@@ -585,7 +585,13 @@
   #tt-new{flex:none;display:flex;align-items:stretch;border-right:1px solid var(--div)}
   #tt-add{width:34px;height:100%;background:transparent;border:none;color:var(--t4);cursor:pointer;transition:.12s;display:flex;align-items:center;justify-content:center}
   #tt-add:hover{background:var(--hover);color:var(--t2)}
-  #tt-hint{flex:1;padding:0 12px;display:flex;align-items:center;font-size:var(--fs-meta);color:var(--t5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;justify-content:flex-end}
+  #tt-hint{flex:1;padding:0 10px;display:flex;align-items:center;gap:6px;font-size:var(--fs-meta);color:var(--t5);white-space:nowrap;overflow:hidden;justify-content:flex-end}
+  #tt-hint .tt-lbl{font-family:var(--mono);font-size:var(--fs-eyebrow);letter-spacing:.1em;text-transform:uppercase;color:var(--t5)}
+  #tt-hint .agbtn{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;border:1px solid var(--hair);background:var(--raised);color:var(--t3);cursor:pointer;transition:.12s;flex:none}
+  #tt-hint .agbtn:hover{color:var(--t1);border-color:var(--hair2);background:var(--hover)}
+  #tt-hint .tt-paste{color:var(--t5);margin-left:2px}
+  .ttab .tname-edit{background:var(--bg);border:1px solid var(--here);border-radius:3px;color:var(--t1);font-family:var(--mono);font-size:var(--fs-code);width:82px;padding:0 4px;outline:none}
+  .ttab .tname{cursor:text}
   #tt-body{flex:1;min-height:0;background:var(--bg);position:relative}
   .term-host{position:absolute;inset:0;padding:6px 4px 14px 10px;display:none}
   .term-host.active{display:block}
@@ -829,8 +835,12 @@ function setHint(copied){
   const h=$("#tt-hint"); clearTimeout(hintTimer);
   h.classList.remove("swap"); void h.offsetWidth; h.classList.add("swap");
   if(copied){ h.innerHTML=`<span style="color:var(--t2)">Paste <span class="mono">⌘V</span> what you copied</span>`;
-    hintTimer=setTimeout(()=>setHint(false),6000); }
-  else h.innerHTML=`Type <span class="mono" style="color:var(--t3);margin:0 4px">${esc(AGENTS.default||"claude")}</span> ⏎ · Paste ⌘V`;
+    hintTimer=setTimeout(()=>setHint(false),6000); return; }
+  h.innerHTML=`<span class="tt-lbl">Start</span>`
+    +`<button class="agbtn" data-agent="claude" title="Start a Claude Code session">${G.claude()}</button>`
+    +`<button class="agbtn" data-agent="codex" title="Start a Codex session">${G.codex()}</button>`
+    +`<span class="tt-paste">Paste ⌘V</span>`;
+  h.querySelectorAll(".agbtn").forEach(btn=>btn.onclick=()=>spawnAgent(btn.dataset.agent));
 }
 async function copyDoc(path,el){
   if(el){ el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
@@ -866,6 +876,8 @@ const G={
   x:(c='currentColor',w=13)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" stroke="${c}" stroke-width="1.5" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"></path></svg>`,
   arrR:(c='currentColor',w=13)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" fill="none" stroke="${c}" stroke-width="1.5" style="flex:none"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`,
   arrD:(c='currentColor',w=13)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" fill="none" stroke="${c}" stroke-width="1.5" style="flex:none"><path d="M8 3v9M4.5 8.5 8 12l3.5-3.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`,
+  claude:(c='currentColor',w=14)=>`<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.7" stroke-linecap="round" style="flex:none"><path d="M12 2.6v6M12 15.4v6M2.6 12h6M15.4 12h6M5.35 5.35l4.25 4.25M14.4 14.4l4.25 4.25M18.65 5.35l-4.25 4.25M9.6 14.4l-4.25 4.25"/></svg>`,
+  codex:(c='currentColor',w=14)=>{const p='M12 12C10 8.7 10 5.6 12 2.9C14 5.6 14 8.7 12 12Z';const g=[0,60,120,180,240,300].map(a=>`<path d="${p}" transform="rotate(${a} 12 12)"/>`).join('');return `<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="1.35" stroke-linejoin="round" style="flex:none">${g}</svg>`;},
   foldersearch:`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.6 4.4c0-.6.5-1.1 1.1-1.1h3.1l1.3 1.5h4.4c.6 0 1.1.5 1.1 1.1v2.3" stroke-linejoin="round"></path><path d="M1.6 6.2v6c0 .6.5 1.1 1.1 1.1h5.1" stroke-linejoin="round"></path><circle cx="11.4" cy="10.6" r="2.3"></circle><path d="M13.1 12.3 14.6 13.8" stroke-linecap="round"></path></svg>`,
 };
 const ago = epoch => { const s=(Date.now()/1000)-Number(epoch||0); if(!epoch||s<0)return"";
@@ -1737,7 +1749,7 @@ const THEME={background:"#0a0a0a",foreground:"#b8b8b8",cursor:"#ececec",selectio
   black:"#121214",red:"#cf8a86",green:"#7fae8a",yellow:"#c9a961",blue:"#8a9bb0",magenta:"#9b8ab0",cyan:"#8ab0a3",white:"#ececec",
   brightBlack:"#525252",brightRed:"#cf8a86",brightGreen:"#7fae8a",brightYellow:"#c9a961",brightBlue:"#8a9bb0",brightMagenta:"#9b8ab0",brightCyan:"#8ab0a3",brightWhite:"#ffffff"};
 const terms=new Map(); let tActive=null, tCount=0;
-async function newTerm(){
+async function newTerm(opts={}){
   if(!activeDir) return;
   const forDir=activeDir;
   tCount++;
@@ -1750,11 +1762,26 @@ async function newTerm(){
   let id;
   try{ id=await invoke("pty_spawn",{dir:forDir,cols:term.cols,rows:term.rows}); }
   catch(e){ toast("Couldn't start a shell: "+esc(String(e)),false); term.dispose(); host.remove(); return; }
-  terms.set(id,{id,term,fit,host,title:"shell "+tCount,dead:false,dir:forDir});
+  terms.set(id,{id,term,fit,host,title:opts.title||("shell "+tCount),autoNamed:!!opts.title,phase:opts.phase||null,dead:false,dir:forDir});
   term.onData(d=>invoke("pty_write",{id,data:d}));
   setActiveTerm(id);
+  if(opts.agent){ setTimeout(()=>invoke("pty_write",{id,data:opts.agent+"\n"}).catch(()=>{}),650); }
+  return id;
+}
+async function spawnAgent(agent){ await newTerm({agent,title:agent.charAt(0).toUpperCase()+agent.slice(1)}); }
+function startRename(el,id){
+  const e=terms.get(id); if(!e||e.dead) return;
+  const span=el.querySelector(".tname"); if(!span) return;
+  const inp=document.createElement("input"); inp.className="tname-edit"; inp.value=e.title;
+  span.replaceWith(inp); inp.focus(); inp.select();
+  let done=false;
+  const commit=save=>{ if(done) return; done=true; if(save){ const v=inp.value.trim(); if(v){ e.title=v; e.renamed=true; } } renderTTabs(); };
+  inp.onkeydown=k=>{ if(k.key==="Enter"){ k.preventDefault(); commit(true); } else if(k.key==="Escape"){ k.preventDefault(); commit(false); } };
+  inp.onblur=()=>commit(true);
+  inp.onclick=k=>k.stopPropagation();
 }
 function setActiveTerm(id){
+  if(tActive===id){ const e=terms.get(id); if(e&&!e.dead) e.term.focus(); return; }  // no re-render on re-click (keeps dblclick-rename stable)
   tActive=id;
   for(const [tid,e] of terms) e.host.classList.toggle("active",tid===id);
   renderTTabs();
@@ -1780,9 +1807,10 @@ function renderTTabs(){
     const dot=e.dead
       ?`<i style="width:5px;height:5px;border-radius:50%;flex:none;background:transparent;border:1px solid var(--t5)"></i>`
       :`<i style="width:5px;height:5px;border-radius:50%;flex:none;background:var(--t4)"></i>`;
-    el.innerHTML=`${dot}<span>${esc(e.title)}${e.dead?" · ended":""}</span><span class="x">${G.x('currentColor',11)}</span>`;
-    el.title=e.dead?"Ended":e.title;
+    el.innerHTML=`${dot}<span class="tname">${esc(e.title)}</span>${e.dead?`<span style="color:var(--t5)">· ended</span>`:""}<span class="x">${G.x('currentColor',11)}</span>`;
+    el.title=e.dead?"Ended":"Double-click to rename · "+e.title;
     el.onclick=()=>setActiveTerm(id);
+    el.querySelector(".tname").ondblclick=(ev)=>{ ev.stopPropagation(); startRename(el,id); };
     el.querySelector(".x").onclick=(ev)=>{ ev.stopPropagation(); closeTerm(id); };
     bar.appendChild(el);
   }
@@ -2116,7 +2144,7 @@ async function openPhaseView(pid,idx){
       const running=[...terms.values()].some(e=>e.dir===activeDir&&e.phase===ph.id&&!e.dead);
       html+=`<div style="flex:1;min-width:8px"></div>`;
       html+=running
-        ?`<span class="pv-start" style="background:var(--raised);color:var(--t4);border:1px solid var(--hair)" disabled>${G.play('var(--t5)',12)}Already running <span style="color:var(--t5);font-family:var(--mono);font-size:var(--fs-meta)">· shell ${[...terms.values()].find(e=>e.dir===activeDir&&e.phase===ph.id)?.title.replace("shell ","")||""}</span></span>`
+        ?`<span class="pv-start" style="background:var(--raised);color:var(--t4);border:1px solid var(--hair)" disabled>${G.play('var(--t5)',12)}Already running <span style="color:var(--t5);font-family:var(--mono);font-size:var(--fs-meta)">· ${esc([...terms.values()].find(e=>e.dir===activeDir&&e.phase===ph.id)?.title||"")}</span></span>`
         :`<button class="pv-start" id="pv-start">Start this phase${G.play("#0a0a0a",12)}</button>`;
     }
     html+=`</div>`;
@@ -2170,10 +2198,8 @@ document.querySelector("#phview .bk").onclick=closePhaseView;
 $("#pv-x").onclick=closePhaseView;
 async function startPhase(ph,btn){
   btn.disabled=true; btn.textContent="Opening a shell…";
-  await newTerm();
-  const e=terms.get(tActive); if(e) e.phase=ph.id;   // so it reads "already running" next time
-  btn.textContent="Starting claude…";
-  const id=tActive;
+  const id=await newTerm({title:ph.id,phase:ph.id});   // auto-named after the phase
+  btn.textContent="Starting "+(AGENTS.default||"claude")+"…";
   setTimeout(async()=>{
     try{ await invoke("pty_write",{id,data:(AGENTS.default||"claude")+"\n"}); }catch(_){}
     const pf=(ph.paste||[]).find(x=>x.path);
