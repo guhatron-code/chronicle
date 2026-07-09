@@ -308,7 +308,7 @@
   .pv-save .hash{font-family:var(--mono);font-size:var(--fs-meta);color:var(--t2);background:var(--raised);border:1px solid var(--hair);border-radius:5px;padding:1.5px 6px;flex:none}
   .pv-save .ago{font-family:var(--mono);font-size:var(--fs-meta);color:var(--t5);margin-left:auto;flex:none}
   .pv-save .msg{font-size:var(--fs-meta);color:var(--t3);margin-top:5px;line-height:1.4}
-  .vdet{flex:none}
+  .vdet{width:100%;justify-content:center}
   .pchip{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 10px;border-radius:6px;border:1px solid var(--hair);
     background:var(--raised);font-family:var(--mono);font-size:var(--fs-code);color:var(--t2)}
   .pchip .arr{color:var(--t5)}.pchip .into{color:var(--t3)}
@@ -1467,8 +1467,6 @@ function renderGitPanels(pad,S,customActs){
       ?`<div class="pnode hot"><div class="plbl">Published online</div><div class="pval">${published} up · ${S.ahead} waiting</div></div>`
       :`<div class="pnode calm"><div class="plbl">Published online</div><div class="pval" style="display:flex;align-items:center;gap:5px"><span>${published} up</span>${G.check('currentColor',13)}</div></div>`;
   const arr=(lbl,hot)=>`<div class="parr${hot?" hot":""}"><span class="albl">${lbl}</span><div class="aln"><div class="l"></div><svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="${hot?"var(--here)":"var(--hair2)"}" stroke-width="1.5"><path d="M2 1.5 5 4 2 6.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></div></div>`;
-  gp.style.cursor="pointer"; gp.title=S.is_git?"Open the full history · saves, changes, the graph":"Start keeping a history of your work";
-  gp.onclick=(ev)=>{ if(!ev.target.closest(".cmdchip")) gitOpen(); };
   const noGitBody=`<div class="pv-nogit">
       <span class="ic">${G.branch}</span>
       <div style="min-width:0">
@@ -1486,8 +1484,11 @@ function renderGitPanels(pad,S,customActs){
     </div>
     ${dirty.length?`<div class="sub-eyebrow">Changed but not saved to history<span class="n">${dirty.length}</span></div>
     <div class="dirty-list">${dirty.slice(0,8).map(d=>`<div class="chg-row">${esc(d.path)}<span class="badge ${d.code==="??"?"new":""}">${d.code==="??"?"new":"edited"}</span></div>`).join("")+
-      (dirty.length>8?`<div class="chg-row" style="color:var(--t5)">… and ${dirty.length-8} more</div>`:"")}</div>`:""}`);
+      (dirty.length>8?`<div class="chg-row" style="color:var(--t5)">… and ${dirty.length-8} more</div>`:"")}</div>`:""}
+    <button class="btn vdet" id="gp-details" style="margin-top:14px">View details<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6.5 4 10.5 8l-4 4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`);
   pad.appendChild(gp);
+  { const d=gp.querySelector("#gp-details"); if(d) d.onclick=gitOpen;
+    const go=gp.querySelector(".go"); if(go){ go.style.cursor="pointer"; go.onclick=gitOpen; } }
 
   const acts=buildActs(S,customActs);
   const AI={
