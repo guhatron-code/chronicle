@@ -1,0 +1,66 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+body{margin:0;background:#050505;font-family:"Geist","Geist Sans",Inter,system-ui,sans-serif;display:flex;gap:2px}
+.half{position:relative;width:50vw;height:100vh;background:#0a0a0a;overflow:hidden}
+canvas{position:absolute;inset:0;width:100%;height:100%}
+.tag{position:absolute;top:14px;left:16px;font-size:11px;color:#525252;letter-spacing:.12em;text-transform:uppercase;z-index:2}
+.hero{position:absolute;top:120px;left:52px;z-index:2}
+.tile{width:56px;height:56px;border-radius:13px;background:#121214;border:1px solid rgba(255,255,255,.07);margin-bottom:18px}
+h1{font-size:26px;font-weight:650;letter-spacing:-.018em;color:#ececec;margin:0}
+p{color:#8f8f8f;font-size:14px;max-width:380px}
+.btn{display:inline-block;margin-top:8px;background:#ececec;color:#0a0a0a;font-weight:600;font-size:12.5px;padding:9px 18px;border-radius:6px}
+.card{position:absolute;top:380px;left:52px;right:52px;background:#0d0d0e;border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:14px 16px;z-index:2}
+.card .nm{color:#ececec;font-weight:600;font-size:13.5px}.card .d{color:#8f8f8f;font-size:11.5px;margin-top:6px}
+</style></head><body>
+<div class="half"><canvas id="c1"></canvas><span class="tag">Variant C · clear (±12%)</span>
+  <div class="hero"><div class="tile"></div><h1>Chronicle</h1><p>Open a project folder to see where its build is and what needs you.</p><span class="btn">Open a project…</span></div>
+  <div class="card"><div class="nm">weave</div><div class="d">A design-to-storefront studio · hand-built designs become verified, deployed websites.</div></div>
+</div>
+<div class="half"><canvas id="c2"></canvas><span class="tag">Variant D · strong (±20%)</span>
+  <div class="hero"><div class="tile"></div><h1>Chronicle</h1><p>Open a project folder to see where its build is and what needs you.</p><span class="btn">Open a project…</span></div>
+  <div class="card"><div class="nm">weave</div><div class="d">A design-to-storefront studio · hand-built designs become verified, deployed websites.</div></div>
+</div>
+<script>
+const FRAG = `
+precision mediump float;
+uniform vec2 res; uniform float t; uniform float amp;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+float noise(vec2 p){
+  vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+  return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);
+}
+float fbm(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p*=2.03; a*=0.5; } return v; }
+void main(){
+  vec2 uv = gl_FragCoord.xy/res.y;
+  // slow domain-warped waves, like light on still water
+  vec2 q = vec2(fbm(uv*1.1 + t*0.030), fbm(uv*1.1 - t*0.024));
+  float w = fbm(uv*1.5 + q*1.8 + vec2(t*0.018, -t*0.013));
+  w = smoothstep(0.34, 0.66, w);
+  // faint monochrome lift over the app background
+  float base = 0.039;                       // #0a0a0a
+  float lum = base + (w-0.5)*amp;
+  // film grain, per pixel per frame
+  float g = (hash(gl_FragCoord.xy + fract(t)*61.0)-0.5)*0.022;
+  lum += g;
+  gl_FragColor = vec4(vec3(lum), 1.0);
+}`;
+function boot(id, amp){
+  const cv=document.getElementById(id);
+  cv.width=cv.clientWidth; cv.height=cv.clientHeight;
+  const gl=cv.getContext('webgl');
+  const vs=gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vs,'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}'); gl.compileShader(vs);
+  const fs=gl.createShader(gl.FRAGMENT_SHADER); gl.shaderSource(fs,FRAG); gl.compileShader(fs);
+  if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(fs));
+  const pr=gl.createProgram(); gl.attachShader(pr,vs); gl.attachShader(pr,fs); gl.linkProgram(pr); gl.useProgram(pr);
+  const b=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,b);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,3,-1,-1,3]),gl.STATIC_DRAW);
+  const loc=gl.getAttribLocation(pr,'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+  const uRes=gl.getUniformLocation(pr,'res'), uT=gl.getUniformLocation(pr,'t'), uA=gl.getUniformLocation(pr,'amp');
+  gl.viewport(0,0,cv.width,cv.height);
+  gl.uniform2f(uRes,cv.width,cv.height); gl.uniform1f(uA,amp);
+  function frame(ms){ gl.uniform1f(uT, ms/1000 + 40); gl.drawArrays(gl.TRIANGLES,0,3); requestAnimationFrame(frame); }
+  requestAnimationFrame(frame);
+}
+boot('c1', 0.12); boot('c2', 0.20);
+</script></body></html>

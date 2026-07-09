@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="stylesheet" href="_ds/weave-design-system-901f5a72-771f-4adc-8f51-80d147723844/fonts/fonts.css">
+  <link rel="stylesheet" href="_ds/weave-design-system-901f5a72-771f-4adc-8f51-80d147723844/_ds_bundle.css">
+  <link rel="stylesheet" href="_ds/weave-design-system-901f5a72-771f-4adc-8f51-80d147723844/styles.css">
+  <script src="_ds/weave-design-system-901f5a72-771f-4adc-8f51-80d147723844/_ds_bundle.js"></script>
+  <style>
+    body{margin:0;background:#161618;color:#ececec;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+    a{color:#8f8f8f;text-decoration:none}
+    a:hover{color:#ececec;text-decoration:underline}
+    ::selection{background:rgba(138,165,200,.28)}
+    @keyframes chronoPulse{0%{transform:scale(.5);opacity:.55}70%{transform:scale(1.9);opacity:0}100%{transform:scale(1.9);opacity:0}}
+    @media (prefers-reduced-motion:reduce){.chrono-pulse{animation:none!important;opacity:.24!important;transform:scale(1.15)!important}}
+    .chrono-scroll::-webkit-scrollbar{width:10px;height:10px}
+    .chrono-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.10);border-radius:6px;border:3px solid transparent;background-clip:padding-box}
+    .chrono-scroll::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.16);background-clip:padding-box}
+    .chrono-scroll::-webkit-scrollbar-track{background:transparent}
+    .clogo{display:inline-block;flex:none;background:currentColor;-webkit-mask:url("uploads/Chronicle_logo.svg") center/contain no-repeat;mask:url("uploads/Chronicle_logo.svg") center/contain no-repeat}
+    .cres{flex:none;width:11px;align-self:stretch;position:relative;cursor:col-resize;touch-action:none;z-index:3}
+    .cres::before{content:"";position:absolute;left:5px;top:0;bottom:0;width:1px;background:var(--c-hair)}
+    .cres::after{content:"";position:absolute;left:3px;top:50%;transform:translateY(-50%);width:5px;height:30px;border-radius:3px;background:var(--c-raised);border:1px solid var(--c-hair)}
+    .cres:hover::before{background:var(--c-t5)}
+    .cres:hover::after{border-color:var(--c-t4);background:var(--c-active)}
+  </style>
+</helmet>
+<div data-theme="dark" style="--background:#0a0a0a;--foreground:#ececec;--card:#0d0d0e;--card-foreground:#ececec;--popover:#121214;--popover-foreground:#ececec;--primary:#ececec;--primary-foreground:#0a0a0a;--secondary:#121214;--secondary-foreground:#b8b8b8;--muted:#121214;--muted-foreground:#8f8f8f;--accent:#17171a;--accent-foreground:#ececec;--destructive:#cf8a86;--destructive-foreground:#0a0a0a;--border:rgba(255,255,255,.07);--input:rgba(255,255,255,.09);--ring:rgba(255,255,255,.28);--radius:8px;--sidebar:#0d0d0e;--sidebar-foreground:#ececec;--sidebar-border:rgba(255,255,255,.07);--sidebar-accent:#17171a;--sidebar-accent-foreground:#ececec;--sidebar-primary:#ececec;--sidebar-primary-foreground:#0a0a0a;--surface-app:#0a0a0a;--surface-panel:#0d0d0e;--surface-card:#0d0d0e;--surface-card-raised:#121214;--surface-sidebar:#0d0d0e;--surface-input:#0b0b0b;--surface-overlay:#121214;--text-primary:#ececec;--text-secondary:#b8b8b8;--text-muted:#8f8f8f;--text-subtle:#6c6c6c;--text-faint:#6c6c6c;--text-dim:#525252;--text-dimmer:#525252;--border-hairline:rgba(255,255,255,.07);--border-strong:rgba(255,255,255,.11);--border-field:rgba(255,255,255,.09);--divider:rgba(255,255,255,.05);--fill-hover:#17171a;--fill-subtle:#121214;--state-success:#7fae8a;--state-error:#cf8a86;--state-neutral:#8f8f8f;--c-bg:#0a0a0a;--c-panel:#0d0d0e;--c-raised:#121214;--c-hover:#17171a;--c-active:#1c1c1f;--c-t1:#ececec;--c-t2:#b8b8b8;--c-t3:#8f8f8f;--c-t4:#6c6c6c;--c-t5:#525252;--c-hair:rgba(255,255,255,.07);--c-hairs:rgba(255,255,255,.11);--c-div:rgba(255,255,255,.05);--c-done:#7fae8a;--c-here:#8aa5c8;--c-error:#cf8a86;--mono:'Geist Mono Variable',ui-monospace,'SF Mono',Menlo,monospace;min-height:100vh;background:#161618;font-family:var(--font-sans);color:var(--c-t1);padding:56px 64px 140px;box-sizing:border-box">
+
+  <!-- ===================== DOC HEADER ===================== -->
+  <div style="display:flex;align-items:flex-start;gap:16px;max-width:1120px">
+    <div style="width:38px;height:38px;flex:none;border:1px solid var(--c-hairs);border-radius:9px;display:flex;align-items:center;justify-content:center;color:var(--c-t2)">
+      <span class="clogo" style="width:23px;height:23px"></span>
+    </div>
+    <div>
+      <div style="display:flex;align-items:baseline;gap:11px">
+        <div style="font-size:16px;font-weight:650;letter-spacing:-.01em">Chronicle</div>
+        <div style="font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--c-t5)">desktop companion · app windows #1–#8</div>
+      </div>
+      <div style="font-size:12.5px;color:var(--c-t3);margin-top:6px;line-height:1.55;max-width:820px">A tiny macOS app that sits beside any project Claude Code is building from a written plan. It answers four things at a glance for a non-developer: <span style="color:var(--c-t2)">where the build is</span>, <span style="color:var(--c-t2)">what needs the operator</span>, <span style="color:var(--c-t2)">what to paste and where</span>, and lets them act — file explorer + real terminals — in one window. Every window is manifest-driven by a <span style="font-family:var(--mono);color:var(--c-t2)">chronicle.json</span> a Claude session writes. <span style="color:var(--c-t4)">Dark-canonical v1.</span></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:13px;align-items:center">
+        <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-t3)"><span style="width:6px;height:6px;border-radius:50%;background:var(--c-done)"></span>done</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-t3)"><span style="width:6px;height:6px;border-radius:50%;background:var(--c-here)"></span>here / needs you</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-t3)"><span style="width:6px;height:6px;border-radius:50%;background:var(--c-error)"></span>error</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-t3)"><span style="width:6px;height:6px;border-radius:50%;background:var(--c-t4)"></span>later</span>
+        <span style="width:1px;height:12px;background:var(--c-hair)"></span>
+        <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t5);letter-spacing:.02em">colour only ever signals state · grey is everything else</span>
+      </div>
+      <div style="font-size:11.5px;color:var(--c-t4);margin-top:9px;line-height:1.5;max-width:820px">Real Weave (shadcn · new-york) mounts: <span style="font-family:var(--mono);color:var(--c-t3)">Button · Tabs · Command · Alert</span>. The signature compositions <span style="font-family:var(--mono);color:var(--c-t3)">[★]</span> — the loom rail, status word, file chip, paste row, terminal strip, tree row, resize handle — are composed on the same tokens and annotated per region. Drag the hairline between any two panes to set column widths.</div>
+    </div>
+  </div>
+
+  <!--FRAMES_START-->
+
+  <!-- ============================================================ FRAME 1 ============================================================ -->
+  <section id="f1" style="margin-top:60px;scroll-margin-top:24px">
+    <div style="display:flex;align-items:baseline;gap:14px;margin:0 0 18px 2px">
+      <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:#0a0a0a;background:var(--c-t2);padding:3px 8px;border-radius:6px;letter-spacing:.02em">#1</span>
+      <span style="font-size:14px;font-weight:600;color:var(--c-t1)">Welcome / project picker</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--c-t4)">no project open</span>
+    </div>
+
+    <div style="display:flex;gap:36px;align-items:flex-start">
+      <!-- ============ APP WINDOW ============ -->
+      <div style="width:1280px;height:860px;flex:none;background:var(--c-bg);border:1px solid var(--c-hairs);border-radius:11px;overflow:hidden;box-shadow:0 30px 80px -22px rgba(0,0,0,.72),0 8px 24px rgba(0,0,0,.5);position:relative;display:flex;flex-direction:column">
+
+        <!-- titlebar (unified) -->
+        <div style="height:42px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--c-div)">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+          </div>
+          <div style="flex:1;text-align:center;font-family:var(--mono);font-size:11px;color:var(--c-t5);letter-spacing:.04em">Chronicle</div>
+          <div style="width:52px"></div>
+        </div>
+
+        <!-- centered welcome column -->
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 40px">
+          <div style="width:100%;max-width:540px;display:flex;flex-direction:column;align-items:center">
+
+            <div style="width:56px;height:56px;border:1px solid var(--c-hairs);border-radius:15px;display:flex;align-items:center;justify-content:center;color:var(--c-t2)">
+              <span class="clogo" style="width:36px;height:36px"></span>
+            </div>
+            <div style="font-size:19px;font-weight:650;letter-spacing:-.01em;margin-top:20px">Chronicle</div>
+            <div style="font-size:13px;color:var(--c-t3);margin-top:9px;text-align:center;line-height:1.55;max-width:380px">Open a project folder to see where its build is and what needs you.</div>
+
+            <div style="margin-top:24px">
+              <x-import component-from-global-scope="Weave.Button" variant="default" hint-size="168px,36px">
+                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.6 4.2c0-.7.5-1.2 1.2-1.2h3l1.4 1.6h6c.7 0 1.2.5 1.2 1.2v6.2c0 .7-.5 1.2-1.2 1.2H2.8c-.7 0-1.2-.5-1.2-1.2z" stroke-linejoin="round"></path></svg>
+                Open a project…
+              </x-import>
+            </div>
+
+            <!-- recents -->
+            <div style="width:100%;margin-top:44px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin:0 2px 10px">
+                <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5)">Recents</span>
+                <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5)">3 projects</span>
+              </div>
+              <div style="border:1px solid var(--c-hair);border-radius:8px;background:var(--c-panel);overflow:hidden">
+
+                <div style="display:flex;align-items:center;gap:13px;padding:13px 15px;cursor:pointer" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='transparent'">
+                  <span style="width:26px;height:26px;flex:none;border:1px solid var(--c-hair);border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--c-t4)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6.6" cy="6.6" r="4.4"></circle><line x1="9.9" y1="9.9" x2="13.4" y2="13.4" stroke-linecap="round"></line></svg></span>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:550;color:var(--c-t1)">weave</div>
+                    <div style="font-family:var(--mono);font-size:11px;color:var(--c-t4);margin-top:2px">~/projects/weave</div>
+                  </div>
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-here);font-variant-numeric:tabular-nums"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here);flex:none"></span>phase 5 of 8</span>
+                  <span style="font-family:var(--mono);font-size:11px;color:var(--c-t5);width:74px;text-align:right;font-variant-numeric:tabular-nums">2m ago</span>
+                </div>
+                <div style="height:1px;background:var(--c-div);margin:0 15px"></div>
+
+                <div style="display:flex;align-items:center;gap:13px;padding:13px 15px;cursor:pointer" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='transparent'">
+                  <span style="width:26px;height:26px;flex:none;border:1px solid var(--c-hair);border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--c-t4)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6.6" cy="6.6" r="4.4"></circle><line x1="9.9" y1="9.9" x2="13.4" y2="13.4" stroke-linecap="round"></line></svg></span>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:550;color:var(--c-t1)">loupe</div>
+                    <div style="font-family:var(--mono);font-size:11px;color:var(--c-t4);margin-top:2px">~/dev/loupe-master</div>
+                  </div>
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-here);font-variant-numeric:tabular-nums"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here);flex:none"></span>phase 3 of 6</span>
+                  <span style="font-family:var(--mono);font-size:11px;color:var(--c-t5);width:74px;text-align:right;font-variant-numeric:tabular-nums">yesterday</span>
+                </div>
+                <div style="height:1px;background:var(--c-div);margin:0 15px"></div>
+
+                <div style="display:flex;align-items:center;gap:13px;padding:13px 15px;cursor:pointer" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='transparent'">
+                  <span style="width:26px;height:26px;flex:none;border:1px solid var(--c-hair);border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--c-t4)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6.6" cy="6.6" r="4.4"></circle><line x1="9.9" y1="9.9" x2="13.4" y2="13.4" stroke-linecap="round"></line></svg></span>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:550;color:var(--c-t1)">atlas</div>
+                    <div style="font-family:var(--mono);font-size:11px;color:var(--c-t4);margin-top:2px">~/code/atlas</div>
+                  </div>
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-done);font-variant-numeric:tabular-nums"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-done);flex:none"></span>done · all 7 phases</span>
+                  <span style="font-family:var(--mono);font-size:11px;color:var(--c-t5);width:74px;text-align:right;font-variant-numeric:tabular-nums">last week</span>
+                </div>
+              </div>
+
+              <!-- empty-recents state, stacked inset -->
+              <div style="margin-top:22px">
+                <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);margin:0 2px 9px">when there are no recents</div>
+                <div style="border:1px dashed var(--c-hairs);border-radius:8px;padding:22px;display:flex;flex-direction:column;align-items:center;text-align:center;background:var(--fill-subtle)">
+                  <span style="color:var(--c-t5);opacity:.8"><svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="6.6" cy="6.6" r="4.4"></circle><line x1="9.9" y1="9.9" x2="13.4" y2="13.4" stroke-linecap="round"></line></svg></span>
+                  <div style="font-size:12.5px;color:var(--c-t3);margin-top:10px">Nothing yet — your first project will appear here.</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ ANNOTATIONS ============ -->
+      <aside style="width:360px;flex:none;padding-top:6px">
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair)">shadcn / weave components</div>
+        <div style="display:flex;flex-direction:column;gap:11px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Button</span> <span style="color:var(--c-t5)">·</span> primary <span style="font-family:var(--mono);color:var(--c-t4)">variant="default"</span> — the one loud action. Real Weave mount.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Card</span> rows <span style="color:var(--c-t5)">·</span> recents list — hairline-divided, hover raises to <span style="font-family:var(--mono);color:var(--c-t4)">#17171a</span>.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">[★] status word</span> <span style="color:var(--c-t5)">·</span> mini per row (<span style="font-family:var(--mono);color:var(--c-here)">phase 5 of 8</span>, <span style="font-family:var(--mono);color:var(--c-done)">done</span>) — 5px dot + lowercase mono, never a filled pill.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">RelativeTime</span> <span style="color:var(--c-t5)">·</span> last-opened, right-aligned mono.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Empty</span> <span style="color:var(--c-t5)">·</span> the no-recents inset (dashed) performs its own explanation.</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair);margin-top:26px">states drawn</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Populated recents (3: <span style="color:var(--c-t2)">weave · loupe · atlas</span>) — two mid-build, one done.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Empty recents — stacked inset below.</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair);margin-top:26px">behaviour</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">A row opens the shell on that folder → <a href="#f3">#3</a> (manifest present) or <a href="#f2">#2</a> (none).</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">“Open a project…” is a native folder picker; there is exactly one primary action here.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+  <!-- ============================================================ FRAME 2 ============================================================ -->
+  <section id="f2" style="margin-top:76px;scroll-margin-top:24px">
+    <div style="display:flex;align-items:baseline;gap:14px;margin:0 0 18px 2px">
+      <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:#0a0a0a;background:var(--c-t2);padding:3px 8px;border-radius:6px;letter-spacing:.02em">#2</span>
+      <span style="font-size:14px;font-weight:600;color:var(--c-t1)">Folder opened, no manifest</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--c-t4)">shell loads · terminal already alive</span>
+    </div>
+
+    <div style="display:flex;gap:36px;align-items:flex-start">
+      <div style="width:1280px;height:860px;flex:none;background:var(--c-bg);border:1px solid var(--c-hairs);border-radius:11px;overflow:hidden;box-shadow:0 30px 80px -22px rgba(0,0,0,.72),0 8px 24px rgba(0,0,0,.5);position:relative;display:flex;flex-direction:column">
+
+        <!-- titlebar -->
+        <div style="height:42px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--c-div)">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+          </div>
+          <div style="flex:1;text-align:center;font-family:var(--mono);font-size:11px;color:var(--c-t5);letter-spacing:.04em">harbor — Chronicle</div>
+          <div style="width:52px"></div>
+        </div>
+
+        <!-- app header -->
+        <div style="height:53px;flex:none;display:flex;align-items:center;gap:13px;padding:0 18px;border-bottom:1px solid var(--c-hair)">
+          <span style="color:var(--c-t2);display:flex"><span class="clogo" style="width:18px;height:18px"></span></span>
+          <span style="font-size:13.5px;font-weight:600;letter-spacing:-.005em">Chronicle</span>
+          <span style="width:4px;height:4px;border-radius:50%;background:var(--c-t5);margin:0 1px"></span>
+          <button style="display:flex;align-items:center;gap:8px;height:30px;padding:0 9px 0 11px;border-radius:6px;border:1px solid var(--c-hair);background:var(--c-raised);cursor:pointer;color:var(--c-t2)" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='var(--c-raised)'">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.6 4.4c0-.6.5-1.1 1.1-1.1h3.1l1.3 1.5h6.2c.6 0 1.1.5 1.1 1.1v5.8c0 .6-.5 1.1-1.1 1.1H2.7c-.6 0-1.1-.5-1.1-1.1z" stroke-linejoin="round"></path></svg>
+            <span style="font-family:var(--mono);font-size:12px;color:var(--c-t2)">harbor</span>
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.4"><path d="M4 6.5 8 10.5l4-4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </button>
+          <div style="flex:1"></div>
+          <span style="font-family:var(--mono);font-size:11px;color:var(--c-t5);letter-spacing:.02em">no roadmap yet</span>
+        </div>
+
+        <!-- body: split -->
+        <div style="flex:1;display:flex;min-height:0">
+
+          <!-- LEFT: empty-state -->
+          <div style="flex:0 0 660px;display:flex;align-items:center;justify-content:center;padding:40px 46px">
+            <div style="max-width:420px;display:flex;flex-direction:column;align-items:center;text-align:center">
+              <div style="width:46px;height:46px;border:1px solid var(--c-hairs);border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--c-t4)">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M6 3.2h7.6L19 8.6V20a.8.8 0 0 1-.8.8H6a.8.8 0 0 1-.8-.8V4a.8.8 0 0 1 .8-.8z" stroke-linejoin="round"></path><path d="M13.2 3.4V8.4h5" stroke-linejoin="round"></path><path d="M12 12.4v3.1M12 17.4v.05" stroke-linecap="round"></path></svg>
+              </div>
+              <div style="font-size:15px;font-weight:600;margin-top:20px;letter-spacing:-.005em">This folder has no <span style="font-family:var(--mono);font-weight:500">chronicle.json</span> yet.</div>
+              <div style="font-size:12.5px;color:var(--c-t3);margin-top:11px;line-height:1.6">Chronicle reads a small file that a Claude session writes for you. In the terminal on the right, start a session and ask for <span style="font-family:var(--mono);color:var(--c-t2)">/chronicle-init</span>.</div>
+
+              <div style="display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 6px 0 14px;border:1px solid var(--c-hairs);border-radius:7px;background:var(--c-bg);font-family:var(--mono);font-size:12.5px;color:var(--c-t1);margin-top:22px">
+                <span style="color:var(--c-t4)">/</span>chronicle-init
+                <button aria-label="copy" style="width:26px;height:26px;border-radius:5px;border:none;background:transparent;color:var(--c-t4);display:flex;align-items:center;justify-content:center;cursor:pointer" onmouseover="this.style.background='var(--c-hover)';this.style.color='var(--c-t2)'" onmouseout="this.style.background='transparent';this.style.color='var(--c-t4)'">
+                  <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.6"></rect><path d="M10.8 5.4V3.5c0-.6-.5-1.1-1.1-1.1H3.4c-.6 0-1.1.5-1.1 1.1v6.3c0 .6.5 1.1 1.1 1.1h1.9" stroke-linecap="round"></path></svg>
+                </button>
+              </div>
+
+              <div style="margin-top:24px;padding-top:22px;border-top:1px solid var(--c-div);width:100%;display:flex;flex-direction:column;align-items:center">
+                <x-import component-from-global-scope="Weave.Button" variant="secondary" size="sm" hint-size="180px,32px">Use the basic view instead</x-import>
+                <div style="font-size:11px;color:var(--c-t5);margin-top:10px;line-height:1.5;max-width:320px">Shows just the git history and actions below — no roadmap. You can still work; you just won’t see the plan.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="cres" data-cres="prev:380:920" title="drag to resize"></div>
+          <!-- RIGHT: terminal column, ALIVE -->
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:var(--c-bg)">
+            <!-- tab strip -->
+            <div style="height:40px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid var(--c-hair);background:var(--c-panel)">
+              <div style="display:flex;align-items:center;gap:8px;padding:0 15px;border-right:1px solid var(--c-hair);position:relative;background:var(--c-bg)">
+                <div style="position:absolute;left:0;right:0;top:0;height:1px;background:var(--c-here)"></div>
+                <span style="width:6px;height:6px;border-radius:50%;background:var(--c-t4)"></span>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t2)">shell 1</span>
+              </div>
+              <button aria-label="new terminal" style="width:34px;border:none;border-right:1px solid var(--c-hair);background:transparent;color:var(--c-t4);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center" onmouseover="this.style.background='var(--c-hover)';this.style.color='var(--c-t2)'" onmouseout="this.style.background='transparent';this.style.color='var(--c-t4)'">+</button>
+              <div style="flex:1;display:flex;align-items:center;justify-content:flex-end;padding:0 14px;font-family:var(--mono);font-size:10.5px;color:var(--c-t5)">type&nbsp;<span style="color:var(--c-t3)">claude ⏎</span>&nbsp;· paste ⌘V</div>
+            </div>
+            <!-- body -->
+            <div style="flex:1;padding:16px 18px;font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--c-t2);overflow:hidden">
+              <div style="color:var(--c-t5)"># fresh clone — nothing here reads the plan yet</div>
+              <div style="margin-top:10px"><span style="color:var(--c-t2)">harbor</span>&nbsp;<span style="color:var(--c-t5)">~/work/harbor</span>&nbsp;<span style="color:var(--c-t4)">⎇ main</span></div>
+              <div style="display:flex;align-items:center;margin-top:1px"><span style="color:var(--c-t4)">$</span>&nbsp;<span style="color:var(--c-t3)">claude</span></div>
+              <div style="margin-top:14px;border:1px solid var(--c-hair);border-radius:7px;padding:13px 14px;background:var(--c-panel);max-width:440px">
+                <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--c-t3);display:flex"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6.6" cy="6.6" r="4.4"></circle><line x1="9.9" y1="9.9" x2="13.4" y2="13.4" stroke-linecap="round"></line></svg></span><span style="color:var(--c-t2);font-size:11.5px">Claude Code</span><span style="color:var(--c-t5);font-size:10.5px">v2.x · ~/work/harbor</span></div>
+                <div style="color:var(--c-t4);font-size:11.5px;margin-top:9px;line-height:1.6">Welcome back. Ask me to <span style="color:var(--c-t2)">/chronicle-init</span> and I’ll read your plan docs and write the roadmap file.</div>
+              </div>
+              <div style="display:flex;align-items:center;margin-top:14px"><span style="color:var(--c-t4)">&gt;</span>&nbsp;<span style="display:inline-block;width:8px;height:15px;background:var(--c-t3)"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- annotations -->
+      <aside style="width:360px;flex:none;padding-top:6px">
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair)">shadcn / weave components</div>
+        <div style="display:flex;flex-direction:column;gap:11px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Empty</span> <span style="color:var(--c-t5)">·</span> the left-pane empty-state — icon, plain-language explainer, and the fix, centred.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">[★] paste / snippet chip</span> <span style="color:var(--c-t5)">·</span> <span style="font-family:var(--mono);color:var(--c-t4)">/chronicle-init</span> with a copy affordance (copies the slash command).</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Button</span> <span style="color:var(--c-t5)">·</span> secondary “Use the basic view instead” — no primary competes on this screen.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">[★] terminal strip + body</span> <span style="color:var(--c-t5)">·</span> the real terminal, already live — a shell sitting in the folder with a <span style="font-family:var(--mono)">claude</span> session sketched (monochrome, no invented TUI).</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair);margin-top:26px">behaviour</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">The terminal is alive <span style="color:var(--c-t2)">before</span> the manifest exists — the paste-and-build loop already works.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Running <span style="font-family:var(--mono);color:var(--c-t3)">/chronicle-init</span> writes <span style="font-family:var(--mono);color:var(--c-t3)">chronicle.json</span>; the left pane becomes the roadmap → <a href="#f3">#3</a>.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">“Basic view” = the degraded, git-only shell (history + actions, no roadmap) — same as the invalid-manifest fallback in <a href="#f8">#8</a>.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+  <!-- ============================================================ FRAME 3 (HERO) ============================================================ -->
+  <section id="f3" style="margin-top:76px;scroll-margin-top:24px">
+    <div style="display:flex;align-items:baseline;gap:14px;margin:0 0 18px 2px">
+      <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:#0a0a0a;background:var(--c-here);padding:3px 8px;border-radius:6px;letter-spacing:.02em">#3</span>
+      <span style="font-size:14px;font-weight:600;color:var(--c-t1)">Main · Roadmap</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--c-t4)">the hero — manifest present · weave sample data</span>
+    </div>
+
+    <div style="display:flex;gap:36px;align-items:flex-start">
+      <div style="width:1280px;height:860px;flex:none;background:var(--c-bg);border:1px solid var(--c-hairs);border-radius:11px;overflow:hidden;box-shadow:0 30px 80px -22px rgba(0,0,0,.72),0 8px 24px rgba(0,0,0,.5);position:relative;display:flex;flex-direction:column">
+
+        <!-- titlebar -->
+        <div style="height:42px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--c-div)">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+          </div>
+          <div style="flex:1;text-align:center;font-family:var(--mono);font-size:11px;color:var(--c-t5);letter-spacing:.04em">weave — Chronicle</div>
+          <div style="width:52px"></div>
+        </div>
+
+        <!-- app header -->
+        <div style="height:53px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--c-hair)">
+          <span style="color:var(--c-t2);display:flex"><span class="clogo" style="width:18px;height:18px"></span></span>
+          <span style="font-size:13.5px;font-weight:600;letter-spacing:-.005em">Chronicle</span>
+          <span style="width:4px;height:4px;border-radius:50%;background:var(--c-t5)"></span>
+          <button style="display:flex;align-items:center;gap:8px;height:30px;padding:0 9px 0 11px;border-radius:6px;border:1px solid var(--c-hair);background:var(--c-raised);cursor:pointer;color:var(--c-t2)" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='var(--c-raised)'">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.6 4.4c0-.6.5-1.1 1.1-1.1h3.1l1.3 1.5h6.2c.6 0 1.1.5 1.1 1.1v5.8c0 .6-.5 1.1-1.1 1.1H2.7c-.6 0-1.1-.5-1.1-1.1z" stroke-linejoin="round"></path></svg>
+            <span style="font-family:var(--mono);font-size:12px;color:var(--c-t1)">weave</span>
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.4"><path d="M4 6.5 8 10.5l4-4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </button>
+          <div style="flex:1"></div>
+          <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-t4);font-variant-numeric:tabular-nums"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-done)"></span>checked 02:09:53</span>
+          <x-import component-from-global-scope="Weave.Tabs" default-value="roadmap" hint-size="176px,34px">
+            <x-import component-from-global-scope="Weave.TabsList" hint-size="176px,32px">
+              <x-import component-from-global-scope="Weave.TabsTrigger" value="roadmap" hint-size="86px,26px">Roadmap</x-import>
+              <x-import component-from-global-scope="Weave.TabsTrigger" value="repo" hint-size="64px,26px">Repo</x-import>
+            </x-import>
+          </x-import>
+          <x-import component-from-global-scope="Weave.Button" variant="ghost" size="icon-sm" hint-size="32px,32px">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13.5 8a5.5 5.5 0 1 1-1.7-4" stroke-linecap="round"></path><path d="M13.7 3.1v3.2h-3.2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </x-import>
+        </div>
+
+        <!-- body split -->
+        <div style="flex:1;display:flex;min-height:0">
+
+          <!-- LEFT PANE (scrolls) -->
+          <div class="chrono-scroll" style="flex:0 0 660px;overflow-y:auto;padding:16px 18px 22px">
+
+            <!-- HERE BANNER -->
+            <div style="position:relative;background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:14px 16px 15px 20px;overflow:hidden">
+              <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--c-here)"></div>
+              <div style="display:flex;align-items:center;gap:9px">
+                <span style="position:relative;width:6px;height:6px;flex:none;display:inline-flex">
+                  <span class="chrono-pulse" style="position:absolute;inset:-2px;border-radius:50%;background:var(--c-here);animation:chronoPulse 2.4s ease-out infinite"></span>
+                  <span style="position:absolute;inset:0;border-radius:50%;background:var(--c-here)"></span>
+                </span>
+                <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--c-here)">The build is here</span>
+              </div>
+              <div style="font-size:15px;font-weight:650;color:var(--c-t1);margin-top:10px;letter-spacing:-.005em">R-1 · Missing screens get drawn</div>
+              <div style="display:flex;align-items:center;gap:16px;margin-top:9px;flex-wrap:wrap">
+                <span style="display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11.5px;color:var(--c-here)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here)"></span>with the designer</span>
+                <span style="font-size:12px;color:var(--c-t4)">up next: <span style="color:var(--c-t3)">EL-1 · The beauty pass</span></span>
+              </div>
+            </div>
+
+            <!-- PROJECT HISTORY -->
+            <div style="background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:13px 15px;margin-top:13px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:11px">
+                <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5)">Project history</span>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-here)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here)"></span>2 saves waiting to publish</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;font-size:12px;color:var(--c-t3)">
+                <span>on&nbsp;<span style="font-family:var(--mono);color:var(--c-t2)">main</span></span>
+                <span style="width:3px;height:3px;border-radius:50%;background:var(--c-t5)"></span>
+                <span>reached</span>
+                <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t3);background:var(--c-raised);border:1px solid var(--c-hair);border-radius:5px;padding:1.5px 6px">phase-0</span>
+                <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t3);background:var(--c-raised);border:1px solid var(--c-hair);border-radius:5px;padding:1.5px 6px">phase-1</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:9px;margin-top:12px">
+                <span style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--c-t5);flex:none">latest save</span>
+                <span style="font-family:var(--mono);font-size:11px;color:var(--c-t2);background:var(--c-raised);border:1px solid var(--c-hair);border-radius:5px;padding:2px 7px;flex:none">a7f3c21</span>
+                <span style="font-size:11.5px;color:var(--c-t4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">R-1: draw sidebar + command-menu screens, wire tokens…</span>
+              </div>
+              <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--c-div)">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                  <span style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--c-t5)">changed but not saved to history</span>
+                  <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t4)">2</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:9px;padding:3px 0"><span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t3)">screens/command-menu.html</span><span style="font-family:var(--mono);font-size:9.5px;color:var(--c-here)">new</span></div>
+                <div style="display:flex;align-items:center;gap:9px;padding:3px 0"><span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t3)">src/tokens.css</span><span style="font-family:var(--mono);font-size:9.5px;color:var(--c-t5)">edited</span></div>
+              </div>
+            </div>
+
+            <!-- WHAT NEEDS YOU -->
+            <div style="background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:13px 15px 6px;margin-top:13px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5)">What needs you</span>
+                <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t4)">4</span>
+              </div>
+
+              <div style="display:flex;gap:11px;padding:10px 0;border-top:1px solid var(--c-div)">
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--c-here);margin-top:5px;flex:none"></span>
+                <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:550;color:var(--c-t1)">Publish 2 saves</div><div style="font-size:11.5px;color:var(--c-t4);margin-top:2px">Saved to history, not online yet.</div></div>
+                <span style="align-self:center;font-family:var(--mono);font-size:11px;color:var(--c-t3);border-bottom:1px dashed var(--c-hairs);cursor:pointer;flex:none" onmouseover="this.style.color='var(--c-t1)'" onmouseout="this.style.color='var(--c-t3)'">git push</span>
+              </div>
+
+              <div style="display:flex;gap:11px;padding:10px 0;border-top:1px solid var(--c-div)">
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--c-here);margin-top:5px;flex:none"></span>
+                <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:550;color:var(--c-t1)">Save 2 changed files</div><div style="font-size:11.5px;color:var(--c-t4);margin-top:2px">Changed, but not written to history yet.</div></div>
+                <span style="align-self:center;font-family:var(--mono);font-size:11px;color:var(--c-t3);border-bottom:1px dashed var(--c-hairs);cursor:pointer;flex:none" onmouseover="this.style.color='var(--c-t1)'" onmouseout="this.style.color='var(--c-t3)'">commit -am …</span>
+              </div>
+
+              <div style="display:flex;gap:11px;padding:10px 0;border-top:1px solid var(--c-div)">
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--c-here);margin-top:5px;flex:none"></span>
+                <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:550;color:var(--c-t1)">Run the R-1 design batch</div><div style="font-size:11.5px;color:var(--c-t4);margin-top:2px">4 screens still need drawing in Claude Design.</div></div>
+                <span style="align-self:center;font-size:11px;color:var(--c-t5);flex:none">in the phase below ↓</span>
+              </div>
+
+              <div style="display:flex;gap:11px;padding:10px 0;border-top:1px solid var(--c-div)">
+                <span style="width:5px;height:5px;border-radius:50%;background:var(--c-t4);margin-top:5px;flex:none"></span>
+                <div style="flex:1;min-width:0"><div style="font-size:12.5px;font-weight:550;color:var(--c-t3)">Phase 6 is gated</div><div style="font-size:11.5px;color:var(--c-t4);margin-top:2px">P-1 can’t start until R-1 and EL-1 are done and signed off.</div></div>
+                <span style="align-self:center;font-size:11px;color:var(--c-t5);flex:none">waiting</span>
+              </div>
+            </div>
+
+            <!-- THE ROADMAP (loom) -->
+            <div style="margin-top:18px">
+              <!-- Stage 1 -->
+              <div style="display:flex;align-items:center;gap:10px;margin:0 0 13px">
+                <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t4)">Stage 1 · Screens</span>
+                <span style="flex:1;height:1px;background:var(--c-div)"></span>
+              </div>
+
+              <div style="position:relative;padding-left:30px">
+                <div style="position:absolute;left:10px;top:8px;bottom:8px;width:1px;background:var(--c-hair)"></div>
+
+                <!-- DONE collapsed -->
+                <div style="position:relative;margin-bottom:9px">
+                  <span style="position:absolute;left:-23.5px;top:14px;width:7px;height:7px;border-radius:50%;background:var(--c-done);box-shadow:0 0 0 3px var(--c-bg)"></span>
+                  <span style="position:absolute;left:-16px;top:17px;width:14px;height:1px;background:var(--c-hair)"></span>
+                  <div style="background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:10px 13px;display:flex;align-items:center;gap:11px;cursor:pointer" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='var(--c-panel)'">
+                    <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t4);background:var(--c-raised);border:1px solid var(--c-hair);border-radius:5px;padding:2px 6px;flex:none">W-2</span>
+                    <span style="flex:1;font-size:12.5px;color:var(--c-t3)">The component library gets built</span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-done)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-done)"></span>done</span>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.4"><path d="M6.5 4 10.5 8l-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                  </div>
+                </div>
+
+                <!-- CURRENT R-1 expanded -->
+                <div style="position:relative;margin-bottom:9px">
+                  <span class="chrono-pulse" style="position:absolute;left:-27.5px;top:10px;width:15px;height:15px;border-radius:50%;background:var(--c-here);animation:chronoPulse 2.4s ease-out infinite"></span>
+                  <span style="position:absolute;left:-23.5px;top:14px;width:7px;height:7px;border-radius:50%;background:var(--c-here);box-shadow:0 0 0 3px var(--c-bg)"></span>
+                  <span style="position:absolute;left:-16px;top:17px;width:14px;height:1px;background:var(--c-here);opacity:.5"></span>
+                  <div style="background:var(--c-panel);border:1px solid var(--c-hairs);border-radius:8px;padding:13px 15px">
+                    <div style="display:flex;align-items:center;gap:11px">
+                      <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t2);background:var(--c-raised);border:1px solid var(--c-hairs);border-radius:5px;padding:2px 6px;flex:none">R-1</span>
+                      <span style="flex:1;font-size:13px;font-weight:600;color:var(--c-t1)">Missing screens get drawn</span>
+                      <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-here)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here)"></span>with the designer</span>
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.4"><path d="M4 6.5 8 10.5l4-4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                    </div>
+                    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--c-div)">
+                      <div style="font-size:12px;color:var(--c-t3);line-height:1.55">Screens the plan names but that don’t exist yet get designed, one batch at a time.</div>
+                      <div style="font-family:var(--mono);font-size:10.5px;color:var(--c-t5);margin-top:9px;letter-spacing:.02em">8 steps · 5 to go</div>
+                      <div style="display:flex;flex-direction:column;gap:5px;margin-top:9px">
+                        <div style="display:flex;gap:9px;font-size:12px;color:var(--c-t3);line-height:1.45"><span style="color:var(--c-t5);flex:none">—</span>Find every screen the plan names</div>
+                        <div style="display:flex;gap:9px;font-size:12px;color:var(--c-t3);line-height:1.45"><span style="color:var(--c-t5);flex:none">—</span>Mark the ones with no design yet</div>
+                        <div style="display:flex;gap:9px;font-size:12px;color:var(--c-t3);line-height:1.45"><span style="color:var(--c-t5);flex:none">—</span>Draw each missing screen in Claude Design</div>
+                        <div style="display:flex;gap:9px;font-size:12px;color:var(--c-t3);line-height:1.45"><span style="color:var(--c-t5);flex:none">—</span>Save each one back into the project folder</div>
+                        <div style="display:flex;gap:9px;font-size:12px;color:var(--c-t3);line-height:1.45"><span style="color:var(--c-t5);flex:none">—</span>Sign off the batch so the next phase can start</div>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:13px">
+                        <span style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--c-here);flex:none">You paste</span>
+                        <span style="display:inline-flex;align-items:center;gap:7px;height:25px;padding:0 3px 0 9px;border-radius:6px;border:1px solid var(--c-hair);background:var(--c-raised);font-family:var(--mono);font-size:11px;color:var(--c-t2);cursor:pointer" onmouseover="this.style.borderColor='var(--c-hairs)'" onmouseout="this.style.borderColor='var(--c-hair)'">
+                          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.3"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path><path d="M8.9 2.5v3h3" stroke-linejoin="round"></path></svg>
+                          WEAVE_CLAUDE_CODE_PROMPT.md<span style="color:var(--c-t5)">→</span><span style="color:var(--c-t3)">Claude Code</span>
+                          <span style="width:20px;height:19px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--c-t5)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.6"></rect><path d="M10.8 5.4V3.5c0-.6-.5-1.1-1.1-1.1H3.4c-.6 0-1.1.5-1.1 1.1v6.3c0 .6.5 1.1 1.1 1.1h1.9" stroke-linecap="round"></path></svg></span>
+                        </span>
+                        <span style="font-size:11px;color:var(--c-t5)">written when R-1 started</span>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:9px">
+                        <span style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--c-t5);flex:none">Reference</span>
+                        <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t3);border:1px solid var(--c-div);border-radius:5px;padding:2px 7px;cursor:pointer">WEAVE_PLAN.md</span>
+                        <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t3);border:1px solid var(--c-div);border-radius:5px;padding:2px 7px;cursor:pointer">components/_index.md</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- EL-1 two-paste variant -->
+                <div style="position:relative;margin-bottom:9px">
+                  <span style="position:absolute;left:-23.5px;top:14px;width:7px;height:7px;border-radius:50%;background:var(--c-here);box-shadow:0 0 0 3px var(--c-bg)"></span>
+                  <span style="position:absolute;left:-16px;top:17px;width:14px;height:1px;background:var(--c-hair)"></span>
+                  <div style="background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:12px 15px">
+                    <div style="display:flex;align-items:center;gap:11px">
+                      <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t3);background:var(--c-raised);border:1px solid var(--c-hair);border-radius:5px;padding:2px 6px;flex:none">EL-1</span>
+                      <span style="flex:1;font-size:12.5px;color:var(--c-t2)">The beauty pass</span>
+                      <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-here)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here)"></span>up next — start it</span>
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.4"><path d="M4 6.5 8 10.5l4-4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                    </div>
+                    <div style="margin-top:11px;padding-top:11px;border-top:1px solid var(--c-div);display:flex;flex-direction:column;gap:8px">
+                      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                        <span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t5);width:78px;flex:none">You paste · 1</span>
+                        <span style="display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 9px;border-radius:6px;border:1px solid var(--c-hair);background:var(--c-raised);font-family:var(--mono);font-size:11px;color:var(--c-t2)">EL-1_DESIGN_BATCH.md<span style="color:var(--c-t5)">→</span><span style="color:var(--c-t3)">Claude Design</span></span>
+                      </div>
+                      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                        <span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t5);width:78px;flex:none">then · 2</span>
+                        <span style="display:inline-flex;align-items:center;gap:7px;height:24px;padding:0 9px;border-radius:6px;border:1px solid var(--c-hair);background:var(--c-raised);font-family:var(--mono);font-size:11px;color:var(--c-t2)">EL-1_CLAUDE_CODE_PROMPT.md<span style="color:var(--c-t5)">→</span><span style="color:var(--c-t3)">Claude Code</span></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- SC-1 later collapsed -->
+                <div style="position:relative">
+                  <span style="position:absolute;left:-23.5px;top:14px;width:7px;height:7px;border-radius:50%;background:var(--c-t4);box-shadow:0 0 0 3px var(--c-bg)"></span>
+                  <span style="position:absolute;left:-16px;top:17px;width:14px;height:1px;background:var(--c-hair)"></span>
+                  <div style="background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:10px 13px;display:flex;align-items:center;gap:11px;cursor:pointer" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='var(--c-panel)'">
+                    <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t4);background:var(--c-raised);border:1px solid var(--c-hair);border-radius:5px;padding:2px 6px;flex:none">SC-1</span>
+                    <span style="flex:1;font-size:12.5px;color:var(--c-t4)">The Scorecard review</span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-t4)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-t4)"></span>later</span>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.4"><path d="M6.5 4 10.5 8l-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Stage 2 -->
+              <div style="display:flex;align-items:center;gap:10px;margin:18px 0 13px">
+                <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t4)">Stage 2 · Ship</span>
+                <span style="flex:1;height:1px;background:var(--c-div)"></span>
+              </div>
+              <div style="position:relative;padding-left:30px">
+                <div style="position:absolute;left:10px;top:8px;bottom:8px;width:1px;background:var(--c-hair)"></div>
+                <div style="position:relative">
+                  <span style="position:absolute;left:-23.5px;top:14px;width:7px;height:7px;border-radius:50%;background:var(--c-t4);box-shadow:0 0 0 3px var(--c-bg)"></span>
+                  <span style="position:absolute;left:-16px;top:17px;width:14px;height:1px;background:var(--c-hair)"></span>
+                  <div style="background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:10px 13px;display:flex;align-items:center;gap:11px;cursor:pointer" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='var(--c-panel)'">
+                    <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t4);background:var(--c-raised);border:1px solid var(--c-hair);border-radius:5px;padding:2px 6px;flex:none">P-1</span>
+                    <span style="flex:1;font-size:12.5px;color:var(--c-t4)">Publish to the registry</span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-t4)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-t4)"></span>later · gated</span>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.4"><path d="M6.5 4 10.5 8l-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                  </div>
+                </div>
+              </div>
+
+              <!-- footer hint -->
+              <div style="text-align:center;font-size:11px;color:var(--c-t5);line-height:1.55;margin-top:20px;padding:0 20px">Every phase names the file you paste and where it goes. Copy it, drop it in a terminal or Claude Design, and the thread moves down.</div>
+            </div>
+
+          </div>
+
+          <div class="cres" data-cres="prev:380:920" title="drag to resize"></div>
+          <!-- RIGHT: terminal column -->
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0;background:var(--c-bg)">
+            <div style="height:40px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid var(--c-hair);background:var(--c-panel)">
+              <div style="display:flex;align-items:center;gap:8px;padding:0 15px;border-right:1px solid var(--c-hair);position:relative;background:var(--c-bg)">
+                <div style="position:absolute;left:0;right:0;top:0;height:1px;background:var(--c-here)"></div>
+                <span style="width:6px;height:6px;border-radius:50%;background:var(--c-t4)"></span>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t2)">shell 1</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:0 15px;border-right:1px solid var(--c-hair)">
+                <span style="width:6px;height:6px;border-radius:50%;background:var(--c-t5)"></span>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t4)">shell 2</span>
+              </div>
+              <button aria-label="new terminal" style="width:34px;border:none;border-right:1px solid var(--c-hair);background:transparent;color:var(--c-t4);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center" onmouseover="this.style.background='var(--c-hover)';this.style.color='var(--c-t2)'" onmouseout="this.style.background='transparent';this.style.color='var(--c-t4)'">+</button>
+              <div style="flex:1;display:flex;align-items:center;justify-content:flex-end;padding:0 14px;font-family:var(--mono);font-size:10.5px;color:var(--c-t5)">type&nbsp;<span style="color:var(--c-t3)">claude ⏎</span>&nbsp;· paste ⌘V</div>
+            </div>
+            <div style="flex:1;padding:16px 18px;font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--c-t2);overflow:hidden">
+              <div style="color:var(--c-t5)"># weave · roadmap is live — paste a phase file to work</div>
+              <div style="margin-top:10px"><span style="color:var(--c-t2)">weave</span>&nbsp;<span style="color:var(--c-t5)">~/projects/weave</span>&nbsp;<span style="color:var(--c-t4)">⎇ main*</span></div>
+              <div style="display:flex;align-items:center;margin-top:1px"><span style="color:var(--c-t4)">$</span>&nbsp;<span style="color:var(--c-t3)">claude</span></div>
+              <div style="margin-top:14px;border:1px solid var(--c-hair);border-radius:7px;padding:13px 14px;background:var(--c-panel);max-width:440px">
+                <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--c-t3);display:flex"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6.6" cy="6.6" r="4.4"></circle><line x1="9.9" y1="9.9" x2="13.4" y2="13.4" stroke-linecap="round"></line></svg></span><span style="color:var(--c-t2);font-size:11.5px">Claude Code</span><span style="color:var(--c-t5);font-size:10.5px">v2.x · ~/projects/weave</span></div>
+                <div style="color:var(--c-t4);font-size:11.5px;margin-top:9px;line-height:1.6">Ready. Paste <span style="color:var(--c-t2)">WEAVE_CLAUDE_CODE_PROMPT.md</span> and I’ll pick up R-1 from where the plan left it.</div>
+              </div>
+              <div style="display:flex;align-items:center;margin-top:14px"><span style="color:var(--c-t4)">&gt;</span>&nbsp;<span style="display:inline-block;width:8px;height:15px;background:var(--c-t3)"></span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- annotations -->
+      <aside style="width:360px;flex:none;padding-top:6px">
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair)">shadcn / weave components</div>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Tabs</span> <span style="color:var(--c-t5)">·</span> segmented Roadmap|Repo (real Weave mount) <span style="color:var(--c-t5)">·</span> <span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Button</span> ghost refresh <span style="color:var(--c-t5)">·</span> <span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">DropdownMenu</span> on the project chip → <a href="#f7">#7</a>.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-here);font-size:11.5px">[★] here-banner</span> <span style="color:var(--c-t5)">·</span> the one loud moment — 2px here-blue rule, pulse-dot eyebrow, phase at 15/650. Nothing competes.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Card</span> panels <span style="color:var(--c-t5)">·</span> history + what-needs-you; <span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Collapsible</span> = the phase cards (header is trigger, body is content).</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-here);font-size:11.5px">[★] loom rail</span> <span style="color:var(--c-t5)">·</span> 1px rail, 7px node per phase (grey/green/blue). Current node carries the 2.4s pulse — the only animation (reduced-motion freezes it).</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-here);font-size:11.5px">[★] status word · file chip · paste row</span> <span style="color:var(--c-t5)">·</span> lowercase mono + 5px dot; filename → target chip copies the file’s contents on click.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-here);font-size:11.5px">[★] terminal strip</span> <span style="color:var(--c-t5)">·</span> shell 1 active (here-blue top rule), shell 2, +, hint; real terminal below <span style="color:var(--c-t5)">·</span> <span style="font-family:var(--mono);color:var(--c-t1)">ScrollArea</span> on the left pane.</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair);margin-top:24px">states drawn</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Phase cards: <span style="color:var(--c-done)">done</span> collapsed · <span style="color:var(--c-here)">current</span> expanded (pulse) · <span style="color:var(--c-here)">up-next</span> two-paste variant · <span style="color:var(--c-t4)">later</span> collapsed.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Left pane scrolls; roadmap continues below the fold.</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair);margin-top:24px">behaviour</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Chronicle only <span style="color:var(--c-t2)">shows</span> the roadmap — it’s derived from the folder + manifest; the operator can’t edit phases here.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Plain language only: “not online yet”, “changed but not saved to history” — never git jargon.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+  <!-- ============================================================ FRAME 4 ============================================================ -->
+  <section id="f4" style="margin-top:76px;scroll-margin-top:24px">
+    <div style="display:flex;align-items:baseline;gap:14px;margin:0 0 18px 2px">
+      <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:#0a0a0a;background:var(--c-t2);padding:3px 8px;border-radius:6px;letter-spacing:.02em">#4</span>
+      <span style="font-size:14px;font-weight:600;color:var(--c-t1)">Roadmap · state variations</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--c-t4)">four insets — each state is drawn, not just named</span>
+    </div>
+
+    <div style="display:flex;gap:36px;align-items:flex-start">
+      <div style="width:1280px;height:860px;flex:none;background:var(--c-bg);border:1px solid var(--c-hairs);border-radius:11px;overflow:hidden;box-shadow:0 30px 80px -22px rgba(0,0,0,.72),0 8px 24px rgba(0,0,0,.5);position:relative;display:flex;flex-direction:column">
+
+        <div style="height:42px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--c-div)">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+          </div>
+          <div style="flex:1;text-align:center;font-family:var(--mono);font-size:11px;color:var(--c-t5);letter-spacing:.04em">weave — Chronicle · roadmap states</div>
+          <div style="width:52px"></div>
+        </div>
+
+        <!-- 2x2 grid -->
+        <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:18px;padding:20px">
+
+          <!-- (a) ghost paste chip -->
+          <div style="border:1px solid var(--c-hair);border-radius:9px;background:var(--fill-subtle);padding:16px 18px;display:flex;flex-direction:column;min-height:0">
+            <div style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t4)">(a) paste file doesn’t exist yet</div>
+            <div style="flex:1;display:flex;align-items:center">
+              <div style="width:100%;background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:13px 15px">
+                <div style="display:flex;align-items:center;gap:11px">
+                  <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t4);background:var(--c-raised);border:1px solid var(--c-hair);border-radius:5px;padding:2px 6px;flex:none">W-3b</span>
+                  <span style="flex:1;font-size:12.5px;color:var(--c-t4)">The light-mode pass</span>
+                  <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-t4)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-t4)"></span>later</span>
+                </div>
+                <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--c-div)">
+                  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                    <span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t5);flex:none">You will paste</span>
+                    <span style="display:inline-flex;align-items:center;gap:7px;height:25px;padding:0 9px;border-radius:6px;border:1px dashed var(--c-hairs);background:transparent;font-family:var(--mono);font-size:11px;color:var(--c-t4)">
+                      <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.3" stroke-dasharray="2 1.6"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path></svg>
+                      the light-mode design batch<span style="color:var(--c-t5)">→</span><span style="color:var(--c-t4)">Claude Design</span>
+                    </span>
+                  </div>
+                  <div style="font-size:11px;color:var(--c-t5);margin-top:9px;line-height:1.5">written at <span style="font-family:var(--mono);color:var(--c-t4)">W-3b</span>’s close — <span style="color:var(--c-t4)">doesn’t exist yet</span>, so the chip is a ghost and can’t be copied.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- (b) gate-blocked current -->
+          <div style="border:1px solid var(--c-hair);border-radius:9px;background:var(--fill-subtle);padding:16px 18px;display:flex;flex-direction:column;min-height:0">
+            <div style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t4)">(b) current phase is gate-blocked</div>
+            <div style="flex:1;display:flex;align-items:center">
+              <div style="position:relative;width:100%;background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:14px 16px 15px 20px;overflow:hidden">
+                <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--c-here)"></div>
+                <div style="display:flex;align-items:center;gap:9px">
+                  <span style="position:relative;width:6px;height:6px;flex:none;display:inline-flex">
+                    <span class="chrono-pulse" style="position:absolute;inset:-2px;border-radius:50%;background:var(--c-here);animation:chronoPulse 2.4s ease-out infinite"></span>
+                    <span style="position:absolute;inset:0;border-radius:50%;background:var(--c-here)"></span>
+                  </span>
+                  <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--c-here)">The build is waiting</span>
+                </div>
+                <div style="font-size:15px;font-weight:650;color:var(--c-t1);margin-top:10px;letter-spacing:-.005em">P-1 · Publish to the registry</div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:9px">
+                  <span style="display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11.5px;color:var(--c-here)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here)"></span>waiting on the handoff bundle</span>
+                </div>
+                <div style="font-size:12px;color:var(--c-t4);margin-top:9px;line-height:1.5">Blocked until <span style="font-family:var(--mono);color:var(--c-t3)">EL-1</span> hands off its bundle — then this starts on its own.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- (c) all-done banner -->
+          <div style="border:1px solid var(--c-hair);border-radius:9px;background:var(--fill-subtle);padding:16px 18px;display:flex;flex-direction:column;min-height:0">
+            <div style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t4)">(c) everything on the plan is done</div>
+            <div style="flex:1;display:flex;align-items:center">
+              <div style="position:relative;width:100%;background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:14px 16px 15px 20px;overflow:hidden">
+                <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--c-done)"></div>
+                <div style="display:flex;align-items:center;gap:9px">
+                  <span style="width:6px;height:6px;border-radius:50%;background:var(--c-done);flex:none"></span>
+                  <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--c-done)">All phases done</span>
+                </div>
+                <div style="font-size:15px;font-weight:650;color:var(--c-t1);margin-top:10px;letter-spacing:-.005em">Everything on the plan is done</div>
+                <div style="font-size:12px;color:var(--c-t4);margin-top:9px;line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t3)">8 of 8</span> phases signed off · nothing needs you right now.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- (d) copied toast -->
+          <div style="border:1px solid var(--c-hair);border-radius:9px;background:var(--fill-subtle);padding:16px 18px;display:flex;flex-direction:column;min-height:0">
+            <div style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t4)">(d) file chip · copied feedback</div>
+            <div style="position:relative;flex:1;margin-top:12px;border-radius:8px;background:var(--c-bg);border:1px solid var(--c-div);overflow:hidden;display:flex;align-items:flex-end;justify-content:center;padding-bottom:20px">
+              <div style="position:absolute;top:12px;left:14px;font-family:var(--mono);font-size:10px;color:var(--c-t5)">…the app, dimmed…</div>
+              <div style="display:inline-flex;align-items:center;gap:10px;padding:9px 14px;border-radius:8px;background:var(--c-active);border:1px solid var(--c-hairs);box-shadow:0 14px 34px rgba(0,0,0,.55);font-family:var(--mono);font-size:11.5px;color:var(--c-t2);max-width:94%">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--c-done)" stroke-width="1.6" style="flex:none"><path d="M3.5 8.4 6.4 11.2 12.5 4.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+                <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">copied WEAVE_CLAUDE_CODE_PROMPT.md&nbsp;<span style="color:var(--c-t5)">·</span>&nbsp;<span style="color:var(--c-t3)">12,847 characters</span>&nbsp;<span style="color:var(--c-t5)">— paste it in a terminal</span>&nbsp;<span style="color:var(--c-t3)">→</span></span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- annotations -->
+      <aside style="width:360px;flex:none;padding-top:6px">
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair)">states drawn</div>
+        <div style="display:flex;flex-direction:column;gap:11px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2);font-weight:550">(a) ghost chip</span> — a paste file the plan will create later. Dashed, un-copyable, with a plain-language “doesn’t exist yet”.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2);font-weight:550">(b) gate-blocked</span> — the here-banner variant. Status <span style="font-family:var(--mono);color:var(--c-here)">waiting on the handoff bundle</span>; the block is named; it starts itself when cleared.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2);font-weight:550">(c) all-done</span> — the only time the banner rule turns <span style="color:var(--c-done)">green</span>; no pulse (nothing is current).</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2);font-weight:550">(d) copied toast</span> — bottom-centre, raised, mono; names the file, its size, and the next move. Green check = success.</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair);margin-top:26px">law check</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Blue only on current / awaiting-human; green only on genuine completion; grey for later. No decorative colour anywhere.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Every failure/blocked state names <span style="color:var(--c-t2)">what’s blocked → what clears it → what happens next</span>.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+  <!-- ============================================================ FRAME 5 ============================================================ -->
+  <section id="f5" style="margin-top:76px;scroll-margin-top:24px">
+    <div style="display:flex;align-items:baseline;gap:14px;margin:0 0 18px 2px">
+      <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:#0a0a0a;background:var(--c-t2);padding:3px 8px;border-radius:6px;letter-spacing:.02em">#5</span>
+      <span style="font-size:14px;font-weight:600;color:var(--c-t1)">Main · Repo</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--c-t4)">the explorer — loupe sample data proves genericity</span>
+    </div>
+
+    <div style="display:flex;gap:36px;align-items:flex-start">
+      <div style="width:1280px;height:860px;flex:none;background:var(--c-bg);border:1px solid var(--c-hairs);border-radius:11px;overflow:hidden;box-shadow:0 30px 80px -22px rgba(0,0,0,.72),0 8px 24px rgba(0,0,0,.5);position:relative;display:flex;flex-direction:column">
+
+        <!-- titlebar -->
+        <div style="height:42px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--c-div)">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+          </div>
+          <div style="flex:1;text-align:center;font-family:var(--mono);font-size:11px;color:var(--c-t5);letter-spacing:.04em">loupe — Chronicle</div>
+          <div style="width:52px"></div>
+        </div>
+
+        <!-- app header (Repo active) -->
+        <div style="height:53px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--c-hair)">
+          <span style="color:var(--c-t2);display:flex"><span class="clogo" style="width:18px;height:18px"></span></span>
+          <span style="font-size:13.5px;font-weight:600;letter-spacing:-.005em">Chronicle</span>
+          <span style="width:4px;height:4px;border-radius:50%;background:var(--c-t5)"></span>
+          <button style="display:flex;align-items:center;gap:8px;height:30px;padding:0 9px 0 11px;border-radius:6px;border:1px solid var(--c-hair);background:var(--c-raised);cursor:pointer;color:var(--c-t2)" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='var(--c-raised)'">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.6 4.4c0-.6.5-1.1 1.1-1.1h3.1l1.3 1.5h6.2c.6 0 1.1.5 1.1 1.1v5.8c0 .6-.5 1.1-1.1 1.1H2.7c-.6 0-1.1-.5-1.1-1.1z" stroke-linejoin="round"></path></svg>
+            <span style="font-family:var(--mono);font-size:12px;color:var(--c-t1)">loupe</span>
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.4"><path d="M4 6.5 8 10.5l4-4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </button>
+          <div style="flex:1"></div>
+          <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-t4);font-variant-numeric:tabular-nums"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-done)"></span>checked 00:41:12</span>
+          <x-import component-from-global-scope="Weave.Tabs" default-value="repo" hint-size="176px,34px">
+            <x-import component-from-global-scope="Weave.TabsList" hint-size="176px,32px">
+              <x-import component-from-global-scope="Weave.TabsTrigger" value="roadmap" hint-size="86px,26px">Roadmap</x-import>
+              <x-import component-from-global-scope="Weave.TabsTrigger" value="repo" hint-size="64px,26px">Repo</x-import>
+            </x-import>
+          </x-import>
+          <x-import component-from-global-scope="Weave.Button" variant="ghost" size="icon-sm" hint-size="32px,32px">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M13.5 8a5.5 5.5 0 1 1-1.7-4" stroke-linecap="round"></path><path d="M13.7 3.1v3.2h-3.2" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </x-import>
+        </div>
+
+        <!-- body: tree | viewer | terminal dock -->
+        <div style="flex:1;display:flex;min-height:0">
+
+          <!-- TREE -->
+          <div class="chrono-scroll" style="width:250px;flex:none;overflow-y:auto;padding:8px 0 12px">
+            <div style="font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--c-t5);padding:4px 12px 8px">Explorer · 2 roots</div>
+
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:10px;font-family:var(--mono);font-size:12px;color:var(--c-t2);cursor:pointer" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='transparent'">
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.7" style="transform:rotate(90deg)"><path d="M6 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.2"><path d="M1.8 4.6c0-.5.4-.9.9-.9h3l1.2 1.4h6.4c.5 0 .9.4.9.9v6.2c0 .5-.4.9-.9.9H2.7c-.5 0-.9-.4-.9-.9z" stroke-linejoin="round"></path></svg>
+              <span style="color:var(--c-t1)">loupe-master</span>
+            </div>
+
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:28px;font-family:var(--mono);font-size:12px;color:var(--c-t2);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat">
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.7" style="transform:rotate(90deg)"><path d="M6 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.2"><path d="M1.8 4.6c0-.5.4-.9.9-.9h3l1.2 1.4h6.4c.5 0 .9.4.9.9v6.2c0 .5-.4.9-.9.9H2.7c-.5 0-.9-.4-.9-.9z" stroke-linejoin="round"></path></svg>
+              <span>src</span>
+            </div>
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:46px;font-family:var(--mono);font-size:12px;color:var(--c-t3);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat,linear-gradient(var(--c-div),var(--c-div)) 34px 0/1px 100% no-repeat" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat,linear-gradient(var(--c-div),var(--c-div)) 34px 0/1px 100% no-repeat'">
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.7"><path d="M6 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.2"><path d="M1.8 4.6c0-.5.4-.9.9-.9h3l1.2 1.4h6.4c.5 0 .9.4.9.9v6.2c0 .5-.4.9-.9.9H2.7c-.5 0-.9-.4-.9-.9z" stroke-linejoin="round"></path></svg>
+              <span>lens</span>
+            </div>
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:46px;font-family:var(--mono);font-size:12px;color:var(--c-t3);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat,linear-gradient(var(--c-div),var(--c-div)) 34px 0/1px 100% no-repeat">
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.7"><path d="M6 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.2"><path d="M1.8 4.6c0-.5.4-.9.9-.9h3l1.2 1.4h6.4c.5 0 .9.4.9.9v6.2c0 .5-.4.9-.9.9H2.7c-.5 0-.9-.4-.9-.9z" stroke-linejoin="round"></path></svg>
+              <span>viewer</span>
+            </div>
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:46px;font-family:var(--mono);font-size:12px;color:var(--c-t3);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat,linear-gradient(var(--c-div),var(--c-div)) 34px 0/1px 100% no-repeat">
+              <span style="width:9px;flex:none"></span>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.2"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path><path d="M8.9 2.5v3h3" stroke-linejoin="round"></path></svg>
+              <span>index.ts</span>
+            </div>
+
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:28px;font-family:var(--mono);font-size:12px;color:var(--c-t2);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat">
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.7" style="transform:rotate(90deg)"><path d="M6 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.2"><path d="M1.8 4.6c0-.5.4-.9.9-.9h3l1.2 1.4h6.4c.5 0 .9.4.9.9v6.2c0 .5-.4.9-.9.9H2.7c-.5 0-.9-.4-.9-.9z" stroke-linejoin="round"></path></svg>
+              <span>screens</span>
+            </div>
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:46px;font-family:var(--mono);font-size:12px;color:var(--c-t3);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat,linear-gradient(var(--c-div),var(--c-div)) 34px 0/1px 100% no-repeat">
+              <span style="width:9px;flex:none"></span>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.2"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path><path d="M8.9 2.5v3h3" stroke-linejoin="round"></path></svg>
+              <span>home.html</span>
+            </div>
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:46px;font-family:var(--mono);font-size:12px;color:var(--c-t1);cursor:pointer;background:var(--c-active);box-shadow:inset 2px 0 0 var(--c-t4)">
+              <span style="width:9px;flex:none"></span>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t3)" stroke-width="1.2"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path><path d="M8.9 2.5v3h3" stroke-linejoin="round"></path></svg>
+              <span>inspect.html</span>
+            </div>
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:46px;font-family:var(--mono);font-size:12px;color:var(--c-t3);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat,linear-gradient(var(--c-div),var(--c-div)) 34px 0/1px 100% no-repeat">
+              <span style="width:9px;flex:none"></span>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.2"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path><path d="M8.9 2.5v3h3" stroke-linejoin="round"></path></svg>
+              <span>compare.html</span>
+            </div>
+
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:28px;font-family:var(--mono);font-size:12px;color:var(--c-t2);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat'">
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.7"><path d="M6 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.2"><path d="M1.8 4.6c0-.5.4-.9.9-.9h3l1.2 1.4h6.4c.5 0 .9.4.9.9v6.2c0 .5-.4.9-.9.9H2.7c-.5 0-.9-.4-.9-.9z" stroke-linejoin="round"></path></svg>
+              <span>docs</span>
+            </div>
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:28px;font-family:var(--mono);font-size:12px;color:var(--c-t3);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat">
+              <span style="width:9px;flex:none"></span>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.2"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path><path d="M8.9 2.5v3h3" stroke-linejoin="round"></path></svg>
+              <span>LOUPE_PLAN.md</span>
+            </div>
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:28px;font-family:var(--mono);font-size:12px;color:var(--c-t3);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat">
+              <span style="width:9px;flex:none"></span>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.2"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path><path d="M8.9 2.5v3h3" stroke-linejoin="round"></path></svg>
+              <span>chronicle.json</span>
+            </div>
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:28px;font-family:var(--mono);font-size:12px;color:var(--c-t3);cursor:pointer;background:linear-gradient(var(--c-div),var(--c-div)) 16px 0/1px 100% no-repeat">
+              <span style="width:9px;flex:none"></span>
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.2"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path><path d="M8.9 2.5v3h3" stroke-linejoin="round"></path></svg>
+              <span>package.json</span>
+            </div>
+
+            <div style="height:23px;display:flex;align-items:center;gap:6px;padding-left:10px;font-family:var(--mono);font-size:12px;color:var(--c-t2);cursor:pointer;margin-top:2px" onmouseover="this.style.background='var(--c-hover)'" onmouseout="this.style.background='transparent'">
+              <svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.7"><path d="M6 4l4 4-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.2"><path d="M1.8 4.6c0-.5.4-.9.9-.9h3l1.2 1.4h6.4c.5 0 .9.4.9.9v6.2c0 .5-.4.9-.9.9H2.7c-.5 0-.9-.4-.9-.9z" stroke-linejoin="round"></path></svg>
+              <span>loupe-redo</span><span style="color:var(--c-t5)">· canon</span>
+            </div>
+          </div>
+
+          <div class="cres" data-cres="prev:180:420" title="drag to resize"></div>
+          <!-- VIEWER (open) -->
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+            <div style="height:40px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid var(--c-hair);background:var(--c-panel)">
+              <div style="display:flex;align-items:center;gap:8px;padding:0 11px;border-right:1px solid var(--c-hair);position:relative;background:var(--c-bg)">
+                <div style="position:absolute;left:0;right:0;top:0;height:1px;background:var(--c-here)"></div>
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t4)" stroke-width="1.2"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path></svg>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t1)">LOUPE_PLAN.md</span>
+                <span style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--c-t5);margin-left:2px"><svg width="10" height="10" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.5" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"></path></svg></span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:0 11px;border-right:1px solid var(--c-hair);background:var(--c-panel)">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.2"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path></svg>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t4)">inspect.html</span>
+                <span style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--c-t5);margin-left:2px"><svg width="10" height="10" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.5" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"></path></svg></span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:0 11px;border-right:1px solid var(--c-hair);background:var(--c-panel)">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.2"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path></svg>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t4)">chronicle.json</span>
+                <span style="width:16px;height:16px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--c-t5);margin-left:2px"><svg width="10" height="10" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.5" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"></path></svg></span>
+              </div>
+            </div>
+
+            <div class="chrono-scroll" style="flex:1;overflow:auto;padding:14px 0;font-family:var(--mono);font-size:12.5px;line-height:1.85;color:var(--c-t3);user-select:text">
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">1</span><span style="color:var(--c-t1)"># Loupe — build plan</span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">2</span><span></span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">3</span><span>Loupe is a desktop magnifier for inspecting</span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">4</span><span>designs pixel by pixel. Chronicle reads this</span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">5</span><span>file to draw the roadmap on the left.</span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">6</span><span></span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">7</span><span style="color:var(--c-t2)">## Phase 1 — The lens<span style="color:var(--c-t5)">        (done)</span></span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">8</span><span><span style="color:var(--c-t5)">- </span>Draw the circular lens overlay</span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">9</span><span><span style="color:var(--c-t5)">- </span>Follow the cursor, clamp to the window</span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">10</span><span><span style="color:var(--c-t5)">- </span>Zoom 2×–16× on the scroll wheel</span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">11</span><span></span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">12</span><span style="color:var(--c-t2)">## Phase 2 — The viewer<span style="color:var(--c-t5)">      (here)</span></span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">13</span><span><span style="color:var(--c-t5)">- </span>Open any image or screen in a panel</span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">14</span><span><span style="color:var(--c-t5)">- </span>Side-by-side compare mode</span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">15</span><span><span style="color:var(--c-t5)">- </span>Copy the pixel colour under the lens</span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">16</span><span></span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">17</span><span style="color:var(--c-t2)">## Phase 3 — Ship<span style="color:var(--c-t5)">            (later)</span></span></div>
+              <div style="display:flex"><span style="width:44px;flex:none;text-align:right;padding-right:14px;color:var(--c-t5)">18</span><span><span style="color:var(--c-t5)">- </span>Package + notarize for macOS</span></div>
+            </div>
+
+            <div style="height:40px;flex:none;display:flex;align-items:center;gap:12px;border-top:1px solid var(--c-hair);padding:0 14px">
+              <span style="font-family:var(--mono);font-size:11px;color:var(--c-t5)">~/dev/loupe-master/LOUPE_PLAN.md</span>
+              <div style="flex:1"></div>
+              <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t5)">markdown · 18 lines</span>
+              <x-import component-from-global-scope="Weave.Button" variant="secondary" size="sm" hint-size="120px,30px">
+                <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.6"></rect><path d="M10.8 5.4V3.5c0-.6-.5-1.1-1.1-1.1H3.4c-.6 0-1.1.5-1.1 1.1v6.3c0 .6.5 1.1 1.1 1.1h1.9" stroke-linecap="round"></path></svg>
+                copy contents
+              </x-import>
+            </div>
+          </div>
+
+          <div class="cres" data-cres="next:280:640" title="drag to resize"></div>
+          <!-- TERMINAL (right dock) -->
+          <div style="width:400px;flex:none;display:flex;flex-direction:column;min-width:0;background:var(--c-bg)">
+            <div style="height:40px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid var(--c-hair);background:var(--c-panel)">
+              <div style="display:flex;align-items:center;gap:8px;padding:0 15px;border-right:1px solid var(--c-hair);position:relative;background:var(--c-bg)">
+                <div style="position:absolute;left:0;right:0;top:0;height:1px;background:var(--c-here)"></div>
+                <span style="width:6px;height:6px;border-radius:50%;background:var(--c-t4)"></span>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t2)">shell 1</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:0 15px;border-right:1px solid var(--c-hair)">
+                <span style="width:6px;height:6px;border-radius:50%;background:var(--c-t5)"></span>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t4)">shell 2</span>
+              </div>
+              <button aria-label="new terminal" style="width:34px;border:none;border-right:1px solid var(--c-hair);background:transparent;color:var(--c-t4);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center" onmouseover="this.style.background='var(--c-hover)';this.style.color='var(--c-t2)'" onmouseout="this.style.background='transparent';this.style.color='var(--c-t4)'">+</button>
+              <div style="flex:1;display:flex;align-items:center;justify-content:flex-end;padding:0 12px;font-family:var(--mono);font-size:10px;color:var(--c-t5)">type&nbsp;<span style="color:var(--c-t3)">claude ⏎</span>&nbsp;· paste ⌘V</div>
+            </div>
+            <div style="flex:1;padding:15px 16px;font-family:var(--mono);font-size:11.5px;line-height:1.8;color:var(--c-t2);overflow:hidden">
+              <div style="color:var(--c-t5)"># loupe — read on the left, paste here to work</div>
+              <div style="margin-top:9px"><span style="color:var(--c-t2)">loupe</span>&nbsp;<span style="color:var(--c-t5)">~/dev/loupe-master</span>&nbsp;<span style="color:var(--c-t4)">⎇ canon</span></div>
+              <div><span style="color:var(--c-t4)">$</span>&nbsp;<span style="color:var(--c-t3)">claude</span></div>
+              <div style="margin-top:12px;border:1px solid var(--c-hair);border-radius:7px;padding:11px 12px;background:var(--c-panel)">
+                <div style="display:flex;align-items:center;gap:8px"><span style="color:var(--c-t3);display:flex"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6.6" cy="6.6" r="4.4"></circle><line x1="9.9" y1="9.9" x2="13.4" y2="13.4" stroke-linecap="round"></line></svg></span><span style="color:var(--c-t2)">Claude Code</span></div>
+                <div style="color:var(--c-t4);margin-top:8px;line-height:1.55">Ready — paste a file chip’s contents and I’ll pick it up.</div>
+              </div>
+              <div style="display:flex;align-items:center;margin-top:12px"><span style="color:var(--c-t4)">&gt;</span>&nbsp;<span style="display:inline-block;width:8px;height:14px;background:var(--c-t3)"></span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- annotations -->
+      <aside style="width:360px;flex:none;padding-top:6px">
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair)">shadcn / weave components</div>
+        <div style="display:flex;flex-direction:column;gap:11px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">[★] file tree row</span> <span style="color:var(--c-t5)">·</span> VS-Code grammar — 23px rows, rotating chevrons, indent guides, two roots (<span style="font-family:var(--mono)">loupe-master</span> expanded, <span style="font-family:var(--mono)">loupe-redo</span> collapsed), one selected/open row.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">[★] open-file tabs</span> <span style="color:var(--c-t5)">·</span> 3 tabs, × on each, active carries the here-blue top rule.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">ScrollArea</span> on tree + viewer <span style="color:var(--c-t5)">·</span> <span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Tabs</span> Repo active <span style="color:var(--c-t5)">·</span> <span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Button</span> secondary “copy contents”.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">[★] terminal dock</span> <span style="color:var(--c-t5)">·</span> docked right — shell tabs + a live terminal, so the paste-while-reading loop stays in Repo. Drag the hairline between panes to resize.</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair);margin-top:26px">behaviour</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Read-only. The file body is selectable mono text; monochrome — no syntax colour.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2)">copy contents</span> puts the whole file on the clipboard — the same click as a paste-row file chip.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">The terminal is the persistent right dock from <a href="#f3">#3</a> — switching Roadmap ⇄ Repo never hides it.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">No-file-open state lives in the viewer itself (“select a file to read it”) — it never needed its own column.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Different project (<span style="font-family:var(--mono)">loupe</span>), same design — genericity is proven by two projects wearing one system.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+  <!-- ============================================================ FRAME 6 ============================================================ -->
+  <section id="f6" style="margin-top:76px;scroll-margin-top:24px">
+    <div style="display:flex;align-items:baseline;gap:14px;margin:0 0 18px 2px">
+      <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:#0a0a0a;background:var(--c-t2);padding:3px 8px;border-radius:6px;letter-spacing:.02em">#6</span>
+      <span style="font-size:14px;font-weight:600;color:var(--c-t1)">Terminals · states</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--c-t4)">active · background · ended · + hover · hint variant</span>
+    </div>
+
+    <div style="display:flex;gap:36px;align-items:flex-start">
+      <div style="width:1280px;height:860px;flex:none;background:var(--c-bg);border:1px solid var(--c-hairs);border-radius:11px;overflow:hidden;box-shadow:0 30px 80px -22px rgba(0,0,0,.72),0 8px 24px rgba(0,0,0,.5);position:relative;display:flex;flex-direction:column">
+
+        <div style="height:42px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--c-div)">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+          </div>
+          <div style="flex:1;text-align:center;font-family:var(--mono);font-size:11px;color:var(--c-t5);letter-spacing:.04em">weave — Chronicle · terminals</div>
+          <div style="width:52px"></div>
+        </div>
+
+        <div style="flex:1;padding:22px;display:flex;flex-direction:column;gap:18px;min-height:0">
+
+          <!-- top: full terminal, three tab states -->
+          <div style="flex:1;display:flex;flex-direction:column;border:1px solid var(--c-hair);border-radius:9px;overflow:hidden;min-height:0;background:var(--c-bg)">
+            <div style="height:40px;flex:none;display:flex;align-items:stretch;border-bottom:1px solid var(--c-hair);background:var(--c-panel)">
+              <div style="display:flex;align-items:center;gap:8px;padding:0 15px;border-right:1px solid var(--c-hair);position:relative;background:var(--c-bg)">
+                <div style="position:absolute;left:0;right:0;top:0;height:1px;background:var(--c-here)"></div>
+                <span style="width:6px;height:6px;border-radius:50%;background:var(--c-t4)"></span>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t2)">shell 1</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:0 15px;border-right:1px solid var(--c-hair)">
+                <span style="width:6px;height:6px;border-radius:50%;background:var(--c-t5)"></span>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t4)">shell 2</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;padding:0 15px;border-right:1px solid var(--c-hair)">
+                <span style="width:6px;height:6px;border-radius:50%;border:1px solid var(--c-t5);background:transparent"></span>
+                <span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t5);font-style:italic">shell 3 · ended</span>
+              </div>
+              <button aria-label="new terminal" style="width:34px;border:none;border-right:1px solid var(--c-hair);background:transparent;color:var(--c-t4);cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center">+</button>
+              <div style="flex:1;display:flex;align-items:center;justify-content:flex-end;padding:0 14px;font-family:var(--mono);font-size:10.5px;color:var(--c-t5)">type&nbsp;<span style="color:var(--c-t3)">claude ⏎</span>&nbsp;· paste ⌘V</div>
+            </div>
+            <div style="flex:1;padding:15px 18px;font-family:var(--mono);font-size:12px;line-height:1.8;color:var(--c-t2);overflow:hidden">
+              <div style="color:var(--c-t5)"># shell 1 — active</div>
+              <div style="margin-top:8px"><span style="color:var(--c-t2)">weave</span>&nbsp;<span style="color:var(--c-t5)">~/projects/weave</span>&nbsp;<span style="color:var(--c-t4)">⎇ main*</span></div>
+              <div><span style="color:var(--c-t4)">$</span>&nbsp;<span style="color:var(--c-t3)">npm run build</span></div>
+              <div><span style="color:var(--c-done)">✓</span>&nbsp;<span style="color:var(--c-t4)">built in 2.3s</span></div>
+              <div style="display:flex;align-items:center;margin-top:2px"><span style="color:var(--c-t4)">$</span>&nbsp;<span style="display:inline-block;width:8px;height:15px;background:var(--c-t3)"></span></div>
+            </div>
+          </div>
+
+          <!-- bottom: three insets -->
+          <div style="flex:none;display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:18px;height:300px">
+
+            <!-- (a) ended body -->
+            <div style="border:1px solid var(--c-hair);border-radius:9px;background:var(--fill-subtle);padding:14px 16px;display:flex;flex-direction:column;min-height:0">
+              <div style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t4)">(a) ended session · body</div>
+              <div style="flex:1;margin-top:11px;border-radius:7px;background:var(--c-bg);border:1px solid var(--c-div);padding:12px 13px;font-family:var(--mono);font-size:11px;line-height:1.75;color:var(--c-t3);overflow:hidden">
+                <div style="color:var(--c-t5)"># shell 3</div>
+                <div><span style="color:var(--c-t3)">weave</span>&nbsp;<span style="color:var(--c-t5)">~/projects/weave</span></div>
+                <div><span style="color:var(--c-t5)">$</span>&nbsp;<span style="color:var(--c-t4)">claude</span></div>
+                <div style="color:var(--c-t5)">… reviewed R-1 · exited</div>
+                <div style="margin-top:8px;color:var(--c-t5);font-style:italic">[session ended]</div>
+              </div>
+            </div>
+
+            <!-- (b) + hover -->
+            <div style="border:1px solid var(--c-hair);border-radius:9px;background:var(--fill-subtle);padding:14px 16px;display:flex;flex-direction:column;min-height:0">
+              <div style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t4)">(b) + hover · new terminal</div>
+              <div style="flex:1;display:flex;align-items:center;justify-content:center">
+                <div style="position:relative;display:flex;align-items:stretch;height:40px;border:1px solid var(--c-hair);border-radius:7px;overflow:hidden;background:var(--c-panel)">
+                  <div style="display:flex;align-items:center;gap:8px;padding:0 15px;border-right:1px solid var(--c-hair);background:var(--c-bg)"><span style="width:6px;height:6px;border-radius:50%;background:var(--c-t4)"></span><span style="font-family:var(--mono);font-size:11.5px;color:var(--c-t3)">shell 1</span></div>
+                  <button aria-label="new terminal" style="width:38px;border:none;background:var(--c-hover);color:var(--c-t1);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center">+</button>
+                  <div style="position:absolute;top:calc(100% + 9px);left:calc(100% - 19px);transform:translateX(-50%);background:var(--c-active);border:1px solid var(--c-hairs);border-radius:6px;padding:5px 9px;font-family:var(--mono);font-size:10.5px;color:var(--c-t2);white-space:nowrap;box-shadow:0 10px 24px rgba(0,0,0,.5)">new terminal&nbsp;<span style="color:var(--c-t5)">⌘T</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- (c) hint after copy -->
+            <div style="border:1px solid var(--c-hair);border-radius:9px;background:var(--fill-subtle);padding:14px 16px;display:flex;flex-direction:column;min-height:0">
+              <div style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t4)">(c) hint bar · after a copy</div>
+              <div style="flex:1;display:flex;flex-direction:column;justify-content:center;gap:12px">
+                <div>
+                  <div style="font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t5);margin-bottom:6px">normally</div>
+                  <div style="height:34px;border:1px solid var(--c-div);border-radius:6px;background:var(--c-panel);display:flex;align-items:center;justify-content:flex-end;padding:0 12px;font-family:var(--mono);font-size:10.5px;color:var(--c-t5)">type&nbsp;<span style="color:var(--c-t3)">claude ⏎</span>&nbsp;· paste ⌘V</div>
+                </div>
+                <div>
+                  <div style="font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t5);margin-bottom:6px">right after you copy a file</div>
+                  <div style="height:34px;border:1px solid var(--c-hair);border-radius:6px;background:var(--c-panel);display:flex;align-items:center;justify-content:flex-end;padding:0 12px;font-family:var(--mono);font-size:10.5px;color:var(--c-t2)">paste&nbsp;<span style="color:var(--c-t1)">⌘V</span>&nbsp;what you copied</div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- annotations -->
+      <aside style="width:360px;flex:none;padding-top:6px">
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair)">states drawn</div>
+        <div style="display:flex;flex-direction:column;gap:11px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2);font-weight:550">tab strip</span> — <span style="font-family:var(--mono)">shell 1</span> active (here-blue top rule), <span style="font-family:var(--mono)">shell 2</span> background, <span style="font-family:var(--mono);font-style:italic">shell 3 · ended</span> (italic, hollow dot).</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2);font-weight:550">(a)</span> the ended tab’s body ends in a dim italic <span style="font-family:var(--mono)">[session ended]</span> — scrollable, takes no input.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2);font-weight:550">(b)</span> the <span style="font-family:var(--mono)">+</span> hover, with a <span style="font-family:var(--mono);color:var(--c-t1)">Tooltip</span>.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2);font-weight:550">(c)</span> the hint bar swaps to <span style="font-family:var(--mono)">paste ⌘V what you copied</span> right after a file is copied.</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair);margin-top:26px">behaviour</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Real terminals (xterm). The <span style="color:var(--c-done)">✓</span> is the only colour — a genuine success state.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">The hint responds to the copy loop: copy a file chip → the strip tells you exactly what to do next.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+  <!-- ============================================================ FRAME 7 ============================================================ -->
+  <section id="f7" style="margin-top:76px;scroll-margin-top:24px">
+    <div style="display:flex;align-items:baseline;gap:14px;margin:0 0 18px 2px">
+      <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:#0a0a0a;background:var(--c-t2);padding:3px 8px;border-radius:6px;letter-spacing:.02em">#7</span>
+      <span style="font-size:14px;font-weight:600;color:var(--c-t1)">Project switcher</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--c-t4)">⌘K Command palette over the shell</span>
+    </div>
+
+    <div style="display:flex;gap:36px;align-items:flex-start">
+      <div style="width:1280px;height:860px;flex:none;background:var(--c-bg);border:1px solid var(--c-hairs);border-radius:11px;overflow:hidden;box-shadow:0 30px 80px -22px rgba(0,0,0,.72),0 8px 24px rgba(0,0,0,.5);position:relative;display:flex;flex-direction:column">
+
+        <!-- dimmed shell backdrop -->
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column">
+          <div style="height:42px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--c-div)">
+            <div style="display:flex;gap:8px;align-items:center">
+              <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+              <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+              <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            </div>
+            <div style="flex:1;text-align:center;font-family:var(--mono);font-size:11px;color:var(--c-t5)">weave — Chronicle</div>
+            <div style="width:52px"></div>
+          </div>
+          <div style="height:53px;flex:none;display:flex;align-items:center;gap:12px;padding:0 16px;border-bottom:1px solid var(--c-hair)">
+            <span style="color:var(--c-t4);display:flex"><span class="clogo" style="width:18px;height:18px"></span></span>
+            <span style="font-size:13.5px;font-weight:600;color:var(--c-t3)">Chronicle</span>
+            <button style="display:flex;align-items:center;gap:8px;height:30px;padding:0 9px 0 11px;border-radius:6px;border:1px solid var(--c-hairs);background:var(--c-raised);color:var(--c-t3)">
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.6 4.4c0-.6.5-1.1 1.1-1.1h3.1l1.3 1.5h6.2c.6 0 1.1.5 1.1 1.1v5.8c0 .6-.5 1.1-1.1 1.1H2.7c-.6 0-1.1-.5-1.1-1.1z" stroke-linejoin="round"></path></svg>
+              <span style="font-family:var(--mono);font-size:12px;color:var(--c-t3)">weave</span>
+              <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--c-t5)" stroke-width="1.4" style="transform:rotate(180deg)"><path d="M4 6.5 8 10.5l4-4" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+            </button>
+            <div style="flex:1"></div>
+            <div style="width:176px;height:32px;border-radius:8px;background:var(--c-raised);border:1px solid var(--c-hair)"></div>
+          </div>
+          <div style="flex:1;display:flex;min-height:0">
+            <div style="flex:0 0 53%;border-right:1px solid var(--c-hair);padding:16px;display:flex;flex-direction:column;gap:12px">
+              <div style="height:72px;border-radius:8px;background:var(--c-panel);border:1px solid var(--c-hair);border-left:2px solid var(--c-hair)"></div>
+              <div style="height:120px;border-radius:8px;background:var(--c-panel);border:1px solid var(--c-hair)"></div>
+              <div style="height:150px;border-radius:8px;background:var(--c-panel);border:1px solid var(--c-hair)"></div>
+            </div>
+            <div style="flex:1;background:var(--c-bg)"></div>
+          </div>
+        </div>
+
+        <!-- scrim -->
+        <div style="position:absolute;inset:0;background:rgba(0,0,0,.58);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)"></div>
+
+        <!-- palette -->
+        <div style="position:absolute;inset:0;display:flex;align-items:flex-start;justify-content:center;padding-top:150px">
+          <div style="width:560px;background:var(--c-raised);border:1px solid var(--c-hairs);border-radius:13px;box-shadow:0 30px 70px rgba(0,0,0,.6);overflow:hidden">
+            <x-import component-from-global-scope="Weave.Command" hint-size="560px,380px">
+              <x-import component-from-global-scope="Weave.CommandInput" placeholder="Search projects…" hint-size="560px,46px"></x-import>
+              <x-import component-from-global-scope="Weave.CommandList" hint-size="560px,300px">
+                <x-import component-from-global-scope="Weave.CommandGroup" heading="Recent projects" hint-size="560px,200px">
+                  <x-import component-from-global-scope="Weave.CommandItem" value="weave" hint-size="536px,44px">
+                    <div style="display:flex;align-items:center;gap:12px;width:100%">
+                      <span style="width:26px;height:26px;flex:none;border:1px solid var(--c-hair);border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--c-t4)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6.6" cy="6.6" r="4.4"></circle><line x1="9.9" y1="9.9" x2="13.4" y2="13.4" stroke-linecap="round"></line></svg></span>
+                      <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:550;color:var(--c-t1)">weave</div><div style="font-family:var(--mono);font-size:11px;color:var(--c-t4);margin-top:1px">~/projects/weave</div></div>
+                      <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-here)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here)"></span>phase 5 of 8</span>
+                    </div>
+                  </x-import>
+                  <x-import component-from-global-scope="Weave.CommandItem" value="loupe" hint-size="536px,44px">
+                    <div style="display:flex;align-items:center;gap:12px;width:100%">
+                      <span style="width:26px;height:26px;flex:none;border:1px solid var(--c-hair);border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--c-t4)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6.6" cy="6.6" r="4.4"></circle><line x1="9.9" y1="9.9" x2="13.4" y2="13.4" stroke-linecap="round"></line></svg></span>
+                      <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:550;color:var(--c-t1)">loupe</div><div style="font-family:var(--mono);font-size:11px;color:var(--c-t4);margin-top:1px">~/dev/loupe-master</div></div>
+                      <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-here)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here)"></span>phase 3 of 6</span>
+                    </div>
+                  </x-import>
+                  <x-import component-from-global-scope="Weave.CommandItem" value="atlas" hint-size="536px,44px">
+                    <div style="display:flex;align-items:center;gap:12px;width:100%">
+                      <span style="width:26px;height:26px;flex:none;border:1px solid var(--c-hair);border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--c-t4)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="6.6" cy="6.6" r="4.4"></circle><line x1="9.9" y1="9.9" x2="13.4" y2="13.4" stroke-linecap="round"></line></svg></span>
+                      <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:550;color:var(--c-t1)">atlas</div><div style="font-family:var(--mono);font-size:11px;color:var(--c-t4);margin-top:1px">~/code/atlas</div></div>
+                      <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-done)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-done)"></span>done</span>
+                    </div>
+                  </x-import>
+                </x-import>
+                <x-import component-from-global-scope="Weave.CommandSeparator" hint-size="560px,1px"></x-import>
+                <x-import component-from-global-scope="Weave.CommandGroup" hint-size="560px,48px">
+                  <x-import component-from-global-scope="Weave.CommandItem" value="open a project" hint-size="536px,40px">
+                    <div style="display:flex;align-items:center;gap:12px;width:100%">
+                      <span style="width:26px;height:26px;flex:none;border:1px solid var(--c-hair);border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--c-t3)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.6 4.4c0-.6.5-1.1 1.1-1.1h3.1l1.3 1.5h6.2c.6 0 1.1.5 1.1 1.1v5.8c0 .6-.5 1.1-1.1 1.1H2.7c-.6 0-1.1-.5-1.1-1.1z" stroke-linejoin="round"></path></svg></span>
+                      <span style="flex:1;font-size:13px;color:var(--c-t2)">Open a project…</span>
+                      <span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t5)">⌘O</span>
+                    </div>
+                  </x-import>
+                </x-import>
+              </x-import>
+            </x-import>
+            <div style="border-top:1px solid var(--c-hair);padding:9px 14px;display:flex;align-items:center;gap:12px;font-family:var(--mono);font-size:10.5px;color:var(--c-t5)">
+              <span>a project = any folder with a <span style="color:var(--c-t3)">chronicle.json</span></span>
+              <div style="flex:1"></div>
+              <span>↵ open</span><span style="color:var(--c-t5)">·</span><span>esc close</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- annotations -->
+      <aside style="width:360px;flex:none;padding-top:6px">
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair)">shadcn / weave components</div>
+        <div style="display:flex;flex-direction:column;gap:11px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Command</span> <span style="color:var(--c-t5)">·</span> real Weave mount — <span style="font-family:var(--mono);color:var(--c-t4)">CommandInput · CommandList · CommandGroup · CommandItem · CommandSeparator</span>.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Dialog</span> scrim <span style="color:var(--c-t5)">·</span> the shell dims + blurs behind, per overlay convention.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">[★] status word</span> <span style="color:var(--c-t5)">·</span> each recent carries its mini status (<span style="color:var(--c-here)">phase 5 of 8</span>, <span style="color:var(--c-done)">done</span>).</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair);margin-top:26px">behaviour</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Opens from the header project chip → <a href="#f3">#3</a>, or ⌘K anywhere.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">Type to filter; ↵ opens the shell on that folder; “Open a project…” is the native picker from <a href="#f1">#1</a>.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5">The footer states the one rule: a project is any folder with a manifest.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+  <!-- ============================================================ FRAME 8 ============================================================ -->
+  <section id="f8" style="margin-top:76px;scroll-margin-top:24px">
+    <div style="display:flex;align-items:baseline;gap:14px;margin:0 0 18px 2px">
+      <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:#0a0a0a;background:var(--c-t2);padding:3px 8px;border-radius:6px;letter-spacing:.02em">#8</span>
+      <span style="font-size:14px;font-weight:600;color:var(--c-t1)">Manifest problems</span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--c-t4)">invalid · possibly stale</span>
+    </div>
+
+    <div style="display:flex;gap:36px;align-items:flex-start">
+      <div style="width:1280px;height:860px;flex:none;background:var(--c-bg);border:1px solid var(--c-hairs);border-radius:11px;overflow:hidden;box-shadow:0 30px 80px -22px rgba(0,0,0,.72),0 8px 24px rgba(0,0,0,.5);position:relative;display:flex;flex-direction:column">
+
+        <div style="height:42px;flex:none;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid var(--c-div)">
+          <div style="display:flex;gap:8px;align-items:center">
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+            <span style="width:11px;height:11px;border-radius:50%;background:var(--c-active);border:1px solid var(--c-hair)"></span>
+          </div>
+          <div style="flex:1;text-align:center;font-family:var(--mono);font-size:11px;color:var(--c-t5);letter-spacing:.04em">weave — Chronicle · manifest states</div>
+          <div style="width:52px"></div>
+        </div>
+
+        <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:0;min-height:0">
+
+          <!-- (a) invalid manifest -->
+          <div class="chrono-scroll" style="border-right:1px solid var(--c-hair);overflow-y:auto;padding:18px 20px">
+            <div style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-error);margin-bottom:14px">(a) manifest can’t be read</div>
+
+            <x-import component-from-global-scope="Weave.Alert" variant="destructive" hint-size="100%,150px">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.35"><path d="M8 2.2 14.4 13.4H1.6z" stroke-linejoin="round"></path><path d="M8 6.4v3.1M8 11.4v.05" stroke-linecap="round"></path></svg>
+              <x-import component-from-global-scope="Weave.AlertTitle" hint-size="100%,20px">chronicle.json couldn’t be read</x-import>
+              <x-import component-from-global-scope="Weave.AlertDescription" hint-size="100%,64px">
+                <div style="font-family:var(--mono);font-size:11.5px;color:var(--c-error);margin-top:2px">line 41: unexpected ,</div>
+                <div style="font-size:12px;color:var(--c-t3);margin-top:7px;line-height:1.5">The basic view still works below — you just won’t see the roadmap until this parses.</div>
+                <div style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap">
+                  <x-import component-from-global-scope="Weave.Button" variant="secondary" size="sm" hint-size="112px,30px">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path></svg>
+                    Open the file
+                  </x-import>
+                  <span style="display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 5px 0 11px;border:1px solid var(--c-hairs);border-radius:6px;background:var(--c-bg);font-family:var(--mono);font-size:11.5px;color:var(--c-t2)">
+                    <span style="color:var(--c-t4)">/</span>chronicle-init
+                    <span style="width:22px;height:22px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--c-t4)"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.6"></rect><path d="M10.8 5.4V3.5c0-.6-.5-1.1-1.1-1.1H3.4c-.6 0-1.1.5-1.1 1.1v6.3c0 .6.5 1.1 1.1 1.1h1.9" stroke-linecap="round"></path></svg></span>
+                  </span>
+                </div>
+              </x-import>
+            </x-import>
+
+            <!-- degraded git-only view -->
+            <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--c-t5);margin:22px 0 11px">basic view · git only</div>
+            <div style="background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:13px 15px">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:11px">
+                <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5)">Project history</span>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;color:var(--c-here)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here)"></span>2 saves waiting to publish</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:var(--c-t3)">on&nbsp;<span style="font-family:var(--mono);color:var(--c-t2)">main</span><span style="width:3px;height:3px;border-radius:50%;background:var(--c-t5)"></span><span style="font-family:var(--mono);font-size:10.5px;color:var(--c-t3);background:var(--c-raised);border:1px solid var(--c-hair);border-radius:5px;padding:1.5px 6px">phase-1</span></div>
+              <div style="display:flex;align-items:center;gap:9px;margin-top:11px"><span style="font-family:var(--mono);font-size:11px;color:var(--c-t2);background:var(--c-raised);border:1px solid var(--c-hair);border-radius:5px;padding:2px 7px">a7f3c21</span><span style="font-size:11.5px;color:var(--c-t4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">R-1: draw sidebar + command-menu screens…</span></div>
+            </div>
+            <div style="background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:13px 15px;margin-top:11px">
+              <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);margin-bottom:9px">What needs you</div>
+              <div style="display:flex;gap:11px;padding:6px 0"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here);margin-top:5px;flex:none"></span><div style="flex:1"><div style="font-size:12.5px;font-weight:550;color:var(--c-t1)">Publish 2 saves</div></div><span style="align-self:center;font-family:var(--mono);font-size:11px;color:var(--c-t3);border-bottom:1px dashed var(--c-hairs)">git push</span></div>
+              <div style="font-size:11px;color:var(--c-t5);margin-top:6px;padding-top:9px;border-top:1px solid var(--c-div)">No roadmap here — actions come straight from git until the manifest parses.</div>
+            </div>
+          </div>
+
+          <!-- (b) possibly stale -->
+          <div class="chrono-scroll" style="overflow-y:auto;padding:18px 20px">
+            <div style="font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--c-t4);margin-bottom:14px">(b) roadmap may be out of date</div>
+
+            <div style="position:relative;background:var(--c-panel);border:1px solid var(--c-hair);border-radius:8px;padding:14px 16px 15px 20px;overflow:hidden">
+              <div style="position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--c-here)"></div>
+              <div style="display:flex;align-items:center;gap:9px">
+                <span style="position:relative;width:6px;height:6px;flex:none;display:inline-flex">
+                  <span class="chrono-pulse" style="position:absolute;inset:-2px;border-radius:50%;background:var(--c-here);animation:chronoPulse 2.4s ease-out infinite"></span>
+                  <span style="position:absolute;inset:0;border-radius:50%;background:var(--c-here)"></span>
+                </span>
+                <span style="font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--c-here)">The build is here</span>
+              </div>
+              <div style="font-size:15px;font-weight:650;color:var(--c-t1);margin-top:10px;letter-spacing:-.005em">R-1 · Missing screens get drawn</div>
+              <div style="display:flex;align-items:center;gap:16px;margin-top:9px;flex-wrap:wrap">
+                <span style="display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11.5px;color:var(--c-here)"><span style="width:5px;height:5px;border-radius:50%;background:var(--c-here)"></span>with the designer</span>
+                <span style="font-size:12px;color:var(--c-t4)">up next: <span style="color:var(--c-t3)">EL-1 · The beauty pass</span></span>
+              </div>
+            </div>
+
+            <!-- stale notice -->
+            <div style="display:flex;align-items:flex-start;gap:11px;padding:11px 13px;border:1px solid var(--c-hair);border-radius:8px;background:var(--fill-subtle);margin-top:11px">
+              <span style="color:var(--c-t4);margin-top:1px;flex:none"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 7.4v3.4M8 5.2v.05" stroke-linecap="round"></path></svg></span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:12px;color:var(--c-t3);line-height:1.55">The plan documents changed after this roadmap was written — ask a session to run <span style="font-family:var(--mono);color:var(--c-t2)">/chronicle-init</span> again to refresh it.</div>
+                <div style="display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 4px 0 10px;border:1px solid var(--c-hair);border-radius:6px;background:var(--c-bg);font-family:var(--mono);font-size:11px;color:var(--c-t2);margin-top:10px">
+                  <span style="color:var(--c-t4)">/</span>chronicle-init
+                  <span style="width:20px;height:20px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--c-t4)"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.6"></rect><path d="M10.8 5.4V3.5c0-.6-.5-1.1-1.1-1.1H3.4c-.6 0-1.1.5-1.1 1.1v6.3c0 .6.5 1.1 1.1 1.1h1.9" stroke-linecap="round"></path></svg></span>
+                </div>
+              </div>
+            </div>
+            <div style="font-size:11px;color:var(--c-t5);margin-top:10px;line-height:1.55;padding:0 2px">Purely informational — it never blocks. The roadmap stays fully usable; this is a gentle nudge, not an error.</div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- annotations -->
+      <aside style="width:360px;flex:none;padding-top:6px">
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair)">shadcn / weave components</div>
+        <div style="display:flex;flex-direction:column;gap:11px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Alert</span> variant <span style="font-family:var(--mono);color:var(--c-error)">destructive</span> <span style="color:var(--c-t5)">·</span> real Weave mount. Error-red only here, on a genuine failure.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Button</span> secondary “Open the file” + the <span style="font-family:var(--mono)">/chronicle-init</span> re-run chip.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="font-family:var(--mono);color:var(--c-t1);font-size:11.5px">Card</span> <span style="color:var(--c-t5)">·</span> the degraded git-only view (history + actions, no roadmap) sits beneath the alert.</div>
+        </div>
+        <div style="font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--c-t5);padding-bottom:12px;border-bottom:1px solid var(--c-hair);margin-top:26px">error grammar</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px">
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2)">(a)</span> names what failed → what’s kept → the way forward, inline. Never a dead end.</div>
+          <div style="font-size:12px;color:var(--c-t3);line-height:1.5"><span style="color:var(--c-t2)">(b)</span> stale is grey, not red or blue — it never blocks and never competes with the banner.</div>
+        </div>
+      </aside>
+    </div>
+  </section>
+  <!--FRAMES_END-->
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  componentDidMount(){
+    if (window.__chronicleResizeInit) return;
+    window.__chronicleResizeInit = true;
+    var startResize = function(e){
+      var h = e.target && e.target.closest ? e.target.closest('[data-cres]') : null;
+      if(!h) return;
+      e.preventDefault(); e.stopPropagation();
+      var parts = (h.getAttribute('data-cres')||'prev:160:1000').split(':');
+      var side = parts[0], min = +parts[1]||160, max = +parts[2]||1000;
+      var target = side === 'next' ? h.nextElementSibling : h.previousElementSibling;
+      if(!target) return;
+      var rect = target.getBoundingClientRect();
+      var scale = target.offsetWidth ? (rect.width / target.offsetWidth) : 1;
+      if(!scale || !isFinite(scale)) scale = 1;
+      var startX = e.clientX, startW = target.offsetWidth, dir = side === 'next' ? -1 : 1;
+      var move = function(ev){
+        var w = Math.max(min, Math.min(max, startW + dir*((ev.clientX - startX)/scale)));
+        target.style.flex = '0 0 ' + w + 'px';
+        target.style.width = w + 'px';
+      };
+      var up = function(){
+        document.removeEventListener('pointermove', move, true);
+        document.removeEventListener('pointerup', up, true);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+      document.addEventListener('pointermove', move, true);
+      document.addEventListener('pointerup', up, true);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    };
+    document.addEventListener('pointerdown', startResize, true);
+  }
+  renderVals(){ return {}; }
+}
+</script>
+</body>
+</html>

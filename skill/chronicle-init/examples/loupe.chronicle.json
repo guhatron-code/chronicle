@@ -1,0 +1,473 @@
+{
+ "chronicleVersion": 1,
+ "name": "loupe",
+ "description": "A design-QA tool · deviations measured by code, not guessed. Phases 0–7 rebuild it on solid ground.",
+ "roots": {
+  "repo": ".",
+  "extra": [
+   {
+    "alias": "canon",
+    "path": "/Users/tuneerguha/Downloads/loupe-redo"
+   }
+  ]
+ },
+ "workBranch": "loupe-overhaul",
+ "generatedFrom": [
+  {
+   "path": "@canon/PLAN.md",
+   "sha256": "c16f50cc78d3b4f4561026ccee9522fc07d56288ec4fe99282108d440b7ee335"
+  }
+ ],
+ "spine": [
+  {
+   "path": "@canon/PLAN.md"
+  },
+  {
+   "path": "@canon/PROMPT.md"
+  },
+  {
+   "path": "@canon/USER-TESTING-SUITE.md"
+  },
+  {
+   "path": "CLAUDE.md"
+  }
+ ],
+ "stages": [
+  {
+   "title": "The overhaul · stability first, the keystone proven, then the reskin",
+   "note": "Phases 0–7 · each ends at its sign-off",
+   "phases": [
+    {
+     "id": "P0",
+     "name": "Preflight & the PRD gate",
+     "desc": "Prove the ground is solid before touching anything.",
+     "items": [
+      "The component-fetch tooling verified before any UI work exists.",
+      "A green baseline: type checks and the full test suite pass in a real terminal · never build on an unverified base.",
+      "The work branch created · main is never touched.",
+      "The repo's own guide rewritten to match today's reality (it described a retired version).",
+      "A PRD that settles the open questions."
+     ],
+     "paste": [
+      {
+       "path": "@canon/PROMPT.md",
+       "into": "Claude Code"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_exists": "loupe-redo/progress/phase0-status.md"
+       },
+       {
+        "file_exists": "@canon/progress/phase0-status.md"
+       },
+       {
+        "commit_subject": "(?i)phase[- ]0 sign-off"
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "commit_subject": "(?i)phase[- ]?0[a-z]?\\b"
+         }
+        ],
+        "label": "in progress"
+       }
+      ]
+     },
+     "docs": [
+      {
+       "path": "loupe-redo/progress/phase0-preflight.md"
+      },
+      {
+       "path": "loupe-redo/progress/PRD.md"
+      }
+     ]
+    },
+    {
+     "id": "P1",
+     "name": "Critical bugs fixed",
+     "desc": "Every showstopper closed, each with its own regression test.",
+     "items": [
+      "Broken OpenAI support, a Figma-login save that lost data, a dead upload mode, saved reports rendering empty, a migration that wiped settings · all fixed.",
+      "The security hole closed: web walkthroughs refuse private/internal addresses.",
+      "Spending-cap correctness: no code path around the monthly cap.",
+      "Every fix ships a test that would catch it coming back."
+     ],
+     "paste": [
+      {
+       "path": "@canon/PROMPT.md",
+       "into": "Claude Code"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_exists": "loupe-redo/progress/phase1-status.md"
+       },
+       {
+        "file_exists": "@canon/progress/phase1-status.md"
+       },
+       {
+        "commit_subject": "(?i)phase[- ]1 sign-off"
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "commit_subject": "(?i)phase[- ]?1[a-z]?\\b"
+         }
+        ],
+        "label": "in progress"
+       }
+      ]
+     },
+     "docs": [
+      {
+       "path": "@canon/audit/01-BUGS.md"
+      },
+      {
+       "path": "loupe-redo/progress/phase1-status.md"
+      }
+     ]
+    },
+    {
+     "id": "P2",
+     "name": "The retired studio removed",
+     "desc": "Theme Factory comes out whole · after its one shared capability is saved.",
+     "items": [
+      "FIRST: the shared Figma capability is preserved; THEN deletion begins.",
+      "Tiles, tabs, files, and its two heavy dependencies removed.",
+      "A sweep proves no trace remains; the app shrinks."
+     ],
+     "paste": [
+      {
+       "path": "@canon/PROMPT.md",
+       "into": "Claude Code"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_exists": "loupe-redo/progress/phase2-status.md"
+       },
+       {
+        "file_exists": "@canon/progress/phase2-status.md"
+       },
+       {
+        "commit_subject": "(?i)phase[- ]2 sign-off"
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "commit_subject": "(?i)phase[- ]?2[a-z]?\\b"
+         }
+        ],
+        "label": "in progress"
+       }
+      ]
+     },
+     "docs": [
+      {
+       "path": "@canon/audit/02-TF-REMOVAL.md"
+      },
+      {
+       "path": "loupe-redo/progress/phase2-status.md"
+      }
+     ]
+    },
+    {
+     "id": "P3",
+     "name": "The keystone: measured, repeatable comparison",
+     "desc": "The reason Loupe exists · deviations measured by code, not guessed by AI. Proven on a fixture suite before anything claims “reliable”.",
+     "items": [
+      "The design is read as data (positions, sizes, styles) · never squinted at as a screenshot.",
+      "Both sides normalized onto one canvas so nothing is misaligned from the start.",
+      "Elements matched two independent ways; asserted only when both agree · a mismatch is never invented.",
+      "Every deviation MEASURED (expected 16px, found 22px · off by 6) and located exactly.",
+      "Hover/focus states, declared motion, and responsive reflow checked too.",
+      "A golden-fixture suite proves the bar · or the gap is honestly ledgered.",
+      "Same inputs → the byte-identical report, every single time."
+     ],
+     "paste": [
+      {
+       "path": "@canon/PROMPT.md",
+       "into": "Claude Code"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_exists": "loupe-redo/progress/phase3-status.md"
+       },
+       {
+        "file_exists": "@canon/progress/phase3-status.md"
+       },
+       {
+        "commit_subject": "(?i)phase[- ]3 sign-off"
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "commit_subject": "(?i)phase[- ]?3[a-z]?\\b"
+         }
+        ],
+        "label": "in progress"
+       }
+      ]
+     },
+     "docs": [
+      {
+       "path": "@canon/audit/03-VQA-SPEC.md"
+      },
+      {
+       "path": "@canon/audit/03-VQA-AUDIT.md"
+      },
+      {
+       "path": "loupe-redo/progress/phase3-status.md"
+      }
+     ]
+    },
+    {
+     "id": "P4",
+     "name": "Projects become real containers",
+     "desc": "Ground every run in a project: sources, targets, defaults, and its whole history.",
+     "items": [
+      "A Project holds the bound design source, live targets, and default settings.",
+      "Opening a project pre-fills a run; any past run re-runs in one click.",
+      "History is diffable run-to-run · did the issue count drop? · with one identity per issue.",
+      "One unified Results surface ends the old split-brain."
+     ],
+     "paste": [
+      {
+       "path": "@canon/PROMPT.md",
+       "into": "Claude Code"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_exists": "loupe-redo/progress/phase4-status.md"
+       },
+       {
+        "file_exists": "@canon/progress/phase4-status.md"
+       },
+       {
+        "commit_subject": "(?i)phase[- ]4 sign-off"
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "commit_subject": "(?i)phase[- ]?4[a-z]?\\b"
+         }
+        ],
+        "label": "in progress"
+       }
+      ]
+     },
+     "docs": [
+      {
+       "path": "@canon/audit/04-UX-SPEC.md"
+      },
+      {
+       "path": "loupe-redo/progress/phase4-status.md"
+      }
+     ]
+    },
+    {
+     "id": "P5",
+     "name": "The learning engine",
+     "desc": "Loupe gets more reliable per project · but ONLY from your explicit ✓ / ✕ / ◐ labels. Nothing learns on its own.",
+     "items": [
+      "A per-project calibration store built only from your labels.",
+      "✕ marks suppress that exact issue recurring · fingerprinted, so it never hides different issues.",
+      "◐ marks teach “intended for this brand” as the expected baseline.",
+      "Confirmed-real findings graduate into the fixture suite (with your click).",
+      "Reliability trends computed and inspectable; every learned rule revertible.",
+      "The measurement stays repeatable: rules are a versioned input, and engine-off = clean baseline."
+     ],
+     "paste": [
+      {
+       "path": "@canon/PROMPT.md",
+       "into": "Claude Code"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_exists": "loupe-redo/progress/phase5-status.md"
+       },
+       {
+        "file_exists": "@canon/progress/phase5-status.md"
+       },
+       {
+        "commit_subject": "(?i)phase[- ]5 sign-off"
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "commit_subject": "(?i)phase[- ]?5[a-z]?\\b"
+         }
+        ],
+        "label": "in progress"
+       }
+      ]
+     },
+     "docs": [
+      {
+       "path": "@canon/audit/07-LEARNING-ENGINE.md"
+      }
+     ]
+    },
+    {
+     "id": "P6",
+     "name": "The Weave reskin",
+     "desc": "Every screen rebuilt on the Weave design system · gated HARD on the design handoff bundle.",
+     "items": [
+      "No bundle, no build: the gate halts rather than improvise a screen.",
+      "Every surface and state rebuilt from handed-off component code · never from a screenshot.",
+      "Three verifications per screen: your file-diff sign-off · Loupe dogfooding its OWN Phase-3 engine on each built screen · a fresh-eyes cleanroom review.",
+      "The learning surfaces and inline ✓/✕/◐ controls land here.",
+      "Tokens from the design system only · no raw colors, no default greys."
+     ],
+     "paste": [
+      {
+       "path": "@canon/PROMPT.md",
+       "into": "Claude Code"
+      },
+      {
+       "path": "@canon/DESIGN-PROMPT.md",
+       "into": "Claude Design",
+       "when": "YOU run this to produce the handoff bundle · the builder never reads this file"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_exists": "loupe-redo/progress/phase6-status.md"
+       },
+       {
+        "file_exists": "@canon/progress/phase6-status.md"
+       },
+       {
+        "commit_subject": "(?i)phase[- ]6 sign-off"
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_glob": {
+           "dir": "@canon",
+           "contains": "handoff"
+          },
+          "not": true
+         }
+        ],
+        "label": "waiting on the handoff bundle"
+       },
+       {
+        "when": [
+         {
+          "commit_subject": "(?i)phase[- ]?6[a-z]?\\b"
+         }
+        ],
+        "label": "in progress"
+       }
+      ],
+      "blocked_note": "Blocked until you run the design prompt and hand its bundle over · then P6 starts."
+     },
+     "docs": [
+      {
+       "path": "@canon/audit/05-UI-MIGRATION.md"
+      },
+      {
+       "path": "@canon/audit/04-UX-SPEC.md"
+      }
+     ]
+    },
+    {
+     "id": "P7",
+     "name": "The long tail",
+     "desc": "The remaining smaller bugs and fold-ins; a full regression pass; backlog stays excluded.",
+     "items": [
+      "Remaining P2/P3 bugs fixed or deferred with a written reason.",
+      "Dead settings purged; an error boundary; progress wiring.",
+      "A regression pass across every surface.",
+      "New features (the backlog) stay excluded · sequenced, not cut."
+     ],
+     "paste": [
+      {
+       "path": "@canon/PROMPT.md",
+       "into": "Claude Code"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_exists": "loupe-redo/progress/phase7-status.md"
+       },
+       {
+        "file_exists": "@canon/progress/phase7-status.md"
+       },
+       {
+        "commit_subject": "(?i)phase[- ]7 sign-off"
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "commit_subject": "(?i)phase[- ]?7[a-z]?\\b"
+         }
+        ],
+        "label": "in progress"
+       }
+      ]
+     },
+     "docs": [
+      {
+       "path": "@canon/audit/01-BUGS.md"
+      },
+      {
+       "path": "@canon/audit/06-RECOMMENDATIONS.md"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "title": "After the overhaul · idea shelves",
+   "note": "Deferred by design",
+   "phases": [
+    {
+     "id": "POOL",
+     "name": "Backlog features & the web version",
+     "desc": "Deliberately excluded from this overhaul; each has a home in a later track.",
+     "items": [
+      "Eight backlog feature ideas (K1–K8) wait for after the overhaul ships.",
+      "A web/SaaS version is its own future track · the core is kept browser-safe for it."
+     ],
+     "docs": [
+      {
+       "path": "@canon/audit/06-RECOMMENDATIONS.md"
+      }
+     ],
+     "pool": true
+    }
+   ]
+  }
+ ],
+ "actions": []
+}

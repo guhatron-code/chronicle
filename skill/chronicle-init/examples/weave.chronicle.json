@@ -1,0 +1,1128 @@
+{
+ "chronicleVersion": 1,
+ "name": "weave",
+ "description": "A design-to-storefront studio · hand-built designs become verified, deployed websites.",
+ "roots": {
+  "repo": "."
+ },
+ "workBranch": "main",
+ "generatedFrom": [
+  {
+   "path": "canon/WEAVE_PLAN.md",
+   "sha256": "2a6b6bcef8a0c32fd4ef1164d3ee04426edc00f4e499cee0e5ed3056720c7c72"
+  },
+  {
+   "path": "Next Phases/EXECUTION_CHRONOLOGY.md",
+   "sha256": "1a4e0fcee6038f9ae496979e883a88afd51b375fb7d1c93e0bb3b6f3e662686b"
+  }
+ ],
+ "spine": [
+  {
+   "path": "canon/WEAVE_PLAN.md"
+  },
+  {
+   "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md"
+  },
+  {
+   "path": "canon/USER_TEST_PLAN.md"
+  },
+  {
+   "path": "DESIGN.md"
+  }
+ ],
+ "stages": [
+  {
+   "title": "Part 1 · Finish the foundation honestly (“W2R”)",
+   "note": "One item at a time · ends at the phase-2 milestone",
+   "phases": [
+    {
+     "id": "R-0",
+     "name": "Tidy the workshop",
+     "desc": "Clean-up so everything after starts from a known-good state.",
+     "items": [
+      "Old leftover work branches removed and all history published online.",
+      "The plans locked in as the single source of truth.",
+      "A tamper-check list (canon.hashes) so key documents can't drift silently."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session just for this item"
+      }
+     ],
+     "docs": [
+      {
+       "path": "W2R_PRD.md"
+      },
+      {
+       "path": "W2R_REPORT.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_matches": {
+         "path": "W2R_REPORT.md",
+         "pattern": "\\*?\\*?R-0\\b.*CLOSED"
+        }
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_matches": {
+           "path": "W2R_REPORT.md",
+           "pattern": "\\*?\\*?R-0\\b.*DISPATCHED"
+          }
+         }
+        ],
+        "label": "in design"
+       }
+      ]
+     }
+    },
+    {
+     "id": "R-1",
+     "name": "Missing screens get drawn",
+     "desc": "The designer (Claude Design) is drawing 3 missing screens + 29 touch-ups.",
+     "items": [
+      "A “publish is held” screen · shown when quality checks block a launch.",
+      "A “fix your fonts” screen · for designs using fonts the build can't load.",
+      "Website-capture screens (blocked / in progress / failed).",
+      "29 smaller corrections across existing screens."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_DESIGN_PROMPT.md",
+       "into": "Claude Design",
+       "when": "Now · this is what's in design"
+      },
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "When the batch returns · the session runs the acceptance"
+      }
+     ],
+     "docs": [
+      {
+       "path": "WEAVE_DESIGN_HANDOFF_ACCEPT.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_matches": {
+         "path": "W2R_REPORT.md",
+         "pattern": "\\*?\\*?R-1\\b.*CLOSED"
+        }
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_matches": {
+           "path": "W2R_REPORT.md",
+           "pattern": "\\*?\\*?R-1\\b.*DISPATCHED"
+          }
+         }
+        ],
+        "label": "in design"
+       }
+      ]
+     }
+    },
+    {
+     "id": "EL-1",
+     "name": "The beauty pass",
+     "desc": "17 polish edits · run it the moment R-1 comes back, in the same sitting.",
+     "items": [
+      "Fix light mode (titles are nearly invisible on white today).",
+      "Design the charts for real (placeholders today).",
+      "One clear main button per screen.",
+      "Dim finished-item thumbnails so your eye lands on what needs attention.",
+      "Dozens of small alignment, wording, and consistency fixes."
+     ],
+     "paste": [
+      {
+       "path": "Next Phases/WEAVE_ELEVATION_DESIGN_PROMPT.md",
+       "into": "Claude Design",
+       "when": "The moment R-1 comes back · same sitting, then one acceptance covers both"
+      }
+     ],
+     "window": true,
+     "status": {
+      "done_when": [
+       {
+        "file_matches": {
+         "path": "Next Phases/WEAVE_ELEVATION_DESIGN_PROMPT.md",
+         "pattern": "Status: \\*\\*RUN"
+        }
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_matches": {
+           "path": "W2R_REPORT.md",
+           "pattern": "\\*?\\*?R-1\\b.*CLOSED"
+          }
+         }
+        ],
+        "label": "run it now"
+       }
+      ],
+      "default_label": "when R-1 returns"
+     }
+    },
+    {
+     "id": "R-2",
+     "name": "Fresh-eyes screen review",
+     "desc": "An independent reviewer compares every built screen to its drawing, once · with the beauty pass already applied, so each screen is judged exactly one time.",
+     "items": [
+      "Each of the 16 built screens is compared to its drawing · layout, spacing, type, colors, every state · in dark AND light mode.",
+      "The reviewer is independent and never saw how the screens were built; “looks right” is not a pass.",
+      "Every difference becomes a written fix item; this is also how the beauty pass lands in the app."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session just for this item"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_matches": {
+         "path": "W2R_REPORT.md",
+         "pattern": "\\*?\\*?R-2\\b.*CLOSED"
+        }
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_matches": {
+           "path": "W2R_REPORT.md",
+           "pattern": "\\*?\\*?R-2\\b.*DISPATCHED"
+          }
+         }
+        ],
+        "label": "in design"
+       }
+      ]
+     }
+    },
+    {
+     "id": "R-3",
+     "name": "No check can be skipped",
+     "desc": "Closes the loophole where a broken or missing quality check could quietly count as a pass.",
+     "items": [
+      "Today a broken or missing quality check can slip through as a pass. After this, anything missing blocks the build and says why."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session just for this item"
+      }
+     ],
+     "docs": [
+      {
+       "path": "analysis/imp_plan/IMPROVEMENT_PLAN.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_matches": {
+         "path": "W2R_REPORT.md",
+         "pattern": "\\*?\\*?R-3\\b.*CLOSED"
+        }
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_matches": {
+           "path": "W2R_REPORT.md",
+           "pattern": "\\*?\\*?R-3\\b.*DISPATCHED"
+          }
+         }
+        ],
+        "label": "in design"
+       }
+      ]
+     }
+    },
+    {
+     "id": "R-4",
+     "name": "Stricter visual checking",
+     "desc": "The design-vs-build comparison gets teeth: more properties, a phone-width pass, honest coverage numbers, and fair treatment of app widgets.",
+     "items": [
+      "A pinned list of visual properties compared design-vs-build: colors, sizes, spacing, whether fonts <b>actually loaded</b>.",
+      "A phone-width (390px) check for every section.",
+      "App-widget areas judged fairly · layout checked, the app's own content honestly marked “not ours to judge”.",
+      "A coverage rule: if important parts couldn't be checked, the result says so instead of quietly passing."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session just for this item"
+      }
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/APP_SECTIONS_ADDENDUM.md"
+      },
+      {
+       "path": "Next Phases/CODEX_ADJUDICATION.md"
+      },
+      {
+       "path": "WEAVE_ADAPTER_SPEC.md"
+      },
+      {
+       "path": "PROOF_DIFF_SPEC.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_matches": {
+         "path": "W2R_REPORT.md",
+         "pattern": "\\*?\\*?R-4\\b.*CLOSED"
+        }
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_matches": {
+           "path": "W2R_REPORT.md",
+           "pattern": "\\*?\\*?R-4\\b.*DISPATCHED"
+          }
+         }
+        ],
+        "label": "in design"
+       }
+      ]
+     }
+    },
+    {
+     "id": "R-5",
+     "name": "Design intake gets real",
+     "desc": "Everything that enters a build · designs, images, fonts · becomes verified, real input before any money is spent generating.",
+     "items": [
+      "Live Figma import · always the exact version you pasted.",
+      "Every image genuinely uploaded to the store (no grey placeholders).",
+      "Fonts verified to load · or you're asked to fix them before money is spent.",
+      "Bad input refused up front with a clear reason."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session just for this item"
+      }
+     ],
+     "docs": [
+      {
+       "path": "analysis/imp_plan/FIGMA_EXTRACTION_PLAN.md"
+      },
+      {
+       "path": "Next Phases/HYDROGEN_SKILLS_LEARNINGS.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_matches": {
+         "path": "W2R_REPORT.md",
+         "pattern": "\\*?\\*?R-5\\b.*CLOSED"
+        }
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_matches": {
+           "path": "W2R_REPORT.md",
+           "pattern": "\\*?\\*?R-5\\b.*DISPATCHED"
+          }
+         }
+        ],
+        "label": "in design"
+       }
+      ]
+     }
+    },
+    {
+     "id": "R-6",
+     "name": "Publish & undo become real",
+     "desc": "The launch path stops pretending: real publish, a real hold when checks fail, real undo · and the live result re-checked after upload.",
+     "items": [
+      "The publish button really publishes.",
+      "A failing check <b>holds</b> the launch, blockers listed.",
+      "Undo genuinely restores and says what's live now.",
+      "Your approval is tied to the exact build you approved.",
+      "After upload, the live preview is re-checked · passing locally isn't enough."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session just for this item"
+      }
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/CODEX_ADJUDICATION.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_matches": {
+         "path": "W2R_REPORT.md",
+         "pattern": "\\*?\\*?R-6\\b.*CLOSED"
+        }
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_matches": {
+           "path": "W2R_REPORT.md",
+           "pattern": "\\*?\\*?R-6\\b.*DISPATCHED"
+          }
+         }
+        ],
+        "label": "in design"
+       }
+      ]
+     }
+    },
+    {
+     "id": "R-7",
+     "name": "No dead ends",
+     "desc": "Every journey completes: create, cancel, go back and restart all work, and no button ever silently does nothing.",
+     "items": [
+      "Create, cancel, go back, restart all work everywhere.",
+      "Every button does something or says why it can't.",
+      "Loading and error states on every screen."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session just for this item"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_matches": {
+         "path": "W2R_REPORT.md",
+         "pattern": "\\*?\\*?R-7\\b.*CLOSED"
+        }
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_matches": {
+           "path": "W2R_REPORT.md",
+           "pattern": "\\*?\\*?R-7\\b.*DISPATCHED"
+          }
+         }
+        ],
+        "label": "in design"
+       }
+      ]
+     }
+    },
+    {
+     "id": "R-8",
+     "name": "A steadier engine",
+     "desc": "The machinery underneath gets dependable: polite retries on hiccups, one repair loop, and no silent guessing on incomplete AI answers.",
+     "items": [
+      "The AI connection retries politely and never pretends success.",
+      "One repair loop instead of two competing ones.",
+      "No silent guessing on incomplete AI answers · gaps are named."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session just for this item"
+      }
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/AGENTS_OPTIMIZATION.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "file_matches": {
+         "path": "W2R_REPORT.md",
+         "pattern": "\\*?\\*?R-8\\b.*CLOSED"
+        }
+       }
+      ],
+      "current_labels": [
+       {
+        "when": [
+         {
+          "file_matches": {
+           "path": "W2R_REPORT.md",
+           "pattern": "\\*?\\*?R-8\\b.*DISPATCHED"
+          }
+         }
+        ],
+        "label": "in design"
+       }
+      ]
+     }
+    },
+    {
+     "id": "R-9",
+     "name": "Sign off & stamp the milestone",
+     "desc": "The closing ceremony: the full manual test book runs end to end, every known problem is settled on paper, and the phase-2 milestone is stamped.",
+     "items": [
+      "Run the full book of manual tests, as a non-coder would.",
+      "Settle every known problem: fixed, or moved with a written reason.",
+      "Stamp the <b>phase-2</b> milestone."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session just for this item"
+      }
+     ],
+     "docs": [
+      {
+       "path": "canon/USER_TEST_PLAN.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-2"
+       },
+       {
+        "file_matches": {
+         "path": "W2R_REPORT.md",
+         "pattern": "\\*?\\*?R-9\\b.*CLOSED"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "title": "Part 2 · Speed & sturdiness",
+   "note": "Background work · rolls alongside the next phases",
+   "phases": [
+    {
+     "id": "HW",
+     "name": "Faster and harder to break",
+     "desc": "A bundle of improvements slotted in as capacity allows.",
+     "items": [
+      "Interrupted builds resume · no paying twice.",
+      "Several sections build at once.",
+      "Smart caching cuts the AI bill.",
+      "Good past sections get reused.",
+      "A “plant one bug, prove the right check catches it” suite for the checker itself."
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/AGENTS_OPTIMIZATION.md"
+      },
+      {
+       "path": "analysis/imp_plan/IMPROVEMENT_PLAN.md"
+      }
+     ],
+     "window": true,
+     "status": {
+      "default_label": "ongoing"
+     }
+    }
+   ]
+  },
+  {
+   "title": "Part 3 · Grow the product",
+   "note": "In this order",
+   "phases": [
+    {
+     "id": "W3a",
+     "name": "Table stakes",
+     "desc": "The everyday-app essentials.",
+     "items": [
+      "A home dashboard with real numbers and charts.",
+      "Build history with one-click undo.",
+      "Rename & delete projects safely.",
+      "Translation tools (+ a checker for a classic translation mistake).",
+      "Quick search (⌘K).",
+      "Launch checks · the app says up front if your Mac is missing something.",
+      "A live preview panel.",
+      "A “save a problem report” button."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session for this phase"
+      }
+     ],
+     "docs": [
+      {
+       "path": "analysis/THEME_FACTORY_LATEST_AUDIT.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w3a"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W3b",
+     "name": "Talk to your build",
+     "desc": "Ask for changes in plain English.",
+     "items": [
+      "A chat that makes real changes · every one still passes the same checks.",
+      "A failed check inside chat offers retry, or opens the full board.",
+      "Protected areas (a client's own edits) refuse changes and say why.",
+      "An “accept with a note” path exists · but it's always visible at publish, never a quiet pass.",
+      "Spending limits · chat pauses and asks, never runs up a bill.",
+      "If the store changed while you chatted, it stops and asks before overwriting anything."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session for this phase"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w3b"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W4",
+     "name": "Second output: standalone site",
+     "desc": "Not everything is a store · Weave learns to build standalone websites with a content editor behind them, held to the same checks.",
+     "items": [
+      "A standalone website output with a friendly content editor (CMS) behind it.",
+      "The same visual checks apply to it · plus a code check that blocks the build on any break.",
+      "One project can produce both outputs, with honest side-by-side statuses.",
+      "Publishing the site's content to production gets its own confirm / failure / held screens."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session for this phase"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w4"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W5",
+     "name": "Explore looks",
+     "desc": "A playground for finding the right look · generate directions, tune the feel · safely separated from anything that can ship.",
+     "items": [
+      "Generate several design directions and compare them side by side.",
+      "A “feel” mode: tune colors, type, and mood with simple controls.",
+      "Everything here is clearly marked unverified · nothing can deploy from Explore.",
+      "Promote the winner into a real build that goes through every check."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session for this phase"
+      },
+      {
+       "label": "the light-mode design batch",
+       "into": "Claude Design",
+       "when": "Written at W3b's close · doesn't exist yet"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w5"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W6",
+     "name": "Quick mockups",
+     "desc": "Rough ideas, fast: throwaway prototypes and remixes with no path to deploy · for thinking, not shipping.",
+     "items": [
+      "Fast throwaway prototypes for trying ideas.",
+      "Remix an existing design into variations.",
+      "Clearly separated from the verified pipeline · no deploy path at all."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session for this phase"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w6"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W7",
+     "name": "Start from a live website",
+     "desc": "Weave learns to start from the real world · capture an existing site as a starting point · and to update itself safely.",
+     "items": [
+      "Point Weave at a live website and capture it as a starting point.",
+      "A safety guard refuses private/internal addresses · visibly, with the reason.",
+      "Scripted capture steps (dismiss cookie banners, open menus) that fail loudly if they can't run.",
+      "The app can update itself · snapshot first, and it refuses to open data from a newer version.",
+      "Optional add-on packs installed from Settings, with honest failure and cleanup.",
+      "A merchant's own edits stay protected during rebuilds."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session for this phase"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w7"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W8",
+     "name": "The right AI for each job",
+     "desc": "The engine gets taste and memory: work routed to the best model for it, and learning loops that advise but can never approve.",
+     "items": [
+      "Each job goes to the AI model best (and cheapest) for it, with a visible scoreboard.",
+      "Remembered repairs: fixes that worked before get offered again.",
+      "Early warning for sections that historically never converge · parked early, honestly.",
+      "Real usage data feeds tips into the user guide.",
+      "Suggested tolerance tweaks arrive with evidence and wait for YOUR approval.",
+      "Learning only advises · it can never approve or ship anything."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session for this phase"
+      }
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/WEAVE_LEARNING_ADDENDUM.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w8"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W9",
+     "name": "Code a Shopify expert would sign",
+     "desc": "The output stops at merely-correct and reaches craftsmanship · code that reads like a senior Shopify developer wrote it by hand.",
+     "items": [
+      "Output that reads like hand-crafted modern Shopify work · editable blocks, theme colors, clean layout.",
+      "Plain-English labels a store owner understands.",
+      "Proper mounting points so app widgets have somewhere official to live.",
+      "A store owner can rearrange things in Shopify's own editor without breaking the design."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session for this phase"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w9"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W10",
+     "name": "Whole sites, wired together",
+     "desc": "From sections to sites: pages, menus and links inferred from the design, confirmed by you · and no dead link can ever ship.",
+     "items": [
+      "Multi-page builds: which page is which (home, product, collection…) is inferred from the design.",
+      "Menus and links are proposed, then YOU confirm · edit, stub, or drop each unresolved link.",
+      "Store data like navigation menus is created through the official channels, never invented.",
+      "The hard rule: no dead link can ever ship."
+     ],
+     "paste": [
+      {
+       "path": "canon/WEAVE_CLAUDE_CODE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "A fresh terminal session for this phase"
+      },
+      {
+       "label": "its design batch",
+       "into": "Claude Design",
+       "when": "Created at this phase's start · doesn't exist yet"
+      }
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/WEAVE_PAGE_WIRING_SPEC.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w10"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W11",
+     "name": "Capture → redesign → ship",
+     "desc": "The full loop: take something real from the web, redesign it anywhere from a touch-up to a re-skin, and ship it verified.",
+     "items": [
+      "Redesign a captured site anywhere from touch-up to re-skin.",
+      "One approval gate for the capture; after that the original site is never consulted again.",
+      "Ships to either output, fully checked."
+     ],
+     "paste": [
+      {
+       "path": "Next Phases/WEAVE_CROCHET_CAPTURE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "This phase has its OWN prompt · not the canon one"
+      },
+      {
+       "path": "Next Phases/WEAVE_CROCHET_CAPTURE_DESIGN_PROMPT.md",
+       "into": "Claude Design",
+       "when": "When this phase starts"
+      }
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/WEAVE_CROCHET_CAPTURE_GOALS.md"
+      },
+      {
+       "path": "Next Phases/WEAVE_CROCHET_CAPTURE_PLAN.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w11"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "title": "Part 4 · Finish the product",
+   "note": "The last four",
+   "phases": [
+    {
+     "id": "W12",
+     "name": "Setup & the built-in guide",
+     "desc": "The product learns to explain itself: a setup checker that names exactly what's missing, and a guide anyone can read.",
+     "items": [
+      "A setup checker with seven live rows (AI key, Figma, Shopify, browsers, network, disk…) naming exactly what's missing and the fix.",
+      "An 18-chapter built-in user guide in plain language · no internals, ever.",
+      "Two independent reviews keep the guide honest: one hunts leaked jargon, one walks every step against the real app.",
+      "Possible extra: an exportable “what was built and checked” report for clients."
+     ],
+     "paste": [
+      {
+       "path": "Next Phases/WEAVE_SETUP_GUIDE_PROMPT.md",
+       "into": "Claude Code",
+       "when": "This phase has its OWN prompt · not the canon one"
+      },
+      {
+       "path": "Next Phases/WEAVE_SETUP_GUIDE_DESIGN_PROMPT.md",
+       "into": "Claude Design",
+       "when": "After the phase's opening decisions"
+      }
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/WEAVE_SETUP_GUIDE_PLAN.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w12"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W12.5",
+     "name": "Real app integrations",
+     "desc": "Reviews from the review app · not drawn stars.",
+     "items": [
+      "A plugin system that teaches Weave real Shopify apps · data only; no app code ever runs inside Weave.",
+      "Bundled knowledge for the 10 most-used apps (reviews, email, subscriptions, search…), each fact sourced from the app's official docs.",
+      "Automatic detection of which apps a connected store already uses.",
+      "What an app teaches can make builds smarter and checks stricter · never looser; the judge never reads it.",
+      "Two new Settings screens: Integrations and per-project Rules.",
+      "Per-client rules you write once (“this client's header never moves”) that every build respects.",
+      "Start builds from your own custom base theme, snapshotted safely at project creation.",
+      "App keys stay on your Mac, masked everywhere, never visible to merchants.",
+      "Five new manual tests close the phase."
+     ],
+     "paste": [
+      {
+       "path": "Next Phases/WEAVE_PLUGINS_PROMPT.md",
+       "into": "Claude Code",
+       "when": "This phase has its OWN prompt · not the canon one"
+      },
+      {
+       "path": "Next Phases/WEAVE_PLUGINS_DESIGN_PROMPT.md",
+       "into": "Claude Design",
+       "when": "After the phase's opening decisions"
+      }
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/WEAVE_PLUGINS_PLAN.md"
+      },
+      {
+       "path": "analysis/THEME_FACTORY_LATEST_AUDIT.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w12.5"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W12.7",
+     "name": "Custom storefront on Shopify",
+     "desc": "A fully custom site on Shopify's checkout & catalog.",
+     "items": [
+      "A third output: the storefront is fully custom; the merchant keeps working in Shopify as usual.",
+      "The builder outputs the same sections, wired to live products from the store.",
+      "Checks stay repeatable by testing against a snapshot of the catalog taken at each run's start.",
+      "See it working on sample products before entering any keys.",
+      "Real deploys: staging preview first, then production with the destination spelled out · undo kept.",
+      "Existing projects can <b>add</b> this output · same design, no rework; a failure on one output never touches another.",
+      "Version pins so Shopify's quarterly updates can't quietly break things.",
+      "New deploy-state screens + five new manual tests."
+     ],
+     "paste": [
+      {
+       "path": "Next Phases/WEAVE_HEADLESS_PROMPT.md",
+       "into": "Claude Code",
+       "when": "This phase has its OWN prompt · not the canon one"
+      },
+      {
+       "path": "Next Phases/WEAVE_HEADLESS_DESIGN_PROMPT.md",
+       "into": "Claude Design",
+       "when": "After the phase's opening decisions"
+      }
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/WEAVE_HEADLESS_PLAN.md"
+      },
+      {
+       "path": "Next Phases/HYDROGEN_SKILLS_LEARNINGS.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w12.7"
+       }
+      ]
+     }
+    },
+    {
+     "id": "W13",
+     "name": "Ready to sell",
+     "desc": "The final phase: everything needed to hand Weave to a stranger · sign-in, subscription, spending caps, security testing, and the legal basics.",
+     "items": [
+      "A small online service (the “broker”) holds the AI keys · the app itself never ships a secret.",
+      "Subscriptions through a payment provider, with billing events handled safely.",
+      "Sign in with Google from the app · the browser does the login; nothing sensitive touches the app.",
+      "Your AI usage flows through the subscription with a live usage meter.",
+      "Running out pauses honestly with clear options (raise the cap, upgrade) · work is never lost.",
+      "A hard spending cap that YOU set; overage is opt-in only.",
+      "An account screen: plan, usage bar, devices, billing, sign-out, delete-account.",
+      "A sign-in gate at launch, honest offline behavior (a one-week lease).",
+      "A security specialist attacks the whole flow before ship; every finding fixed or refuted on record.",
+      "Terms, privacy, and a named support channel.",
+      "Final walkthroughs on the real packaged app · including one real purchase and refund."
+     ],
+     "paste": [
+      {
+       "path": "Next Phases/WEAVE_DISTRIBUTION_PROMPT.md",
+       "into": "Claude Code",
+       "when": "This phase has its OWN prompt · not the canon one"
+      },
+      {
+       "path": "Next Phases/WEAVE_DISTRIBUTION_DESIGN_PROMPT.md",
+       "into": "Claude Design",
+       "when": "After the phase's opening decisions"
+      }
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/WEAVE_DISTRIBUTION_PLAN.md"
+      }
+     ],
+     "status": {
+      "done_when": [
+       {
+        "tag": "phase-w13"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "title": "Part 5 · Idea shelves",
+   "note": "Nothing scheduled yet",
+   "phases": [
+    {
+     "id": "POOL",
+     "name": "Shopper-facing superpowers",
+     "desc": "20 candidate features for the sites Weave builds.",
+     "items": [
+      "Virtual try-on, honest urgency counters, a product Q&A that only says what it can prove, AI-shopper readiness, instant search, and 15 more."
+     ],
+     "docs": [
+      {
+       "path": "Next Phases/WEAVE_STOREFRONT_FEATURES.md"
+      }
+     ],
+     "pool": true
+    },
+    {
+     "id": "POOL",
+     "name": "Agency monitoring service",
+     "desc": "A possible future cloud product. Your call (OD-3).",
+     "items": [
+      "Continuously watch client stores for breakage and prove changes are safe · parked with its own go/no-go checklist."
+     ],
+     "docs": [
+      {
+       "path": "codex_thought/Shopify_ideas.md"
+      },
+      {
+       "path": "Next Phases/CODEX_ADJUDICATION.md"
+      }
+     ],
+     "pool": true
+    }
+   ]
+  }
+ ],
+ "actions": [
+  {
+   "when": [
+    {
+     "worktree_branch": "medan"
+    }
+   ],
+   "level": "hi",
+   "text": "<b>Remove the leftover “medan” workspace</b> · the last clean-up loose end.",
+   "cmd": "git worktree remove --force ~/conductor/workspaces/weave/medan && git -C ~/Documents/weave branch -d medan"
+  },
+  {
+   "when": [
+    {
+     "file_matches": {
+      "path": "W2R_REPORT.md",
+      "pattern": "\\*?\\*?R-1\\b.*DISPATCHED"
+     }
+    }
+   ],
+   "text": "<b>R-1 is in design</b> · run the drawing batch in Claude Design; when it's back, run the <b>beauty pass (EL-1)</b> in the same sitting, then accept both together."
+  },
+  {
+   "when": [
+    {
+     "file_matches": {
+      "path": "W2R_REPORT.md",
+      "pattern": "\\*?\\*?R-1\\b.*CLOSED"
+     }
+    },
+    {
+     "file_matches": {
+      "path": "Next Phases/WEAVE_ELEVATION_DESIGN_PROMPT.md",
+      "pattern": "Status: \\*\\*RUN"
+     },
+     "not": true
+    }
+   ],
+   "level": "hi",
+   "text": "<b>Run the beauty pass (EL-1) now</b> · before R-2 starts, so every screen is only reviewed once."
+  },
+  {
+   "when": [
+    {
+     "file_matches": {
+      "path": "canon/WEAVE_PLAN.md",
+      "pattern": "OD-1/OD-2/OD-3 remain"
+     }
+    }
+   ],
+   "text": "<b>Three decisions wait on you</b> (OD-1 roadmap scope · OD-2 paid pilots · OD-3 monitoring service) · due at the next sign-off."
+  }
+ ]
+}

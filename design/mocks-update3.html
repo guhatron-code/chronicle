@@ -1,0 +1,398 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+:root{--bg:#0a0a0a;--panel:#0d0d0e;--raised:#121214;--hover:#17171a;--active:#1c1c1f;
+--t1:#ececec;--t2:#b8b8b8;--t3:#8f8f8f;--t4:#6c6c6c;--t5:#525252;
+--hair:rgba(255,255,255,.07);--hair2:rgba(255,255,255,.11);--div:rgba(255,255,255,.05);
+--here:#8aa5c8;--done:#7fae8a;--err:#cf8a86;
+--sans:"Geist","Geist Sans",Inter,"Segoe UI",system-ui,sans-serif;--code:"Geist Mono",ui-monospace,Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#050505;font-family:var(--sans);font-size:13px;color:var(--t1);-webkit-font-smoothing:antialiased;padding:40px;display:flex;flex-direction:column;gap:56px}
+.mocklbl{font-size:11px;color:var(--t5);letter-spacing:.12em;text-transform:uppercase;margin-bottom:12px}
+.frame{width:1280px;height:860px;background:var(--bg);border:1px solid var(--hair2);border-radius:11px;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 30px 80px -22px rgba(0,0,0,.72)}
+/* header */
+.hd{height:54px;flex:none;display:flex;align-items:center;padding:0 12px 0 16px;border-bottom:1px solid var(--hair);gap:0}
+.tl{width:11px;height:11px;border-radius:50%;border:1px solid rgba(0,0,0,.25);margin-right:8px}
+.tl.r{background:#ff5f57}.tl.y{background:#febc2e}.tl.g{background:#28c840;margin-right:15px}
+.wm{font-size:13.5px;font-weight:600;letter-spacing:-.005em;margin-left:9px}
+.lgo{width:18px;height:18px;border-radius:4px;background:var(--t2);opacity:.85;-webkit-mask:radial-gradient(circle at 35% 35%,black 60%,transparent 61%) }
+.hdv{width:1px;height:20px;background:var(--hair);margin:0 14px}
+.ptab{display:flex;align-items:center;gap:8px;height:54px;padding:0 11px;font-family:var(--code);font-size:12px;color:var(--t3);border-bottom:2px solid transparent}
+.ptab.on{color:var(--t1);border-bottom-color:var(--here)}
+.pdot{width:6px;height:6px;border-radius:50%;background:var(--here)}
+.plus{width:34px;text-align:center;color:var(--t4);font-size:16px}
+.sp{flex:1}
+.chk{font-family:var(--code);font-size:11px;color:var(--t4);display:flex;align-items:center;gap:6px;margin-right:12px}
+.chk i{width:5px;height:5px;border-radius:50%;background:var(--done)}
+.seg{display:flex;background:var(--raised);border:1px solid var(--hair);border-radius:6px;padding:2px;gap:2px;margin-right:8px}
+.seg span{font-size:12px;color:var(--t3);border-radius:4px;padding:3px 13px}
+.seg .on{background:var(--active);color:var(--t1);border:1px solid var(--hair)}
+.body{flex:1;min-height:0;display:flex}
+.eyebrow{font-family:var(--code);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t4)}
+.st{display:inline-flex;align-items:center;gap:6px;font-family:var(--code);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--t4);white-space:nowrap}
+.st i{width:5px;height:5px;border-radius:50%;background:var(--t5)}
+.st.here{color:var(--here)}.st.here i{background:var(--here)}
+.st.done{color:var(--done)}.st.done i{background:var(--done)}
+.panel{background:var(--panel);border:1px solid var(--hair);border-radius:8px;padding:12px 15px;margin-bottom:10px}
+.panel h2{font-family:var(--code);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t4);margin-bottom:9px;display:flex;gap:10px;align-items:center}
+.panel h2 .hr{margin-left:auto;letter-spacing:0;text-transform:none;font-weight:400}
+.btnP{background:var(--t1);color:#0a0a0a;font-weight:600;font-size:12px;padding:7px 15px;border-radius:6px;display:inline-flex;align-items:center;gap:7px;border:none}
+.btnS{background:var(--raised);color:var(--t3);border:1px solid var(--hair);font-size:11.5px;padding:6px 13px;border-radius:6px;display:inline-flex;gap:7px;align-items:center}
+.mono{font-family:var(--code)}
+/* left column mini-roadmap */
+.colL{min-width:0;border-right:1px solid var(--hair);padding:14px 16px;overflow:hidden}
+.banner{position:relative;background:var(--panel);border:1px solid rgba(138,165,200,.45);border-radius:8px;padding:13px 16px;margin-bottom:10px}
+.banner .big{font-size:15px;font-weight:650;letter-spacing:-.012em;margin-top:4px}
+.banner .sub{font-size:11.5px;color:var(--t3);margin-top:3px}
+.banner .row{display:flex;gap:16px;margin-top:6px;align-items:baseline}
+.banner .since{position:absolute;right:14px;bottom:11px;font-family:var(--code);font-size:10px;color:var(--t5)}
+.stage{margin-top:20px}
+.srow{display:flex;align-items:center;gap:12px}
+.srow h3{font-family:var(--code);font-size:10px;font-weight:500;letter-spacing:.14em;text-transform:uppercase;color:var(--t3)}
+.srow .rule{flex:1;height:1px;background:var(--hair)}
+.sprog{display:flex;align-items:center;gap:10px;margin:5px 0 10px}
+.sprog .n{font-family:var(--code);font-size:10px;color:var(--t5)}
+.sprog .bar{flex:1;height:2px;background:var(--raised);border-radius:1px;overflow:hidden}
+.sprog .bar i{display:block;height:100%;background:var(--here);border-radius:1px}
+.rail{position:relative;margin-left:10px;padding-left:20px;display:flex;flex-direction:column;gap:6px}
+.rail:before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:1px;background:var(--hair2)}
+.ph{position:relative;background:var(--panel);border:1px solid var(--hair);border-radius:8px;padding:0 14px;height:44px;display:flex;align-items:center;gap:11px}
+.ph:before{content:"";position:absolute;left:-23.5px;top:18px;width:7px;height:7px;border-radius:50%;background:var(--bg);border:1.5px solid var(--t5);box-shadow:0 0 0 3px var(--bg)}
+.ph:after{content:"";position:absolute;left:-15px;top:21.5px;width:13px;height:1px;background:var(--hair2)}
+.ph.done:before{background:var(--done);border-color:var(--done)}
+.ph.now:before{background:var(--here);border-color:var(--here)}
+.ph .id{font-family:var(--code);font-size:10px;color:var(--t3);background:var(--raised);border:1px solid var(--hair);border-radius:5px;padding:1.5px 0;width:56px;text-align:center;flex:none}
+.ph .nm{font-weight:550;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ph .st{margin-left:auto}
+.ph .tw{color:var(--t5);font-size:10px;margin-left:12px}
+/* git pane */
+.gp{width:430px;flex:none;border-right:1px solid var(--hair);background:var(--panel);display:flex;flex-direction:column;min-height:0}
+.gp .ghd{flex:none;display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--div)}
+.gp .ghd b{font-size:13px;font-weight:650}
+.brch{display:inline-flex;align-items:center;gap:6px;font-family:var(--code);font-size:10.5px;color:var(--t3);background:var(--raised);border:1px solid var(--hair);border-radius:5px;padding:2px 9px}
+.x{margin-left:auto;color:var(--t4);font-size:12px}
+.gbody{flex:1;overflow-y:auto;padding:12px 14px}
+.pipe{display:flex;align-items:stretch;margin-bottom:14px}
+.pn{flex:1;background:var(--raised);border:1px solid var(--hair);border-radius:6px;padding:7px 10px;min-width:0}
+.pn .l{font-family:var(--code);font-size:8px;letter-spacing:.12em;text-transform:uppercase;color:var(--t5);white-space:nowrap}
+.pn .v{display:flex;gap:6px;align-items:baseline;margin-top:2px;white-space:nowrap}
+.pn .num{font-size:14px;font-weight:650}
+.pn.hot{border-color:rgba(138,165,200,.35)}.pn.hot .num{color:var(--here)}
+.pn .u{font-size:9.5px;color:var(--t4);font-family:var(--code);overflow:hidden;text-overflow:ellipsis}
+.pseg{width:22px;align-self:center;height:1px;background:var(--hair2);position:relative;flex:none}
+.pseg.hot{background:var(--here)}
+.gsec{font-family:var(--code);font-size:8.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--t5);margin:14px 0 7px;display:flex}
+.gsec .n{margin-left:auto}
+.frow{display:flex;align-items:center;gap:9px;height:26px;padding:0 7px;border-radius:5px;font-size:12px;color:var(--t2)}
+.frow:hover{background:var(--raised)}
+.frow .fp{color:var(--t5);font-size:10.5px;font-family:var(--code);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow .m{margin-left:auto;font-family:var(--code);font-size:10.5px;flex:none}
+.m.M{color:var(--here)}.m.A{color:var(--done)}.m.D{color:var(--err)}
+.cmsg{width:100%;background:var(--raised);border:1px solid var(--hair2);border-radius:6px;color:var(--t1);font-family:var(--sans);font-size:12px;padding:8px 11px;margin:10px 0 8px}
+.cmsg::placeholder{color:var(--t5)}
+.grail{position:relative;margin-left:7px;padding-left:18px;display:flex;flex-direction:column;gap:0}
+.grail:before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:1px;background:var(--hair2)}
+.gc{position:relative;padding:6px 0}
+.gc:before{content:"";position:absolute;left:-21px;top:13px;width:5px;height:5px;border-radius:50%;background:var(--t5)}
+.gc .l1{display:flex;gap:8px;align-items:baseline}
+.gc .hash{font-family:var(--code);font-size:10px;color:var(--t2);background:var(--raised);border:1px solid var(--hair);border-radius:4px;padding:1px 6px}
+.gc .msg{font-size:11.5px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gc .meta{display:flex;gap:9px;margin-top:2px;padding-left:0}
+.gc .ago{font-family:var(--code);font-size:9.5px;color:var(--t5)}
+.gc .ptag{font-family:var(--code);font-size:8px;letter-spacing:.1em;text-transform:uppercase;color:var(--here);border:1px solid rgba(138,165,200,.3);border-radius:3px;padding:0 5px}
+/* vs code source-control graph */
+.gg{display:flex;flex-direction:column}
+.ggrow{display:flex;align-items:center;height:44px;position:relative;padding-right:6px;border-radius:5px;z-index:1}
+.ggrow:hover{background:var(--raised)}
+.gglane{width:40px;flex:none;height:100%;position:relative}
+.ggmsg{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+.ggrefs{display:flex;align-items:center;gap:5px;margin-left:9px;flex:none}
+.ggref{display:inline-flex;align-items:center;height:16px;line-height:1;font-family:var(--code);font-size:9px;letter-spacing:.03em;background:var(--raised);border:1px solid var(--hair);border-radius:4px;padding:0 6px;color:var(--t3);white-space:nowrap}
+.ggref.head{border-color:rgba(138,165,200,.4);color:var(--here);background:rgba(138,165,200,.07)}
+.ggref.phx{color:var(--t4);background:transparent}
+.ggright{margin-left:auto;display:flex;align-items:center;gap:7px;flex:none;padding-left:10px}
+.ggau{width:14px;height:14px;border-radius:50%;background:var(--raised);border:1px solid var(--hair);
+  font-size:7.5px;display:flex;align-items:center;justify-content:center;color:var(--t4);letter-spacing:.02em}
+.gghash{font-family:var(--code);font-size:9.5px;color:var(--t5)}
+.ggago{font-family:var(--code);font-size:10px;color:var(--t5);width:30px;text-align:right}
+/* scm tree */
+.trow{display:flex;align-items:center;gap:6px;height:26px;padding:0 7px;border-radius:5px;font-size:12px;color:var(--t2);position:relative}
+.trow:hover{background:var(--raised)}
+.trow .ch{font-family:var(--code);font-size:8.5px;color:var(--t4);width:10px;text-align:center;flex:none}
+.trow .fic{width:12px;height:12px;flex:none;border:1px solid var(--t5);border-radius:2px;opacity:.55}
+.trow .fic.dir{border-radius:3px;background:rgba(255,255,255,.04)}
+.trow.f1{padding-left:24px}.trow.f2{padding-left:42px}
+.trow .act{margin-left:auto;display:flex;gap:8px;color:var(--t5);font-size:11px;visibility:hidden}
+.trow:hover .act{visibility:visible}
+.trow .m{font-family:var(--code);font-size:10.5px;flex:none;width:12px;text-align:center;margin-left:8px}
+.tguide{position:absolute;left:11px;top:0;bottom:0;width:1px;background:var(--div)}
+/* diff */
+.dhd{display:flex;align-items:center;gap:9px;padding:8px 14px;border-bottom:1px solid var(--div);font-family:var(--code);font-size:11px;color:var(--t2)}
+.dhd .bk{color:var(--t4)}
+.diff{font-family:var(--code);font-size:11px;line-height:1.65;padding:10px 0}
+.dl{display:flex;white-space:pre}
+.dl .no{width:74px;flex:none;text-align:right;padding-right:12px;color:var(--t5);font-size:10px}
+.dl.add{background:rgba(127,174,138,.08)}.dl.add .tx{color:#a9c9b1}
+.dl.del{background:rgba(207,138,134,.08)}.dl.del .tx{color:#cf9d9a}
+.dl .tx{color:var(--t3)}
+.hunk{color:var(--t5);padding:6px 0 2px 86px;font-size:10px}
+/* terminal side */
+.term{flex:1;min-width:0;background:var(--panel);display:flex;flex-direction:column}
+.tbar{height:38px;border-bottom:1px solid var(--div);display:flex;align-items:center}
+.ttab{display:flex;align-items:center;gap:8px;padding:0 13px;height:100%;font-family:var(--code);font-size:11px;color:var(--t1);background:var(--bg);border-right:1px solid var(--div);position:relative}
+.ttab:after{content:"";position:absolute;top:0;left:0;right:0;height:1px;background:var(--here)}
+.ttab i{width:5px;height:5px;border-radius:50%;background:var(--t4)}
+.tplus{width:34px;text-align:center;color:var(--t4);border-right:1px solid var(--div);height:100%;line-height:38px}
+.thint{margin-left:auto;padding-right:12px;font-size:11px;color:var(--t5)}
+.tbody{flex:1;background:var(--bg);padding:12px 14px;font-family:var(--code);font-size:12px;color:var(--t3);line-height:1.7}
+.tbody .dim{color:var(--t5)}
+/* drawer */
+.drawer{position:absolute;top:54px;right:0;bottom:0;width:640px;background:var(--panel);border-left:1px solid var(--hair2);display:flex;flex-direction:column;box-shadow:-30px 0 60px -30px rgba(0,0,0,.6)}
+.dr-h{display:flex;align-items:center;gap:11px;padding:13px 16px;border-bottom:1px solid var(--div)}
+.dr-h .id{font-family:var(--code);font-size:10px;color:var(--t3);background:var(--raised);border:1px solid var(--hair);border-radius:5px;padding:1.5px 8px}
+.dr-h b{font-size:14px;font-weight:650}
+.dr-b{flex:1;overflow-y:auto;padding:14px 18px}
+.dr-b p{color:var(--t3);font-size:12px;margin-bottom:10px}
+.steps li{list-style:none;font-size:11.5px;color:var(--t3);padding:3px 0 3px 13px;position:relative}
+.steps li:before{content:"";position:absolute;left:0;top:10px;width:3px;height:3px;border-radius:50%;background:var(--t5)}
+.chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--code);font-size:10px;border:1px solid var(--hair2);border-radius:6px;padding:2.5px 9px;color:var(--t1);background:var(--raised)}
+.chip .into{color:var(--t4);font-size:9px;border-left:1px solid var(--div);padding-left:6px}
+.acc{border:1px solid var(--hair);border-radius:7px;margin:8px 0 4px;overflow:hidden}
+.acc .arow{display:flex;align-items:center;gap:10px;height:38px;padding:0 13px;background:var(--panel);cursor:pointer;border-top:1px solid var(--div)}
+.acc .arow:first-child{border-top:none}
+.acc .arow .tw{font-family:var(--code);font-size:10px;color:var(--t5);transition:transform .15s}
+.acc .arow.open .tw{transform:rotate(90deg)}
+.acc .arow .ttl{font-size:12.5px;font-weight:550;color:var(--t2)}
+.acc .arow .fn{font-family:var(--code);font-size:9.5px;color:var(--t5)}
+.acc .arow .cp{margin-left:auto;color:var(--t4);font-size:11px}
+.acc .abody{background:var(--bg);padding:14px 18px;border-top:1px solid var(--div)}
+.acc .abody h4{font-size:13px;margin-bottom:6px}
+.acc .abody p{font-size:11.5px;color:var(--t3);margin-bottom:6px;line-height:1.55}
+.acc .abody code{font-family:var(--code);font-size:10.5px;background:var(--raised);border:1px solid var(--hair);border-radius:3px;padding:0 4px;color:var(--t2)}
+.mdoc{display:none}
+.mdoc h4{font-size:13px;margin-bottom:6px}
+.mdoc p{font-size:11.5px;color:var(--t3);margin-bottom:6px}
+.mdoc code{font-family:var(--code);font-size:10.5px;background:var(--raised);border:1px solid var(--hair);border-radius:3px;padding:0 4px;color:var(--t2)}
+.mdoc .fade{position:absolute;left:0;right:0;bottom:0;height:44px;background:linear-gradient(transparent,var(--bg))}
+/* picker tiles */
+.pk{padding:72px 52px;flex:1;overflow:hidden}
+.pk h1{font-size:26px;font-weight:650;letter-spacing:-.018em;margin:14px 0 6px}
+.pk .sub{color:var(--t3);font-size:14px;max-width:440px}
+.tilebtns{margin-top:22px;display:flex;gap:10px}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:44px}
+.tile{background:var(--panel);border:1px solid var(--hair);border-radius:8px;padding:13px 15px 11px}
+.tile .h{display:flex;gap:9px;align-items:center}
+.tile .ic{width:26px;height:26px;border-radius:7px;background:var(--raised);border:1px solid var(--hair)}
+.tile .nm{font-weight:600;font-size:13.5px}
+.tile .pth{font-family:var(--code);font-size:10px;color:var(--t4)}
+.tile .d{font-size:11.5px;color:var(--t3);margin:9px 0;min-height:32px;line-height:1.45}
+.tile .cur{display:flex;gap:8px;align-items:center;border-top:1px solid var(--div);padding-top:9px}
+.tile .cid{font-family:var(--code);font-size:9px;color:var(--t3);background:var(--raised);border:1px solid var(--hair);border-radius:4px;padding:1px 6px}
+.tile .cnm{font-size:11.5px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .prog{display:flex;align-items:center;gap:9px;margin-top:9px}
+.tile .bar{flex:1;height:2px;background:var(--raised);border-radius:1px;overflow:hidden}
+.tile .bar i{display:block;height:100%;background:var(--here)}
+.tile .bar i.g{background:var(--done)}
+.tile .need{font-family:var(--code);font-size:9.5px;color:var(--t4);text-transform:uppercase;letter-spacing:.06em;flex:none}
+.spin{width:13px;height:13px;border:2px solid var(--hair2);border-top-color:var(--here);border-radius:50%;flex:none}
+.paste{display:flex;align-items:center;gap:9px;margin-top:8px}
+.rlbl{font-family:var(--code);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--here);width:64px;flex:none}
+</style></head><body>
+
+<!-- ============ M1 · git pane ============ -->
+<div><div class="mocklbl">M1 · Project history opens the git pane · the exact VS Code source-control shape, on Chronicle tokens</div>
+<div class="frame"><div class="hd">
+  <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
+  <span class="lgo"></span><span class="wm">Chronicle</span><span class="hdv"></span>
+  <span class="ptab on">weave <span class="pdot"></span> ✕</span><span class="ptab">loupe <span class="pdot"></span></span><span class="plus">+</span>
+  <span class="sp"></span><span class="chk"><i></i>Checked 11:42:19</span>
+  <div class="seg"><span class="on">Roadmap</span><span>Repo</span></div><span style="color:var(--t4);font-size:14px">⟳</span>
+</div><div class="body">
+  <div class="colL" style="width:360px;flex:none;opacity:.38;pointer-events:none">
+    <div class="banner"><span class="eyebrow" style="color:var(--here)">● Current state</span>
+      <div class="big">R-1 · Missing screens get drawn</div>
+      <div class="row"><span class="st here"><i></i>In design</span></div></div>
+    <div class="stage"><div class="srow"><h3>Part 1 · Finish the foundation</h3><span class="rule"></span></div>
+      <div class="rail">
+        <div class="ph done"><span class="id">R-0</span><span class="nm">Tidy the workshop</span><span class="st done"><i></i>Done</span></div>
+        <div class="ph now"><span class="id">R-1</span><span class="nm">Missing screens get drawn</span><span class="st here"><i></i>In design</span></div>
+      </div></div>
+  </div>
+  <div class="gp" style="width:520px">
+    <div class="ghd" style="padding:16px 20px"><b>Project history</b><span class="brch">⎇ main</span><span class="x">✕</span></div>
+    <div class="gbody" style="padding:14px 14px">
+      <input class="cmsg" style="margin:0 6px 8px;width:calc(100% - 12px)" placeholder="Message (what changed?)">
+      <button class="btnP" style="width:calc(100% - 12px);margin:0 6px 16px;justify-content:center">✓ Save to history</button>
+      <div class="gsec" style="padding:0 7px">Staged changes<span class="n">1</span></div>
+      <div class="trow"><span class="ch"></span><span class="fic"></span><span>chronicle.json</span><span class="act">−</span><span class="m A">A</span></div>
+      <div class="gsec" style="padding:0 7px;margin-top:16px">Changes<span class="n">3</span></div>
+      <div class="trow"><span class="ch">▾</span><span class="fic dir"></span><span>canon</span><span class="act">+ ↻</span><span class="m"></span></div>
+      <div class="trow f1"><span class="tguide"></span><span class="fic"></span><span>WEAVE_PLAN.md</span><span class="act">+ ↻</span><span class="m M">M</span></div>
+      <div class="trow"><span class="ch">▾</span><span class="fic dir"></span><span>Next Phases</span><span class="act">+ ↻</span><span class="m"></span></div>
+      <div class="trow f1" style="background:var(--active)"><span class="tguide"></span><span class="fic"></span><span style="color:var(--t1)">AGENTS_OPTIMIZATION.md</span><span class="act">+ ↻</span><span class="m M">M</span></div>
+      <div class="trow"><span class="ch"></span><span class="fic"></span><span>W2R_REPORT.md</span><span class="act">+ ↻</span><span class="m M">M</span></div>
+      <div style="margin:14px 6px 0;display:flex;align-items:center">
+        <span style="font-size:11px;color:var(--t4)">1 save waiting to publish</span><span class="sp"></span>
+        <span style="font-family:var(--code);font-size:10.5px;color:var(--t3);border-bottom:1px dashed var(--t5);padding-bottom:1px">Publish online</span></div>
+      <div class="gsec" style="padding:0 7px;margin-top:24px">Graph<span class="n">Show all</span></div>
+      <div class="gg" style="position:relative">
+        <svg width="40" height="220" style="position:absolute;left:0;top:0;z-index:2;pointer-events:none" fill="none">
+          <path d="M14 0 V220" stroke="#8aa5c8" stroke-width="1.5"/>
+          <path d="M14 66 C 30 66, 30 76, 30 88 V132 C 30 148, 30 154, 14 176" stroke="#7fae8a" stroke-width="1.5"/>
+          <circle cx="14" cy="22" r="4" fill="#0d0d0e" stroke="#8aa5c8" stroke-width="1.5"/>
+          <circle cx="14" cy="66" r="4" fill="#8aa5c8" stroke="#8aa5c8" stroke-width="1.5"/>
+          <circle cx="14" cy="110" r="4" fill="#0d0d0e" stroke="#8aa5c8" stroke-width="1.5"/>
+          <circle cx="30" cy="110" r="4" fill="#0d0d0e" stroke="#7fae8a" stroke-width="1.5"/>
+          <circle cx="14" cy="154" r="4" fill="#0d0d0e" stroke="#8aa5c8" stroke-width="1.5"/>
+          <circle cx="14" cy="198" r="4" fill="#0d0d0e" stroke="#8aa5c8" stroke-width="1.5"/>
+        </svg>
+        <div class="ggrow"><span class="gglane"></span><span class="ggmsg">docs(next-phases): the EL-1 craft-elevation design prompt</span>
+          <span class="ggrefs"><span class="ggref head">main</span><span class="ggref">origin/main</span></span>
+          <span class="ggright"><span class="ggau">TG</span><span class="gghash">60ae96d</span><span class="ggago">2h</span></span></div>
+        <div class="ggrow"><span class="gglane"></span><span class="ggmsg">Merge branch 'medan'</span>
+          <span class="ggright"><span class="ggau">TG</span><span class="gghash">b117c02</span><span class="ggago">18h</span></span></div>
+        <div class="ggrow"><span class="gglane"></span><span class="ggmsg">docs(next-phases): app-sections addendum</span>
+          <span class="ggrefs"><span class="ggref phx">R-1</span></span>
+          <span class="ggright"><span class="ggau">TG</span><span class="gghash">f6a9d63</span><span class="ggago">1d</span></span></div>
+        <div class="ggrow"><span class="gglane"></span><span class="ggmsg">docs(next-phases): execution chronology on one page</span>
+          <span class="ggrefs"><span class="ggref phx">R-0</span></span>
+          <span class="ggright"><span class="ggau">TG</span><span class="gghash">932cd8c</span><span class="ggago">1d</span></span></div>
+        <div class="ggrow"><span class="gglane"></span><span class="ggmsg">docs(business): the outbound sales playbook</span>
+          <span class="ggrefs"><span class="ggref phx">R-0</span></span>
+          <span class="ggright"><span class="ggau">TG</span><span class="gghash">7838bc5</span><span class="ggago">2d</span></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="term" style="opacity:.38"><div class="tbar"><span class="ttab"><i></i>shell 1 ×</span><span class="tplus">+</span></div>
+    <div class="tbody"><span class="dim">$</span></div></div>
+</div></div></div>
+
+<!-- ============ M2 · diff open ============ -->
+<div><div class="mocklbl">M2 · Clicking a changed file in the tree opens its diff · ‹ changes goes back</div>
+<div class="frame"><div class="hd">
+  <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
+  <span class="lgo"></span><span class="wm">Chronicle</span><span class="hdv"></span>
+  <span class="ptab on">weave <span class="pdot"></span> ✕</span><span class="plus">+</span>
+  <span class="sp"></span><span class="chk"><i></i>Checked 11:42:27</span>
+  <div class="seg"><span class="on">Roadmap</span><span>Repo</span></div><span style="color:var(--t4);font-size:14px">⟳</span>
+</div><div class="body">
+  <div class="colL" style="width:360px;flex:none;opacity:.38;pointer-events:none">
+    <div class="banner"><span class="eyebrow" style="color:var(--here)">● Current state</span>
+      <div class="big">R-1 · Missing screens get drawn</div>
+      <div class="row"><span class="st here"><i></i>In design</span></div></div>
+    <div class="panel"><span class="eyebrow">Project history</span></div>
+  </div>
+  <div class="gp" style="width:520px">
+    <div class="ghd" style="padding:16px 20px"><b>Project history</b><span class="brch">⎇ main</span><span class="x">✕</span></div>
+    <div class="dhd" style="padding:10px 20px"><span class="bk">‹ changes</span><span>canon/WEAVE_PLAN.md</span><span class="m M" style="margin-left:auto;font-family:var(--code)">M · +6 −2</span></div>
+    <div class="diff">
+      <div class="hunk">@@ §4 · the W2R remediation schedule @@</div>
+      <div class="dl"><span class="no">141</span><span class="tx">  R-1 dispatches the canon design batch to the operator</span></div>
+      <div class="dl del"><span class="no">142</span><span class="tx">- and holds until the batch returns from the designer.</span></div>
+      <div class="dl add"><span class="no">142</span><span class="tx">+ and holds until the batch returns. The acceptance session</span></div>
+      <div class="dl add"><span class="no">143</span><span class="tx">+ then runs EL-1 in the same sitting, so every screen is</span></div>
+      <div class="dl add"><span class="no">144</span><span class="tx">+ reviewed exactly once at R-2.</span></div>
+      <div class="dl"><span class="no">145</span><span class="tx">  R-2 begins only after both batches are accepted.</span></div>
+      <div class="hunk">@@ §5 · the decisions log @@</div>
+      <div class="dl del"><span class="no">201</span><span class="tx">- OD-1/OD-2/OD-3 remain open.</span></div>
+      <div class="dl add"><span class="no">201</span><span class="tx">+ OD-1 is resolved; OD-2/OD-3 remain open, due at the next</span></div>
+      <div class="dl add"><span class="no">202</span><span class="tx">+ sign-off.</span></div>
+      <div class="dl"><span class="no">203</span><span class="tx">  The supersession header governs every conflict.</span></div>
+    </div>
+  </div>
+  <div class="term" style="opacity:.38"><div class="tbar"><span class="ttab"><i></i>shell 1 ×</span><span class="tplus">+</span></div>
+    <div class="tbody"><span class="dim">$</span></div></div>
+</div></div></div>
+
+<!-- ============ M3 · phase drawer ============ -->
+<div><div class="mocklbl">M3 entry point · the card accordion stays as-is · "View details" opens the phase view</div>
+<div style="width:640px;background:var(--bg);border:1px solid var(--hair2);border-radius:11px;padding:18px 18px 18px 40px;margin-bottom:26px;position:relative">
+  <div class="ph now" style="height:auto;display:block;padding:10px 14px">
+    <div style="display:flex;align-items:center;gap:11px"><span class="id">R-1</span><span class="nm">Missing screens get drawn</span><span class="st here" style="margin-left:auto"><i></i>In design</span><span class="tw" style="transform:rotate(90deg)">›</span></div>
+    <div style="color:var(--t4);font-size:11.5px;margin-top:7px">The designer (Claude Design) is drawing 3 missing screens + 29 touch-ups.</div>
+    <ul class="steps" style="margin-top:8px;border-top:1px solid var(--div);padding-top:8px">
+      <li>A "publish is held" screen, shown when quality checks block a launch.</li>
+      <li>A "fix your fonts" screen for designs using fonts the build can't load.</li>
+    </ul>
+    <div class="paste" style="border-top:1px solid var(--div);padding-top:9px"><span class="rlbl">You paste</span><span class="chip">WEAVE_CLAUDE_DESIGN_PROMPT.md<span class="into">→ Claude Design</span></span>
+      <button class="btnS" style="margin-left:auto">View details ›</button></div>
+  </div>
+</div>
+<div class="mocklbl">M3 · The phase view it opens · the shell is never covered</div>
+<div class="frame"><div class="hd">
+  <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
+  <span class="lgo"></span><span class="wm">Chronicle</span><span class="hdv"></span>
+  <span class="ptab on">weave <span class="pdot"></span> ✕</span><span class="plus">+</span>
+  <span class="sp"></span><span class="chk"><i></i>Checked 11:43:02</span>
+  <div class="seg"><span class="on">Roadmap</span><span>Repo</span></div><span style="color:var(--t4);font-size:14px">⟳</span>
+</div><div class="body">
+  <div class="colL" style="flex:1;padding:0;display:flex;flex-direction:column">
+    <div class="dr-h" style="flex:none;padding:16px 18px"><span style="font-family:var(--code);font-size:10.5px;color:var(--t4)">‹ Roadmap</span>
+      <span class="id" style="font-family:var(--code);font-size:10px;color:var(--t3);background:var(--raised);border:1px solid var(--hair);border-radius:5px;padding:1.5px 8px">R-1</span>
+      <b>Missing screens get drawn</b><span class="st here"><i></i>In design</span>
+      <span class="x" style="margin-left:auto">✕</span></div>
+    <div class="dr-b">
+      <p>The designer (Claude Design) is drawing 3 missing screens + 29 touch-ups.</p>
+      <div class="gsec">4 steps</div>
+      <ul class="steps">
+        <li>A "publish is held" screen, shown when quality checks block a launch.</li>
+        <li>A "fix your fonts" screen for designs using fonts the build can't load.</li>
+        <li>Website-capture screens (blocked · in progress · failed).</li>
+        <li>29 smaller corrections across existing screens.</li>
+      </ul>
+      <div class="paste"><span class="rlbl">You paste</span><span class="chip">WEAVE_CLAUDE_DESIGN_PROMPT.md<span class="into">→ Claude Design</span></span>
+        <button class="btnP" style="margin-left:auto;font-size:11.5px;padding:6px 13px">Start this phase ▸</button></div>
+      <div class="gsec" style="margin-top:18px">Documents</div>
+      <div class="acc">
+        <div class="arow open"><span class="tw">›</span><span class="ttl">The design handoff acceptance</span><span class="fn">WEAVE_DESIGN_HANDOFF_ACCEPT.md</span><span class="cp">⧉</span></div>
+        <div class="abody">
+          <p>Every returned batch is accepted through one mechanism: the session diffs each frame against its spec, verifies the token bridge owns every color, and files a fix list before anything wires.</p>
+          <p>The gate reads <code>WEAVE_DESIGN_HANDOFF_ACCEPT.md</code> and refuses partial batches. A frame with an unresolved token is returned, not patched.</p>
+          <p>Acceptance ends with a written record in the phase report so R-2 reviews each screen exactly once.</p>
+        </div>
+        <div class="arow"><span class="tw">›</span><span class="ttl">The canon design batch</span><span class="fn">WEAVE_CLAUDE_DESIGN_PROMPT.md</span><span class="cp">⧉</span></div>
+      </div>
+      <div class="gsec" style="margin-top:18px">Saves during this phase</div>
+      <div class="grail">
+        <div class="gc"><div class="l1"><span class="hash">60ae96d</span><span class="msg">docs(next-phases): the EL-1 craft-elevation design prompt</span></div>
+          <div class="meta"><span class="ago">2h ago</span></div></div>
+        <div class="gc"><div class="l1"><span class="hash">f6a9d63</span><span class="msg">docs(next-phases): app-sections addendum</span></div>
+          <div class="meta"><span class="ago">1d ago</span></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="term" style="width:560px;flex:none;border-left:1px solid var(--hair)">
+    <div class="tbar"><span class="ttab"><i></i>shell 1 ×</span><span class="tplus">+</span><span class="thint">Type claude ⏎ · Paste ⌘V</span></div>
+    <div class="tbody"># weave · roadmap is live<br><span class="dim">weave ~/Documents/weave on main</span><br>$ <span style="background:var(--t2);color:var(--bg)">&nbsp;</span></div></div>
+</div></div></div>
+
+<!-- ============ M4 · mission control ============ -->
+<div><div class="mocklbl">M4 · Mission control: the picker becomes a live dashboard</div>
+<div class="frame"><div style="height:54px;flex:none;display:flex;align-items:center;padding:0 16px">
+  <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></div>
+<div class="pk">
+  <div style="width:56px;height:56px;border-radius:13px;background:var(--raised);border:1px solid var(--hair)"></div>
+  <h1>Chronicle</h1>
+  <div class="sub">Open a project folder to see where its build is and what needs you.</div>
+  <div class="tilebtns"><button class="btnP">⌂ Open a project…</button><button class="btnS">+ New blank project</button></div>
+  <div style="display:flex;margin-top:44px"><span class="eyebrow">Recents</span><span class="sp"></span><span class="eyebrow">4 projects</span></div>
+  <div class="grid" style="margin-top:12px">
+    <div class="tile"><div class="h"><span class="ic"></span><span><div class="nm">weave</div><div class="pth">~/Documents/weave</div></span></div>
+      <div class="d">A design-to-storefront studio · hand-built designs become verified, deployed websites.</div>
+      <div class="cur"><span class="cid">R-1</span><span class="cnm">Missing screens get drawn</span><span class="st here" style="margin-left:auto"><i></i>In design</span></div>
+      <div class="prog"><div class="bar"><i style="width:8%"></i></div><span class="need">3 waiting</span></div></div>
+    <div class="tile"><div class="h"><span class="ic"></span><span><div class="nm">loupe</div><div class="pth">~/Downloads/loupe-master</div></span></div>
+      <div class="d">A design-QA tool · deviations measured by code, not guessed.</div>
+      <div class="cur"><span class="cid">P5</span><span class="cnm">The learning engine</span><span class="st here" style="margin-left:auto"><i></i>Up next</span></div>
+      <div class="prog"><div class="bar"><i style="width:62%"></i></div><span class="need">2 waiting</span></div></div>
+    <div class="tile"><div class="h"><span class="ic"></span><span><div class="nm">Forge</div><div class="pth">~/Documents/Projects/Forge</div></span></div>
+      <div class="d">No description yet. The roadmap writes one.</div>
+      <div class="cur"><span class="spin"></span><span class="cnm" style="color:var(--t4)">Writing your roadmap…</span></div>
+      <div class="prog"><div class="bar"><i style="width:34%"></i></div><span class="need" style="color:var(--t5)">Runs with Codex</span></div></div>
+    <div class="tile"><div class="h"><span class="ic"></span><span><div class="nm">sundial</div><div class="pth">~/Documents/sundial</div></span></div>
+      <div class="d">A tiny menu-bar app that shows the time until sunset.</div>
+      <div class="cur"><span class="cid">P3</span><span class="cnm">Ship it</span><span class="st done" style="margin-left:auto"><i></i>All phases done</span></div>
+      <div class="prog"><div class="bar"><i class="g" style="width:100%"></i></div><span class="need" style="color:var(--done)">Clear</span></div></div>
+  </div>
+</div></div></div>
+
+</body></html>

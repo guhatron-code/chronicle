@@ -1,0 +1,1015 @@
+{
+  "plugins": [
+    "react",
+    "import"
+  ],
+  "rules": {
+    "react/forbid-elements": [
+      "warn",
+      {
+        "forbid": []
+      }
+    ],
+    "no-restricted-imports": [
+      "warn",
+      {
+        "patterns": [
+          {
+            "group": [
+              "components/ai-elements/Artifact/**",
+              "components/ai-elements/Canvas/**",
+              "components/ai-elements/ChainOfThought/**",
+              "components/ai-elements/Checkpoint/**",
+              "components/ai-elements/Confirmation/**",
+              "components/ai-elements/Connection/**",
+              "components/ai-elements/Controls/**",
+              "components/ai-elements/Conversation/**",
+              "components/ai-elements/Edge/**",
+              "components/ai-elements/ExampleChainOfThought/**",
+              "components/ai-elements/ExampleChatbot/**",
+              "components/ai-elements/ExampleCheckpoint/**",
+              "components/ai-elements/ExampleConfirmation/**",
+              "components/ai-elements/ExampleConfirmationAccepted/**",
+              "components/ai-elements/ExampleConfirmationRejected/**",
+              "components/ai-elements/ExampleConfirmationRequest/**",
+              "components/ai-elements/ExampleConversation/**",
+              "components/ai-elements/ExampleDemoChatgpt/**",
+              "components/ai-elements/ExampleDemoClaude/**",
+              "components/ai-elements/ExampleDemoGrok/**",
+              "components/ai-elements/ExampleDemoWorkflow/**",
+              "components/ai-elements/ExampleImage/**",
+              "components/ai-elements/ExampleInlineCitation/**",
+              "components/ai-elements/ExampleLoader/**",
+              "components/ai-elements/ExampleLoaderCustom/**",
+              "components/ai-elements/ExampleLoaderSizes/**",
+              "components/ai-elements/ExampleMessage/**",
+              "components/ai-elements/ExampleMessageFlat/**",
+              "components/ai-elements/ExampleOpenInChat/**",
+              "components/ai-elements/ExamplePlan/**",
+              "components/ai-elements/ExamplePromptInput/**",
+              "components/ai-elements/ExamplePromptInputCursor/**",
+              "components/ai-elements/ExampleQueue/**",
+              "components/ai-elements/ExampleQueuePromptInput/**",
+              "components/ai-elements/ExampleReasoning/**",
+              "components/ai-elements/ExampleShimmer/**",
+              "components/ai-elements/ExampleShimmerDuration/**",
+              "components/ai-elements/ExampleShimmerElements/**",
+              "components/ai-elements/ExampleSources/**",
+              "components/ai-elements/ExampleSourcesCustom/**",
+              "components/ai-elements/ExampleSuggestion/**",
+              "components/ai-elements/ExampleSuggestionInput/**",
+              "components/ai-elements/ExampleV0Clone/**",
+              "components/ai-elements/ExampleWebPreview/**",
+              "components/ai-elements/ExampleWorkflow/**",
+              "components/ai-elements/Image/**",
+              "components/ai-elements/InlineCitation/**",
+              "components/ai-elements/Loader/**",
+              "components/ai-elements/Message/**",
+              "components/ai-elements/Node/**",
+              "components/ai-elements/OpenIn/**",
+              "components/ai-elements/Panel/**",
+              "components/ai-elements/Plan/**",
+              "components/ai-elements/PromptInput/**",
+              "components/ai-elements/Queue/**",
+              "components/ai-elements/Reasoning/**",
+              "components/ai-elements/Shimmer/**",
+              "components/ai-elements/Sources/**",
+              "components/ai-elements/Suggestion/**",
+              "components/ai-elements/Task/**",
+              "components/ai-elements/Toolbar/**",
+              "components/ai-elements/WebPreview/**",
+              "components/avatar-stack/AvatarStack/**",
+              "components/calendar/CalendarBody/**",
+              "components/color-picker/ColorPicker/**",
+              "components/contribution-graph/ContributionGraph/**",
+              "components/dialog-stack/DialogStack/**",
+              "components/gantt/GanttToday/**",
+              "components/general/Accordion/**",
+              "components/general/Alert/**",
+              "components/general/AlertDialog/**",
+              "components/general/AspectRatio/**",
+              "components/general/Attachment/**",
+              "components/general/Avatar/**",
+              "components/general/Badge/**",
+              "components/general/Breadcrumb/**",
+              "components/general/Bubble/**",
+              "components/general/Button/**",
+              "components/general/ButtonGroup/**",
+              "components/general/Calendar/**",
+              "components/general/Card/**",
+              "components/general/Carousel/**",
+              "components/general/Checkbox/**",
+              "components/general/Collapsible/**",
+              "components/general/Command/**",
+              "components/general/ContextMenu/**",
+              "components/general/Dialog/**",
+              "components/general/DirectionProvider/**",
+              "components/general/Drawer/**",
+              "components/general/DropdownMenu/**",
+              "components/general/Empty/**",
+              "components/general/Field/**",
+              "components/general/Form/**",
+              "components/general/HoverCard/**",
+              "components/general/Input/**",
+              "components/general/InputGroup/**",
+              "components/general/InputOTP/**",
+              "components/general/Item/**",
+              "components/general/Kbd/**",
+              "components/general/Label/**",
+              "components/general/Marker/**",
+              "components/general/Menubar/**",
+              "components/general/MessageScroller/**",
+              "components/general/NativeSelect/**",
+              "components/general/NavigationMenu/**",
+              "components/general/Pagination/**",
+              "components/general/Popover/**",
+              "components/general/Progress/**",
+              "components/general/RadioGroup/**",
+              "components/general/ResizablePanel/**",
+              "components/general/ScrollArea/**",
+              "components/general/Select/**",
+              "components/general/Separator/**",
+              "components/general/Sheet/**",
+              "components/general/Sidebar/**",
+              "components/general/Skeleton/**",
+              "components/general/Slider/**",
+              "components/general/Switch/**",
+              "components/general/Table/**",
+              "components/general/Tabs/**",
+              "components/general/Textarea/**",
+              "components/general/Toaster/**",
+              "components/general/Toggle/**",
+              "components/general/ToggleGroup/**",
+              "components/general/Tooltip/**",
+              "components/image-crop/ImageCrop/**",
+              "components/image-zoom/ImageZoom/**",
+              "components/kanban/KanbanCard/**",
+              "components/kibo-ui/Announcement/**",
+              "components/kibo-ui/Banner/**",
+              "components/kibo-ui/Choicebox/**",
+              "components/kibo-ui/Combobox/**",
+              "components/kibo-ui/Comparison/**",
+              "components/kibo-ui/Cursor/**",
+              "components/kibo-ui/Deck/**",
+              "components/kibo-ui/Dropzone/**",
+              "components/kibo-ui/Glimpse/**",
+              "components/kibo-ui/Marquee/**",
+              "components/kibo-ui/Pill/**",
+              "components/kibo-ui/Rating/**",
+              "components/kibo-ui/Reel/**",
+              "components/kibo-ui/Snippet/**",
+              "components/kibo-ui/Spinner/**",
+              "components/kibo-ui/Status/**",
+              "components/kibo-ui/Stories/**",
+              "components/kibo-ui/Tags/**",
+              "components/kibo-ui/Ticker/**",
+              "components/list/ListItem/**",
+              "components/mini-calendar/MiniCalendar/**",
+              "components/qr-code/QRCode/**",
+              "components/relative-time/RelativeTime/**",
+              "components/table/TableRow/**",
+              "components/theme-switcher/ThemeSwitcher/**",
+              "components/tree/TreeIcon/**"
+            ],
+            "message": "Import design-system components from 'index.js', not component internals."
+          }
+        ]
+      }
+    ],
+    "no-restricted-syntax": [
+      "warn",
+      {
+        "selector": "Literal[value=/#[0-9a-fA-F]{3,8}\\b/]",
+        "message": "Raw hex color — use a design-system color token via var()."
+      },
+      {
+        "selector": "Literal[value=/\\b\\d+px\\b/]",
+        "message": "Raw px value — use a design-system spacing token via var()."
+      },
+      {
+        "selector": "Literal[value=/font-family\\s*:\\s*(?!['\\\"]?(?:Geist Variable|Geist Mono Variable))/i]",
+        "message": "Font not provided by the design system. Available: Geist Variable, Geist Mono Variable."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute > JSXIdentifier[name!=/^(?:variant|size|className|id|style|children|key|ref|className|style|children)$/]",
+        "message": "<Button> doesn't accept that prop. Declared props: variant, size, className, id, style, children."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='variant'] > Literal[value!=/^(?:default|primary|primary-ghost|ghost|subtle)$/]",
+        "message": "<Button> variant must be one of 'default' | 'primary' | 'primary-ghost' | 'ghost' | 'subtle'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Button'] > JSXAttribute[name.name='size'] > Literal[value!=/^(?:default|icon)$/]",
+        "message": "<Button> size must be one of 'default' | 'icon'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Dialog'] > JSXAttribute > JSXIdentifier[name!=/^(?:children|onClose|className|backdropClassName|includeChromeClassName|id|role|ariaLabel|ariaLabelledBy|ariaDescribedBy|closeOnBackdrop|closeOnEscape|layout|as|onSubmit|key|ref|className|style|children)$/]",
+        "message": "<Dialog> doesn't accept that prop. Declared props: children, onClose, className, backdropClassName, includeChromeClassName, id, role, ariaLabel, ariaLabelledBy, ariaDescribedBy, closeOnBackdrop, closeOnEscape, layout, as, onSubmit."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Dialog'] > JSXAttribute[name.name='role'] > Literal[value!=/^(?:dialog|alertdialog)$/]",
+        "message": "<Dialog> role must be one of 'dialog' | 'alertdialog'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Dialog'] > JSXAttribute[name.name='layout'] > Literal[value!=/^(?:default|sectioned)$/]",
+        "message": "<Dialog> layout must be one of 'default' | 'sectioned'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Dialog'] > JSXAttribute[name.name='as'] > Literal[value!=/^(?:div|form)$/]",
+        "message": "<Dialog> as must be one of 'div' | 'form'."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Input'] > JSXAttribute > JSXIdentifier[name!=/^(?:className|id|style|children|key|ref|className|style|children)$/]",
+        "message": "<Input> doesn't accept that prop. Declared props: className, id, style, children."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Select'] > JSXAttribute > JSXIdentifier[name!=/^(?:className|id|style|children|key|ref|className|style|children)$/]",
+        "message": "<Select> doesn't accept that prop. Declared props: className, id, style, children."
+      },
+      {
+        "selector": "JSXOpeningElement[name.name='Textarea'] > JSXAttribute > JSXIdentifier[name!=/^(?:className|id|style|children|key|ref|className|style|children)$/]",
+        "message": "<Textarea> doesn't accept that prop. Declared props: className, id, style, children."
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": [
+        "**/index.js"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
+    }
+  ],
+  "x-omelette": {
+    "components": {
+      "Accordion": {
+        "replaces": []
+      },
+      "Alert": {
+        "replaces": []
+      },
+      "AlertDialog": {
+        "replaces": []
+      },
+      "Announcement": {
+        "replaces": []
+      },
+      "Artifact": {
+        "replaces": []
+      },
+      "AspectRatio": {
+        "replaces": []
+      },
+      "Attachment": {
+        "replaces": []
+      },
+      "Avatar": {
+        "replaces": []
+      },
+      "AvatarStack": {
+        "replaces": []
+      },
+      "Badge": {
+        "replaces": []
+      },
+      "Banner": {
+        "replaces": []
+      },
+      "Breadcrumb": {
+        "replaces": []
+      },
+      "Bubble": {
+        "replaces": []
+      },
+      "Button": {
+        "replaces": []
+      },
+      "ButtonGroup": {
+        "replaces": []
+      },
+      "Calendar": {
+        "replaces": []
+      },
+      "CalendarBody": {
+        "replaces": []
+      },
+      "Canvas": {
+        "replaces": []
+      },
+      "Card": {
+        "replaces": []
+      },
+      "Carousel": {
+        "replaces": []
+      },
+      "ChainOfThought": {
+        "replaces": []
+      },
+      "Checkbox": {
+        "replaces": []
+      },
+      "Checkpoint": {
+        "replaces": []
+      },
+      "Choicebox": {
+        "replaces": []
+      },
+      "Collapsible": {
+        "replaces": []
+      },
+      "ColorPicker": {
+        "replaces": []
+      },
+      "Combobox": {
+        "replaces": []
+      },
+      "Command": {
+        "replaces": []
+      },
+      "Comparison": {
+        "replaces": []
+      },
+      "Confirmation": {
+        "replaces": []
+      },
+      "Connection": {
+        "replaces": []
+      },
+      "ContextMenu": {
+        "replaces": []
+      },
+      "ContributionGraph": {
+        "replaces": []
+      },
+      "Controls": {
+        "replaces": []
+      },
+      "Conversation": {
+        "replaces": []
+      },
+      "Cursor": {
+        "replaces": []
+      },
+      "Deck": {
+        "replaces": []
+      },
+      "Dialog": {
+        "replaces": []
+      },
+      "DialogStack": {
+        "replaces": []
+      },
+      "DirectionProvider": {
+        "replaces": []
+      },
+      "Drawer": {
+        "replaces": []
+      },
+      "DropdownMenu": {
+        "replaces": []
+      },
+      "Dropzone": {
+        "replaces": []
+      },
+      "Edge": {
+        "replaces": []
+      },
+      "Empty": {
+        "replaces": []
+      },
+      "ExampleChainOfThought": {
+        "replaces": []
+      },
+      "ExampleChatbot": {
+        "replaces": []
+      },
+      "ExampleCheckpoint": {
+        "replaces": []
+      },
+      "ExampleConfirmation": {
+        "replaces": []
+      },
+      "ExampleConfirmationAccepted": {
+        "replaces": []
+      },
+      "ExampleConfirmationRejected": {
+        "replaces": []
+      },
+      "ExampleConfirmationRequest": {
+        "replaces": []
+      },
+      "ExampleConversation": {
+        "replaces": []
+      },
+      "ExampleDemoChatgpt": {
+        "replaces": []
+      },
+      "ExampleDemoClaude": {
+        "replaces": []
+      },
+      "ExampleDemoGrok": {
+        "replaces": []
+      },
+      "ExampleDemoWorkflow": {
+        "replaces": []
+      },
+      "ExampleImage": {
+        "replaces": []
+      },
+      "ExampleInlineCitation": {
+        "replaces": []
+      },
+      "ExampleLoader": {
+        "replaces": []
+      },
+      "ExampleLoaderCustom": {
+        "replaces": []
+      },
+      "ExampleLoaderSizes": {
+        "replaces": []
+      },
+      "ExampleMessage": {
+        "replaces": []
+      },
+      "ExampleMessageFlat": {
+        "replaces": []
+      },
+      "ExampleOpenInChat": {
+        "replaces": []
+      },
+      "ExamplePlan": {
+        "replaces": []
+      },
+      "ExamplePromptInput": {
+        "replaces": []
+      },
+      "ExamplePromptInputCursor": {
+        "replaces": []
+      },
+      "ExampleQueue": {
+        "replaces": []
+      },
+      "ExampleQueuePromptInput": {
+        "replaces": []
+      },
+      "ExampleReasoning": {
+        "replaces": []
+      },
+      "ExampleShimmer": {
+        "replaces": []
+      },
+      "ExampleShimmerDuration": {
+        "replaces": []
+      },
+      "ExampleShimmerElements": {
+        "replaces": []
+      },
+      "ExampleSources": {
+        "replaces": []
+      },
+      "ExampleSourcesCustom": {
+        "replaces": []
+      },
+      "ExampleSuggestion": {
+        "replaces": []
+      },
+      "ExampleSuggestionInput": {
+        "replaces": []
+      },
+      "ExampleV0Clone": {
+        "replaces": []
+      },
+      "ExampleWebPreview": {
+        "replaces": []
+      },
+      "ExampleWorkflow": {
+        "replaces": []
+      },
+      "Field": {
+        "replaces": []
+      },
+      "Form": {
+        "replaces": []
+      },
+      "GanttToday": {
+        "replaces": []
+      },
+      "Glimpse": {
+        "replaces": []
+      },
+      "HoverCard": {
+        "replaces": []
+      },
+      "Image": {
+        "replaces": []
+      },
+      "ImageCrop": {
+        "replaces": []
+      },
+      "ImageZoom": {
+        "replaces": []
+      },
+      "InlineCitation": {
+        "replaces": []
+      },
+      "Input": {
+        "replaces": []
+      },
+      "InputGroup": {
+        "replaces": []
+      },
+      "InputOTP": {
+        "replaces": []
+      },
+      "Item": {
+        "replaces": []
+      },
+      "KanbanCard": {
+        "replaces": []
+      },
+      "Kbd": {
+        "replaces": []
+      },
+      "Label": {
+        "replaces": []
+      },
+      "ListItem": {
+        "replaces": []
+      },
+      "Loader": {
+        "replaces": []
+      },
+      "Marker": {
+        "replaces": []
+      },
+      "Marquee": {
+        "replaces": []
+      },
+      "Menubar": {
+        "replaces": []
+      },
+      "Message": {
+        "replaces": []
+      },
+      "MessageScroller": {
+        "replaces": []
+      },
+      "MiniCalendar": {
+        "replaces": []
+      },
+      "NativeSelect": {
+        "replaces": []
+      },
+      "NavigationMenu": {
+        "replaces": []
+      },
+      "Node": {
+        "replaces": []
+      },
+      "OpenIn": {
+        "replaces": []
+      },
+      "Pagination": {
+        "replaces": []
+      },
+      "Panel": {
+        "replaces": []
+      },
+      "Pill": {
+        "replaces": []
+      },
+      "Plan": {
+        "replaces": []
+      },
+      "Popover": {
+        "replaces": []
+      },
+      "Progress": {
+        "replaces": []
+      },
+      "PromptInput": {
+        "replaces": []
+      },
+      "QRCode": {
+        "replaces": []
+      },
+      "Queue": {
+        "replaces": []
+      },
+      "RadioGroup": {
+        "replaces": []
+      },
+      "Rating": {
+        "replaces": []
+      },
+      "Reasoning": {
+        "replaces": []
+      },
+      "Reel": {
+        "replaces": []
+      },
+      "RelativeTime": {
+        "replaces": []
+      },
+      "ResizablePanel": {
+        "replaces": []
+      },
+      "ScrollArea": {
+        "replaces": []
+      },
+      "Select": {
+        "replaces": []
+      },
+      "Separator": {
+        "replaces": []
+      },
+      "Sheet": {
+        "replaces": []
+      },
+      "Shimmer": {
+        "replaces": []
+      },
+      "Sidebar": {
+        "replaces": []
+      },
+      "Skeleton": {
+        "replaces": []
+      },
+      "Slider": {
+        "replaces": []
+      },
+      "Snippet": {
+        "replaces": []
+      },
+      "Sources": {
+        "replaces": []
+      },
+      "Spinner": {
+        "replaces": []
+      },
+      "Status": {
+        "replaces": []
+      },
+      "Stories": {
+        "replaces": []
+      },
+      "Suggestion": {
+        "replaces": []
+      },
+      "Switch": {
+        "replaces": []
+      },
+      "Table": {
+        "replaces": []
+      },
+      "TableRow": {
+        "replaces": []
+      },
+      "Tabs": {
+        "replaces": []
+      },
+      "Tags": {
+        "replaces": []
+      },
+      "Task": {
+        "replaces": []
+      },
+      "Textarea": {
+        "replaces": []
+      },
+      "ThemeSwitcher": {
+        "replaces": []
+      },
+      "Ticker": {
+        "replaces": []
+      },
+      "Toaster": {
+        "replaces": []
+      },
+      "Toggle": {
+        "replaces": []
+      },
+      "ToggleGroup": {
+        "replaces": []
+      },
+      "Toolbar": {
+        "replaces": []
+      },
+      "Tooltip": {
+        "replaces": []
+      },
+      "TreeIcon": {
+        "replaces": []
+      },
+      "WebPreview": {
+        "replaces": []
+      }
+    },
+    "tokens": [
+      "--animate-ping",
+      "--animate-pulse",
+      "--animate-spin",
+      "--aspect-video",
+      "--blur-lg",
+      "--blur-md",
+      "--blur-sm",
+      "--color-amber-400",
+      "--color-amber-500",
+      "--color-background",
+      "--color-black",
+      "--color-blue-100",
+      "--color-blue-50",
+      "--color-blue-500",
+      "--color-blue-600",
+      "--color-blue-900",
+      "--color-border",
+      "--color-emerald-400",
+      "--color-emerald-50",
+      "--color-emerald-500",
+      "--color-emerald-600",
+      "--color-foreground",
+      "--color-gray-100",
+      "--color-gray-200",
+      "--color-gray-300",
+      "--color-gray-600",
+      "--color-gray-700",
+      "--color-gray-800",
+      "--color-gray-900",
+      "--color-gray-950",
+      "--color-green-100",
+      "--color-green-400",
+      "--color-green-500",
+      "--color-green-600",
+      "--color-muted",
+      "--color-muted-foreground",
+      "--color-orange-500",
+      "--color-orange-600",
+      "--color-primary",
+      "--color-purple-500",
+      "--color-red-500",
+      "--color-red-600",
+      "--color-ring",
+      "--color-rose-400",
+      "--color-rose-50",
+      "--color-rose-500",
+      "--color-sky-400",
+      "--color-sky-500",
+      "--color-violet-500",
+      "--color-white",
+      "--color-yellow-300",
+      "--color-yellow-600",
+      "--container-2xl",
+      "--container-lg",
+      "--container-md",
+      "--container-sm",
+      "--container-xl",
+      "--container-xs",
+      "--default-font-family",
+      "--default-mono-font-family",
+      "--default-transition-duration",
+      "--default-transition-timing-function",
+      "--ease-in-out",
+      "--font-mono",
+      "--font-sans",
+      "--font-serif",
+      "--font-weight-bold",
+      "--font-weight-medium",
+      "--font-weight-normal",
+      "--font-weight-semibold",
+      "--leading-normal",
+      "--leading-relaxed",
+      "--leading-snug",
+      "--leading-tight",
+      "--perspective-distant",
+      "--radius-2xl",
+      "--radius-xs",
+      "--rc-border-color",
+      "--rc-drag-bar-size",
+      "--rc-drag-handle-bg-colour",
+      "--rc-drag-handle-mobile-size",
+      "--rc-drag-handle-size",
+      "--rc-focus-color",
+      "--spacing",
+      "--text-2xl",
+      "--text-2xl--line-height",
+      "--text-3xl",
+      "--text-3xl--line-height",
+      "--text-4xl",
+      "--text-4xl--line-height",
+      "--text-5xl",
+      "--text-5xl--line-height",
+      "--text-base",
+      "--text-base--line-height",
+      "--text-lg",
+      "--text-lg--line-height",
+      "--text-sm",
+      "--text-sm--line-height",
+      "--text-xl",
+      "--text-xl--line-height",
+      "--text-xs",
+      "--text-xs--line-height",
+      "--tracking-tight",
+      "--tracking-wide",
+      "--tracking-widest",
+      "--tw-border-style",
+      "--tw-gradient-position",
+      "--tw-rotate-y",
+      "--tw-scroll-snap-strictness",
+      "--tw-translate-x",
+      "--tw-translate-y",
+      "--xy-attribution-background-color-default",
+      "--xy-background-color-default",
+      "--xy-background-pattern-cross-color-default",
+      "--xy-background-pattern-dots-color-default",
+      "--xy-background-pattern-lines-color-default",
+      "--xy-connectionline-stroke-default",
+      "--xy-connectionline-stroke-width-default",
+      "--xy-controls-box-shadow-default",
+      "--xy-controls-button-background-color-default",
+      "--xy-controls-button-background-color-hover-default",
+      "--xy-controls-button-border-color-default",
+      "--xy-controls-button-color-default",
+      "--xy-controls-button-color-hover-default",
+      "--xy-edge-label-background-color-default",
+      "--xy-edge-label-color-default",
+      "--xy-edge-stroke-default",
+      "--xy-edge-stroke-selected-default",
+      "--xy-edge-stroke-width-default",
+      "--xy-handle-background-color-default",
+      "--xy-handle-border-color-default",
+      "--xy-minimap-background-color-default",
+      "--xy-minimap-mask-background-color-default",
+      "--xy-minimap-mask-stroke-color-default",
+      "--xy-minimap-mask-stroke-width-default",
+      "--xy-minimap-node-background-color-default",
+      "--xy-minimap-node-stroke-color-default",
+      "--xy-minimap-node-stroke-width-default",
+      "--xy-node-background-color-default",
+      "--xy-node-border-default",
+      "--xy-node-border-radius-default",
+      "--xy-node-boxshadow-hover-default",
+      "--xy-node-boxshadow-selected-default",
+      "--xy-node-color-default",
+      "--xy-node-group-background-color-default",
+      "--xy-resize-background-color-default",
+      "--xy-selection-background-color-default",
+      "--xy-selection-border-default"
+    ],
+    "tokenKinds": {
+      "--rc-drag-handle-size": "spacing",
+      "--rc-drag-handle-mobile-size": "spacing",
+      "--rc-drag-handle-bg-colour": "color",
+      "--rc-drag-bar-size": "spacing",
+      "--rc-border-color": "color",
+      "--rc-focus-color": "color",
+      "--xy-edge-stroke-default": "color",
+      "--xy-edge-stroke-width-default": "color",
+      "--xy-edge-stroke-selected-default": "color",
+      "--xy-connectionline-stroke-default": "color",
+      "--xy-connectionline-stroke-width-default": "color",
+      "--xy-attribution-background-color-default": "color",
+      "--xy-minimap-background-color-default": "color",
+      "--xy-minimap-mask-background-color-default": "color",
+      "--xy-minimap-mask-stroke-color-default": "color",
+      "--xy-minimap-mask-stroke-width-default": "color",
+      "--xy-minimap-node-background-color-default": "color",
+      "--xy-minimap-node-stroke-color-default": "color",
+      "--xy-minimap-node-stroke-width-default": "color",
+      "--xy-background-color-default": "color",
+      "--xy-background-pattern-dots-color-default": "color",
+      "--xy-background-pattern-lines-color-default": "color",
+      "--xy-background-pattern-cross-color-default": "color",
+      "--xy-node-color-default": "color",
+      "--xy-node-border-default": "other",
+      "--xy-node-background-color-default": "color",
+      "--xy-node-group-background-color-default": "color",
+      "--xy-node-boxshadow-hover-default": "shadow",
+      "--xy-node-boxshadow-selected-default": "shadow",
+      "--xy-node-border-radius-default": "radius",
+      "--xy-handle-background-color-default": "color",
+      "--xy-handle-border-color-default": "color",
+      "--xy-selection-background-color-default": "color",
+      "--xy-selection-border-default": "other",
+      "--xy-controls-button-background-color-default": "color",
+      "--xy-controls-button-background-color-hover-default": "color",
+      "--xy-controls-button-color-default": "color",
+      "--xy-controls-button-color-hover-default": "color",
+      "--xy-controls-button-border-color-default": "color",
+      "--xy-controls-box-shadow-default": "shadow",
+      "--xy-edge-label-background-color-default": "color",
+      "--xy-edge-label-color-default": "color",
+      "--xy-resize-background-color-default": "color",
+      "--font-sans": "font",
+      "--font-serif": "font",
+      "--font-mono": "font",
+      "--color-red-500": "color",
+      "--color-red-600": "color",
+      "--color-orange-500": "color",
+      "--color-orange-600": "color",
+      "--color-amber-400": "color",
+      "--color-amber-500": "color",
+      "--color-yellow-300": "color",
+      "--color-yellow-600": "color",
+      "--color-green-100": "color",
+      "--color-green-400": "color",
+      "--color-green-500": "color",
+      "--color-green-600": "color",
+      "--color-emerald-50": "color",
+      "--color-emerald-400": "color",
+      "--color-emerald-500": "color",
+      "--color-emerald-600": "color",
+      "--color-sky-400": "color",
+      "--color-sky-500": "color",
+      "--color-blue-50": "color",
+      "--color-blue-100": "color",
+      "--color-blue-500": "color",
+      "--color-blue-600": "color",
+      "--color-blue-900": "color",
+      "--color-violet-500": "color",
+      "--color-purple-500": "color",
+      "--color-rose-50": "color",
+      "--color-rose-400": "color",
+      "--color-rose-500": "color",
+      "--color-gray-100": "color",
+      "--color-gray-200": "color",
+      "--color-gray-300": "color",
+      "--color-gray-600": "color",
+      "--color-gray-700": "color",
+      "--color-gray-800": "color",
+      "--color-gray-900": "color",
+      "--color-gray-950": "color",
+      "--color-black": "color",
+      "--color-white": "color",
+      "--spacing": "spacing",
+      "--container-xs": "spacing",
+      "--container-sm": "spacing",
+      "--container-md": "spacing",
+      "--container-lg": "spacing",
+      "--container-xl": "spacing",
+      "--container-2xl": "spacing",
+      "--text-xs": "font",
+      "--text-xs--line-height": "font",
+      "--text-sm": "font",
+      "--text-sm--line-height": "font",
+      "--text-base": "font",
+      "--text-base--line-height": "font",
+      "--text-lg": "font",
+      "--text-lg--line-height": "font",
+      "--text-xl": "font",
+      "--text-xl--line-height": "font",
+      "--text-2xl": "font",
+      "--text-2xl--line-height": "font",
+      "--text-3xl": "font",
+      "--text-3xl--line-height": "font",
+      "--text-4xl": "font",
+      "--text-4xl--line-height": "font",
+      "--text-5xl": "font",
+      "--text-5xl--line-height": "font",
+      "--font-weight-normal": "font",
+      "--font-weight-medium": "font",
+      "--font-weight-semibold": "font",
+      "--font-weight-bold": "font",
+      "--tracking-tight": "font",
+      "--tracking-wide": "font",
+      "--tracking-widest": "font",
+      "--leading-tight": "font",
+      "--leading-snug": "font",
+      "--leading-normal": "font",
+      "--leading-relaxed": "font",
+      "--radius-xs": "radius",
+      "--radius-2xl": "radius",
+      "--ease-in-out": "other",
+      "--animate-spin": "other",
+      "--animate-ping": "other",
+      "--animate-pulse": "other",
+      "--blur-sm": "spacing",
+      "--blur-md": "spacing",
+      "--blur-lg": "spacing",
+      "--perspective-distant": "spacing",
+      "--aspect-video": "other",
+      "--default-transition-duration": "other",
+      "--default-transition-timing-function": "other",
+      "--default-font-family": "font",
+      "--default-mono-font-family": "font",
+      "--color-background": "color",
+      "--color-foreground": "color",
+      "--color-primary": "color",
+      "--color-muted": "color",
+      "--color-muted-foreground": "color",
+      "--color-border": "color",
+      "--color-ring": "color",
+      "--tw-translate-x": "spacing",
+      "--tw-translate-y": "color",
+      "--tw-rotate-y": "other",
+      "--tw-scroll-snap-strictness": "other",
+      "--tw-border-style": "other",
+      "--tw-gradient-position": "other"
+    },
+    "fontFamilies": [
+      "Geist Mono Variable",
+      "Geist Variable"
+    ]
+  }
+}
