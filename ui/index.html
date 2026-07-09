@@ -249,25 +249,24 @@
   #phview{display:none;flex-direction:column;min-height:0;flex:1}
   #phview.on{display:flex}
   #tab-road.phased{display:none!important}
-  .pv-h{flex:none;border-bottom:1px solid var(--hair);padding:11px 10px 13px 18px}
+  .pv-h{flex:none;border-bottom:1px solid var(--hair);padding:12px 10px 12px 18px}
   .pv-h1{display:flex;align-items:center;gap:10px}
   .pv-h1 .bk,#gp-head .bk{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px 0 6px;border-radius:6px;
     border:1px solid var(--hair);background:var(--raised);color:var(--t3);cursor:pointer;font-family:var(--mono);font-size:var(--fs-label);flex:none}
   .pv-h1 .bk:hover,#gp-head .bk:hover{color:var(--t1);border-color:var(--hair2)}
-  #gp-head .bk svg{width:11px;height:11px}
-  #gp-head .gp-crumb{color:var(--t5);flex:none}
+  #gp-head .bk svg,.pv-h1 .bk svg{width:11px;height:11px}
+  #gp-head .gp-crumb,.pv-h1 .gp-crumb{color:var(--t5);flex:none}
   /* folder collapse in the changes tree */
   .gfchev{display:inline-flex;align-items:center;justify-content:center;transition:transform .12s}
   .gfold.collapsed .gfchev{transform:rotate(-90deg)}
   .gtr.fhide{display:none}
   .gfcount{font-family:var(--code);font-size:var(--fs-meta);color:var(--t5);flex:none;margin-right:4px}
-  .pv-h1 #pv-x{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:var(--t4);cursor:pointer}
+  .pv-h1 #pv-x{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:var(--t4);cursor:pointer;flex:none;margin-left:2px}
   .pv-h1 #pv-x:hover{background:var(--hover);color:var(--t2)}
-  .pv-h2{display:flex;align-items:center;gap:11px;margin-top:11px}
-  .pv-h2 .id{font-family:var(--mono);font-size:var(--fs-code);color:var(--t2);background:var(--raised);border:1px solid var(--hair2);
+  .pv-h1 .id{font-family:var(--mono);font-size:var(--fs-code);color:var(--t2);background:var(--raised);border:1px solid var(--hair2);
     border-radius:5px;padding:2px 0;width:56px;text-align:center;flex:none}
-  .pv-h2 b{flex:1;min-width:0;font-size:var(--fs-heading);font-weight:var(--fw-heading);letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .pv-h2 .st{flex:none}
+  .pv-h1 b{flex:1;min-width:0;font-size:var(--fs-heading);font-weight:var(--fw-heading);letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pv-h1 .st{flex:none}
   .pv-b{flex:1;overflow-y:auto;padding:15px 16px 22px}
   .pv-b>p{color:var(--t3);font-size:var(--fs-body);line-height:1.6;margin-bottom:0}
   .pv-sec{font-family:var(--mono);font-size:var(--fs-eyebrow);letter-spacing:.14em;text-transform:uppercase;color:var(--t5);
@@ -719,8 +718,7 @@
   <div id="left">
     <div class="tabpane active" id="tab-road"><canvas class="bgfx" id="fx-road"></canvas><div class="pad" id="road-pad"></div></div>
     <div id="phview"><div class="pv-h">
-      <div class="pv-h1"><button class="bk"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 4 6 8l4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>Roadmap</button><div class="spacer"></div><span id="pv-x" title="Close · Esc"></span></div>
-      <div class="pv-h2"><span class="id" id="pv-id"></span><b id="pv-name"></b><span class="st here" id="pv-st"><i></i></span></div>
+      <div class="pv-h1"><button class="bk"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 4 6 8l4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>Roadmap</button><span class="gp-crumb">/</span><span class="id" id="pv-id"></span><b id="pv-name"></b><span class="st here" id="pv-st"><i></i></span><span id="pv-x" title="Close · Esc"></span></div>
     </div><div class="pv-b" id="pv-body"></div></div>
 
     <div class="tabpane" id="tab-repo">
