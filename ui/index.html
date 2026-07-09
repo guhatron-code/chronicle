@@ -106,6 +106,8 @@
   .recent .cid{font-family:var(--mono);font-size:var(--fs-code);color:var(--t3);background:var(--raised);border:1px solid var(--hair);border-radius:4px;padding:1px 6px;flex:none}
   .recent .cnm{font-size:var(--fs-meta);color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   .recent .prog{display:flex;align-items:center;gap:9px;margin-top:9px}
+  .recent .cst{margin-top:9px;min-width:0;overflow:hidden}
+  .recent .cst .st{min-width:0;max-width:100%}
   .recent .bar{flex:1;height:2px;background:var(--raised);border-radius:1px;overflow:hidden}
   .recent .bar i{display:block;height:100%;background:var(--here);border-radius:1px}
   .recent .bar i.g{background:var(--done)}
@@ -892,11 +894,13 @@ async function renderPicker(){
     const allDone=r.total>0&&r.done===r.total;
     const pct=r.total>0?Math.round(r.done/r.total*100):0;
     if(r.missing) row.classList.add("missing");
-    let curRow;
+    let curRow, statusRow="";
     if(r.missing) curRow=`<div class="cur"><span class="cnm" style="color:var(--t4)">Folder missing · was ${esc(tilde(r.path))}</span></div>`;
     else if(writing) curRow=`<div class="cur"><span class="spin"></span><span class="cnm" style="color:var(--t4)">Writing your roadmap…</span></div>`;
-    else if(r.current&&r.current.id) curRow=`<div class="cur"><span class="cid">${esc(r.current.id)}</span><span class="cnm">${esc(r.current.name||"")}</span><span class="st ${allDone?"done":"here"}" style="margin-left:auto"><i></i>${esc(r.current.label||"")}</span></div>`;
-    else if(allDone) curRow=`<div class="cur"><span class="cnm" style="color:var(--t3)">Everything on the plan is done</span><span class="st done" style="margin-left:auto"><i></i>All phases done</span></div>`;
+    else if(r.current&&r.current.id){ curRow=`<div class="cur"><span class="cid">${esc(r.current.id)}</span><span class="cnm">${esc(r.current.name||"")}</span></div>`;
+      statusRow=`<div class="cst"><span class="st ${allDone?"done":"here"}"><i></i>${esc(r.current.label||"")}</span></div>`; }
+    else if(allDone){ curRow=`<div class="cur"><span class="cnm" style="color:var(--t3)">Everything on the plan is done</span></div>`;
+      statusRow=`<div class="cst"><span class="st done"><i></i>All phases done</span></div>`; }
     else curRow=`<div class="cur"><span class="cnm" style="color:var(--t4)">No roadmap yet</span><span class="need" style="margin-left:auto">Runs with ${esc(AGENTS.default==="codex"?"Codex":"Claude")}</span></div>`;
     const progRow=(r.total>0&&!r.missing)?`<div class="prog"><div class="bar"><i class="${allDone?"g":""}" style="width:${allDone?100:Math.max(pct,3)}%"></i></div>
       <span class="need" style="${allDone&&!r.needs?"color:var(--done)":""}">${r.needs?r.needs+" waiting":(allDone?"Clear":"")}</span></div>`
@@ -904,7 +908,7 @@ async function renderPicker(){
     row.innerHTML=`<div class="head"><span class="tile" style="color:var(--t3)">${G.foldersearch}</span>
       <span style="min-width:0"><div class="nm">${esc(r.name)}</div><div class="pth">${esc(tilde(r.path))}</div></span></div>
       <div class="desc">${esc(r.description||"No description yet. The roadmap writes one.")}</div>
-      ${curRow}${progRow}
+      ${curRow}${progRow}${statusRow}
       <span class="rm" title="Remove from Chronicle · the folder itself is untouched"><svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M10 11v6M14 11v6"/></svg></span>`;
     if(!r.missing) row.onclick=()=>openProject(r.path);
     row.querySelector(".rm").onclick=(ev)=>{ ev.stopPropagation();
