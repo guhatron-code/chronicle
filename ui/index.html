@@ -1034,7 +1034,9 @@ function projDone(proj){
 }
 let seenTabs=new Set(), doneTabs={};
 function renderPTabs(){
-  const bar=$("#ptabs"); bar.innerHTML="";
+  const bar=$("#ptabs");
+  bar.querySelectorAll(".ptab").forEach(b=>b.remove());   // keep #ptab-ind so it doesn't re-animate on every poll
+  let ind=$("#ptab-ind");
   let activeBtn=null;
   for(const [dir,proj] of projects){
     const b=document.createElement("button");
@@ -1045,14 +1047,18 @@ function renderPTabs(){
     b.innerHTML=`${FOLDER16}<span>${esc(proj.name)}</span><span class="pdot ${done?"done":""}${celebrate?" celebrate":""}"></span><span class="px">${G.x('currentColor',11)}</span>`;
     b.querySelector(".px").onclick=(e)=>{ e.stopPropagation(); closeProject(dir); };
     b.onclick=()=>{ if(dir!==activeDir) activate(dir); };
-    bar.appendChild(b);
+    if(ind) bar.insertBefore(b,ind); else bar.appendChild(b);
     seenTabs.add(dir); doneTabs[dir]=done;
     if(dir===activeDir) activeBtn=b;
   }
-  let ind=$("#ptab-ind");
-  if(!ind){ ind=document.createElement("span"); ind.id="ptab-ind"; bar.appendChild(ind); } else bar.appendChild(ind);
-  if(activeBtn){ ind.style.width=activeBtn.offsetWidth+"px"; ind.style.transform=`translateX(${activeBtn.offsetLeft}px)`; ind.style.opacity="1"; }
-  else ind.style.opacity="0";
+  if(!ind){ ind=document.createElement("span"); ind.id="ptab-ind"; bar.appendChild(ind); }
+  if(activeBtn){
+    const w=activeBtn.offsetWidth+"px", tx=`translateX(${activeBtn.offsetLeft}px)`;
+    // only touch style when it actually changed, so re-renders don't retrigger the slide
+    if(ind.style.width!==w) ind.style.width=w;
+    if(ind.style.transform!==tx) ind.style.transform=tx;
+    ind.style.opacity="1";
+  } else ind.style.opacity="0";
 }
 function closeProject(dir){
   const proj=projects.get(dir); if(!proj)return;
