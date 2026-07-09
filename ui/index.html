@@ -51,10 +51,7 @@
   .view{display:none;height:100vh}
   .view.active{display:block}
   #view-shell.active{display:flex;flex-direction:column}
-  #shell-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(300px,var(--leftw,54%)) 6px 0px minmax(380px,1fr)}
-  #shell-body.git-open{grid-template-columns:minmax(280px,.8fr) 0px 520px minmax(340px,1fr)}
-  #shell-body.git-open #left{opacity:.38;pointer-events:none}
-  #shell-body.git-open #split-main{visibility:hidden}
+  #shell-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(300px,var(--leftw,54%)) 6px minmax(380px,1fr)}
   #left,#right{min-height:0}
   .splitter{position:relative;cursor:col-resize;background:transparent;z-index:5}
   .splitter::after{content:"";position:absolute;left:2.5px;top:0;bottom:0;width:1px;background:var(--hair)}
@@ -153,7 +150,10 @@
   .icon-btn:hover{background:var(--raised);color:var(--t1)}
   .icon-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
   /* ===== the git pane (M1/M2) ===== */
-  #gitpane{min-width:0;overflow:hidden;background:var(--panel);border-right:1px solid var(--hair);display:flex;flex-direction:column}
+  /* the git pane overlays the left column (like the phase view); the terminal stays untouched */
+  #gitpane{display:none;flex-direction:column;min-height:0;flex:1;min-width:0;overflow:hidden;background:var(--panel)}
+  #gitpane.on{display:flex}
+  #left.gitting>.tabpane,#left.gitting>#phview{display:none!important}
   #gp-head{flex:none;display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid var(--div)}
   #gp-head b{font-size:13.5px;font-weight:650}
   .brch{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--t3);
@@ -664,15 +664,15 @@
         </div>
       </div>
     </div>
+
+    <div id="gitpane">
+      <div id="gp-head"><b>Project history</b><span class="brch" id="gp-branch">⎇ —</span><span id="gp-x" title="Close · Esc">✕</span></div>
+      <div id="gp-err"></div>
+      <div id="gp-body"></div>
+    </div>
   </div>
 
   <div class="splitter" id="split-main"></div>
-
-  <div id="gitpane">
-    <div id="gp-head"><b>Project history</b><span class="brch" id="gp-branch">⎇ —</span><span id="gp-x" title="Close · Esc">✕</span></div>
-    <div id="gp-err"></div>
-    <div id="gp-body"></div>
-  </div>
 
   <div id="right">
     <div id="tt-bar">
@@ -1522,6 +1522,7 @@ $("#refresh").onclick=()=>refresh();
 /* ============ tabs ============ */
 function switchTab(name){
   if(typeof closePhaseView==="function") closePhaseView();
+  if(typeof gitClose==="function"&&GIT.open) gitClose();
   document.querySelectorAll(".seg .tab").forEach(x=>x.classList.toggle("active",x.dataset.tab===name));
   document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active",p.id==="tab-"+name));
   if(name==="repo"&&!treeLoaded) buildTree();
@@ -1687,13 +1688,14 @@ function gitToast(e){ const el=$("#gp-err"); if(!e){el.style.display="none";retu
   el.style.display="block"; el.textContent=String(e).slice(0,300); }
 async function gitOpen(){
   if(!activeDir)return;
+  if(typeof closePhaseView==="function") closePhaseView();
   GIT.open=true; GIT.view="status"; GIT.diff=null; gitToast(null);
-  document.getElementById("shell-body").classList.add("git-open");
+  $("#left").classList.add("gitting"); $("#gitpane").classList.add("on");
   await gitRefresh();
 }
 function gitClose(){
   GIT.open=false; GIT.status=null; GIT.log=null; GIT.diff=null; GIT.view="status"; GIT.notGit=false; GIT.limit=30;
-  document.getElementById("shell-body").classList.remove("git-open");
+  $("#left").classList.remove("gitting"); $("#gitpane").classList.remove("on");
 }
 async function gitRefresh(){
   if(!GIT.open||!activeDir)return;
@@ -1946,6 +1948,7 @@ async function openPhaseView(pid,idx){
   const flat=[]; ((MANIFEST&&MANIFEST.stages)||[]).forEach(st=>(st.phases||[]).forEach(p=>flat.push(p)));
   const ph=flat[idx]; if(!ph)return;
   const st=((PROJ.state&&PROJ.state.statuses)||[])[idx]||{state:"later",label:"later"};
+  if(GIT.open) gitClose();
   PROJ.phaseView=idx;
   document.querySelectorAll(".seg .tab").forEach(x=>x.classList.toggle("active",x.dataset.tab==="road"));
   document.querySelectorAll(".tabpane").forEach(pp=>pp.classList.toggle("active",pp.id==="tab-road"));
