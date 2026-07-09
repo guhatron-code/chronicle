@@ -427,9 +427,12 @@
   .p-items li::before{content:"";position:absolute;left:0;top:10px;width:3px;height:3px;border-radius:50%;background:var(--t5)}
   .p-items li b{color:var(--t2);font-weight:550}
   .row-lbl{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t5);align-self:center;flex:none;min-width:64px}
-  .p-paste{display:flex;flex-direction:column;gap:5px;margin:9px 0 1px 2px;padding-top:9px;border-top:1px solid var(--div)}
+  .p-plbl{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t5);margin-bottom:7px}
+  .phase.now .p-plbl{color:var(--here)}
+  .p-paste{display:flex;flex-direction:column;gap:6px;margin:11px 0 1px 2px;padding-top:11px;border-top:1px solid var(--div)}
   .paste-line{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-  .p-docs{display:flex;flex-wrap:wrap;gap:5px;margin:9px 0 1px 2px}
+  .p-docs{margin:11px 0 1px 2px}
+  .p-docs .chips{display:flex;flex-wrap:wrap;gap:5px}
   .doc{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;
     border:1px solid var(--hair);border-radius:var(--r-s);padding:2.5px 9px;color:var(--t3);background:var(--raised);
     cursor:pointer;transition:.12s;white-space:nowrap}
@@ -1081,9 +1084,9 @@ function docChip(d, docsMap){
 function pasteRows(p, docsMap){
   const list=p.paste||[]; if(!list.length)return null;
   const box=document.createElement("div"); box.className="p-paste";
+  const hdr=document.createElement("div"); hdr.className="p-plbl"; hdr.textContent="You paste"; box.appendChild(hdr);
   list.forEach((pl,i)=>{
     const line=document.createElement("div"); line.className="paste-line";
-    const l=document.createElement("span"); l.className="row-lbl"; l.textContent=i===0?"you paste":""; line.appendChild(l);
     const chip=document.createElement("span");
     if(pl.path && docsMap[pl.path]!==false){
       chip.className="doc paste";
@@ -1333,8 +1336,9 @@ function render(S){
       }
       const pr=pasteRows(p,S.docs||{}); if(pr) bodyIn.appendChild(pr);
       if((p.docs||[]).length){const row=document.createElement("div");row.className="p-docs";
-        const l=document.createElement("span");l.className="row-lbl";l.textContent="reference";row.appendChild(l);
-        p.docs.forEach(d=>row.appendChild(docChip(d,S.docs||{})));bodyIn.appendChild(row);}
+        const l=document.createElement("div");l.className="p-plbl";l.textContent="Reference";row.appendChild(l);
+        const chips=document.createElement("div");chips.className="chips";
+        p.docs.forEach(d=>chips.appendChild(docChip(d,S.docs||{})));row.appendChild(chips);bodyIn.appendChild(row);}
       card.appendChild(body);
       rail.appendChild(card);
     }
