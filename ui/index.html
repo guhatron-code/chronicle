@@ -1757,7 +1757,11 @@ async function openFile(p){
   let t=forProj.vtabs.find(x=>x.path===p);
   if(!t){ let text;
     try{ text=await invoke("read_file",{dir:forDir,path:p}); }catch(e){ text="Couldn't read: "+e; }
-    let diff=""; try{ diff=(await invoke("git_diff",{dir:forDir,path:p,staged:false,untracked:false}))||""; }catch(_){}
+    // a file's changes may be unstaged, staged, or a brand-new (untracked) file — try each
+    let diff="";
+    for(const a of [{staged:false,untracked:false},{staged:true,untracked:false},{staged:false,untracked:true}]){
+      try{ const d=(await invoke("git_diff",{dir:forDir,path:p,...a}))||""; if(d.trim()){ diff=d; break; } }catch(_){}
+    }
     t={path:p,text,diff,mode:"contents"}; forProj.vtabs.push(t); }
   forProj.vActive=p;
   if(PROJ===forProj){ vtabs=forProj.vtabs; vActive=p; showActiveFile(); } // ignore if the user switched tabs mid-read
