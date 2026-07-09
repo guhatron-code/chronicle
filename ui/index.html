@@ -1824,6 +1824,10 @@ function phaseIdRe(){
 }
 function laneGraph(commits){
   // each lane holds the hash it is currently routing toward (null = free)
+  // a parent outside the fetched window is treated as off-window: we never reserve a
+  // lane for it (that would draw a ghost line with no terminating node), we just mark
+  // the commit as continuing below the window so graphSvg can draw a short stub.
+  const have=new Set(commits.map(c=>c.hash));
   let lanes=[]; const rows=[];
   for(let ri=0; ri<commits.length; ri++){
     const c=commits[ri];
@@ -1835,15 +1839,18 @@ function laneGraph(commits){
     const mergedFrom=[];
     lanes.forEach((h,i)=>{ if(h===c.hash&&i!==nodeLane){ mergedFrom.push(i); lanes[i]=null; } });
     const parents=c.parents||[];
-    // first parent continues in the node's lane
-    lanes[nodeLane]=parents[0]||null;
-    // extra parents reuse a lane already routing to them, else take a free/new lane
+    // first parent continues in the node's lane — but only if it's actually in the window
+    const p0in=parents[0]&&have.has(parents[0]);
+    lanes[nodeLane]=p0in?parents[0]:null;
+    // does history continue past the window from this node? (first parent off-window)
+    const offWindow=parents.length>0 && !parents.some(p=>have.has(p));
+    // extra parents reuse a lane already routing to them, else take a free/new lane — in-window only
     for(let k=1;k<parents.length;k++){
       const pp=parents[k];
-      if(lanes.indexOf(pp)===-1){ let idx=lanes.indexOf(null); if(idx===-1){ idx=lanes.length; lanes.push(null); } lanes[idx]=pp; }
+      if(pp&&have.has(pp)&&lanes.indexOf(pp)===-1){ let idx=lanes.indexOf(null); if(idx===-1){ idx=lanes.length; lanes.push(null); } lanes[idx]=pp; }
     }
     while(lanes.length && lanes[lanes.length-1]==null) lanes.pop();
-    rows.push({c,nodeLane,before,after:lanes.slice(),mergedFrom,parents});
+    rows.push({c,nodeLane,before,after:lanes.slice(),mergedFrom,parents,offWindow});
   }
   return rows;
 }
@@ -1879,6 +1886,8 @@ function graphSvg(rows){
       if(pl===r.nodeLane) out+=`<path d="M${x(r.nodeLane)} ${yc} V${yBot}" stroke="${col(pl)}" stroke-width="1.5"/>`;
       else out+=`<path d="M${x(r.nodeLane)} ${yc} C ${x(r.nodeLane)} ${yc+RH*.22}, ${x(pl)} ${yc+RH*.28}, ${x(pl)} ${yBot}" stroke="${col(pl)}" stroke-width="1.5"/>`;
     });
+    // history continues below the fetched window — short stub so the lane doesn't just stop dead
+    if(r.offWindow) out+=`<path d="M${x(r.nodeLane)} ${yc} V${yBot}" stroke="${col(r.nodeLane)}" stroke-width="1.5" stroke-dasharray="1.5 2.5" opacity=".6"/>`;
     const merge=r.parents.length>1;
     out+=`<circle cx="${x(r.nodeLane)}" cy="${yc}" r="${merge?4:R}" fill="${merge?col(r.nodeLane):"var(--panel)"}" stroke="${col(r.nodeLane)}" stroke-width="1.5"/>`;
   });
