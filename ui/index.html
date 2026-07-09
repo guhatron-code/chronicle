@@ -568,6 +568,11 @@
   #vempty{flex:1;display:flex;align-items:center;justify-content:center;color:var(--t5);font-size:var(--fs-body)}
   #vactions{flex:none;display:flex;gap:8px;align-items:center;padding:7px 14px;border-top:1px solid var(--div)}
   #vactions .path{font-family:var(--mono);font-size:var(--fs-code);color:var(--t5);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #vmode{display:inline-flex;gap:2px;background:var(--raised);border:1px solid var(--hair);border-radius:6px;padding:2px}
+  #vmode .vm{font-family:var(--sans);font-size:var(--fs-meta);color:var(--t4);background:transparent;border:none;border-radius:4px;padding:2px 10px;cursor:pointer;transition:.12s}
+  #vmode .vm:hover{color:var(--t2)}
+  #vmode .vm.on{background:var(--bg);color:var(--t1)}
+  #vbody .vdiff{padding:12px 4px 24px 10px}
 
   /* right: terminals */
   #right{display:flex;flex-direction:column;min-width:0;background:var(--panel)}
@@ -742,6 +747,7 @@
         <div id="vactions" style="display:none">
           <span class="path" id="vpath"></span>
           <div class="spacer"></div>
+          <div id="vmode" style="display:none"></div>
           <span class="mono" id="vinfo" style="font-size:var(--fs-meta);color:var(--t5)"></span>
           <button class="btn" id="vcopy" style="font-family:var(--sans);font-size:var(--fs-btn);padding:6px 14px;display:inline-flex;align-items:center;gap:7px"><svg style="width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.6" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>Copy contents</button>
         </div>
@@ -1726,19 +1732,33 @@ function showActiveFile(){
   $("#vempty").style.display=t?"none":"flex";
   $("#vbody").style.display=t?"block":"none";
   $("#vactions").style.display=t?"flex":"none";
+  const vm=$("#vmode");
   if(t){
-    $("#vpre").textContent=t.text; $("#vpath").textContent=t.path;
-    const n=t.text.split("\n").length;
-    $("#vgut").textContent=Array.from({length:n},(_,i)=>i+1).join("\n");
-    $("#vinfo").textContent=`${langOf(t.path)} · ${n} lines`;
-  }
+    const hasDiff=!!(t.diff&&t.diff.trim());
+    const mode=(t.mode==="diff"&&hasDiff)?"diff":"contents"; t.mode=mode;
+    if(hasDiff){ vm.style.display="inline-flex";
+      vm.innerHTML=`<button class="vm ${mode==="contents"?"on":""}" data-m="contents">Contents</button><button class="vm ${mode==="diff"?"on":""}" data-m="diff">Diff</button>`;
+      vm.querySelectorAll(".vm").forEach(bn=>bn.onclick=()=>{ t.mode=bn.dataset.m; showActiveFile(); });
+    } else vm.style.display="none";
+    if(mode==="diff"){
+      const {html,adds,dels}=parseDiff(t.diff);
+      $("#vbody").innerHTML=`<div class="diff vdiff">${html}</div>`;
+      $("#vinfo").innerHTML=`<span class="dadd">+${adds}</span> <span class="ddel">−${dels}</span>`;
+    } else {
+      const n=t.text.split("\n").length;
+      $("#vbody").innerHTML=`<div id="vgrid"><div id="vgut">${Array.from({length:n},(_,i)=>i+1).join("\n")}</div><pre id="vpre">${esc(t.text)}</pre></div>`;
+      $("#vinfo").textContent=`${langOf(t.path)} · ${n} lines`;
+    }
+    $("#vpath").textContent=t.path;
+  } else if(vm) vm.style.display="none";
 }
 async function openFile(p){
   const forProj=PROJ, forDir=activeDir;
   let t=forProj.vtabs.find(x=>x.path===p);
   if(!t){ let text;
     try{ text=await invoke("read_file",{dir:forDir,path:p}); }catch(e){ text="Couldn't read: "+e; }
-    t={path:p,text}; forProj.vtabs.push(t); }
+    let diff=""; try{ diff=(await invoke("git_diff",{dir:forDir,path:p,staged:false,untracked:false}))||""; }catch(_){}
+    t={path:p,text,diff,mode:"contents"}; forProj.vtabs.push(t); }
   forProj.vActive=p;
   if(PROJ===forProj){ vtabs=forProj.vtabs; vActive=p; showActiveFile(); } // ignore if the user switched tabs mid-read
 }
@@ -2082,23 +2102,27 @@ function gitOpenDiff(path,staged,untracked){
   invoke("git_diff",{dir:activeDir,path,staged,untracked}).then(t=>{ GIT.diff.text=t; gitRender(); })
     .catch(e=>{ gitToast(e); GIT.view="status"; });
 }
-function gitRenderDiff(){
-  const d=GIT.diff; const b=$("#gp-body");
-  let body="",oldN=0,newN=0,adds=0,dels=0,first=true;
-  for(const line of (d.text||"").split("\n")){
+function parseDiff(text){
+  let html="",oldN=0,newN=0,adds=0,dels=0,first=true;
+  for(const line of (text||"").split("\n")){
     if(line.startsWith("\\")) continue;              // "\ No newline at end of file"
     if(line.startsWith("@@")){ const m=line.match(/-(\d+)(?:,\d+)? \+(\d+)/); if(m){oldN=+m[1];newN=+m[2];}
-      body+=`<div class="dhk${first?"":" mt"}">${esc(line)}</div>`; first=false; continue; }
+      html+=`<div class="dhk${first?"":" mt"}">${esc(line)}</div>`; first=false; continue; }
     if(/^(diff |index |--- |\+\+\+ |new file|deleted |similarity |rename )/.test(line)) continue;
-    if(line.startsWith("+")){ adds++; body+=`<div class="dl add"><span class="no">${newN++}</span><span class="sg">+</span><span class="tx">${esc(line.slice(1))}</span></div>`; }
-    else if(line.startsWith("-")){ dels++; body+=`<div class="dl del"><span class="no">${oldN++}</span><span class="sg">\u2212</span><span class="tx">${esc(line.slice(1))}</span></div>`; }
-    else { body+=`<div class="dl"><span class="no">${newN++}</span><span class="sg"> </span><span class="tx">${esc(line.replace(/^ /,""))}</span></div>`; oldN++; }
+    if(line.startsWith("+")){ adds++; html+=`<div class="dl add"><span class="no">${newN++}</span><span class="sg">+</span><span class="tx">${esc(line.slice(1))}</span></div>`; }
+    else if(line.startsWith("-")){ dels++; html+=`<div class="dl del"><span class="no">${oldN++}</span><span class="sg">\u2212</span><span class="tx">${esc(line.slice(1))}</span></div>`; }
+    else { html+=`<div class="dl"><span class="no">${newN++}</span><span class="sg"> </span><span class="tx">${esc(line.replace(/^ /,""))}</span></div>`; oldN++; }
   }
+  return {html,adds,dels};
+}
+function gitRenderDiff(){
+  const d=GIT.diff; const b=$("#gp-body");
+  const {html,adds,dels}=parseDiff(d.text);
   const i=d.path.lastIndexOf("/"), nm=i<0?d.path:d.path.slice(i+1), dir=i<0?"":d.path.slice(0,i+1);
   b.style.padding="0";
   b.innerHTML=`<div class="dhd"><button class="bk" id="gp-diffback">${G.chevL('currentColor',11)}changes</button>
     <span class="dpath">${dir?`<span class="dd">${esc(dir)}</span>`:""}${esc(nm)}</span>
-    <span class="dadd">+${adds}</span><span class="ddel">\u2212${dels}</span></div><div class="diff">${body}</div>`;
+    <span class="dadd">+${adds}</span><span class="ddel">\u2212${dels}</span></div><div class="diff">${html}</div>`;
   $("#gp-diffback").onclick=()=>{ GIT.view="status"; GIT.diff=null; b.style.padding=""; gitRender(); };
 }
 $("#gp-x").onclick=gitClose;
