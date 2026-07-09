@@ -577,6 +577,7 @@ fn state_for_project(p: &Project) -> Value {
     let is_git = !branch.is_empty();
     // does this project have an online home at all? (no network — just the configured remote)
     let remote_url = git_in(&p.repo, &["remote", "get-url", "origin"]);
+    let commits: u32 = git_in(&p.repo, &["rev-list", "--count", "HEAD"]).parse().unwrap_or(0);
     let upstream = Command::new("git").arg("-C").arg(&p.repo)
         .args(["rev-parse", "--abbrev-ref", "@{u}"]).output()
         .map(|o| o.status.success()).unwrap_or(false);
@@ -660,7 +661,7 @@ fn state_for_project(p: &Project) -> Value {
         "repo": p.repo.to_string_lossy(), "dir": p.dir.to_string_lossy(),
         "manifest_present": p.manifest.is_some(), "manifest_error": p.manifest_error,
         "is_git": is_git, "branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind,
-        "remote_url": remote_url,
+        "remote_url": remote_url, "commits": commits,
         "last_commit": git_in(&p.repo, &["log", "-1", "--format=%h · %s"]),
         "tags": tags_sorted,
         "worktrees": worktrees, "dirty": dirty,
