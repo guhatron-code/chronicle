@@ -154,77 +154,85 @@
   #gitpane{display:none;flex-direction:column;min-height:0;flex:1;min-width:0;overflow:hidden;background:var(--panel)}
   #gitpane.on{display:flex}
   #left.gitting>.tabpane,#left.gitting>#phview{display:none!important}
-  #gp-head{flex:none;display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid var(--div)}
-  #gp-head b{font-size:13.5px;font-weight:650}
-  .brch{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--t3);
-    background:var(--raised);border:1px solid var(--hair);border-radius:5px;padding:2px 9px}
-  #gp-x{margin-left:auto;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:5px;
-    color:var(--t4);font-size:12px;cursor:pointer}
-  #gp-x:hover{background:var(--hover);color:var(--t1)}
-  #gp-body{flex:1;overflow-y:auto;padding:16px 14px}
-  #gp-err{margin:0 6px 12px;padding:9px 12px;border:1px solid rgba(207,138,134,.4);border-radius:var(--r-s);
+  #gp-head{flex:none;height:48px;display:flex;align-items:center;gap:11px;padding:0 8px 0 18px;border-bottom:1px solid var(--hair)}
+  #gp-head b{font-size:13.5px;font-weight:650;letter-spacing:-.005em}
+  .brch{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;font-family:var(--mono);font-size:11px;color:var(--t2);
+    background:var(--raised);border:1px solid var(--hair);border-radius:5px}
+  #gp-x{margin-left:auto;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;
+    color:var(--t4);cursor:pointer}
+  #gp-x:hover{background:var(--hover);color:var(--t2)}
+  #gp-body{flex:1;overflow-y:auto;padding:15px 16px 18px}
+  #gp-err{margin:0 0 12px;padding:9px 12px;border:1px solid rgba(207,138,134,.4);border-radius:var(--r-s);
     font-size:11.5px;color:var(--err);display:none}
-  .gp-msg{width:calc(100% - 12px);margin:0 6px 8px;background:var(--raised);border:1px solid var(--hair2);
-    border-radius:var(--r-s);color:var(--t1);font-family:var(--sans);font-size:12px;padding:8px 11px;outline:none}
-  .gp-save{width:calc(100% - 12px);margin:0 6px 16px;background:var(--t1);color:#0a0a0a;font-weight:600;font-size:12px;
-    padding:8px 0;border-radius:var(--r-s);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px}
+  .gp-msg{width:100%;background:var(--raised);border:1px solid var(--hair2);
+    border-radius:8px;color:var(--t1);font-family:var(--sans);font-size:12.5px;padding:10px 12px;outline:none}
+  .gp-msg::placeholder{color:var(--t4)}
+  .gp-save{width:100%;margin-top:9px;background:var(--t1);color:#0a0a0a;font-weight:600;font-size:12px;
+    height:34px;border-radius:var(--r-s);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px}
   .gp-save:hover{background:#fff}
   .gp-save:disabled{opacity:.5;cursor:default}
-  .gsec{font-family:var(--mono);font-size:8.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--t5);
-    margin:14px 6px 6px;display:flex;align-items:center}
-  .gsec .n{margin-left:auto;letter-spacing:0}
-  .gsec .lnk{margin-left:auto;letter-spacing:.06em;cursor:pointer;border-bottom:1px dashed var(--t5)}
-  .gsec .lnk:hover{color:var(--t2)}
-  .gpr{display:flex;align-items:center;gap:6px;height:26px;padding:0 7px;border-radius:5px;font-size:12px;color:var(--t2);
-    cursor:pointer;position:relative;min-width:0}
-  .gpr:hover{background:var(--raised)}
-  .gpr .ch{font-family:var(--mono);font-size:8.5px;color:var(--t4);width:10px;text-align:center;flex:none}
-  .gpr .fi{width:13px;height:13px}
-  .gpr .fn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .gpr .fp{color:var(--t5);font-size:10px;font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .gpr.sub{padding-left:26px}
-  .gpr .act{margin-left:auto;display:flex;gap:6px;visibility:hidden;flex:none}
-  .gpr:hover .act{visibility:visible}
-  .gpr .act span{width:18px;height:18px;display:flex;align-items:center;justify-content:center;border-radius:4px;
-    color:var(--t4);font-size:11px}
-  .gpr .act span:hover{background:var(--hover);color:var(--t1)}
-  .gpr .mm{font-family:var(--mono);font-size:10.5px;flex:none;width:14px;text-align:center;margin-left:6px}
-  .mm.M{color:var(--here)}.mm.A{color:var(--done)}.mm.D{color:var(--err)}
-  .gp-quiet{margin:8px 6px;font-size:11.5px;color:var(--t5)}
-  .gp-row2{margin:12px 6px 0;display:flex;align-items:center}
-  .gp-row2 .pub{font-family:var(--mono);font-size:10.5px;color:var(--t3);border-bottom:1px dashed var(--t5);
-    padding-bottom:1px;cursor:pointer;white-space:nowrap}
-  .gp-row2 .pub:hover{color:var(--t1)}
+  .gsec2{font-family:var(--mono);font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t5);
+    margin:18px 0 6px;display:flex;align-items:center;justify-content:space-between}
+  .gsec2 span{font-family:var(--mono);font-size:10px;letter-spacing:0;color:var(--t4);text-transform:none}
+  .gsec2 .lnk{cursor:pointer;border-bottom:1px dashed var(--hair2)}
+  .gsec2 .lnk:hover{color:var(--t2)}
+  .gtr{display:flex;align-items:center;gap:9px;padding:5px 7px 5px 9px;border-radius:5px;cursor:pointer;min-width:0}
+  .gtr:hover{background:var(--hover)}
+  .gtr.gfold{gap:7px;padding:5px 7px}
+  .gtr.sub{padding-left:30px}
+  .gfn{font-family:var(--mono);font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gfn.gdel{color:var(--t4);text-decoration:line-through;text-decoration-color:var(--t5)}
+  .gdir{font-family:var(--mono);font-size:11px;color:var(--t5);white-space:nowrap;flex:none}
+  .gtr .gsp{flex:1}
+  .gtr .gact{display:flex;gap:2px;margin-right:2px;visibility:hidden;flex:none}
+  .gtr:hover .gact{visibility:visible}
+  .gtr .gact button{width:20px;height:20px;border-radius:4px;border:none;background:transparent;color:var(--t3);
+    display:flex;align-items:center;justify-content:center;cursor:pointer}
+  .gtr .gact button:hover{background:var(--active);color:var(--t1)}
+  .gmm{font-family:var(--mono);font-size:12px;font-weight:600;width:12px;text-align:center;flex:none}
+  .gp-quiet{font-size:11.5px;color:var(--t5)}
+  .gp-pubbox{display:flex;align-items:center;gap:10px;margin-top:16px;padding:10px 12px;background:var(--raised);
+    border:1px solid var(--hair);border-radius:8px}
+  .gp-pubbox .ptxt{font-size:12px;color:var(--t3);flex:1}
+  .gp-pubbox .pub{font-family:var(--mono);font-size:11px;color:var(--here);border-bottom:1px dashed var(--here);cursor:pointer;white-space:nowrap;flex:none}
+  .gp-pubbox .pub.dim{color:var(--t4);border-bottom-color:var(--t5)}
+  .gp-pubbox .pub#gp-pull{margin-right:2px}
   /* graph */
-  .gg{position:relative;margin:0 2px}
-  .gg svg.lanes{position:absolute;left:4px;top:0;z-index:2;pointer-events:none}
-  .ggrow{display:flex;align-items:center;height:40px;padding:0 6px 0 0;border-radius:5px;position:relative;z-index:1;min-width:0}
+  .gg{position:relative}
+  .gg svg.lanes{position:absolute;left:0;top:0;z-index:2;pointer-events:none}
+  .ggrow{display:flex;align-items:center;height:38px;padding-left:44px;padding-right:8px;gap:7px;border-radius:5px;position:relative;z-index:1;min-width:0}
   .ggrow:hover{background:var(--raised)}
-  .gglane{flex:none}
-  .ggmsg{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
-  .ggrefs{display:flex;align-items:center;gap:5px;margin-left:8px;flex:none}
-  .ggref{display:inline-flex;align-items:center;height:16px;font-family:var(--mono);font-size:9px;letter-spacing:.03em;
-    background:var(--raised);border:1px solid var(--hair);border-radius:4px;padding:0 6px;color:var(--t3);white-space:nowrap}
-  .ggref.head{border-color:rgba(138,165,200,.4);color:var(--here);background:rgba(138,165,200,.07)}
-  .ggref.phx{color:var(--t4);background:transparent}
-  .ggright{margin-left:auto;display:flex;align-items:center;gap:7px;flex:none;padding-left:10px}
+  .ggmsgwrap{flex:1;min-width:0;display:flex;align-items:center;gap:7px}
+  .ggmsg{font-family:var(--mono);font-size:11.5px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .ggrow.dim .ggmsg{color:var(--t4)}
+  .ggref{display:inline-flex;align-items:center;font-family:var(--mono);font-size:9px;
+    background:var(--raised);border:1px solid var(--hair);border-radius:4px;padding:1px 5px;color:var(--t4);white-space:nowrap;flex:none}
+  .ggref.head{border-color:rgba(138,165,200,.3);color:var(--here);background:rgba(138,165,200,.14)}
+  .ggref.phx{color:var(--t4);background:transparent;border-color:var(--div)}
+  .ggright{display:flex;align-items:center;gap:7px;flex:none}
   .ggau{width:14px;height:14px;border-radius:50%;background:var(--raised);border:1px solid var(--hair);
-    font-size:7px;display:flex;align-items:center;justify-content:center;color:var(--t4);flex:none}
-  .gghash{font-family:var(--mono);font-size:9.5px;color:var(--t5)}
-  .ggago{font-family:var(--mono);font-size:10px;color:var(--t5);min-width:26px;text-align:right}
+    font-family:var(--mono);font-size:7px;display:flex;align-items:center;justify-content:center;color:var(--t3);flex:none}
+  .gghash{font-family:var(--mono);font-size:10.5px;color:var(--t5)}
+  .ggago{font-family:var(--mono);font-size:10.5px;color:var(--t5);width:22px;text-align:right}
   /* diff view */
-  .dhd{display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--div);
-    font-family:var(--mono);font-size:11px;color:var(--t2)}
-  .dhd .bk{color:var(--t4);cursor:pointer}
-  .dhd .bk:hover{color:var(--t1)}
-  .diff{font-family:var(--code);font-size:11px;line-height:1.62;padding:8px 0 24px}
-  .dl{display:flex;white-space:pre-wrap;word-break:break-word}
-  .dl .no{width:44px;flex:none;text-align:right;padding-right:10px;color:var(--t5);font-size:9.5px;
-    -webkit-user-select:none;user-select:none}
-  .dl.add{background:rgba(127,174,138,.08)}.dl.add .tx{color:#a9c9b1}
-  .dl.del{background:rgba(207,138,134,.08)}.dl.del .tx{color:#cf9d9a}
-  .dl .tx{color:var(--t3);min-width:0;-webkit-user-select:text;user-select:text}
-  .hunk{color:var(--t5);padding:6px 14px 2px 54px;font-size:9.5px;font-family:var(--code)}
+  .dhd{display:flex;align-items:center;gap:11px;padding:9px 14px;border-bottom:1px solid var(--hair);
+    font-family:var(--mono);font-size:11.5px;color:var(--t2)}
+  .dhd .bk{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px 0 6px;border-radius:6px;
+    border:1px solid var(--hair);background:var(--raised);color:var(--t3);cursor:pointer;font-size:10.5px;flex:none}
+  .dhd .bk:hover{color:var(--t1);border-color:var(--hair2)}
+  .dhd .dpath{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dhd .dpath .dd{color:var(--t5)}
+  .dhd .dadd{color:var(--done);flex:none}
+  .dhd .ddel{color:var(--err);flex:none}
+  .diff{font-family:var(--code);font-size:11.5px;line-height:1.85;background:var(--bg);flex:1;overflow:auto}
+  .dhk{color:var(--t5);background:var(--panel);border-bottom:1px solid var(--div);padding:6px 14px;position:sticky;top:0}
+  .dhk.mt{border-top:1px solid var(--div);margin-top:2px}
+  .dl{display:flex}
+  .dl .no{width:44px;text-align:right;padding-right:12px;color:var(--t5);flex:none;-webkit-user-select:none;user-select:none}
+  .dl .sg{width:16px;text-align:center;color:var(--t5);flex:none}
+  .dl.add{background:rgba(127,174,138,.08)}.dl.add .sg{color:var(--done)}.dl.add .tx{color:#a9c9b1}
+  .dl.del{background:rgba(207,138,134,.08)}.dl.del .sg{color:var(--err)}.dl.del .tx{color:#cf9d9a}
+  .dl .tx{color:var(--t3);white-space:pre;padding-right:12px;-webkit-user-select:text;user-select:text}
   /* phase view (M3) */
   #phview{display:none;flex-direction:column;min-height:0;flex:1}
   #phview.on{display:flex}
@@ -666,7 +674,7 @@
     </div>
 
     <div id="gitpane">
-      <div id="gp-head"><b>Project history</b><span class="brch" id="gp-branch">⎇ —</span><span id="gp-x" title="Close · Esc">✕</span></div>
+      <div id="gp-head"><b>Project history</b><span class="brch" id="gp-branch"></span><span id="gp-x" title="Close · Esc"></span></div>
       <div id="gp-err"></div>
       <div id="gp-body"></div>
     </div>
@@ -766,6 +774,25 @@ const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replac
 const sanB = s => esc(s).replace(/&lt;(\/?b)&gt;/gi,"<$1>");
 const humanTitle=fn=>{ const b=fn.replace(/\.[a-z0-9]+$/i,"").replace(/[_-]+/g," ").trim().toLowerCase(); return b.charAt(0).toUpperCase()+b.slice(1); };
 const FICON = `<svg class="ficon" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>`;
+/* glyphs transcribed 1:1 from the Claude Design comp (16-viewBox) */
+const G={
+  file:(c='var(--t4)',w=13)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" fill="none" stroke="${c}" stroke-width="1.3" style="flex:none"><path d="M4 2.4h5l3 3v8a.6.6 0 0 1-.6.6H4a.6.6 0 0 1-.6-.6V3a.6.6 0 0 1 .6-.6z" stroke-linejoin="round"></path><path d="M8.9 2.5v3h3" stroke-linejoin="round"></path></svg>`,
+  folder:(c='var(--t3)',w=13)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" fill="none" stroke="${c}" stroke-width="1.3" style="flex:none"><path d="M1.6 4.4c0-.6.5-1.1 1.1-1.1h3.1l1.3 1.5h6.2c.6 0 1.1.5 1.1 1.1v5.8c0 .6-.5 1.1-1.1 1.1H2.7c-.6 0-1.1-.5-1.1-1.1z" stroke-linejoin="round"></path></svg>`,
+  chevD:(c='var(--t4)',w=10,sw=1.6)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" fill="none" stroke="${c}" stroke-width="${sw}" style="flex:none"><path d="M4 6.5 8 10.5l4-4" stroke-linecap="round" stroke-linejoin="round"></path></svg>`,
+  chevR:(c='var(--t4)',w=11,sw=1.7)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" fill="none" stroke="${c}" stroke-width="${sw}" style="flex:none"><path d="M6.5 4 10.5 8l-4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>`,
+  chevL:(c='currentColor',w=11)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" fill="none" stroke="${c}" stroke-width="1.6"><path d="M10 4 6 8l4 4" stroke-linecap="round" stroke-linejoin="round"></path></svg>`,
+  branch:`<svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="var(--t4)" stroke-width="1.4"><path d="M5 3.2a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6zM5 6.8v4.4M11 9.2a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6zM11 9.2V7.4A2 2 0 0 0 9 5.4H6.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>`,
+  star:`<svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5l1.6 4.9H14.7l-4.1 3 1.6 4.9L8 11.3 3.8 14.3l1.6-4.9-4.1-3H6.4z"></path></svg>`,
+  check:(c='currentColor',w=13)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" fill="none" stroke="${c}" stroke-width="1.7"><path d="M3.5 8.4 6.4 11.2 12.5 4.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>`,
+  up:`<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--here)" stroke-width="1.3" style="flex:none"><path d="M8 12.5v-9M4.5 6.8 8 3.3l3.5 3.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>`,
+  copy:`<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.6"></rect><path d="M10.8 5.4V3.5c0-.6-.5-1.1-1.1-1.1H3.4c-.6 0-1.1.5-1.1 1.1v6.3c0 .6.5 1.1 1.1 1.1h1.9" stroke-linecap="round"></path></svg>`,
+  play:(c='currentColor',w=12)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" fill="${c}"><path d="M5 3.5v9l7-4.5z"></path></svg>`,
+  plus:`<svg width="12" height="12" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.5" fill="none"><path d="M8 3.5v9M3.5 8h9" stroke-linecap="round"></path></svg>`,
+  minus:`<svg width="12" height="12" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.6" fill="none"><path d="M3.5 8h9" stroke-linecap="round"></path></svg>`,
+  discard:`<svg width="12" height="12" viewBox="0 0 16 16" stroke="currentColor" stroke-width="1.4" fill="none"><path d="M13.4 7.2A5.4 5.4 0 1 0 12 11.4" stroke-linecap="round"></path><path d="M13.6 3.4v3.6h-3.6" stroke-linecap="round" stroke-linejoin="round"></path></svg>`,
+  x:(c='currentColor',w=13)=>`<svg width="${w}" height="${w}" viewBox="0 0 16 16" stroke="${c}" stroke-width="1.5" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke-linecap="round"></path></svg>`,
+  foldersearch:`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M1.6 4.4c0-.6.5-1.1 1.1-1.1h3.1l1.3 1.5h4.4c.6 0 1.1.5 1.1 1.1v2.3" stroke-linejoin="round"></path><path d="M1.6 6.2v6c0 .6.5 1.1 1.1 1.1h5.1" stroke-linejoin="round"></path><circle cx="11.4" cy="10.6" r="2.3"></circle><path d="M13.1 12.3 14.6 13.8" stroke-linecap="round"></path></svg>`,
+};
 const ago = epoch => { const s=(Date.now()/1000)-Number(epoch||0); if(!epoch||s<0)return"";
   if(s<120)return"just now"; if(s<7200)return Math.round(s/60)+"m ago"; if(s<172800)return Math.round(s/3600)+"h ago";
   return Math.round(s/86400)+"d ago"; };
@@ -1714,7 +1741,7 @@ async function gitRefresh(){
 }
 const AGENT_RE=/\b(claude|codex|gpt|agent)\b|\[bot\]/i;
 function auGlyph(name){
-  if(AGENT_RE.test(name||"")) return `<span class="ggau" title="${esc(name)} (an agent session)">✳</span>`;
+  if(AGENT_RE.test(name||"")) return `<span class="ggau" style="color:var(--here)" title="${esc(name)} (an agent session)">${G.star}</span>`;
   const ini=(name||"?").split(/\s+/).map(w=>w[0]).join("").slice(0,2).toUpperCase();
   return `<span class="ggau" title="${esc(name||"")}">${esc(ini)}</span>`;
 }
@@ -1754,11 +1781,11 @@ function graphLaneCount(rows){
   return Math.min(m,GRAPH_CAP);
 }
 function graphSvg(rows){
-  const RH=40,LW=14,R=3.5;
+  const RH=38,LW=14,R=3.5;
   const cap=graphLaneCount(rows);
-  const x=i=>6+Math.min(i,GRAPH_CAP-1)*LW;
+  const x=i=>13+Math.min(i,GRAPH_CAP-1)*LW;
   const col=i=>LANECOL[Math.min(i,LANECOL.length-1)];
-  let out=`<svg class="lanes" width="${cap*LW+8}" height="${rows.length*RH}" fill="none">`;
+  let out=`<svg class="lanes" width="40" height="${rows.length*RH}" fill="none">`;
   rows.forEach((r,ri)=>{
     const yc=ri*RH+RH/2, yTop=yc-RH/2, yBot=yc+RH/2;
     const maxL=Math.max(r.before.length,r.after.length);
@@ -1780,75 +1807,67 @@ function graphSvg(rows){
       else out+=`<path d="M${x(r.nodeLane)} ${yc} C ${x(r.nodeLane)} ${yc+RH*.22}, ${x(pl)} ${yc+RH*.28}, ${x(pl)} ${yBot}" stroke="${col(pl)}" stroke-width="1.5"/>`;
     });
     const merge=r.parents.length>1;
-    out+=`<circle cx="${x(r.nodeLane)}" cy="${yc}" r="${R}" fill="${merge?col(r.nodeLane):"var(--panel)"}" stroke="${col(r.nodeLane)}" stroke-width="1.5"/>`;
+    out+=`<circle cx="${x(r.nodeLane)}" cy="${yc}" r="${merge?4:R}" fill="${merge?col(r.nodeLane):"var(--panel)"}" stroke="${col(r.nodeLane)}" stroke-width="1.5"/>`;
   });
   return out+"</svg>";
 }
+const shortAgo=a=>String(a||"").replace(" ago","").replace(/(\d+)\s*(year|month|week|day|hour|min(?:ute)?|sec(?:ond)?)s?.*/i,(m,n,u)=>n+(/mo/i.test(u)?"mo":u[0].toLowerCase()));
 function gitRender(){
-  $("#gp-branch").textContent="⎇ "+((PROJ&&PROJ.state&&PROJ.state.branch)||"—");
+  const S=(PROJ&&PROJ.state)||{};
+  const bc=$("#gp-branch"); if(bc) bc.innerHTML=`${G.branch}<span>${esc(S.branch||"—")}</span>`;
+  const gx=$("#gp-x"); if(gx&&!gx.dataset.g){ gx.innerHTML=G.x('currentColor',13); gx.dataset.g=1; }
   const b=$("#gp-body");
+  if(GIT.view!=="diff") b.style.padding="";
   if(GIT.notGit){
-    b.innerHTML=`<div class="gp-quiet" style="margin-top:20px;text-align:center">This folder isn't a git project yet.<br>
-      Ideate in the terminal · the first save creates its history.</div>`;
+    b.innerHTML=`<div class="gp-quiet" style="margin-top:20px;text-align:center;line-height:1.6">This folder isn't a git project yet.<br>
+      <span style="color:var(--t4)">Ideate in the terminal · the first save creates its history.</span></div>`;
     return;
   }
   if(GIT.view==="diff"&&GIT.diff){ gitRenderDiff(); return; }
   const st=GIT.status||{staged:[],unstaged:[]};
   const total=st.staged.length+st.unstaged.length;
-  const S=(PROJ&&PROJ.state)||{};
-  const treeRows=(list,staged)=>{
-    // group by folder, VS Code tree style
-    const dirs={};
-    list.forEach(f=>{ const i=f.path.lastIndexOf("/"); const d=i<0?"":f.path.slice(0,i);
-      (dirs[d]=dirs[d]||[]).push(f); });
-    let html="";
-    Object.keys(dirs).sort().forEach(d=>{
-      if(d) html+=`<div class="gpr" style="cursor:default"><span class="ch">▾</span>${ICON_DIR.replace('class="fi"','class="fi" style="width:13px;height:13px"')}<span class="fn" style="color:var(--t3)">${esc(d)}</span></div>`;
-      dirs[d].forEach(f=>{
-        const nm=f.path.split("/").pop();
-        html+=`<div class="gpr ${d?"sub":""}" data-p="${encodeURIComponent(f.path)}" data-st="${staged?1:0}" data-un="${f.untracked?1:0}">
-          <span class="ch"></span>${ICON_FILE}<span class="fn">${esc(nm)}</span>
-          <span class="act">${staged?`<span class="unstage" title="Unstage">−</span>`
-            :`<span class="stage" title="Stage">+</span><span class="discard" title="Discard changes">↻</span>`}</span>
-          <span class="mm ${esc(f.code)}">${esc(f.code)}</span></div>`;
-      });
-    });
-    return html;
+  const mmc={A:"var(--done)",M:"var(--here)",D:"var(--err)"};
+  const stagedRow=f=>{
+    const i=f.path.lastIndexOf("/"), nm=i<0?f.path:f.path.slice(i+1), dir=i<0?"":f.path.slice(0,i);
+    return `<div class="gtr" data-p="${encodeURIComponent(f.path)}" data-st="1" data-un="0">
+      ${G.file()}<span class="gfn">${esc(nm)}</span>${dir?`<span class="gdir">${esc(dir)}</span>`:""}
+      <div class="gsp"></div><span class="gact"><button class="unstage" title="Unstage">${G.minus}</button></span>
+      <span class="gmm" style="color:${mmc[f.code]||"var(--t3)"}">${esc(f.code)}</span></div>`;
   };
-  let html=`
-    <input class="gp-msg" id="gp-msg" placeholder="Message (what changed?)" value="${esc(GIT.msg||"")}">
-    <button class="gp-save" id="gp-save">✓ Save to history</button>`;
-  if(total===0){
-    html+=`<div class="gp-quiet">Nothing to save · everything is recorded.</div>`;
-  } else {
-    if(st.staged.length){ html+=`<div class="gsec">Staged changes<span class="n">${st.staged.length}</span></div>`+treeRows(st.staged,true); }
-    html+=`<div class="gsec">Changes<span class="n">${st.unstaged.length}</span></div>`+(st.unstaged.length?treeRows(st.unstaged,false):`<div class="gp-quiet">None.</div>`);
-  }
-  const pubLabel=!S.remote_url?"Put this project on GitHub"
-    :(!S.upstream||S.ahead>0)?`Publish online${S.ahead>0?" · "+S.ahead+" waiting":""}`:null;
-  html+=`<div class="gp-row2">
-    <span style="font-size:11px;color:var(--t4)">${S.ahead>0?S.ahead+" save"+(S.ahead>1?"s":"")+" waiting to publish":(S.upstream?"Everything is published":(S.remote_url?"Never pushed":"Not on GitHub yet"))}</span>
-    <span class="spacer"></span>
-    ${S.behind>0?`<span class="pub" id="gp-pull" style="margin-right:14px">Bring down ${S.behind} newer</span>`:""}
-    ${pubLabel?`<span class="pub" id="gp-pub">${esc(pubLabel)}</span>`:""}</div>`;
-  // the graph
-  const re=phaseIdRe();
-  const rows=laneGraph(GIT.log||[]);
-  html+=`<div class="gsec" style="margin-top:22px">Graph<span class="${(GIT.limit||30)<=30?"lnk":"n"}" id="gp-showall">${(GIT.limit||30)<=30?"Show all":"last "+rows.length}</span></div><div class="gg">`;
-  html+=graphSvg(rows);
-  const laneW=graphLaneCount(rows)*14+12;
-  rows.forEach(r=>{
-    const c=r.c;
-    let refHtml="";
-    (c.refs||"").split(",").map(x=>x.trim().replace("HEAD -> ","")).filter(Boolean).slice(0,2).forEach(x=>{
-      refHtml+=`<span class="ggref ${x===((PROJ.state||{}).branch)?"head":""}">${esc(x)}</span>`;
+  const changeTree=list=>{
+    const dirs={}; list.forEach(f=>{ const i=f.path.lastIndexOf("/"); const d=i<0?"":f.path.slice(0,i); (dirs[d]=dirs[d]||[]).push(f); });
+    let h="";
+    Object.keys(dirs).sort().forEach(d=>{
+      if(d) h+=`<div class="gtr gfold">${G.chevD()}${G.folder()}<span class="gfn">${esc(d)}</span></div>`;
+      dirs[d].forEach(f=>{ const nm=f.path.split("/").pop(), del=f.code==="D";
+        h+=`<div class="gtr${d?" sub":""}" data-p="${encodeURIComponent(f.path)}" data-st="0" data-un="${f.untracked?1:0}">
+          ${G.file(del?"var(--t5)":"var(--t4)")}<span class="gfn${del?" gdel":""}">${esc(nm)}</span>
+          <div class="gsp"></div><span class="gact"><button class="stage" title="Stage">${G.plus}</button>${del?"":`<button class="discard" title="Discard changes">${G.discard}</button>`}</span>
+          <span class="gmm" style="color:${mmc[f.code]||"var(--t3)"}">${esc(f.code)}</span></div>`; });
     });
+    return h;
+  };
+  let html=`<input class="gp-msg" id="gp-msg" placeholder="Message (what changed?)" value="${esc(GIT.msg||"")}">
+    <button class="gp-save" id="gp-save">${G.check("currentColor",13)}Save to history</button>`;
+  if(total===0){ html+=`<div class="gp-quiet" style="margin-top:16px">Nothing to save · everything is recorded.</div>`; }
+  else {
+    if(st.staged.length){ html+=`<div class="gsec2">Staged changes<span>${st.staged.length}</span></div>`+st.staged.map(stagedRow).join(""); }
+    html+=`<div class="gsec2">Changes<span>${st.unstaged.length}</span></div>`+(st.unstaged.length?changeTree(st.unstaged):`<div class="gp-quiet">None.</div>`);
+  }
+  const noRemote=!S.remote_url;
+  const cnt=S.ahead>0?`${S.ahead} save${S.ahead>1?"s":""} waiting to publish`:(S.upstream?"Everything is published":(noRemote?"Not on GitHub yet":"Never pushed"));
+  html+=`<div class="gp-pubbox">${G.up}<span class="ptxt">${esc(cnt)}</span>${S.behind>0?`<span class="pub" id="gp-pull">Bring down ${S.behind} newer</span>`:""}<span class="pub${noRemote?" dim":""}" id="gp-pub">${noRemote?"Put this project on GitHub":"Publish online"}</span></div>`;
+  const re=phaseIdRe(); const rows=laneGraph(GIT.log||[]);
+  html+=`<div class="gsec2" style="margin-top:18px">Graph<span class="lnk" id="gp-showall">${(GIT.limit||30)<=30?"Show all":"last "+rows.length}</span></div><div class="gg">`;
+  html+=graphSvg(rows);
+  rows.forEach(r=>{
+    const c=r.c; let refHtml="";
+    (c.refs||"").split(",").map(x=>x.trim().replace("HEAD -> ","")).filter(Boolean).slice(0,2).forEach(x=>{
+      refHtml+=`<span class="ggref ${x===(S.branch)?"head":""}">${esc(x)}</span>`; });
     const m=re&&(c.subject||"").match(re);
     if(m) refHtml+=`<span class="ggref phx" title="Tagged from the save message · approximate">${esc(m[1])}</span>`;
-    html+=`<div class="ggrow"><span class="gglane" style="width:${laneW}px"></span>
-      <span class="ggmsg" title="${esc(c.subject)}">${esc(c.subject)}</span>
-      <span class="ggrefs">${refHtml}</span>
-      <span class="ggright">${auGlyph(c.author)}<span class="gghash">${esc(c.hash)}</span><span class="ggago">${esc((c.ago||"").replace(" ago","").replace(/(\d+) (\w)\w*/,"$1$2"))}</span></span></div>`;
+    html+=`<div class="ggrow"><div class="ggmsgwrap"><span class="ggmsg" title="${esc(c.subject)}">${esc(c.subject)}</span>${refHtml}</div>
+      <span class="ggright">${auGlyph(c.author)}<span class="gghash">${esc(c.hash)}</span><span class="ggago">${esc(shortAgo(c.ago))}</span></span></div>`;
   });
   html+=`</div>`;
   b.innerHTML=html;
@@ -1862,7 +1881,7 @@ function gitRender(){
   const pull=$("#gp-pull"); if(pull) pull.onclick=async()=>{ gitToast(null);
     try{ await invoke("git_pull",{dir:activeDir}); toast("Brought the newer saves down"); refresh(); gitRefresh(); }
     catch(e){ gitToast("Couldn't pull: "+e); } };
-  b.querySelectorAll(".gpr[data-p]").forEach(row=>{
+  b.querySelectorAll(".gtr[data-p]").forEach(row=>{
     const path=decodeURIComponent(row.dataset.p), staged=row.dataset.st==="1", un=row.dataset.un==="1";
     row.onclick=()=>gitOpenDiff(path,staged,un);
     const st1=row.querySelector(".stage"); if(st1) st1.onclick=async ev=>{ ev.stopPropagation();
@@ -1914,20 +1933,22 @@ function gitOpenDiff(path,staged,untracked){
 }
 function gitRenderDiff(){
   const d=GIT.diff; const b=$("#gp-body");
-  let body="",oldN=0,newN=0,adds=0,dels=0;
+  let body="",oldN=0,newN=0,adds=0,dels=0,first=true;
   for(const line of (d.text||"").split("\n")){
     if(line.startsWith("\\")) continue;              // "\ No newline at end of file"
     if(line.startsWith("@@")){ const m=line.match(/-(\d+)(?:,\d+)? \+(\d+)/); if(m){oldN=+m[1];newN=+m[2];}
-      body+=`<div class="hunk">${esc(line)}</div>`; continue; }
+      body+=`<div class="dhk${first?"":" mt"}">${esc(line)}</div>`; first=false; continue; }
     if(/^(diff |index |--- |\+\+\+ |new file|deleted |similarity |rename )/.test(line)) continue;
-    if(line.startsWith("+")){ adds++; body+=`<div class="dl add"><span class="no">${newN++}</span><span class="tx">${esc(line)}</span></div>`; }
-    else if(line.startsWith("-")){ dels++; body+=`<div class="dl del"><span class="no">${oldN++}</span><span class="tx">${esc(line)}</span></div>`; }
-    else { body+=`<div class="dl"><span class="no">${newN++}</span><span class="tx">${esc(line)}</span></div>`; oldN++; }
+    if(line.startsWith("+")){ adds++; body+=`<div class="dl add"><span class="no">${newN++}</span><span class="sg">+</span><span class="tx">${esc(line.slice(1))}</span></div>`; }
+    else if(line.startsWith("-")){ dels++; body+=`<div class="dl del"><span class="no">${oldN++}</span><span class="sg">\u2212</span><span class="tx">${esc(line.slice(1))}</span></div>`; }
+    else { body+=`<div class="dl"><span class="no">${newN++}</span><span class="sg"> </span><span class="tx">${esc(line.replace(/^ /,""))}</span></div>`; oldN++; }
   }
-  const stat=`<span class="mm" style="color:var(--done)">+${adds}</span> <span class="mm" style="color:var(--err)">\u2212${dels}</span>`;
-  b.innerHTML=`<div class="dhd" style="margin:-16px -14px 10px;padding:12px 16px"><span class="bk" id="gp-back">‹ changes</span>
-    <span>${esc(d.path)}</span><span style="margin-left:auto;font-family:var(--mono);font-size:10px">${d.staged?'<span style="color:var(--t5)">staged&nbsp;</span>':""}${stat}</span></div><div class="diff">${body}</div>`;
-  $("#gp-back").onclick=()=>{ GIT.view="status"; GIT.diff=null; gitRender(); };
+  const i=d.path.lastIndexOf("/"), nm=i<0?d.path:d.path.slice(i+1), dir=i<0?"":d.path.slice(0,i+1);
+  b.style.padding="0";
+  b.innerHTML=`<div class="dhd"><button class="bk" id="gp-back">${G.chevL('currentColor',11)}changes</button>
+    <span class="dpath">${dir?`<span class="dd">${esc(dir)}</span>`:""}${esc(nm)}</span>
+    <span class="dadd">+${adds}</span><span class="ddel">\u2212${dels}</span></div><div class="diff">${body}</div>`;
+  $("#gp-back").onclick=()=>{ GIT.view="status"; GIT.diff=null; b.style.padding=""; gitRender(); };
 }
 $("#gp-x").onclick=gitClose;
 
