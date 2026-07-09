@@ -1686,7 +1686,7 @@ async function buildTree(){
 }
 async function treeChildren(rel,depth){
   const box=document.createElement("div");
-  box.className="t-kids"; box.style.setProperty("--gx",(6+(depth-1)*12+11)+"px");
+  box.className="t-kids"; box.style.setProperty("--gx",(6+(depth-1)*12+6)+"px");  // = parent row's chevron center (paddingLeft + half the 12px chevron)
   let entries=[];
   try{ entries=await invoke("list_dir",{dir:activeDir,path:rel}); }catch(e){ return box; }
   for(const e of entries){
