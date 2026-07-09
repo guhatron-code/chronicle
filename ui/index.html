@@ -338,12 +338,9 @@
   @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(138,165,200,.35)}50%{box-shadow:0 0 0 6px rgba(138,165,200,0)}}
   @media(prefers-reduced-motion:reduce){.pulse,.phase.now::before{animation:none}}
   .stale-note{display:flex;align-items:center;gap:12px;font-size:var(--fs-body);color:var(--t2);line-height:1.5;
-    padding:14px 16px;border:1px solid rgba(217,180,95,.38);background:rgba(217,180,95,.09);border-radius:var(--r);margin-bottom:13px}
+    padding:14px 16px;background:rgba(217,180,95,.10);border-radius:var(--r);margin-bottom:13px}
   .stale-note .fi{width:19px;height:19px;flex:none;color:var(--warn)}
-  .stale-note .chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--sans);font-size:var(--fs-label);font-weight:600;color:#0a0a0a;
-    background:var(--warn);border:none;border-radius:6px;padding:6px 13px;cursor:pointer;white-space:nowrap;flex:none}
-  .stale-note .chip:hover{filter:brightness(1.08)}
-  .stale-note .chip svg{width:13px;height:13px}
+  .stale-note .btn{margin-left:auto}
 
   .panel-c{background:var(--panel);border-radius:var(--r);padding:15px 17px;margin-bottom:13px}
   .panel-c h2{font-family:var(--mono);font-size:var(--fs-eyebrow);font-weight:var(--fw-eyebrow);letter-spacing:.14em;text-transform:uppercase;color:var(--t4);margin-bottom:9px;
@@ -1338,8 +1335,14 @@ function render(S){
     const n=document.createElement("div"); n.className="stale-note";
     n.innerHTML=`<svg class="fi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
       <span style="min-width:0">The plan documents changed after this roadmap was written (${esc(S.stale.map(s=>s.split("/").pop()).join(", "))}). Ask a session to run it again.</span>
-      <span class="chip" style="margin-left:auto" data-c="/chronicle-init" title="Copies /chronicle-init to paste into a session">Scan ${G.copy}</span>`;
-    n.querySelector("[data-c]").onclick=()=>copyCmd("/chronicle-init");
+      <button class="btn primary" data-c="scan" title="Re-run the roadmap scan in a background session">Scan${G.play('#0a0a0a',12)}</button>`;
+    n.querySelector("[data-c]").onclick=(ev)=>{
+      if(PROJ.init&&PROJ.init.phase==="running") return;
+      PROJ.init={};                                   // clear any prior done/failed so it re-runs
+      const btn=ev.currentTarget; btn.disabled=true;
+      btn.innerHTML=`Scanning…<span class="spin" style="width:13px;height:13px;border-width:2px;border-color:rgba(0,0,0,.28);border-top-color:#0a0a0a;margin-left:6px"></span>`;
+      startInit(PROJ);                                // same background /chronicle-init a new project runs
+    };
     pad.appendChild(n);
   }
 
