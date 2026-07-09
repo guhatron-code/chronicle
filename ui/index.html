@@ -29,9 +29,13 @@
   ::-webkit-scrollbar-track{background:transparent}
   :focus-visible{outline:2px solid rgba(255,255,255,.3);outline-offset:1px;border-radius:4px}
 
-  .btn{font-family:var(--mono);font-size:11px;color:var(--t3);background:var(--raised);
-    border:1px solid var(--hair);border-radius:var(--r-s);padding:4px 11px;cursor:pointer;transition:.12s}
-  .btn:hover{background:var(--hover);color:var(--t1);border-color:var(--hair2)}
+  /* secondary button — faithful to the Weave DS shadcn Button (variant=secondary, size=sm) */
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    font-family:var(--sans);font-size:14px;font-weight:500;line-height:1;color:var(--t2);
+    background:var(--raised);border:0;border-radius:var(--r);height:32px;padding:0 12px;
+    cursor:pointer;transition:background .12s,color .12s;white-space:nowrap}
+  .btn:hover{background:var(--hover);color:var(--t1)}
+  .btn svg{width:16px;height:16px;flex:none}
   .btn.primary{background:var(--t1);color:#0a0a0a;border-color:transparent;font-family:var(--sans);font-weight:600;font-size:12.5px;padding:8px 18px}
   .btn.primary:hover{background:#fff}
   .seg{display:flex;background:var(--raised);border:1px solid var(--hair);border-radius:var(--r-s);padding:2px;gap:2px}
@@ -1338,7 +1342,7 @@ function render(S){
         p.docs.forEach(d=>chips.appendChild(docChip(d,S.docs||{})));row.appendChild(chips);bodyIn.appendChild(row);}
       if(!p.pool){
         const vd=document.createElement("div"); vd.style.cssText="display:flex;margin-top:12px";
-        vd.innerHTML=`<button class="btn vdet">View details ›</button>`;
+        vd.innerHTML=`<button class="btn vdet">View details<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6.5 4 10.5 8l-4 4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
         const fidx=idx-1;
         vd.querySelector("button").onclick=(ev)=>{ ev.stopPropagation(); openPhaseView(p.id,fidx); };
         bodyIn.appendChild(vd);
