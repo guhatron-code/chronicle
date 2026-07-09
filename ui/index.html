@@ -600,8 +600,6 @@
   #tt-hint .tt-lbl{font-family:var(--mono);font-size:var(--fs-eyebrow);letter-spacing:.1em;text-transform:uppercase;color:var(--t5)}
   #tt-hint .agbtn{display:inline-flex;align-items:center;justify-content:center;padding:3px;background:none;border:none;cursor:pointer;opacity:.92;transition:.12s;flex:none}
   #tt-hint .agbtn:hover{opacity:1;transform:translateY(-1px)}
-  #tt-hint .tt-paste{color:var(--t5);margin-left:2px}
-  #tt-hint .tt-paste.hot{color:var(--t2)}
   .ttab .tname-edit{background:var(--bg);border:1px solid var(--here);border-radius:3px;color:var(--t1);font-family:var(--mono);font-size:var(--fs-code);width:82px;padding:0 4px;outline:none}
   .ttab .tname{cursor:text}
   #tt-body{flex:1;min-height:0;background:var(--bg);position:relative}
@@ -849,10 +847,8 @@ function setHint(copied){
   h.classList.remove("swap"); void h.offsetWidth; h.classList.add("swap");
   h.innerHTML=`<span class="tt-lbl">Start</span>`
     +`<button class="agbtn" data-agent="claude" title="Start a Claude Code session">${G.claude('#D97757',15)}</button>`
-    +`<button class="agbtn" data-agent="codex" title="Start a Codex session">${G.codexColor(15)}</button>`
-    +`<span class="tt-paste${copied?" hot":""}">Paste ⌘V</span>`;
+    +`<button class="agbtn" data-agent="codex" title="Start a Codex session">${G.codexColor(15)}</button>`;
   h.querySelectorAll(".agbtn").forEach(btn=>btn.onclick=()=>spawnAgent(btn.dataset.agent));
-  if(copied) hintTimer=setTimeout(()=>setHint(false),6000);   // keep the buttons; just emphasize "Paste ⌘V" briefly
 }
 async function copyDoc(path,el){
   if(el){ el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
