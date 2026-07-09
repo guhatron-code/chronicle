@@ -801,6 +801,23 @@ fn git_diff(dir: String, path: String, staged: bool, untracked: bool) -> Result<
     else { git_full(&p.repo, &["diff", "--", &path]) }
 }
 
+// run a suggested command in the project's repo dir (login shell so PATH matches the user's).
+// used by the roadmap "what needs you" / stale actions instead of copy-to-clipboard.
+#[tauri::command]
+fn run_command(dir: String, cmd: String) -> Result<String, String> {
+    let p = project_for(&dir)?;
+    let out = std::process::Command::new("/bin/zsh")
+        .args(["-lc", &cmd]).current_dir(&p.repo).output()
+        .map_err(|e| e.to_string())?;
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    if out.status.success() {
+        Ok(if stdout.is_empty() { "Done.".into() } else { stdout })
+    } else {
+        Err(if stderr.is_empty() { if stdout.is_empty() { "command failed".into() } else { stdout } } else { stderr })
+    }
+}
+
 /* ================= files (jailed to the project's roots) ================= */
 
 fn jailed(p: &Project, path: &str) -> Result<PathBuf, String> {
@@ -996,7 +1013,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state, init_start, init_status, agents_available, set_default_agent,
-            git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff,
+            git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             list_dir, read_file, copy_file, copy_text,
             pty_spawn, pty_write, pty_resize, pty_kill
         ])

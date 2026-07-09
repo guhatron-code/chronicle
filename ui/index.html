@@ -863,6 +863,27 @@ async function copyDoc(path,el){
 async function copyCmd(text){ try{ await invoke("copy_text",{text});
   toast(`Copied <span class="dim">· paste it in a terminal →</span>`); setHint(true); }
   catch(e){ toast("Couldn't copy: "+esc(String(e)),false);} }
+// run a suggested command in the background instead of copying it.
+async function runAction(cmd, btn){
+  if(!cmd) return; cmd=cmd.trim();
+  if(cmd==="/chronicle-init"){                        // a Claude command -> background init, like a new project
+    if(PROJ&&PROJ.init&&PROJ.init.phase==="running") return;
+    if(PROJ) PROJ.init={};
+    if(btn){ btn.style.pointerEvents="none"; btn.textContent="Scanning…"; }
+    startInit(PROJ); return;
+  }
+  const risky=/gh repo create|worktree remove|--force|--hard|\brm\s|\bdelete\b|reset --hard/i.test(cmd);
+  const go=async()=>{
+    const old=btn?btn.textContent:""; if(btn){ btn.style.pointerEvents="none"; btn.textContent="Running…"; }
+    try{ await invoke("run_command",{dir:activeDir,cmd});
+      toast(`Ran <span class="mono">${esc(cmd.length>44?cmd.slice(0,42)+"…":cmd)}</span>`);
+      await refresh(); if(GIT.open&&typeof gitRefresh==="function") gitRefresh();   // re-render picks up the new state
+    }catch(e){ toast(`Couldn't run · ${esc(String(e).split("\n")[0].slice(0,120))}`,false);
+      if(btn){ btn.style.pointerEvents=""; btn.textContent=old; } }
+  };
+  if(risky) confirmBox("Run this command?", `<span class="mono">${esc(cmd)}</span> · this can't be undone.`, "Run", go);
+  else go();
+}
 const tilde = p => (p||"").replace(/^\/Users\/[^/]+/,"~");
 const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 /* manifest text is data, not markup — escape everything, then re-allow only <b> */
@@ -1203,7 +1224,7 @@ function render(S){
           <button class="btn" id="err-open-file">Open the file</button>
         </div>`;
       pad.appendChild(alert);
-      alert.querySelector(".mono-snip").onclick=()=>copyCmd("/chronicle-init");
+      alert.querySelector(".mono-snip").onclick=(e)=>runAction("/chronicle-init",e.currentTarget);
       alert.querySelector("#err-open-file").onclick=()=>{ switchTab("repo"); openFile("chronicle.json"); };
       const eb=document.createElement("div"); eb.className="sect-eyebrow"; eb.textContent="Basic view · git only";
       pad.appendChild(eb);
@@ -1284,7 +1305,7 @@ function render(S){
         <button class="btn" id="nm-basic">Use the basic view instead</button>
         <p style="font-size:var(--fs-meta);color:var(--t5);margin:8px 0 0">Git history and generic actions only · no phases.</p></div>`;
       pad.appendChild(wrap);
-      wrap.querySelector(".mono-snip").onclick=()=>copyCmd("/chronicle-init");
+      wrap.querySelector(".mono-snip").onclick=(e)=>runAction("/chronicle-init",e.currentTarget);
       wrap.querySelector("#nm-basic").onclick=()=>{ PROJ.basicView=true; render(S); };
       const rt=wrap.querySelector("#nm-retry");
       if(rt) rt.onclick=()=>{ PROJ.init={}; render(S); };
@@ -1531,7 +1552,7 @@ function renderGitPanels(pad,S,customActs){
     `${a.cmd?`<span class="right"><span class="cmdchip" data-cmd="${encodeURIComponent(a.cmd)}">${esc(a.cmd.length>26?a.cmd.slice(0,24)+"…":a.cmd)}</span></span>`:(a.note?`<span class="right"><span class="rnote" style="display:inline-flex;align-items:center;gap:4px">${esc(a.note)}${a.noteIcon||""}</span></span>`:"")}</div>`).join("")
     :`<div class="act2"><span class="aicon" style="color:var(--done);border-color:rgba(127,174,138,.3)"><svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7"/></svg></span><span class="body"><div class="t" style="color:var(--t3);font-weight:400">Nothing needs you right now.</div></span></div>`);
   pad.appendChild(ap);
-  ap.querySelectorAll(".cmdchip").forEach(el=>el.onclick=()=>copyCmd(decodeURIComponent(el.dataset.cmd)));
+  ap.querySelectorAll(".cmdchip").forEach(el=>el.onclick=()=>runAction(decodeURIComponent(el.dataset.cmd),el));
 }
 
 /* background /chronicle-init — idempotent per project */
@@ -2135,7 +2156,7 @@ async function gitPublish(){
   const S=(PROJ&&PROJ.state)||{};
   if(!S.remote_url){
     const slug=(tilde(S.repo||"").split("/").pop()||"project").replace(/[^a-zA-Z0-9._-]/g,"-");
-    copyCmd(`gh repo create ${slug} --private --source=. --push`);
+    runAction(`gh repo create ${slug} --private --source=. --push`);
     return;
   }
   try{ await invoke("git_push",{dir:activeDir}); toast("Published online"); refresh(); gitRefresh(); }
