@@ -725,6 +725,17 @@ fn git_discard(dir: String, path: String, untracked: bool) -> Result<(), String>
     else { git_full(&p.repo, &["checkout", "--", &path]).map(|_| ()) }
 }
 
+/// Turn a plain folder into a tracked project: git init + a first save.
+#[tauri::command]
+fn git_init_here(dir: String) -> Result<(), String> {
+    let d = PathBuf::from(&dir).canonicalize().map_err(|e| e.to_string())?;
+    if d.join(".git").exists() { return Ok(()); }
+    git_full(&d, &["init"])?;
+    git_full(&d, &["add", "-A"])?;
+    // an empty tree still commits with --allow-empty; a first save either way
+    git_full(&d, &["commit", "--allow-empty", "-m", "First save"]).map(|_| ())
+}
+
 #[tauri::command]
 fn git_commit(dir: String, message: String, stage_all: bool) -> Result<(), String> {
     let p = project_for(&dir)?;
@@ -983,7 +994,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state, init_start, init_status, agents_available, set_default_agent,
-            git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_push, git_pull, git_log_graph, git_diff,
+            git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff,
             list_dir, read_file, copy_file, copy_text,
             pty_spawn, pty_write, pty_resize, pty_kill
         ])

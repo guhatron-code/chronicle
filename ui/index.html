@@ -289,7 +289,7 @@
   .pv-save .hash{font-family:var(--mono);font-size:10.5px;color:var(--t2);background:var(--raised);border:1px solid var(--hair);border-radius:5px;padding:1.5px 6px;flex:none}
   .pv-save .ago{font-family:var(--mono);font-size:10.5px;color:var(--t5);margin-left:auto;flex:none}
   .pv-save .msg{font-size:12px;color:var(--t3);margin-top:5px;line-height:1.4}
-  .vdet{margin-left:auto;flex:none}
+  .vdet{flex:none}
   .pchip{display:inline-flex;align-items:center;gap:7px;height:26px;padding:0 10px;border-radius:6px;border:1px solid var(--hair);
     background:var(--raised);font-family:var(--mono);font-size:11px;color:var(--t2)}
   .pchip .arr{color:var(--t5)}.pchip .into{color:var(--t3)}
@@ -364,6 +364,20 @@
   .parr .aln .l{flex:1;height:1.5px;background:var(--hair2)}
   .parr.hot .aln .l{background:var(--here);opacity:.7}
   .parr .aln svg{margin-left:-1px}
+  .pv-nogit{display:flex;gap:13px;align-items:flex-start;padding:4px 2px 2px}
+  .pv-nogit .ic{width:30px;height:30px;flex:none;border-radius:8px;background:var(--raised);border:1px solid var(--hair);
+    display:flex;align-items:center;justify-content:center;color:var(--t4)}
+  .pv-nogit .t{font-size:12.5px;font-weight:600;color:var(--t2)}
+  .pv-nogit .s{font-size:11.5px;color:var(--t4);line-height:1.55;margin-top:4px;max-width:440px}
+  .pv-nogit .go{display:inline-block;margin-top:9px;font-size:11px;color:var(--here);border-bottom:1px dashed var(--here);padding-bottom:1px}
+  .gp-nogit-full{margin:36px auto 0;max-width:420px;text-align:center;display:flex;flex-direction:column;align-items:center}
+  .gp-nogit-full .ic{width:40px;height:40px;border-radius:11px;background:var(--raised);border:1px solid var(--hair);
+    display:flex;align-items:center;justify-content:center;color:var(--t4);margin-bottom:15px}
+  .gp-nogit-full .ic svg{width:18px;height:18px}
+  .gp-nogit-full .t{font-size:15px;font-weight:650;color:var(--t1);letter-spacing:-.005em}
+  .gp-nogit-full .s{font-size:12.5px;color:var(--t3);line-height:1.6;margin-top:8px}
+  .gp-nogit-full .gp-save svg{width:13px;height:13px}
+  .gp-nogit-full .s2{font-size:11px;color:var(--t5);line-height:1.5;margin-top:10px}
 
   /* the needs-you queue — icon tiles */
   .act2{display:flex;gap:11px;padding:8px 0;border-bottom:1px solid var(--div);align-items:flex-start}
@@ -1310,14 +1324,14 @@ function render(S){
         bodyIn.appendChild(cnt);
         const ul=document.createElement("ul");ul.className="p-items";ul.style.marginTop="4px";
         p.items.forEach(t=>{const li=document.createElement("li");li.innerHTML=sanB(t);ul.appendChild(li);});bodyIn.appendChild(ul);}
-      const pr=pasteRows(p,S.docs||{}); if(pr) bodyIn.appendChild(pr);
       if(!p.pool){
-        const vd=document.createElement("div"); vd.style.cssText="display:flex;margin-top:9px";
+        const vd=document.createElement("div"); vd.style.cssText="display:flex;margin-top:11px";
         vd.innerHTML=`<button class="btn vdet">View details ›</button>`;
         const fidx=idx-1;
         vd.querySelector("button").onclick=(ev)=>{ ev.stopPropagation(); openPhaseView(p.id,fidx); };
         bodyIn.appendChild(vd);
       }
+      const pr=pasteRows(p,S.docs||{}); if(pr) bodyIn.appendChild(pr);
       if((p.docs||[]).length){const row=document.createElement("div");row.className="p-docs";
         const l=document.createElement("span");l.className="row-lbl";l.textContent="reference";row.appendChild(l);
         p.docs.forEach(d=>row.appendChild(docChip(d,S.docs||{})));bodyIn.appendChild(row);}
@@ -1399,10 +1413,18 @@ function renderGitPanels(pad,S,customActs){
       ?`<div class="pnode hot"><div class="plbl">Published online</div><div class="pval">${published} up · ${S.ahead} waiting</div></div>`
       :`<div class="pnode calm"><div class="plbl">Published online</div><div class="pval">${published} up ✓</div></div>`;
   const arr=(lbl,hot)=>`<div class="parr${hot?" hot":""}"><span class="albl">${lbl} →</span><div class="aln"><div class="l"></div><svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="${hot?"var(--here)":"var(--hair2)"}" stroke-width="1.5"><path d="M2 1.5 5 4 2 6.5" stroke-linecap="round" stroke-linejoin="round"></path></svg></div></div>`;
-  gp.style.cursor="pointer"; gp.title="Open the full history · saves, changes, the graph";
+  gp.style.cursor="pointer"; gp.title=S.is_git?"Open the full history · saves, changes, the graph":"Start keeping a history of your work";
   gp.onclick=(ev)=>{ if(!ev.target.closest(".cmdchip")) gitOpen(); };
-  gp.innerHTML=`<h2>Project history<span class="hr">${S.is_git?(S.ahead>0?`<span class="st here"><i></i>${S.ahead} save${S.ahead>1?"s":""} waiting</span>`:`on <span style="color:var(--t2)">${esc(S.branch||"—")}</span>${wb&&S.branch&&S.branch!==wb?` · should be ${esc(wb)}`:""}`):sync}</span></h2>`
-    +(!S.is_git?"":`
+  const noGitBody=`<div class="pv-nogit">
+      <span class="ic">${G.branch}</span>
+      <div style="min-width:0">
+        <div class="t">No history yet</div>
+        <div class="s">This folder isn't tracked, so there's nothing to save or publish. Chronicle keeps your work as a timeline of saves the moment it becomes a git project. The first save sets it up.</div>
+        <span class="go mono">Set up history →</span>
+      </div>
+    </div>`;
+  gp.innerHTML=`<h2>Project history<span class="hr">${S.is_git?(S.ahead>0?`<span class="st here"><i></i>${S.ahead} save${S.ahead>1?"s":""} waiting</span>`:`on <span style="color:var(--t2)">${esc(S.branch||"—")}</span>${wb&&S.branch&&S.branch!==wb?` · should be ${esc(wb)}`:""}`):`<span class="st"><i></i>not tracked yet</span>`}</span></h2>`
+    +(!S.is_git?noGitBody:`
     <div class="pipe">${editsNode}${arr("save",dirty.length>0)}${histNode}${arr("publish",S.upstream&&S.ahead>0)}${onlineNode}</div>
     <div class="kv" style="margin-top:9px">
       ${(S.tags||[]).length?`<span style="display:inline-flex;align-items:center;gap:6px">Milestones reached ${S.tags.slice(-4).map(t=>`<span class="tagchip">${esc(t)}</span>`).join("")}${S.tags.length>4?`<span class="mono" style="font-size:10px;color:var(--t5)">+${S.tags.length-4}</span>`:""}</span>`:""}
@@ -1856,8 +1878,16 @@ function gitRender(){
   const b=$("#gp-body");
   if(GIT.view!=="diff") b.style.padding="";
   if(GIT.notGit){
-    b.innerHTML=`<div class="gp-quiet" style="margin-top:20px;text-align:center;line-height:1.6">This folder isn't a git project yet.<br>
-      <span style="color:var(--t4)">Ideate in the terminal · the first save creates its history.</span></div>`;
+    b.innerHTML=`<div class="gp-nogit-full">
+      <span class="ic">${G.branch}</span>
+      <div class="t">No history yet</div>
+      <div class="s">This folder isn't a git project, so there's nothing to save, publish, or diff. Chronicle keeps every save as a timeline you can scroll, the moment it's tracked.</div>
+      <button class="gp-save" id="gp-init" style="width:auto;margin:16px auto 0;padding:0 16px;gap:6px">${G.branch}Start keeping history</button>
+      <div class="s2">Creates a git repository here and makes the first save. Nothing leaves your Mac.</div>
+    </div>`;
+    const gi=$("#gp-init"); if(gi) gi.onclick=async()=>{ gitToast(null);
+      try{ await invoke("git_init_here",{dir:activeDir}); GIT.notGit=false; refresh(); gitRefresh(); toast("Started keeping history"); }
+      catch(e){ gitToast("Couldn't set up history: "+e); } };
     return;
   }
   if(GIT.view==="diff"&&GIT.diff){ gitRenderDiff(); return; }
