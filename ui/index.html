@@ -431,7 +431,8 @@
   .row-lbl{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t5);align-self:center;flex:none;min-width:64px}
   .p-plbl{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t5);margin-bottom:7px}
   .phase.now .p-plbl{color:var(--here)}
-  .p-paste{display:flex;flex-direction:column;gap:11px;margin:12px 0 0 2px}
+  .p-paste{margin:12px 0 0 2px}
+  .p-plines{display:flex;flex-direction:column;gap:11px}
   .paste-line{display:flex;flex-direction:column;align-items:flex-start;gap:5px}
   .p-docs{margin:12px 0 0 2px}
   .p-docs .chips{display:flex;flex-wrap:wrap;gap:5px}
@@ -1087,6 +1088,7 @@ function pasteRows(p, docsMap){
   const list=p.paste||[]; if(!list.length)return null;
   const box=document.createElement("div"); box.className="p-paste";
   const hdr=document.createElement("div"); hdr.className="p-plbl"; hdr.textContent="You paste"; box.appendChild(hdr);
+  const lines=document.createElement("div"); lines.className="p-plines"; box.appendChild(lines);
   list.forEach((pl,i)=>{
     const line=document.createElement("div"); line.className="paste-line";
     const chip=document.createElement("span");
@@ -1103,7 +1105,7 @@ function pasteRows(p, docsMap){
     }
     line.appendChild(chip);
     if(pl.when){const w=document.createElement("span");w.className="when";w.textContent=pl.when;line.appendChild(w);}
-    box.appendChild(line);
+    lines.appendChild(line);
   });
   return box;
 }
