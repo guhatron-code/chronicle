@@ -98,7 +98,7 @@
   .recent .bar{flex:1;height:2px;background:var(--raised);border-radius:1px;overflow:hidden}
   .recent .bar i{display:block;height:100%;background:var(--here);border-radius:1px}
   .recent .bar i.g{background:var(--done)}
-  .recent .need{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--t4);flex:none}
+  .recent .need{font-family:var(--mono);font-size:10px;color:var(--here);flex:none}
   .recent .spin{width:12px;height:12px;border-width:2px;margin:0;flex:none}
   .recent .rm{position:absolute;top:9px;right:9px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;
     border-radius:5px;color:var(--err);visibility:hidden}
@@ -749,10 +749,14 @@
 <!-- new blank project -->
 <div id="newproj" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);z-index:72;align-items:center;justify-content:center">
   <div class="sw" style="width:400px;padding:20px 20px 16px">
-    <div style="font-size:14px;font-weight:650;margin-bottom:6px">New blank project</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+      <span style="width:28px;height:28px;flex:none;border-radius:8px;background:var(--raised);border:1px solid var(--hair);display:flex;align-items:center;justify-content:center;color:var(--t3)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3.3v9.4M3.3 8h9.4" stroke-linecap="round"></path></svg></span>
+      <div style="font-size:14px;font-weight:650">New blank project</div>
+    </div>
     <p style="font-size:12px;color:var(--t3);margin-bottom:12px">A fresh folder in <span class="mono" style="color:var(--t2)">~/Documents</span>.
     Ideate in the terminal, create files, then build the roadmap when it has taken shape.</p>
-    <input id="np-name" placeholder="Project name" style="width:100%;background:var(--raised);border:1px solid var(--hair2);border-radius:var(--r-s);
+    <div style="font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--t5);margin-bottom:6px">Project name</div>
+    <input id="np-name" placeholder="my-project" style="width:100%;background:var(--raised);border:1px solid var(--hair2);border-radius:var(--r-s);
       color:var(--t1);font-family:var(--sans);font-size:13px;padding:8px 12px;outline:none;margin-bottom:6px">
     <div id="np-err" class="mono" style="font-size:10.5px;color:var(--err);min-height:16px"></div>
     <div style="display:flex;justify-content:flex-end;gap:8px">
@@ -1095,6 +1099,7 @@ function render(S){
   const pad=$("#road-pad"); pad.innerHTML="";
   fxRoad.stop(); // re-enabled only by the writing-roadmap card below
   $("#shell-head").classList.toggle("degraded",!S.manifest_present&&!S.blank);
+  { const hd=$("#head-degraded"); if(hd) hd.textContent=(PROJ&&PROJ.init&&PROJ.init.phase==="running")?"writing roadmap…":"no roadmap yet"; }
 
   /* manifest problem states (frames #2 / #8a) */
   if(!S.manifest_present){
@@ -1141,7 +1146,7 @@ function render(S){
         <p>Ideate in the terminal on the right: talk to <span class="mono" style="color:var(--t2)">claude</span>,
         sketch plans, create files. They appear in the <b>Repo</b> tab. When the project has taken shape,
         build the roadmap from what's there.</p>
-        <button class="btn primary" id="blank-build" style="margin:10px 0 4px">Build roadmap</button>
+        <button class="btn primary" id="blank-build" style="margin:10px 0 4px;display:inline-flex;align-items:center;gap:6px">${G.play("#0a0a0a",12)}Build roadmap</button>
         <p style="font-size:11px;color:var(--t5);margin:8px 0 0">A Claude session reads what you created and writes the roadmap. It takes a few minutes.</p></div>`;
       pad.appendChild(wrap);
       wrap.querySelector("#blank-build").onclick=()=>{ PROJ.buildRequested=true; PROJ.init={}; render(S); };
@@ -1431,7 +1436,7 @@ function renderGitPanels(pad,S,customActs){
     return AI.dot;
   };
   const ap=document.createElement("div");ap.className="panel-c";
-  ap.innerHTML=`<h2>What needs you<span class="hr">${acts.length?acts.length+" waiting":""}</span></h2>`+(acts.length?acts.map((a,i)=>
+  ap.innerHTML=`<h2>What needs you<span class="hr">${acts.length||""}</span></h2>`+(acts.length?acts.map((a,i)=>
     `<div class="act2 rise ${a.hi?"hi":""}" style="animation-delay:${i*45}ms"><span class="aicon">${iconFor(a)}</span><span class="body"><div class="t">${a.t}</div>${a.s?`<div class="s">${a.s}</div>`:""}</span>`+
     `${a.cmd?`<span class="right"><span class="cmdchip" data-cmd="${encodeURIComponent(a.cmd)}">${esc(a.cmd.length>26?a.cmd.slice(0,24)+"…":a.cmd)}</span></span>`:(a.note?`<span class="right"><span class="rnote">${esc(a.note)}</span></span>`:"")}</div>`).join("")
     :`<div class="act2"><span class="aicon" style="color:var(--done);border-color:rgba(127,174,138,.3)"><svg viewBox="0 0 24 24"><path d="m5 13 4 4L19 7"/></svg></span><span class="body"><div class="t" style="color:var(--t3);font-weight:400">Nothing needs you right now.</div></span></div>`);
