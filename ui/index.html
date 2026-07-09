@@ -761,9 +761,10 @@ async function copyCmd(text){ try{ await invoke("copy_text",{text});
   toast(`Copied <span class="dim">· paste it in a terminal →</span>`); setHint(true); }
   catch(e){ toast("Couldn't copy: "+esc(String(e)),false);} }
 const tilde = p => (p||"").replace(/^\/Users\/[^/]+/,"~");
-const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+const esc = s => String(s??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 /* manifest text is data, not markup — escape everything, then re-allow only <b> */
-const sanB = s => esc(s).replace(/&lt;(\/?b)>/gi,"<$1>");
+const sanB = s => esc(s).replace(/&lt;(\/?b)&gt;/gi,"<$1>");
+const humanTitle=fn=>{ const b=fn.replace(/\.[a-z0-9]+$/i,"").replace(/[_-]+/g," ").trim().toLowerCase(); return b.charAt(0).toUpperCase()+b.slice(1); };
 const FICON = `<svg class="ficon" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>`;
 const ago = epoch => { const s=(Date.now()/1000)-Number(epoch||0); if(!epoch||s<0)return"";
   if(s<120)return"just now"; if(s<7200)return Math.round(s/60)+"m ago"; if(s<172800)return Math.round(s/3600)+"h ago";
@@ -796,7 +797,7 @@ async function renderPicker(){
     else if(writing) curRow=`<div class="cur"><span class="spin"></span><span class="cnm" style="color:var(--t4)">Writing your roadmap…</span></div>`;
     else if(r.current&&r.current.id) curRow=`<div class="cur"><span class="cid">${esc(r.current.id)}</span><span class="cnm">${esc(r.current.name||"")}</span><span class="st ${allDone?"done":"here"}" style="margin-left:auto"><i></i>${esc(r.current.label||"")}</span></div>`;
     else if(allDone) curRow=`<div class="cur"><span class="cnm" style="color:var(--t3)">Everything on the plan is done</span><span class="st done" style="margin-left:auto"><i></i>All phases done</span></div>`;
-    else curRow=`<div class="cur"><span class="cnm" style="color:var(--t4)">No roadmap yet</span></div>`;
+    else curRow=`<div class="cur"><span class="cnm" style="color:var(--t4)">No roadmap yet</span><span class="need" style="margin-left:auto">Runs with ${esc(AGENTS.default==="codex"?"Codex":"Claude")}</span></div>`;
     const progRow=(r.total>0&&!r.missing)?`<div class="prog"><div class="bar"><i class="${allDone?"g":""}" style="width:${allDone?100:Math.max(pct,3)}%"></i></div>
       <span class="need" style="${allDone&&!r.needs?"color:var(--done)":""}">${r.needs?r.needs+" waiting":(allDone?"Clear":"")}</span></div>`
       :`<div class="meta" style="margin-top:9px"><span class="st ${cls}"><i></i>${esc(sum)}</span><span class="ago">${ago(r.opened_at)}</span></div>`;
@@ -985,6 +986,8 @@ $("#sw-input").onkeydown=(e)=>{
 document.addEventListener("keydown",e=>{ if(e.key==="Escape"){
   if($("#switcher").classList.contains("open")||$("#newproj").style.display==="flex"||$("#confirm").style.display==="flex"){
     closePalette(); closeNewProj(); $("#confirm").style.display="none"; return; }
+  const ae=document.activeElement;
+  if(ae&&ae.closest&&ae.closest(".term-host")) return;   // the shell owns Esc (vim, claude)
   if(GIT.open){ gitClose(); return; }
   if($("#phview").classList.contains("on")) closePhaseView();
 } });
@@ -1106,6 +1109,7 @@ function render(S){
       if(init.phase!=="failed"&&init.phase!=="unavailable"&&init.phase!=="dismissed"&&init.phase!=="done"){
         // auto-run /chronicle-init in a background Claude session — no pasting
         startInit(PROJ);
+        try{ fxRoad.start(); }catch(_){}
         wrap.innerHTML=`<div class="nm-card">
           <div class="spin"></div>
           <h3>Writing your roadmap…</h3>
@@ -1243,13 +1247,13 @@ function render(S){
         bodyIn.appendChild(cnt);
         const ul=document.createElement("ul");ul.className="p-items";ul.style.marginTop="4px";
         p.items.forEach(t=>{const li=document.createElement("li");li.innerHTML=sanB(t);ul.appendChild(li);});bodyIn.appendChild(ul);}
-      const pr=pasteRows(p,S.docs||{}); if(pr){
-        const vd=document.createElement("div"); vd.style.cssText="display:flex;margin-top:8px";
+      const pr=pasteRows(p,S.docs||{}); if(pr) bodyIn.appendChild(pr);
+      if(!p.pool){
+        const vd=document.createElement("div"); vd.style.cssText="display:flex;margin-top:9px";
         vd.innerHTML=`<button class="btn vdet">View details ›</button>`;
         const fidx=idx-1;
         vd.querySelector("button").onclick=(ev)=>{ ev.stopPropagation(); openPhaseView(p.id,fidx); };
-        pr.appendChild(vd);
-        bodyIn.appendChild(pr);
+        bodyIn.appendChild(vd);
       }
       if((p.docs||[]).length){const row=document.createElement("div");row.className="p-docs";
         const l=document.createElement("span");l.className="row-lbl";l.textContent="reference";row.appendChild(l);
@@ -1267,7 +1271,15 @@ function render(S){
 function buildActs(S,customActs){
   customActs=customActs||S.custom_actions||[];
   const acts=[];
-  const split=t=>{ const m=t.match(/^(.*?<\/b>)\s*[—·]\s*(.*)$/)||t.match(/^(.*?)\s+[—·]\s+(.*)$/); return m?{t:m[1],s:m[2]}:{t,s:""}; };
+  const split=t=>{
+    let depth=0;
+    for(let i=1;i<t.length-1;i++){
+      const ch=t[i];
+      if(ch==="(")depth++; else if(ch===")")depth=Math.max(0,depth-1);
+      else if(depth===0&&(ch==="·"||ch==="—")&&t[i-1]===" "&&t[i+1]===" ") return {t:t.slice(0,i-1),s:t.slice(i+1).trim()};
+    }
+    return {t,s:""};
+  };
   if(S.is_git){
     if(S.work_branch&&S.branch&&S.branch!==S.work_branch)
       acts.push({hi:1,t:`You're on ${esc(S.branch)}`,s:`This project works on its own branch (${esc(S.work_branch)}).`,cmd:`git checkout ${S.work_branch}`});
@@ -1509,6 +1521,7 @@ $("#refresh").onclick=()=>refresh();
 
 /* ============ tabs ============ */
 function switchTab(name){
+  if(typeof closePhaseView==="function") closePhaseView();
   document.querySelectorAll(".seg .tab").forEach(x=>x.classList.toggle("active",x.dataset.tab===name));
   document.querySelectorAll(".tabpane").forEach(p=>p.classList.toggle("active",p.id==="tab-"+name));
   if(name==="repo"&&!treeLoaded) buildTree();
@@ -1679,24 +1692,25 @@ async function gitOpen(){
   await gitRefresh();
 }
 function gitClose(){
-  GIT.open=false;
+  GIT.open=false; GIT.status=null; GIT.log=null; GIT.diff=null; GIT.view="status"; GIT.notGit=false; GIT.limit=30;
   document.getElementById("shell-body").classList.remove("git-open");
 }
 async function gitRefresh(){
   if(!GIT.open||!activeDir)return;
+  // F4: never yank the caret out of the message box mid-type
+  if(document.activeElement&&document.activeElement.id==="gp-msg"){ GIT._deferred=true; return; }
   try{
     const [st,log]=await Promise.all([
       invoke("git_status_detail",{dir:activeDir}),
-      invoke("git_log_graph",{dir:activeDir,limit:30}),
+      invoke("git_log_graph",{dir:activeDir,limit:GIT.limit||30}),
     ]);
-    GIT.status=st; GIT.log=log;
+    GIT.status=st; GIT.log=log; GIT.notGit=false;
     gitRender();
   }catch(e){
-    // non-git folder: an honest empty pane
-    GIT.status=null; GIT.log=null; gitRender(String(e));
+    GIT.status=null; GIT.log=null; GIT.notGit=true; gitRender();
   }
 }
-const AGENT_RE=/claude|codex|bot|gpt|agent/i;
+const AGENT_RE=/\b(claude|codex|gpt|agent)\b|\[bot\]/i;
 function auGlyph(name){
   if(AGENT_RE.test(name||"")) return `<span class="ggau" title="${esc(name)} (an agent session)">✳</span>`;
   const ini=(name||"?").split(/\s+/).map(w=>w[0]).join("").slice(0,2).toUpperCase();
@@ -1707,51 +1721,71 @@ function phaseIdRe(){
   return ids.length?new RegExp("\\b("+ids.join("|")+")\\b"):null;
 }
 function laneGraph(commits){
-  // VS Code-style lane assignment: lanes hold the hash each line expects next
-  const lanes=[]; const rows=[];
-  for(const c of commits){
-    let li=lanes.indexOf(c.hash);
-    if(li===-1){ li=lanes.length; lanes.push(c.hash); }
-    const from=lanes.slice();
+  // each lane holds the hash it is currently routing toward (null = free)
+  let lanes=[]; const rows=[];
+  for(let ri=0; ri<commits.length; ri++){
+    const c=commits[ri];
+    const before=lanes.slice();
+    // this commit takes the leftmost lane already waiting for it, else a free/new lane
+    let nodeLane=lanes.indexOf(c.hash);
+    if(nodeLane===-1){ nodeLane=lanes.indexOf(null); if(nodeLane===-1){ nodeLane=lanes.length; lanes.push(null); } }
+    // any other lane also waiting for this commit merges in and frees
+    const mergedFrom=[];
+    lanes.forEach((h,i)=>{ if(h===c.hash&&i!==nodeLane){ mergedFrom.push(i); lanes[i]=null; } });
     const parents=c.parents||[];
-    lanes[li]=parents[0]||null;
-    for(let k=1;k<parents.length;k++){ if(!lanes.includes(parents[k])) lanes.splice(li+k,0,parents[k]); }
-    for(let k=lanes.length-1;k>=0;k--){ if(lanes[k]===null) lanes.splice(k,1); }
-    rows.push({c,lane:li,from,to:lanes.slice()});
+    // first parent continues in the node's lane
+    lanes[nodeLane]=parents[0]||null;
+    // extra parents reuse a lane already routing to them, else take a free/new lane
+    for(let k=1;k<parents.length;k++){
+      const pp=parents[k];
+      if(lanes.indexOf(pp)===-1){ let idx=lanes.indexOf(null); if(idx===-1){ idx=lanes.length; lanes.push(null); } lanes[idx]=pp; }
+    }
+    while(lanes.length && lanes[lanes.length-1]==null) lanes.pop();
+    rows.push({c,nodeLane,before,after:lanes.slice(),mergedFrom,parents});
   }
   return rows;
 }
 const LANECOL=["#8aa5c8","#7fae8a","#c9a961","#9b8ab0"];
+const GRAPH_CAP=5;
+function graphLaneCount(rows){
+  let m=1; rows.forEach(r=>{ m=Math.max(m,r.nodeLane+1,r.before.length,r.after.length); });
+  return Math.min(m,GRAPH_CAP);
+}
 function graphSvg(rows){
   const RH=40,LW=14,R=3.5;
-  const maxLane=Math.max(1,...rows.map(r=>Math.max(r.lane+1,r.from.length,r.to.length)));
-  const w=Math.min(maxLane,4)*LW+8;
-  let out=`<svg class="lanes" width="${w}" height="${rows.length*RH}" fill="none">`;
-  const x=i=>6+i*LW;
+  const cap=graphLaneCount(rows);
+  const x=i=>6+Math.min(i,GRAPH_CAP-1)*LW;
+  const col=i=>LANECOL[Math.min(i,LANECOL.length-1)];
+  let out=`<svg class="lanes" width="${cap*LW+8}" height="${rows.length*RH}" fill="none">`;
   rows.forEach((r,ri)=>{
-    const yc=ri*RH+RH/2;
-    // continuing lanes: from -> to
-    r.to.forEach((h,ti)=>{
-      if(h===null)return;
-      const fi=r.from.indexOf(h)!==-1?r.from.indexOf(h):(ti===r.lane?r.lane:ti);
-      const col=LANECOL[Math.min(ti,3)];
-      if(ti===r.lane||r.from[ti]===h||fi===ti){
-        out+=`<path d="M${x(ti)} ${yc} V${yc+RH}" stroke="${col}" stroke-width="1.5"/>`;
-      } else {
-        out+=`<path d="M${x(fi)} ${yc} C ${x(fi)} ${yc+RH*.6}, ${x(ti)} ${yc+RH*.4}, ${x(ti)} ${yc+RH}" stroke="${col}" stroke-width="1.5"/>`;
-      }
+    const yc=ri*RH+RH/2, yTop=yc-RH/2, yBot=yc+RH/2;
+    const maxL=Math.max(r.before.length,r.after.length);
+    // pass-through lanes (live above and below, not the node's lane)
+    for(let L=0; L<maxL; L++){
+      if(L===r.nodeLane) continue;
+      if(r.before[L]!=null && r.after[L]!=null) out+=`<path d="M${x(L)} ${yTop} V${yBot}" stroke="${col(L)}" stroke-width="1.5"/>`;
+    }
+    // node incoming (its lane continued from above)
+    if(r.before[r.nodeLane]!=null) out+=`<path d="M${x(r.nodeLane)} ${yTop} V${yc}" stroke="${col(r.nodeLane)}" stroke-width="1.5"/>`;
+    // merge-in curves from lanes that were waiting on this commit
+    r.mergedFrom.forEach(ml=>{
+      out+=`<path d="M${x(ml)} ${yTop} C ${x(ml)} ${yc-RH*.28}, ${x(r.nodeLane)} ${yc-RH*.22}, ${x(r.nodeLane)} ${yc}" stroke="${col(ml)}" stroke-width="1.5"/>`;
     });
-    // incoming line from the row above
-    if(ri>0) out+=`<path d="M${x(r.lane)} ${yc-RH/2} V${yc}" stroke="${LANECOL[Math.min(r.lane,3)]}" stroke-width="1.5"/>`;
-    const merge=(r.c.parents||[]).length>1;
-    out+=`<circle cx="${x(r.lane)}" cy="${yc}" r="${R}" fill="${merge?LANECOL[Math.min(r.lane,3)]:"var(--panel)"}" stroke="${LANECOL[Math.min(r.lane,3)]}" stroke-width="1.5"/>`;
+    // outgoing edges to each parent (curve out to the parent's lane)
+    r.parents.forEach(pp=>{
+      const pl=r.after.indexOf(pp); if(pl===-1) return;
+      if(pl===r.nodeLane) out+=`<path d="M${x(r.nodeLane)} ${yc} V${yBot}" stroke="${col(pl)}" stroke-width="1.5"/>`;
+      else out+=`<path d="M${x(r.nodeLane)} ${yc} C ${x(r.nodeLane)} ${yc+RH*.22}, ${x(pl)} ${yc+RH*.28}, ${x(pl)} ${yBot}" stroke="${col(pl)}" stroke-width="1.5"/>`;
+    });
+    const merge=r.parents.length>1;
+    out+=`<circle cx="${x(r.nodeLane)}" cy="${yc}" r="${R}" fill="${merge?col(r.nodeLane):"var(--panel)"}" stroke="${col(r.nodeLane)}" stroke-width="1.5"/>`;
   });
   return out+"</svg>";
 }
-function gitRender(nonGitErr){
+function gitRender(){
   $("#gp-branch").textContent="⎇ "+((PROJ&&PROJ.state&&PROJ.state.branch)||"—");
   const b=$("#gp-body");
-  if(nonGitErr!==undefined&&!GIT.status){
+  if(GIT.notGit){
     b.innerHTML=`<div class="gp-quiet" style="margin-top:20px;text-align:center">This folder isn't a git project yet.<br>
       Ideate in the terminal · the first save creates its history.</div>`;
     return;
@@ -1798,12 +1832,11 @@ function gitRender(nonGitErr){
   // the graph
   const re=phaseIdRe();
   const rows=laneGraph(GIT.log||[]);
-  html+=`<div class="gsec" style="margin-top:22px">Graph<span class="n">last ${rows.length}</span></div><div class="gg">`;
+  html+=`<div class="gsec" style="margin-top:22px">Graph<span class="${(GIT.limit||30)<=30?"lnk":"n"}" id="gp-showall">${(GIT.limit||30)<=30?"Show all":"last "+rows.length}</span></div><div class="gg">`;
   html+=graphSvg(rows);
-  const laneW=Math.min(Math.max(1,...rows.map(r=>r.lane+1)),4)*14+10;
+  const laneW=graphLaneCount(rows)*14+12;
   rows.forEach(r=>{
     const c=r.c;
-    const refs=(c.refs||"").split(",").map(x=>x.trim()).filter(x=>x&&!x.startsWith("HEAD ->")===false||x);
     let refHtml="";
     (c.refs||"").split(",").map(x=>x.trim().replace("HEAD -> ","")).filter(Boolean).slice(0,2).forEach(x=>{
       refHtml+=`<span class="ggref ${x===((PROJ.state||{}).branch)?"head":""}">${esc(x)}</span>`;
@@ -1820,7 +1853,9 @@ function gitRender(nonGitErr){
   // wire
   $("#gp-msg").oninput=e=>GIT.msg=e.target.value;
   $("#gp-msg").onkeydown=e=>{ if((e.metaKey||e.ctrlKey)&&e.key==="Enter") gitSave(); };
+  $("#gp-msg").onblur=()=>{ if(GIT._deferred){ GIT._deferred=false; gitRefresh(); } };
   $("#gp-save").onclick=gitSave;
+  const sa=$("#gp-showall"); if(sa&&(GIT.limit||30)<=30) sa.onclick=()=>{ GIT.limit=200; gitRefresh(); };
   const pub=$("#gp-pub"); if(pub) pub.onclick=gitPublish;
   const pull=$("#gp-pull"); if(pull) pull.onclick=async()=>{ gitToast(null);
     try{ await invoke("git_pull",{dir:activeDir}); toast("Brought the newer saves down"); refresh(); gitRefresh(); }
@@ -1843,11 +1878,12 @@ async function gitSave(){
   const msg=(GIT.msg||"").trim(); gitToast(null);
   if(!msg){ gitToast("Give the save a short message first."); return; }
   const st=GIT.status||{staged:[],unstaged:[]};
-  const doCommit=async(all)=>{ try{
+  const btn=$("#gp-save"); if(btn&&btn.disabled) return;
+  const doCommit=async(all)=>{ if(btn) btn.disabled=true; try{
       await invoke("git_commit",{dir:activeDir,message:msg,stageAll:all});
       GIT.msg=""; toast(`Saved to history <span class="dim">· ${esc(msg.slice(0,40))}</span>`);
       gitRefresh(); refresh();
-    }catch(e){ gitToast("Couldn't save: "+e); } };
+    }catch(e){ gitToast("Couldn't save: "+e); if(btn) btn.disabled=false; } };
   if(st.staged.length===0){
     if(st.unstaged.length===0){ gitToast("Nothing to save · everything is recorded."); return; }
     confirmBox(`No files marked · save all ${st.unstaged.length} changed file${st.unstaged.length>1?"s":""}?`,
@@ -1876,19 +1912,19 @@ function gitOpenDiff(path,staged,untracked){
 }
 function gitRenderDiff(){
   const d=GIT.diff; const b=$("#gp-body");
-  let html=`<div class="dhd" style="margin:-16px -14px 10px;padding:12px 16px"><span class="bk" id="gp-back">‹ changes</span>
-    <span>${esc(d.path)}</span><span class="mm M" style="margin-left:auto">${d.staged?"staged":""}</span></div><div class="diff">`;
-  let oldN=0,newN=0;
+  let body="",oldN=0,newN=0,adds=0,dels=0;
   for(const line of (d.text||"").split("\n")){
+    if(line.startsWith("\\")) continue;              // "\ No newline at end of file"
     if(line.startsWith("@@")){ const m=line.match(/-(\d+)(?:,\d+)? \+(\d+)/); if(m){oldN=+m[1];newN=+m[2];}
-      html+=`<div class="hunk">${esc(line)}</div>`; continue; }
-    if(/^(diff |index |--- |\+\+\+ |new file|deleted )/.test(line)) continue;
-    if(line.startsWith("+")){ html+=`<div class="dl add"><span class="no">${newN++}</span><span class="tx">${esc(line)}</span></div>`; }
-    else if(line.startsWith("-")){ html+=`<div class="dl del"><span class="no">${oldN++}</span><span class="tx">${esc(line)}</span></div>`; }
-    else { html+=`<div class="dl"><span class="no">${newN++}</span><span class="tx">${esc(line)}</span></div>`; oldN++; }
+      body+=`<div class="hunk">${esc(line)}</div>`; continue; }
+    if(/^(diff |index |--- |\+\+\+ |new file|deleted |similarity |rename )/.test(line)) continue;
+    if(line.startsWith("+")){ adds++; body+=`<div class="dl add"><span class="no">${newN++}</span><span class="tx">${esc(line)}</span></div>`; }
+    else if(line.startsWith("-")){ dels++; body+=`<div class="dl del"><span class="no">${oldN++}</span><span class="tx">${esc(line)}</span></div>`; }
+    else { body+=`<div class="dl"><span class="no">${newN++}</span><span class="tx">${esc(line)}</span></div>`; oldN++; }
   }
-  html+="</div>";
-  b.innerHTML=html;
+  const stat=`<span class="mm" style="color:var(--done)">+${adds}</span> <span class="mm" style="color:var(--err)">\u2212${dels}</span>`;
+  b.innerHTML=`<div class="dhd" style="margin:-16px -14px 10px;padding:12px 16px"><span class="bk" id="gp-back">‹ changes</span>
+    <span>${esc(d.path)}</span><span style="margin-left:auto;font-family:var(--mono);font-size:10px">${d.staged?'<span style="color:var(--t5)">staged&nbsp;</span>':""}${stat}</span></div><div class="diff">${body}</div>`;
   $("#gp-back").onclick=()=>{ GIT.view="status"; GIT.diff=null; gitRender(); };
 }
 $("#gp-x").onclick=gitClose;
@@ -1911,6 +1947,8 @@ async function openPhaseView(pid,idx){
   const ph=flat[idx]; if(!ph)return;
   const st=((PROJ.state&&PROJ.state.statuses)||[])[idx]||{state:"later",label:"later"};
   PROJ.phaseView=idx;
+  document.querySelectorAll(".seg .tab").forEach(x=>x.classList.toggle("active",x.dataset.tab==="road"));
+  document.querySelectorAll(".tabpane").forEach(pp=>pp.classList.toggle("active",pp.id==="tab-road"));
   $("#tab-road").classList.add("phased");
   $("#phview").classList.add("on");
   $("#pv-id").textContent=ph.id; $("#pv-name").textContent=ph.name||"";
@@ -1937,7 +1975,7 @@ async function openPhaseView(pid,idx){
     html+=`<div class="gsec" style="margin:18px 0 6px 0">Documents</div><div class="acc" id="pv-acc">`;
     docs.forEach((d,i)=>{
       const fn=d.path.split("/").pop();
-      html+=`<div class="arow" data-i="${i}" data-p="${encodeURIComponent(d.path)}"><span class="tw">›</span><span class="ttl">${esc(fn.replace(/\.md$/,"").replace(/_/g," ").toLowerCase())}</span><span class="fnm">${esc(fn)}</span><span class="cp" title="Copy contents">⧉</span></div><div class="abody" data-b="${i}">Loading…</div>`;
+      html+=`<div class="arow" data-i="${i}" data-p="${encodeURIComponent(d.path)}"><span class="tw">›</span><span class="ttl">${esc(humanTitle(fn))}</span><span class="fnm">${esc(fn)}</span><span class="cp" title="Copy contents">⧉</span></div><div class="abody" data-b="${i}">Loading…</div>`;
     });
     html+=`</div>`;
   }
@@ -1961,7 +1999,7 @@ async function openPhaseView(pid,idx){
   });
   // saves during this phase: honest subject-mention matching
   try{
-    const log=GIT.log||await invoke("git_log_graph",{dir:activeDir,limit:60});
+    const log=await invoke("git_log_graph",{dir:activeDir,limit:60}).catch(()=>[]);
     const re=new RegExp("\\b"+ph.id.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","i");
     const hits=(log||[]).filter(c=>re.test(c.subject||"")).slice(0,8);
     $("#pv-saves").innerHTML=hits.length

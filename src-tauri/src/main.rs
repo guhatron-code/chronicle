@@ -686,14 +686,15 @@ fn git_full(repo: &Path, args: &[&str]) -> Result<String, String> {
 #[tauri::command]
 fn git_status_detail(dir: String) -> Result<Value, String> {
     let p = project_for(&dir)?;
-    let raw = git_full(&p.repo, &["status", "--porcelain=v1"]).unwrap_or_default();
+    let raw = git_full(&p.repo, &["status", "--porcelain=v1"])?;
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
     for l in raw.lines() {
         if l.len() < 4 { continue; }
         let x = l.as_bytes()[0] as char;
         let y = l.as_bytes()[1] as char;
-        let path = l[3..].trim_matches('"').to_string();
+        let rawp = &l[3..];
+        let path = rawp.split(" -> ").last().unwrap_or(rawp).trim_matches('"').to_string();
         if x != ' ' && x != '?' { staged.push(json!({"path": path, "code": x.to_string()})); }
         if y != ' ' { unstaged.push(json!({"path": path, "code": if x=='?' {"A".into()} else {y.to_string()}, "untracked": x=='?'})); }
     }
@@ -719,7 +720,7 @@ fn git_unstage(dir: String, path: String) -> Result<(), String> {
 #[tauri::command]
 fn git_discard(dir: String, path: String, untracked: bool) -> Result<(), String> {
     let p = project_for(&dir)?;
-    if untracked { git_full(&p.repo, &["clean", "-f", "--", &path]).map(|_| ()) }
+    if untracked { git_full(&p.repo, &["clean", "-fd", "--", &path]).map(|_| ()) }
     else { git_full(&p.repo, &["checkout", "--", &path]).map(|_| ()) }
 }
 
@@ -755,8 +756,7 @@ fn git_pull(dir: String) -> Result<(), String> {
 fn git_log_graph(dir: String, limit: Option<u32>) -> Result<Value, String> {
     let p = project_for(&dir)?;
     let n = limit.unwrap_or(30).min(200).to_string();
-    let raw = git_full(&p.repo, &["log", "-n", &n, "--pretty=format:%h\x1f%p\x1f%s\x1f%an\x1f%ar\x1f%D"])
-        .unwrap_or_default();
+    let raw = git_full(&p.repo, &["log", "-n", &n, "--pretty=format:%h\x1f%p\x1f%s\x1f%an\x1f%ar\x1f%D"])?;
     let commits: Vec<Value> = raw.lines().map(|l| {
         let f: Vec<&str> = l.split('\x1f').collect();
         json!({
@@ -779,6 +779,8 @@ fn git_diff(dir: String, path: String, staged: bool, untracked: bool) -> Result<
         let out = Command::new("git").arg("-C").arg(&p.repo)
             .args(["diff", "--no-index", "--", "/dev/null", &path]).output()
             .map_err(|e| e.to_string())?;
+        let code = out.status.code().unwrap_or(0);
+        if code > 1 { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
         return Ok(String::from_utf8_lossy(&out.stdout).to_string());
     }
     if staged { git_full(&p.repo, &["diff", "--cached", "--", &path]) }
