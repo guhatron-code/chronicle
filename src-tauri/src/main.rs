@@ -768,7 +768,9 @@ fn git_pull(dir: String) -> Result<(), String> {
 fn git_log_graph(dir: String, limit: Option<u32>) -> Result<Value, String> {
     let p = project_for(&dir)?;
     let n = limit.unwrap_or(30).min(200).to_string();
-    let raw = git_full(&p.repo, &["log", "-n", &n, "--pretty=format:%h\x1f%p\x1f%s\x1f%an\x1f%ar\x1f%D"])?;
+    // --all + topo-order so diverged branches (main vs a feature branch) render as real lanes,
+    // not just the current branch as one straight line.
+    let raw = git_full(&p.repo, &["log", "--all", "--topo-order", "-n", &n, "--pretty=format:%h\x1f%p\x1f%s\x1f%an\x1f%ar\x1f%D"])?;
     let commits: Vec<Value> = raw.lines().map(|l| {
         let f: Vec<&str> = l.split('\x1f').collect();
         json!({
