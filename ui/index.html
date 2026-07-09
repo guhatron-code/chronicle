@@ -542,7 +542,13 @@
   .t-kids::before{content:"";position:absolute;left:var(--gx,11px);top:2px;bottom:2px;width:1px;background:var(--div)}
   .t-row .chev{color:var(--t4);width:12px;flex:none;display:inline-flex;align-items:center;justify-content:center;transition:transform .12s}
   .t-row.exp .chev{transform:rotate(90deg)}
-  .t-row .fname{overflow:hidden;text-overflow:ellipsis}
+  .t-row .fname{overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  /* git status in the explorer (VS Code style) — letter badge + colored name */
+  .t-row .t-badge{flex:none;font-family:var(--code);font-size:var(--fs-meta);font-weight:600;margin-left:4px;padding-right:2px}
+  .t-row.st-m .fname,.t-row.st-m .t-badge{color:var(--here)}
+  .t-row.st-a .fname,.t-row.st-a .t-badge,.t-row.st-u .fname,.t-row.st-u .t-badge{color:var(--done)}
+  .t-row.st-d .fname,.t-row.st-d .t-badge{color:var(--err)}
+  .t-row.st-dir .fname{color:var(--t2)}
   .t-row.file{color:var(--t3)}
   .t-row.file .fname{font-size:var(--fs-code)}
   .fi{width:13px;height:13px;flex:none;stroke:currentColor;fill:none;stroke-width:1.5;opacity:.65}
@@ -1648,6 +1654,7 @@ async function refresh(dir){
     }
     renderPTabs();
     if(dir===activeDir&&GIT.open&&GIT.view==="status") gitRefresh();
+    if(dir===activeDir&&treeLoaded) refreshTreeStatus();
   }
   catch(e){ if(dir===activeDir) $("#road-pad").innerHTML=`<div class="nm-center"><div class="nm-card"><h3>Couldn't read the project</h3><p>${esc(String(e))}</p></div></div>`; }
 }
@@ -1664,9 +1671,30 @@ function switchTab(name){
 document.querySelectorAll(".seg .tab").forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
 
 /* ============ repo tree (roots = repo + extras) ============ */
-let treeLoaded=false, selRow=null;
+let treeLoaded=false, selRow=null, treeStatus={};
+function statusMap(st){ const m={};
+  (st.staged||[]).forEach(f=>{ m[f.path]=f.code; });
+  (st.unstaged||[]).forEach(f=>{ m[f.path]=f.untracked?"U":f.code; });
+  return m; }
+async function fetchStatusMap(){ try{ return statusMap(await invoke("git_status_detail",{dir:activeDir})); }catch(_){ return {}; } }
+function decorateRow(row){
+  const p=row.dataset.path; if(p==null) return;
+  row.classList.remove("st-m","st-a","st-u","st-d","st-dir");
+  let badge=row.querySelector(".t-badge");
+  if(row.dataset.dir==="1"){ if(badge) badge.remove();
+    if(Object.keys(treeStatus).some(k=>k===p||k.startsWith(p+"/"))) row.classList.add("st-dir");
+    return; }
+  const letter=treeStatus[p]||"";
+  if(letter){ row.classList.add("st-"+({M:"m",A:"a",U:"u",D:"d"}[letter]||"m"));
+    if(!badge){ badge=document.createElement("span"); badge.className="t-badge"; row.appendChild(badge); }
+    badge.textContent=letter;
+  } else if(badge) badge.remove();
+}
+function decorateTree(container){ (container||$("#tree")).querySelectorAll(".t-row[data-path]").forEach(decorateRow); }
+async function refreshTreeStatus(){ if(!treeLoaded||!activeDir) return; treeStatus=await fetchStatusMap(); decorateTree($("#tree")); }
 async function buildTree(){
   treeLoaded=true;
+  treeStatus=await fetchStatusMap();
   const host=$("#tree"); host.innerHTML="";
   const roots=[{label:tilde(PROJ.repo).split("/").pop()||"project",rel:""}];
   for(const e of (PROJ.extras||[])) roots.push({label:`${tilde(e.path).split("/").pop()} · ${e.alias}`,rel:"@"+e.alias});
@@ -1693,6 +1721,7 @@ async function treeChildren(rel,depth){
     const p=rel?rel+"/"+e.name:e.name;
     const row=document.createElement("div");
     row.className="t-row"+(e.is_dir?"":" file");
+    row.dataset.path=p; if(e.is_dir) row.dataset.dir="1";
     row.style.paddingLeft=(6+depth*12)+"px";
     row.innerHTML=`<span class="chev">${e.is_dir?G.chevR('var(--t4)',10):""}</span>${e.is_dir?ICON_DIR:ICON_FILE}<span class="fname">${esc(e.name)}</span>`;
     box.appendChild(row);
@@ -1707,6 +1736,7 @@ async function treeChildren(rel,depth){
       row.onclick=()=>{ if(selRow)selRow.classList.remove("sel"); selRow=row; row.classList.add("sel"); openFile(p); };
     }
   }
+  decorateTree(box);
   return box;
 }
 
