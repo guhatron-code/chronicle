@@ -671,6 +671,120 @@ fn state_for_project(p: &Project) -> Value {
     })
 }
 
+/* ================= the git pane (M1/M2) ================= */
+
+fn git_full(repo: &Path, args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git").arg("-C").arg(repo).args(args).output()
+        .map_err(|e| e.to_string())?;
+    if out.status.success() { Ok(String::from_utf8_lossy(&out.stdout).to_string()) }
+    else {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Err(if err.is_empty() { String::from_utf8_lossy(&out.stdout).trim().to_string() } else { err })
+    }
+}
+
+#[tauri::command]
+fn git_status_detail(dir: String) -> Result<Value, String> {
+    let p = project_for(&dir)?;
+    let raw = git_full(&p.repo, &["status", "--porcelain=v1"]).unwrap_or_default();
+    let mut staged = Vec::new();
+    let mut unstaged = Vec::new();
+    for l in raw.lines() {
+        if l.len() < 4 { continue; }
+        let x = l.as_bytes()[0] as char;
+        let y = l.as_bytes()[1] as char;
+        let path = l[3..].trim_matches('"').to_string();
+        if x != ' ' && x != '?' { staged.push(json!({"path": path, "code": x.to_string()})); }
+        if y != ' ' { unstaged.push(json!({"path": path, "code": if x=='?' {"A".into()} else {y.to_string()}, "untracked": x=='?'})); }
+    }
+    Ok(json!({ "staged": staged, "unstaged": unstaged }))
+}
+
+#[tauri::command]
+fn git_stage(dir: String, path: Option<String>) -> Result<(), String> {
+    let p = project_for(&dir)?;
+    match path {
+        Some(f) => git_full(&p.repo, &["add", "--", &f]).map(|_| ()),
+        None => git_full(&p.repo, &["add", "-A"]).map(|_| ()),
+    }
+}
+
+#[tauri::command]
+fn git_unstage(dir: String, path: String) -> Result<(), String> {
+    let p = project_for(&dir)?;
+    git_full(&p.repo, &["reset", "-q", "HEAD", "--", &path]).map(|_| ())
+}
+
+/// Destructive; the UI always confirms first. Untracked files are deleted, tracked restored.
+#[tauri::command]
+fn git_discard(dir: String, path: String, untracked: bool) -> Result<(), String> {
+    let p = project_for(&dir)?;
+    if untracked { git_full(&p.repo, &["clean", "-f", "--", &path]).map(|_| ()) }
+    else { git_full(&p.repo, &["checkout", "--", &path]).map(|_| ()) }
+}
+
+#[tauri::command]
+fn git_commit(dir: String, message: String, stage_all: bool) -> Result<(), String> {
+    let p = project_for(&dir)?;
+    if message.trim().is_empty() { return Err("give the save a short message".into()); }
+    if stage_all { git_full(&p.repo, &["add", "-A"])?; }
+    git_full(&p.repo, &["commit", "-m", &message]).map(|_| ())
+}
+
+/// Plain push only. No force flag exists anywhere in this app.
+#[tauri::command]
+fn git_push(dir: String) -> Result<(), String> {
+    let p = project_for(&dir)?;
+    let upstream = Command::new("git").arg("-C").arg(&p.repo)
+        .args(["rev-parse", "--abbrev-ref", "@{u}"]).output()
+        .map(|o| o.status.success()).unwrap_or(false);
+    if upstream { git_full(&p.repo, &["push"]).map(|_| ()) }
+    else {
+        let br = git_in(&p.repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
+        git_full(&p.repo, &["push", "-u", "origin", &br]).map(|_| ())
+    }
+}
+
+#[tauri::command]
+fn git_pull(dir: String) -> Result<(), String> {
+    let p = project_for(&dir)?;
+    git_full(&p.repo, &["pull", "--ff-only"]).map(|_| ())
+}
+
+#[tauri::command]
+fn git_log_graph(dir: String, limit: Option<u32>) -> Result<Value, String> {
+    let p = project_for(&dir)?;
+    let n = limit.unwrap_or(30).min(200).to_string();
+    let raw = git_full(&p.repo, &["log", "-n", &n, "--pretty=format:%h\x1f%p\x1f%s\x1f%an\x1f%ar\x1f%D"])
+        .unwrap_or_default();
+    let commits: Vec<Value> = raw.lines().map(|l| {
+        let f: Vec<&str> = l.split('\x1f').collect();
+        json!({
+            "hash": f.first().copied().unwrap_or(""),
+            "parents": f.get(1).map(|x| x.split(' ').filter(|y| !y.is_empty()).collect::<Vec<_>>()).unwrap_or_default(),
+            "subject": f.get(2).copied().unwrap_or(""),
+            "author": f.get(3).copied().unwrap_or(""),
+            "ago": f.get(4).copied().unwrap_or(""),
+            "refs": f.get(5).copied().unwrap_or(""),
+        })
+    }).collect();
+    Ok(json!(commits))
+}
+
+#[tauri::command]
+fn git_diff(dir: String, path: String, staged: bool, untracked: bool) -> Result<String, String> {
+    let p = project_for(&dir)?;
+    if untracked {
+        // no-index diff exits 1 when files differ; capture output regardless
+        let out = Command::new("git").arg("-C").arg(&p.repo)
+            .args(["diff", "--no-index", "--", "/dev/null", &path]).output()
+            .map_err(|e| e.to_string())?;
+        return Ok(String::from_utf8_lossy(&out.stdout).to_string());
+    }
+    if staged { git_full(&p.repo, &["diff", "--cached", "--", &path]) }
+    else { git_full(&p.repo, &["diff", "--", &path]) }
+}
+
 /* ================= files (jailed to the project's roots) ================= */
 
 fn jailed(p: &Project, path: &str) -> Result<PathBuf, String> {
@@ -866,6 +980,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state, init_start, init_status, agents_available, set_default_agent,
+            git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_push, git_pull, git_log_graph, git_diff,
             list_dir, read_file, copy_file, copy_text,
             pty_spawn, pty_write, pty_resize, pty_kill
         ])

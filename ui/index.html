@@ -51,7 +51,10 @@
   .view{display:none;height:100vh}
   .view.active{display:block}
   #view-shell.active{display:flex;flex-direction:column}
-  #shell-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(480px,var(--leftw,54%)) 6px minmax(380px,1fr)}
+  #shell-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(300px,var(--leftw,54%)) 6px 0px minmax(380px,1fr)}
+  #shell-body.git-open{grid-template-columns:minmax(280px,.8fr) 0px 520px minmax(340px,1fr)}
+  #shell-body.git-open #left{opacity:.38;pointer-events:none}
+  #shell-body.git-open #split-main{visibility:hidden}
   #left,#right{min-height:0}
   .splitter{position:relative;cursor:col-resize;background:transparent;z-index:5}
   .splitter::after{content:"";position:absolute;left:2.5px;top:0;bottom:0;width:1px;background:var(--hair)}
@@ -149,6 +152,113 @@
     display:flex;align-items:center;justify-content:center;cursor:pointer;transition:.12s;flex:none}
   .icon-btn:hover{background:var(--raised);color:var(--t1)}
   .icon-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  /* ===== the git pane (M1/M2) ===== */
+  #gitpane{min-width:0;overflow:hidden;background:var(--panel);border-right:1px solid var(--hair);display:flex;flex-direction:column}
+  #gp-head{flex:none;display:flex;align-items:center;gap:10px;padding:15px 20px;border-bottom:1px solid var(--div)}
+  #gp-head b{font-size:13.5px;font-weight:650}
+  .brch{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--t3);
+    background:var(--raised);border:1px solid var(--hair);border-radius:5px;padding:2px 9px}
+  #gp-x{margin-left:auto;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:5px;
+    color:var(--t4);font-size:12px;cursor:pointer}
+  #gp-x:hover{background:var(--hover);color:var(--t1)}
+  #gp-body{flex:1;overflow-y:auto;padding:16px 14px}
+  #gp-err{margin:0 6px 12px;padding:9px 12px;border:1px solid rgba(207,138,134,.4);border-radius:var(--r-s);
+    font-size:11.5px;color:var(--err);display:none}
+  .gp-msg{width:calc(100% - 12px);margin:0 6px 8px;background:var(--raised);border:1px solid var(--hair2);
+    border-radius:var(--r-s);color:var(--t1);font-family:var(--sans);font-size:12px;padding:8px 11px;outline:none}
+  .gp-save{width:calc(100% - 12px);margin:0 6px 16px;background:var(--t1);color:#0a0a0a;font-weight:600;font-size:12px;
+    padding:8px 0;border-radius:var(--r-s);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:7px}
+  .gp-save:hover{background:#fff}
+  .gp-save:disabled{opacity:.5;cursor:default}
+  .gsec{font-family:var(--mono);font-size:8.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--t5);
+    margin:14px 6px 6px;display:flex;align-items:center}
+  .gsec .n{margin-left:auto;letter-spacing:0}
+  .gsec .lnk{margin-left:auto;letter-spacing:.06em;cursor:pointer;border-bottom:1px dashed var(--t5)}
+  .gsec .lnk:hover{color:var(--t2)}
+  .gpr{display:flex;align-items:center;gap:6px;height:26px;padding:0 7px;border-radius:5px;font-size:12px;color:var(--t2);
+    cursor:pointer;position:relative;min-width:0}
+  .gpr:hover{background:var(--raised)}
+  .gpr .ch{font-family:var(--mono);font-size:8.5px;color:var(--t4);width:10px;text-align:center;flex:none}
+  .gpr .fi{width:13px;height:13px}
+  .gpr .fn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gpr .fp{color:var(--t5);font-size:10px;font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gpr.sub{padding-left:26px}
+  .gpr .act{margin-left:auto;display:flex;gap:6px;visibility:hidden;flex:none}
+  .gpr:hover .act{visibility:visible}
+  .gpr .act span{width:18px;height:18px;display:flex;align-items:center;justify-content:center;border-radius:4px;
+    color:var(--t4);font-size:11px}
+  .gpr .act span:hover{background:var(--hover);color:var(--t1)}
+  .gpr .mm{font-family:var(--mono);font-size:10.5px;flex:none;width:14px;text-align:center;margin-left:6px}
+  .mm.M{color:var(--here)}.mm.A{color:var(--done)}.mm.D{color:var(--err)}
+  .gp-quiet{margin:8px 6px;font-size:11.5px;color:var(--t5)}
+  .gp-row2{margin:12px 6px 0;display:flex;align-items:center}
+  .gp-row2 .pub{font-family:var(--mono);font-size:10.5px;color:var(--t3);border-bottom:1px dashed var(--t5);
+    padding-bottom:1px;cursor:pointer;white-space:nowrap}
+  .gp-row2 .pub:hover{color:var(--t1)}
+  /* graph */
+  .gg{position:relative;margin:0 2px}
+  .gg svg.lanes{position:absolute;left:4px;top:0;z-index:2;pointer-events:none}
+  .ggrow{display:flex;align-items:center;height:40px;padding:0 6px 0 0;border-radius:5px;position:relative;z-index:1;min-width:0}
+  .ggrow:hover{background:var(--raised)}
+  .gglane{flex:none}
+  .ggmsg{font-size:12px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto}
+  .ggrefs{display:flex;align-items:center;gap:5px;margin-left:8px;flex:none}
+  .ggref{display:inline-flex;align-items:center;height:16px;font-family:var(--mono);font-size:9px;letter-spacing:.03em;
+    background:var(--raised);border:1px solid var(--hair);border-radius:4px;padding:0 6px;color:var(--t3);white-space:nowrap}
+  .ggref.head{border-color:rgba(138,165,200,.4);color:var(--here);background:rgba(138,165,200,.07)}
+  .ggref.phx{color:var(--t4);background:transparent}
+  .ggright{margin-left:auto;display:flex;align-items:center;gap:7px;flex:none;padding-left:10px}
+  .ggau{width:14px;height:14px;border-radius:50%;background:var(--raised);border:1px solid var(--hair);
+    font-size:7px;display:flex;align-items:center;justify-content:center;color:var(--t4);flex:none}
+  .gghash{font-family:var(--mono);font-size:9.5px;color:var(--t5)}
+  .ggago{font-family:var(--mono);font-size:10px;color:var(--t5);min-width:26px;text-align:right}
+  /* diff view */
+  .dhd{display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--div);
+    font-family:var(--mono);font-size:11px;color:var(--t2)}
+  .dhd .bk{color:var(--t4);cursor:pointer}
+  .dhd .bk:hover{color:var(--t1)}
+  .diff{font-family:var(--code);font-size:11px;line-height:1.62;padding:8px 0 24px}
+  .dl{display:flex;white-space:pre-wrap;word-break:break-word}
+  .dl .no{width:44px;flex:none;text-align:right;padding-right:10px;color:var(--t5);font-size:9.5px;
+    -webkit-user-select:none;user-select:none}
+  .dl.add{background:rgba(127,174,138,.08)}.dl.add .tx{color:#a9c9b1}
+  .dl.del{background:rgba(207,138,134,.08)}.dl.del .tx{color:#cf9d9a}
+  .dl .tx{color:var(--t3);min-width:0;-webkit-user-select:text;user-select:text}
+  .hunk{color:var(--t5);padding:6px 14px 2px 54px;font-size:9.5px;font-family:var(--code)}
+  /* phase view (M3) */
+  #phview{display:none;flex-direction:column;min-height:0;flex:1}
+  #phview.on{display:flex}
+  #tab-road.phased{display:none!important}
+  .pv-h{flex:none;display:flex;align-items:center;gap:11px;padding:15px 16px;border-bottom:1px solid var(--div)}
+  .pv-h .bk{font-family:var(--mono);font-size:10.5px;color:var(--t4);cursor:pointer;white-space:nowrap}
+  .pv-h .bk:hover{color:var(--t1)}
+  .pv-h .id{font-family:var(--mono);font-size:10px;color:var(--t3);background:var(--raised);border:1px solid var(--hair);
+    border-radius:5px;padding:1.5px 8px;flex:none}
+  .pv-h b{font-size:14px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pv-b{flex:1;overflow-y:auto;padding:14px 18px 40px}
+  .pv-b>p{color:var(--t3);font-size:12.5px;margin-bottom:10px}
+  .acc{border:1px solid var(--hair);border-radius:7px;margin:6px 0 4px;overflow:hidden}
+  .arow{display:flex;align-items:center;gap:10px;height:38px;padding:0 13px;background:var(--panel);cursor:pointer;
+    border-top:1px solid var(--div);min-width:0}
+  .arow:first-child{border-top:none}
+  .arow .tw{font-family:var(--mono);font-size:10px;color:var(--t5);transition:transform .15s;flex:none}
+  .arow.open .tw{transform:rotate(90deg)}
+  .arow .ttl{font-size:12.5px;font-weight:550;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .arow .fnm{font-family:var(--mono);font-size:9.5px;color:var(--t5);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .arow .cp{margin-left:auto;flex:none;width:20px;height:20px;display:flex;align-items:center;justify-content:center;
+    border-radius:4px;color:var(--t4);font-size:11px}
+  .arow .cp:hover{background:var(--hover);color:var(--t1)}
+  .abody{display:none;background:var(--bg);padding:14px 18px;border-top:1px solid var(--div)}
+  .acc .open+.abody{display:block}
+  .md h1,.md h2,.md h3{font-size:13.5px;font-weight:650;margin:12px 0 6px;color:var(--t1)}
+  .md p{font-size:11.5px;color:var(--t3);margin-bottom:7px;line-height:1.6}
+  .md li{font-size:11.5px;color:var(--t3);margin:2px 0 2px 16px;line-height:1.55}
+  .md code{font-family:var(--code);font-size:10.5px;background:var(--raised);border:1px solid var(--hair);
+    border-radius:3px;padding:0 4px;color:var(--t2)}
+  .pv-start{background:var(--t1);color:#0a0a0a;font-weight:600;font-size:11.5px;padding:6px 13px;border-radius:var(--r-s);
+    border:none;cursor:pointer;margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:6px}
+  .pv-start:disabled{opacity:.5;cursor:default}
+  .vdet{margin-left:auto;flex:none}
   /* frameless window: the picker needs its own draggable strip + lights */
   #picker-bar{position:fixed;top:0;left:0;right:0;height:54px;display:flex;align-items:center;padding:0 16px;z-index:5}
   #left{display:flex;flex-direction:column;min-width:0}
@@ -534,6 +644,7 @@
   <div id="shell-body">
   <div id="left">
     <div class="tabpane active" id="tab-road"><canvas class="bgfx" id="fx-road"></canvas><div class="pad" id="road-pad"></div></div>
+    <div id="phview"><div class="pv-h"><span class="bk">‹ Roadmap</span><span class="id" id="pv-id"></span><b id="pv-name"></b><span class="st here" id="pv-st"><i></i></span><span id="pv-x" style="margin-left:auto;color:var(--t4);cursor:pointer">✕</span></div><div class="pv-b" id="pv-body"></div></div>
 
     <div class="tabpane" id="tab-repo">
       <div id="tree-pane">
@@ -556,6 +667,12 @@
   </div>
 
   <div class="splitter" id="split-main"></div>
+
+  <div id="gitpane">
+    <div id="gp-head"><b>Project history</b><span class="brch" id="gp-branch">⎇ —</span><span id="gp-x" title="Close · Esc">✕</span></div>
+    <div id="gp-err"></div>
+    <div id="gp-body"></div>
+  </div>
 
   <div id="right">
     <div id="tt-bar">
@@ -710,6 +827,9 @@ $("#pick-open").onclick=pickFolder;
 /* ============ confirm dialog ============ */
 function confirmBox(title,body,okLabel,onOk){
   $("#cf-title").innerHTML=title; $("#cf-body").textContent=body; $("#cf-ok").textContent=okLabel;
+  const danger=/remove|discard|delete/i.test(okLabel);
+  $("#cf-ok").style.borderColor=danger?"rgba(207,138,134,.5)":"var(--hair2)";
+  $("#cf-ok").style.color=danger?"var(--err)":"var(--t1)";
   $("#confirm").style.display="flex";
   $("#cf-ok").onclick=()=>{ $("#confirm").style.display="none"; onOk(); };
   $("#cf-cancel").onclick=()=>{ $("#confirm").style.display="none"; };
@@ -760,6 +880,7 @@ function activate(dir){
   document.title=`${proj.name} · Chronicle`;
   try{ window.__TAURI__.window.getCurrentWindow().setTitle(`${proj.name} · Chronicle`); }catch(_){}
   renderPTabs();
+  gitClose(); closePhaseView();
   // left panes are the active project's
   if(!proj.state){ $("#road-pad").innerHTML=""; window.__padKey=null; } // never show another project's screen
   treeLoaded=false; selRow=null; $("#tree").innerHTML="";
@@ -861,7 +982,12 @@ $("#sw-input").onkeydown=(e)=>{
   else if(e.key==="ArrowUp"){ e.preventDefault(); swIdx--; swHighlight(); }
   else if(e.key==="Enter"){ e.preventDefault(); const rows=swVisible(); if(rows[swIdx]) rows[swIdx].click(); }
 };
-document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closePalette(); closeNewProj(); $("#confirm").style.display="none"; } });
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"){
+  if($("#switcher").classList.contains("open")||$("#newproj").style.display==="flex"||$("#confirm").style.display==="flex"){
+    closePalette(); closeNewProj(); $("#confirm").style.display="none"; return; }
+  if(GIT.open){ gitClose(); return; }
+  if($("#phview").classList.contains("on")) closePhaseView();
+} });
 
 /* ============ roadmap render (manifest + live state) ============ */
 function docChip(d, docsMap){
@@ -1117,7 +1243,14 @@ function render(S){
         bodyIn.appendChild(cnt);
         const ul=document.createElement("ul");ul.className="p-items";ul.style.marginTop="4px";
         p.items.forEach(t=>{const li=document.createElement("li");li.innerHTML=sanB(t);ul.appendChild(li);});bodyIn.appendChild(ul);}
-      const pr=pasteRows(p,S.docs||{}); if(pr)bodyIn.appendChild(pr);
+      const pr=pasteRows(p,S.docs||{}); if(pr){
+        const vd=document.createElement("div"); vd.style.cssText="display:flex;margin-top:8px";
+        vd.innerHTML=`<button class="btn vdet">View details ›</button>`;
+        const fidx=idx-1;
+        vd.querySelector("button").onclick=(ev)=>{ ev.stopPropagation(); openPhaseView(p.id,fidx); };
+        pr.appendChild(vd);
+        bodyIn.appendChild(pr);
+      }
       if((p.docs||[]).length){const row=document.createElement("div");row.className="p-docs";
         const l=document.createElement("span");l.className="row-lbl";l.textContent="reference";row.appendChild(l);
         p.docs.forEach(d=>row.appendChild(docChip(d,S.docs||{})));bodyIn.appendChild(row);}
@@ -1190,6 +1323,8 @@ function renderGitPanels(pad,S,customActs){
     :(S.ahead>0||S.behind>0)
       ?`<div class="pnode hot"><div class="plbl">Published online</div><div class="pval"><span class="pnum${tick("a")}">${S.ahead>0?S.ahead:"↓"}</span><span class="punit">${S.ahead>0?`save${S.ahead>1?"s":""} waiting`:""}${S.behind>0?(S.ahead>0?" · ":"")+"Newer online":""}</span></div></div>`
       :`<div class="pnode calm"><div class="plbl">Published online</div><div class="pval"><span class="pnum">✓</span><span class="punit">up to date</span></div></div>`;
+  gp.style.cursor="pointer"; gp.title="Open the full history · saves, changes, the graph";
+  gp.onclick=(ev)=>{ if(!ev.target.closest(".cmdchip")) gitOpen(); };
   gp.innerHTML=`<h2>Project history<span class="hr">${S.is_git?`on <span style="color:var(--t2)">${esc(S.branch||"—")}</span>${wb&&S.branch&&S.branch!==wb?` · should be ${esc(wb)}`:""}`:sync}</span></h2>`
     +(!S.is_git?"":`
     <div class="pipe">${editsNode}<span class="pseg ${dirty.length?"hot":""}"></span>${histNode}<span class="pseg ${S.upstream&&S.ahead>0?"hot":""}"></span>${onlineNode}</div>
@@ -1366,6 +1501,7 @@ async function refresh(dir){
       render(S);
     }
     renderPTabs();
+    if(dir===activeDir&&GIT.open&&GIT.view==="status") gitRefresh();
   }
   catch(e){ if(dir===activeDir) $("#road-pad").innerHTML=`<div class="nm-center"><div class="nm-card"><h3>Couldn't read the project</h3><p>${esc(String(e))}</p></div></div>`; }
 }
@@ -1530,6 +1666,328 @@ new ResizeObserver(()=>{ const e=terms.get(tActive);
   .observe($("#tt-body"));
 $("#tt-add").onclick=()=>newTerm();
 setHint(false);
+
+
+/* ============ the git pane (M1/M2) ============ */
+const GIT={open:false,view:"status",diff:null,status:null,log:null};
+function gitToast(e){ const el=$("#gp-err"); if(!e){el.style.display="none";return;}
+  el.style.display="block"; el.textContent=String(e).slice(0,300); }
+async function gitOpen(){
+  if(!activeDir)return;
+  GIT.open=true; GIT.view="status"; GIT.diff=null; gitToast(null);
+  document.getElementById("shell-body").classList.add("git-open");
+  await gitRefresh();
+}
+function gitClose(){
+  GIT.open=false;
+  document.getElementById("shell-body").classList.remove("git-open");
+}
+async function gitRefresh(){
+  if(!GIT.open||!activeDir)return;
+  try{
+    const [st,log]=await Promise.all([
+      invoke("git_status_detail",{dir:activeDir}),
+      invoke("git_log_graph",{dir:activeDir,limit:30}),
+    ]);
+    GIT.status=st; GIT.log=log;
+    gitRender();
+  }catch(e){
+    // non-git folder: an honest empty pane
+    GIT.status=null; GIT.log=null; gitRender(String(e));
+  }
+}
+const AGENT_RE=/claude|codex|bot|gpt|agent/i;
+function auGlyph(name){
+  if(AGENT_RE.test(name||"")) return `<span class="ggau" title="${esc(name)} (an agent session)">✳</span>`;
+  const ini=(name||"?").split(/\s+/).map(w=>w[0]).join("").slice(0,2).toUpperCase();
+  return `<span class="ggau" title="${esc(name||"")}">${esc(ini)}</span>`;
+}
+function phaseIdRe(){
+  const ids=[]; ((MANIFEST&&MANIFEST.stages)||[]).forEach(st=>(st.phases||[]).forEach(p=>{ if(p.id&&p.id!=="POOL") ids.push(p.id.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")); }));
+  return ids.length?new RegExp("\\b("+ids.join("|")+")\\b"):null;
+}
+function laneGraph(commits){
+  // VS Code-style lane assignment: lanes hold the hash each line expects next
+  const lanes=[]; const rows=[];
+  for(const c of commits){
+    let li=lanes.indexOf(c.hash);
+    if(li===-1){ li=lanes.length; lanes.push(c.hash); }
+    const from=lanes.slice();
+    const parents=c.parents||[];
+    lanes[li]=parents[0]||null;
+    for(let k=1;k<parents.length;k++){ if(!lanes.includes(parents[k])) lanes.splice(li+k,0,parents[k]); }
+    for(let k=lanes.length-1;k>=0;k--){ if(lanes[k]===null) lanes.splice(k,1); }
+    rows.push({c,lane:li,from,to:lanes.slice()});
+  }
+  return rows;
+}
+const LANECOL=["#8aa5c8","#7fae8a","#c9a961","#9b8ab0"];
+function graphSvg(rows){
+  const RH=40,LW=14,R=3.5;
+  const maxLane=Math.max(1,...rows.map(r=>Math.max(r.lane+1,r.from.length,r.to.length)));
+  const w=Math.min(maxLane,4)*LW+8;
+  let out=`<svg class="lanes" width="${w}" height="${rows.length*RH}" fill="none">`;
+  const x=i=>6+i*LW;
+  rows.forEach((r,ri)=>{
+    const yc=ri*RH+RH/2;
+    // continuing lanes: from -> to
+    r.to.forEach((h,ti)=>{
+      if(h===null)return;
+      const fi=r.from.indexOf(h)!==-1?r.from.indexOf(h):(ti===r.lane?r.lane:ti);
+      const col=LANECOL[Math.min(ti,3)];
+      if(ti===r.lane||r.from[ti]===h||fi===ti){
+        out+=`<path d="M${x(ti)} ${yc} V${yc+RH}" stroke="${col}" stroke-width="1.5"/>`;
+      } else {
+        out+=`<path d="M${x(fi)} ${yc} C ${x(fi)} ${yc+RH*.6}, ${x(ti)} ${yc+RH*.4}, ${x(ti)} ${yc+RH}" stroke="${col}" stroke-width="1.5"/>`;
+      }
+    });
+    // incoming line from the row above
+    if(ri>0) out+=`<path d="M${x(r.lane)} ${yc-RH/2} V${yc}" stroke="${LANECOL[Math.min(r.lane,3)]}" stroke-width="1.5"/>`;
+    const merge=(r.c.parents||[]).length>1;
+    out+=`<circle cx="${x(r.lane)}" cy="${yc}" r="${R}" fill="${merge?LANECOL[Math.min(r.lane,3)]:"var(--panel)"}" stroke="${LANECOL[Math.min(r.lane,3)]}" stroke-width="1.5"/>`;
+  });
+  return out+"</svg>";
+}
+function gitRender(nonGitErr){
+  $("#gp-branch").textContent="⎇ "+((PROJ&&PROJ.state&&PROJ.state.branch)||"—");
+  const b=$("#gp-body");
+  if(nonGitErr!==undefined&&!GIT.status){
+    b.innerHTML=`<div class="gp-quiet" style="margin-top:20px;text-align:center">This folder isn't a git project yet.<br>
+      Ideate in the terminal · the first save creates its history.</div>`;
+    return;
+  }
+  if(GIT.view==="diff"&&GIT.diff){ gitRenderDiff(); return; }
+  const st=GIT.status||{staged:[],unstaged:[]};
+  const total=st.staged.length+st.unstaged.length;
+  const S=(PROJ&&PROJ.state)||{};
+  const treeRows=(list,staged)=>{
+    // group by folder, VS Code tree style
+    const dirs={};
+    list.forEach(f=>{ const i=f.path.lastIndexOf("/"); const d=i<0?"":f.path.slice(0,i);
+      (dirs[d]=dirs[d]||[]).push(f); });
+    let html="";
+    Object.keys(dirs).sort().forEach(d=>{
+      if(d) html+=`<div class="gpr" style="cursor:default"><span class="ch">▾</span>${ICON_DIR.replace('class="fi"','class="fi" style="width:13px;height:13px"')}<span class="fn" style="color:var(--t3)">${esc(d)}</span></div>`;
+      dirs[d].forEach(f=>{
+        const nm=f.path.split("/").pop();
+        html+=`<div class="gpr ${d?"sub":""}" data-p="${encodeURIComponent(f.path)}" data-st="${staged?1:0}" data-un="${f.untracked?1:0}">
+          <span class="ch"></span>${ICON_FILE}<span class="fn">${esc(nm)}</span>
+          <span class="act">${staged?`<span class="unstage" title="Unstage">−</span>`
+            :`<span class="stage" title="Stage">+</span><span class="discard" title="Discard changes">↻</span>`}</span>
+          <span class="mm ${esc(f.code)}">${esc(f.code)}</span></div>`;
+      });
+    });
+    return html;
+  };
+  let html=`
+    <input class="gp-msg" id="gp-msg" placeholder="Message (what changed?)" value="${esc(GIT.msg||"")}">
+    <button class="gp-save" id="gp-save">✓ Save to history</button>`;
+  if(total===0){
+    html+=`<div class="gp-quiet">Nothing to save · everything is recorded.</div>`;
+  } else {
+    if(st.staged.length){ html+=`<div class="gsec">Staged changes<span class="n">${st.staged.length}</span></div>`+treeRows(st.staged,true); }
+    html+=`<div class="gsec">Changes<span class="n">${st.unstaged.length}</span></div>`+(st.unstaged.length?treeRows(st.unstaged,false):`<div class="gp-quiet">None.</div>`);
+  }
+  const pubLabel=!S.remote_url?"Put this project on GitHub"
+    :(!S.upstream||S.ahead>0)?`Publish online${S.ahead>0?" · "+S.ahead+" waiting":""}`:null;
+  html+=`<div class="gp-row2">
+    <span style="font-size:11px;color:var(--t4)">${S.ahead>0?S.ahead+" save"+(S.ahead>1?"s":"")+" waiting to publish":(S.upstream?"Everything is published":(S.remote_url?"Never pushed":"Not on GitHub yet"))}</span>
+    <span class="spacer"></span>
+    ${S.behind>0?`<span class="pub" id="gp-pull" style="margin-right:14px">Bring down ${S.behind} newer</span>`:""}
+    ${pubLabel?`<span class="pub" id="gp-pub">${esc(pubLabel)}</span>`:""}</div>`;
+  // the graph
+  const re=phaseIdRe();
+  const rows=laneGraph(GIT.log||[]);
+  html+=`<div class="gsec" style="margin-top:22px">Graph<span class="n">last ${rows.length}</span></div><div class="gg">`;
+  html+=graphSvg(rows);
+  const laneW=Math.min(Math.max(1,...rows.map(r=>r.lane+1)),4)*14+10;
+  rows.forEach(r=>{
+    const c=r.c;
+    const refs=(c.refs||"").split(",").map(x=>x.trim()).filter(x=>x&&!x.startsWith("HEAD ->")===false||x);
+    let refHtml="";
+    (c.refs||"").split(",").map(x=>x.trim().replace("HEAD -> ","")).filter(Boolean).slice(0,2).forEach(x=>{
+      refHtml+=`<span class="ggref ${x===((PROJ.state||{}).branch)?"head":""}">${esc(x)}</span>`;
+    });
+    const m=re&&(c.subject||"").match(re);
+    if(m) refHtml+=`<span class="ggref phx" title="Tagged from the save message · approximate">${esc(m[1])}</span>`;
+    html+=`<div class="ggrow"><span class="gglane" style="width:${laneW}px"></span>
+      <span class="ggmsg" title="${esc(c.subject)}">${esc(c.subject)}</span>
+      <span class="ggrefs">${refHtml}</span>
+      <span class="ggright">${auGlyph(c.author)}<span class="gghash">${esc(c.hash)}</span><span class="ggago">${esc((c.ago||"").replace(" ago","").replace(/(\d+) (\w)\w*/,"$1$2"))}</span></span></div>`;
+  });
+  html+=`</div>`;
+  b.innerHTML=html;
+  // wire
+  $("#gp-msg").oninput=e=>GIT.msg=e.target.value;
+  $("#gp-msg").onkeydown=e=>{ if((e.metaKey||e.ctrlKey)&&e.key==="Enter") gitSave(); };
+  $("#gp-save").onclick=gitSave;
+  const pub=$("#gp-pub"); if(pub) pub.onclick=gitPublish;
+  const pull=$("#gp-pull"); if(pull) pull.onclick=async()=>{ gitToast(null);
+    try{ await invoke("git_pull",{dir:activeDir}); toast("Brought the newer saves down"); refresh(); gitRefresh(); }
+    catch(e){ gitToast("Couldn't pull: "+e); } };
+  b.querySelectorAll(".gpr[data-p]").forEach(row=>{
+    const path=decodeURIComponent(row.dataset.p), staged=row.dataset.st==="1", un=row.dataset.un==="1";
+    row.onclick=()=>gitOpenDiff(path,staged,un);
+    const st1=row.querySelector(".stage"); if(st1) st1.onclick=async ev=>{ ev.stopPropagation();
+      await invoke("git_stage",{dir:activeDir,path}).catch(e=>gitToast(e)); gitRefresh(); };
+    const un1=row.querySelector(".unstage"); if(un1) un1.onclick=async ev=>{ ev.stopPropagation();
+      await invoke("git_unstage",{dir:activeDir,path}).catch(e=>gitToast(e)); gitRefresh(); };
+    const d1=row.querySelector(".discard"); if(d1) d1.onclick=ev=>{ ev.stopPropagation();
+      confirmBox(`Discard the changes in ${esc(path.split("/").pop())}?`,
+        un?"This file is new and not saved anywhere · discarding deletes it. This can't be undone."
+          :"The file goes back to its last saved state. This can't be undone.",
+        "Discard", async()=>{ await invoke("git_discard",{dir:activeDir,path,untracked:un}).catch(e=>gitToast(e)); gitRefresh(); refresh(); }); };
+  });
+}
+async function gitSave(){
+  const msg=(GIT.msg||"").trim(); gitToast(null);
+  if(!msg){ gitToast("Give the save a short message first."); return; }
+  const st=GIT.status||{staged:[],unstaged:[]};
+  const doCommit=async(all)=>{ try{
+      await invoke("git_commit",{dir:activeDir,message:msg,stageAll:all});
+      GIT.msg=""; toast(`Saved to history <span class="dim">· ${esc(msg.slice(0,40))}</span>`);
+      gitRefresh(); refresh();
+    }catch(e){ gitToast("Couldn't save: "+e); } };
+  if(st.staged.length===0){
+    if(st.unstaged.length===0){ gitToast("Nothing to save · everything is recorded."); return; }
+    confirmBox(`No files marked · save all ${st.unstaged.length} changed file${st.unstaged.length>1?"s":""}?`,
+      "Same as VS Code: with nothing staged, the save takes every change.","Save all",()=>doCommit(true));
+  } else doCommit(false);
+}
+async function gitPublish(){
+  gitToast(null);
+  const S=(PROJ&&PROJ.state)||{};
+  if(!S.remote_url){
+    const slug=(tilde(S.repo||"").split("/").pop()||"project").replace(/[^a-zA-Z0-9._-]/g,"-");
+    copyCmd(`gh repo create ${slug} --private --source=. --push`);
+    return;
+  }
+  try{ await invoke("git_push",{dir:activeDir}); toast("Published online"); refresh(); gitRefresh(); }
+  catch(e){
+    gitToast(/reject|non-fast|fetch first|behind/i.test(String(e))
+      ?"The online copy has newer saves. Bring them down first (there is no force-push in Chronicle)."
+      :"Couldn't publish: "+e);
+  }
+}
+function gitOpenDiff(path,staged,untracked){
+  GIT.view="diff"; GIT.diff={path,staged,untracked};
+  invoke("git_diff",{dir:activeDir,path,staged,untracked}).then(t=>{ GIT.diff.text=t; gitRender(); })
+    .catch(e=>{ gitToast(e); GIT.view="status"; });
+}
+function gitRenderDiff(){
+  const d=GIT.diff; const b=$("#gp-body");
+  let html=`<div class="dhd" style="margin:-16px -14px 10px;padding:12px 16px"><span class="bk" id="gp-back">‹ changes</span>
+    <span>${esc(d.path)}</span><span class="mm M" style="margin-left:auto">${d.staged?"staged":""}</span></div><div class="diff">`;
+  let oldN=0,newN=0;
+  for(const line of (d.text||"").split("\n")){
+    if(line.startsWith("@@")){ const m=line.match(/-(\d+)(?:,\d+)? \+(\d+)/); if(m){oldN=+m[1];newN=+m[2];}
+      html+=`<div class="hunk">${esc(line)}</div>`; continue; }
+    if(/^(diff |index |--- |\+\+\+ |new file|deleted )/.test(line)) continue;
+    if(line.startsWith("+")){ html+=`<div class="dl add"><span class="no">${newN++}</span><span class="tx">${esc(line)}</span></div>`; }
+    else if(line.startsWith("-")){ html+=`<div class="dl del"><span class="no">${oldN++}</span><span class="tx">${esc(line)}</span></div>`; }
+    else { html+=`<div class="dl"><span class="no">${newN++}</span><span class="tx">${esc(line)}</span></div>`; oldN++; }
+  }
+  html+="</div>";
+  b.innerHTML=html;
+  $("#gp-back").onclick=()=>{ GIT.view="status"; GIT.diff=null; gitRender(); };
+}
+$("#gp-x").onclick=gitClose;
+
+/* ============ the phase view (M3) ============ */
+function mdRender(text){
+  const lines=esc(text).split("\n"); let out="",inList=false;
+  const inline=t=>t.replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<b>$1</b>");
+  for(const l of lines){
+    if(/^#{1,3} /.test(l)){ if(inList){out+="</ul>";inList=false;} out+=`<h3>${inline(l.replace(/^#+ /,""))}</h3>`; }
+    else if(/^\s*[-*] /.test(l)){ if(!inList){out+="<ul>";inList=true;} out+=`<li>${inline(l.replace(/^\s*[-*] /,""))}</li>`; }
+    else if(l.trim()===""){ if(inList){out+="</ul>";inList=false;} }
+    else { if(inList){out+="</ul>";inList=false;} out+=`<p>${inline(l)}</p>`; }
+  }
+  if(inList)out+="</ul>";
+  return `<div class="md">${out}</div>`;
+}
+async function openPhaseView(pid,idx){
+  const flat=[]; ((MANIFEST&&MANIFEST.stages)||[]).forEach(st=>(st.phases||[]).forEach(p=>flat.push(p)));
+  const ph=flat[idx]; if(!ph)return;
+  const st=((PROJ.state&&PROJ.state.statuses)||[])[idx]||{state:"later",label:"later"};
+  PROJ.phaseView=idx;
+  $("#tab-road").classList.add("phased");
+  $("#phview").classList.add("on");
+  $("#pv-id").textContent=ph.id; $("#pv-name").textContent=ph.name||"";
+  const stEl=$("#pv-st"); stEl.className="st "+(st.state==="done"?"done":(st.state==="now"?"here":""));
+  stEl.innerHTML=`<i></i>${esc(st.label)}`;
+  const b=$("#pv-body");
+  let html="";
+  if(ph.desc) html+=`<p>${sanB(ph.desc)}</p>`;
+  if((ph.items||[]).length){
+    html+=`<div class="gsec" style="margin-left:0">${ph.items.length} steps</div><ul style="list-style:none">`;
+    ph.items.forEach(t=>html+=`<li style="font-size:11.5px;color:var(--t3);padding:3px 0 3px 13px;position:relative"><span style="position:absolute;left:0;top:10px;width:3px;height:3px;border-radius:50%;background:var(--t5)"></span>${sanB(t)}</li>`);
+    html+="</ul>";
+  }
+  const isNow=st.state==="now";
+  if((ph.paste||[]).length){
+    html+=`<div style="display:flex;align-items:center;gap:9px;margin-top:12px;flex-wrap:wrap">`;
+    html+=`<span class="row-lbl" style="color:${isNow?"var(--here)":"var(--t5)"}">You paste</span>`;
+    ph.paste.forEach(pl=>{ if(pl.path) html+=`<span class="doc paste" data-cp="${encodeURIComponent(pl.path)}">${FICON}${esc(pl.path.split("/").pop())}<span class="into">→ ${esc(pl.into)}</span></span>`; });
+    if(isNow&&!ph.pool&&!ph.window) html+=`<button class="pv-start" id="pv-start">Start this phase ▸</button>`;
+    html+=`</div>`;
+  }
+  const docs=[...(ph.docs||[]),...(ph.paste||[]).filter(x=>x.path)];
+  if(docs.length){
+    html+=`<div class="gsec" style="margin:18px 0 6px 0">Documents</div><div class="acc" id="pv-acc">`;
+    docs.forEach((d,i)=>{
+      const fn=d.path.split("/").pop();
+      html+=`<div class="arow" data-i="${i}" data-p="${encodeURIComponent(d.path)}"><span class="tw">›</span><span class="ttl">${esc(fn.replace(/\.md$/,"").replace(/_/g," ").toLowerCase())}</span><span class="fnm">${esc(fn)}</span><span class="cp" title="Copy contents">⧉</span></div><div class="abody" data-b="${i}">Loading…</div>`;
+    });
+    html+=`</div>`;
+  }
+  html+=`<div class="gsec" style="margin:18px 0 6px 0">Saves during this phase</div><div id="pv-saves" class="gp-quiet">Looking…</div>`;
+  b.innerHTML=html;
+  b.querySelectorAll("[data-cp]").forEach(el=>el.onclick=ev=>copyDoc(decodeURIComponent(el.dataset.cp),ev.currentTarget));
+  const startBtn=$("#pv-start");
+  if(startBtn) startBtn.onclick=()=>startPhase(ph,startBtn);
+  const acc=$("#pv-acc");
+  if(acc) acc.querySelectorAll(".arow").forEach(row=>{
+    row.querySelector(".cp").onclick=ev=>{ev.stopPropagation();copyDoc(decodeURIComponent(row.dataset.p));};
+    row.onclick=async()=>{
+      const body=acc.querySelector(`[data-b="${row.dataset.i}"]`);
+      const opening=!row.classList.contains("open");
+      acc.querySelectorAll(".arow").forEach(r2=>r2.classList.remove("open"));
+      if(opening){ row.classList.add("open");
+        if(!body.dataset.done){ try{ body.innerHTML=mdRender(await invoke("read_file",{dir:activeDir,path:decodeURIComponent(row.dataset.p)})); }
+          catch(e){ body.innerHTML=`<p style="color:var(--err);font-size:11px">${esc(String(e))}</p>`; }
+          body.dataset.done=1; } }
+    };
+  });
+  // saves during this phase: honest subject-mention matching
+  try{
+    const log=GIT.log||await invoke("git_log_graph",{dir:activeDir,limit:60});
+    const re=new RegExp("\\b"+ph.id.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","i");
+    const hits=(log||[]).filter(c=>re.test(c.subject||"")).slice(0,8);
+    $("#pv-saves").innerHTML=hits.length
+      ?hits.map(c=>`<div style="display:flex;gap:8px;align-items:baseline;padding:4px 0"><span class="gghash" style="background:var(--raised);border:1px solid var(--hair);border-radius:4px;padding:1px 6px;color:var(--t2)">${esc(c.hash)}</span><span style="font-size:11.5px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.subject)}</span><span class="ggago" style="margin-left:auto">${esc(c.ago)}</span></div>`).join("")
+      :`No saves mention ${esc(ph.id)} yet.`;
+  }catch(_){ $("#pv-saves").textContent="History unavailable."; }
+}
+function closePhaseView(){
+  PROJ&&(PROJ.phaseView=null);
+  $("#phview").classList.remove("on");
+  $("#tab-road").classList.remove("phased");
+}
+document.querySelector("#phview .bk").onclick=closePhaseView;
+$("#pv-x").onclick=closePhaseView;
+async function startPhase(ph,btn){
+  btn.disabled=true; btn.textContent="Opening a shell…";
+  await newTerm();
+  btn.textContent="Starting claude…";
+  const id=tActive;
+  setTimeout(async()=>{
+    try{ await invoke("pty_write",{id,data:(AGENTS.default||"claude")+"\n"}); }catch(_){}
+    const pf=(ph.paste||[]).find(x=>x.path);
+    if(pf){ await copyDoc(pf.path); btn.textContent="Copied · paste ⌘V when it's ready"; }
+    else btn.textContent="Shell ready";
+  },700);
+}
 
 /* ============ resizable columns ============ */
 function makeSplit(el, cssVar, storeKey, compute){
