@@ -423,12 +423,14 @@
   .stage-head .snote{font-size:var(--fs-meta);color:var(--t5);margin-top:3px}
   .stage-head .rule{flex:1;min-width:24px;height:1px;background:var(--hair)}
   .rail{position:relative;margin-left:10px;padding-left:20px;display:flex;flex-direction:column;gap:9px}
-  .rail::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:1px;background:var(--hair2)}
   .phase{position:relative;background:var(--panel);border:1px solid var(--hair);border-radius:var(--r);padding:13px 16px;transition:border-color .12s}
   .phase:hover{border-color:var(--hair2)}
   .phase::before{content:"";position:absolute;left:-23.5px;top:14px;width:7px;height:7px;border-radius:50%;
-    background:var(--bg);border:1.5px solid var(--t5);box-shadow:0 0 0 3px var(--bg)}
+    background:var(--bg);border:1.5px solid var(--t5);box-shadow:0 0 0 3px var(--bg);z-index:1}
   .phase::after{content:"";position:absolute;left:-15px;top:18.5px;width:13px;height:1px;background:var(--hair2)}
+  /* connector: each card draws the rail from its dot down to the next card's dot (scales with expand/collapse) */
+  .p-rline{position:absolute;left:-20.5px;top:17.5px;width:1px;height:calc(100% + 11px);background:var(--hair2);pointer-events:none}
+  .rail>.phase:last-child .p-rline{display:none}
   .phase.done::before{background:var(--done);border-color:var(--done)}
   .phase.now::before{background:var(--here);border-color:var(--here);animation:pulse 2.4s ease-in-out infinite}
   .phase.window{border-style:dashed}
@@ -1363,6 +1365,7 @@ function render(S){
       const pid=p.id+"·"+idx;
       const isOpen=(pid in PROJ.cardState)?PROJ.cardState[pid]:(s.state==="now");
       const card=document.createElement("div");card.className="phase "+cls+(isOpen?" open":"")+(justDone?" just-done":"");
+      const rl=document.createElement("span");rl.className="p-rline";card.appendChild(rl);
       const head=document.createElement("div");head.className="p-head";
       head.innerHTML=`<span class="id">${esc(p.id)}</span><span class="name">${esc(p.name)}</span>`+
         `<span class="st ${stCls}${labelChanged?" st-changed":""}"><i></i>${esc(s.label)}</span><span class="tw">${G.chevR('var(--t5)',11)}</span>`;
