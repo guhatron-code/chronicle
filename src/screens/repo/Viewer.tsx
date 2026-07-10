@@ -230,15 +230,6 @@ export function Viewer(p: ViewerProps) {
               <span className="text-state-error">{"−"}{p.diffStat.removed}</span>
             </span>
           )}
-          {p.mode === "contents" && (
-            <button
-              onClick={p.onCopy}
-              className="inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-md border border-border-strong px-2.5 text-[11.5px] font-medium text-text-secondary hover:bg-fill-hover"
-            >
-              <CopyGlyph size={11} />
-              Copy contents
-            </button>
-          )}
         </div>
       )}
 
@@ -312,6 +303,18 @@ export function Viewer(p: ViewerProps) {
           </button>
           )}
         </Stage>
+      )}
+      {/* bottom bar (operator: copy lives down here, out of the reading path) */}
+      {p.mode === "contents" && p.body.kind === "code" && (
+        <div className="flex items-center justify-end border-t border-divider px-3.5 py-[7px]">
+          <button
+            onClick={p.onCopy}
+            className="inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-md border border-border-strong px-2.5 text-[11.5px] font-medium text-text-secondary hover:bg-fill-hover"
+          >
+            <CopyGlyph size={11} />
+            Copy contents
+          </button>
+        </div>
       )}
     </div>
   );
