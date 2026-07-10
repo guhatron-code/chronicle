@@ -207,7 +207,7 @@ export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
       title, sub,
       command: cmd,
       ...(cmd
-        ? { kind: "one-click" as const, actionLabel: "Run the command…", onAction: () => H.onRunCustom(cmd) }
+        ? { kind: "one-click" as const, actionLabel: "Execute…", onAction: () => H.onRunCustom(cmd) }
         : { kind: "copy-only" as const }),
     });
   }

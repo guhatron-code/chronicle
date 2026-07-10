@@ -236,15 +236,15 @@ export function RoadmapPane({
       onRunCustom: (cmd) => {
         const risky = /gh repo create|worktree remove|--force|--hard|\brm\s|\bdelete\b|reset --hard/i.test(cmd);
         onConfirm({
-          title: "Run this command?",
+          title: "Execute this command?",
           body: cmd,
           cancelLabel: "Not yet",
-          confirmLabel: risky ? "Run it — can't be undone" : "Run it",
+          confirmLabel: risky ? "Execute — can't be undone" : "Execute",
           danger: risky,
           onConfirm: () => {
             runCommand(dir, cmd)
               .then((out) => {
-                toastSuccess("Ran the command", String(out).split("\n")[0].slice(0, 90));
+                toastSuccess("Executed", String(out).split("\n")[0].slice(0, 90));
                 onPollNow();
               })
               .catch((e) => toastError("That didn't finish", String(e).split("\n")[0].slice(0, 110)));
