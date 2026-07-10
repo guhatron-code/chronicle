@@ -50,6 +50,11 @@ export const initStart = (dir: string, agent: string | null) =>
   invoke<void>("init_start", { dir, agent });
 export const initStatus = (dir: string) =>
   invoke<InitStatusData>("init_status", { dir });
+/** Stop a running roadmap session (SIGTERM → grace → SIGKILL, always reaped). */
+export const initCancel = (dir: string) => invoke<void>("init_cancel", { dir });
+/** Persist the per-project consent choice; surfaces as `init_consent` in get_state. */
+export const setInitConsent = (dir: string, choice: "auto" | "manual" | "basic") =>
+  invoke<void>("set_init_consent", { dir, choice });
 
 /* ---------- git ---------- */
 export const gitStatusDetail = (dir: string) =>

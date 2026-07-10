@@ -15,8 +15,8 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
-use tauri::{Emitter, State};
+use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager, State};
 
 /* ================= project model ================= */
 
@@ -29,9 +29,39 @@ struct Project {
     manifest_error: Option<String>,
 }
 
-/// Background /chronicle-init runs, keyed by project dir.
+/// Background /chronicle-init runs, keyed by the CANONICALIZED project path (same-named
+/// folders in different places must never share a run or a log).
 struct InitState {
     runs: Mutex<std::collections::HashMap<String, (std::process::Child, PathBuf)>>,
+}
+
+/// The trust anchor: the set of project roots the USER opened (open_project /
+/// create_project / the recents list). Every path-taking command resolves its `dir`
+/// against this allowlist — an arbitrary `dir` from the webview is rejected, so the
+/// per-project jail can't be relocated by the caller.
+struct OpenRoots(Mutex<HashSet<PathBuf>>);
+
+/// Canonical key + a collision-free log path for an init run.
+fn canon_key(dir: &str) -> Result<(String, PathBuf), String> {
+    let canon = PathBuf::from(dir).canonicalize().map_err(|e| e.to_string())?;
+    let key = canon.to_string_lossy().to_string();
+    let mut h = Sha256::new();
+    h.update(key.as_bytes());
+    let hex = format!("{:x}", h.finalize());
+    let log = std::env::temp_dir().join(format!("chronicle-init-{}.log", &hex[..16]));
+    Ok((key, log))
+}
+
+/// SIGTERM, give the child a moment to exit cleanly, then SIGKILL; always reap.
+fn term_then_kill(child: &mut std::process::Child) {
+    let pid = child.id() as i32;
+    unsafe { libc::kill(pid, libc::SIGTERM) };
+    for _ in 0..20 {
+        if let Ok(Some(_)) = child.try_wait() { return; }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /* ================= agents (Claude Code · Codex) ================= */
@@ -137,9 +167,16 @@ fn load_project(dir: &Path) -> Project {
 /* ================= git + condition context ================= */
 
 fn git_in(repo: &Path, args: &[&str]) -> String {
+    git_in_checked(repo, args).unwrap_or_default()
+}
+
+/// Err ONLY when git itself couldn't run (missing binary / spawn failure). A broken
+/// environment must surface as DEGRADED — never silently derive "0 commits / not a
+/// repo" from it. (A normal non-zero git exit, e.g. not-a-repo, is still empty output.)
+fn git_in_checked(repo: &Path, args: &[&str]) -> Result<String, String> {
     Command::new("git").arg("-C").arg(repo).args(args).output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
+        .map_err(|e| e.to_string())
 }
 
 struct Ctx {
@@ -170,6 +207,27 @@ impl Ctx {
         }
         self.repo.join(path)
     }
+
+    /// The jailed resolve for MANIFEST-DECLARED paths (conditions, docs, generatedFrom).
+    /// Manifest content is data, never trusted: absolute paths and `..` traversal are
+    /// rejected outright; the resolved path (symlinks followed) must stay inside a
+    /// declared root. Returns None for anything that escapes or doesn't exist.
+    fn resolve_jailed(&self, path: &str) -> Option<PathBuf> {
+        if Path::new(path).is_absolute() { return None; }
+        if Path::new(path).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return None;
+        }
+        let full = self.resolve(path);
+        let canon = full.canonicalize().ok()?; // nonexistent → None (file_exists = false)
+        let mut roots: Vec<&PathBuf> = vec![&self.repo];
+        roots.extend(self.extras.iter().map(|(_, b)| b));
+        for r in roots {
+            if let Ok(cr) = r.canonicalize() {
+                if canon.starts_with(&cr) { return Some(canon); }
+            }
+        }
+        None
+    }
 }
 
 /// One condition. Supported keys (exactly one per object, plus optional "not": true):
@@ -186,14 +244,15 @@ fn eval_cond(ctx: &Ctx, cond: &Value) -> bool {
             return ctx.tags.contains(t);
         }
         if let Some(p) = cond.get("file_exists").and_then(|v| v.as_str()) {
-            return ctx.resolve(p).exists();
+            return ctx.resolve_jailed(p).is_some();
         }
         if let Some(fm) = cond.get("file_matches") {
             if let (Some(p), Some(pat)) = (
                 fm.get("path").and_then(|v| v.as_str()),
                 fm.get("pattern").and_then(|v| v.as_str()),
             ) {
-                let text = std::fs::read_to_string(ctx.resolve(p)).unwrap_or_default();
+                let Some(full) = ctx.resolve_jailed(p) else { return false };
+                let text = std::fs::read_to_string(full).unwrap_or_default();
                 return Regex::new(&format!("(?m){pat}")).map(|re| re.is_match(&text)).unwrap_or(false);
             }
             return false;
@@ -210,9 +269,11 @@ fn eval_cond(ctx: &Ctx, cond: &Value) -> bool {
                 .any(|l| l.strip_prefix("branch refs/heads/") == Some(wb));
         }
         if let Some(fg) = cond.get("file_glob") {
-            let dir = fg.get("dir").and_then(|v| v.as_str()).map(|d| ctx.resolve(d));
+            let dir = match fg.get("dir").and_then(|v| v.as_str()) {
+                Some(d) => match ctx.resolve_jailed(d) { Some(p) => p, None => return false },
+                None => ctx.repo.clone(),
+            };
             let needle = fg.get("contains").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
-            let dir = dir.unwrap_or_else(|| ctx.repo.clone());
             if let Ok(rd) = std::fs::read_dir(dir) {
                 return rd.flatten().any(|e| e.file_name().to_string_lossy().to_lowercase().contains(&needle));
             }
@@ -302,7 +363,7 @@ struct Worktree { path: String, branch: String, prunable: bool }
 struct DirtyEntry { code: String, path: String }
 
 #[tauri::command]
-fn get_picker() -> Value {
+async fn get_picker() -> Value {
     let recents: Vec<Value> = load_recents().into_iter().map(|mut r| {
         if let Some(path) = r.get("path").and_then(|v| v.as_str()) {
             let dir = PathBuf::from(path);
@@ -406,7 +467,7 @@ fn part_of_hint(dir: &Path) -> Value {
 /// A blank project: a fresh folder in ~/Documents to ideate in. The roadmap stays an
 /// empty state (marked by .chronicle-blank) until the user asks to build it.
 #[tauri::command]
-fn create_project(name: String) -> Result<String, String> {
+fn create_project(roots: State<OpenRoots>, name: String) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() || name.contains('/') || name.starts_with('.') {
         return Err("give the project a simple name (no slashes)".into());
@@ -418,6 +479,7 @@ fn create_project(name: String) -> Result<String, String> {
     let _ = Command::new("git").arg("-C").arg(&dir).arg("init").output();
     let _ = std::fs::write(dir.join(".chronicle-blank"),
         "created by Chronicle — deleted automatically once the roadmap exists\n");
+    if let Ok(canon) = dir.canonicalize() { allow_root(&roots, &canon); }
     Ok(dir.to_string_lossy().into())
 }
 
@@ -436,9 +498,9 @@ fn misplaced_manifest(dir: &Path) -> Option<String> {
 
 /// Move a misplaced sub-folder manifest up to the opened folder's root.
 #[tauri::command]
-fn adopt_manifest(dir: String, sub: String) -> Result<(), String> {
+fn adopt_manifest(roots: State<OpenRoots>, dir: String, sub: String) -> Result<(), String> {
     if sub.contains('/') || sub.contains("..") { return Err("bad folder name".into()); }
-    let dir = PathBuf::from(&dir).canonicalize().map_err(|e| e.to_string())?;
+    let dir = project_for(&roots, &dir)?.dir;
     let from = dir.join(&sub).join("chronicle.json");
     let to = dir.join("chronicle.json");
     if to.exists() { return Err("a chronicle.json already exists here".into()); }
@@ -455,9 +517,10 @@ fn remove_recent(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn open_project(path: String) -> Result<Value, String> {
+async fn open_project(roots: State<'_, OpenRoots>, path: String) -> Result<Value, String> {
     let dir = PathBuf::from(&path).canonicalize().map_err(|e| e.to_string())?;
     if !dir.is_dir() { return Err("not a folder".into()); }
+    allow_root(&roots, &dir); // the USER opened it — this is the trust anchor
     let p = load_project(&dir);
     let part_of = if p.manifest.is_none() { part_of_hint(&dir) } else { Value::Null };
     // recents: newest first, dedup by path, keep 10
@@ -485,9 +548,8 @@ fn open_project(path: String) -> Result<Value, String> {
 /// while the project is open (e.g. by a background /chronicle-init) is picked up on the
 /// next poll or refresh, no reopen needed.
 #[tauri::command]
-fn get_state(dir: String) -> Result<Value, String> {
-    let dir = PathBuf::from(&dir).canonicalize().map_err(|e| e.to_string())?;
-    let p = load_project(&dir);
+async fn get_state(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
     let mut s = state_for_project(&p);
     let marker = p.dir.join(".chronicle-blank");
     let blank = marker.exists();
@@ -500,6 +562,7 @@ fn get_state(dir: String) -> Result<Value, String> {
         }
         obj.insert("extras".into(), json!(p.extras.iter()
             .map(|(a, pp)| json!({"alias": a, "path": pp.to_string_lossy()})).collect::<Vec<_>>()));
+        obj.insert("init_consent".into(), init_consent_for(&p.dir));
     }
     Ok(s)
 }
@@ -507,16 +570,15 @@ fn get_state(dir: String) -> Result<Value, String> {
 /* ================= background /chronicle-init ================= */
 
 #[tauri::command]
-fn init_start(init: State<InitState>, dir: String, agent: Option<String>) -> Result<(), String> {
-    let dirp = PathBuf::from(&dir).canonicalize().map_err(|e| e.to_string())?;
+async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>) -> Result<(), String> {
+    let dirp = project_for(&roots, &dir)?.dir; // only an OPENED project may run a session
+    let (key, log) = canon_key(&dir)?; // canonical path key + hashed log name — no collisions
     let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
-    if let Some((child, _)) = runs.get_mut(&dir) {
+    if let Some((child, _)) = runs.get_mut(&key) {
         if child.try_wait().map_err(|e| e.to_string())?.is_none() {
             return Ok(()); // already running
         }
     }
-    let log = std::env::temp_dir().join(format!("chronicle-init-{}.log",
-        dirp.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default()));
     let logf = std::fs::File::create(&log).map_err(|e| e.to_string())?;
     let errf = logf.try_clone().map_err(|e| e.to_string())?;
     // full auto mode either way: the session must finish without a single prompt.
@@ -548,32 +610,87 @@ fn init_start(init: State<InitState>, dir: String, agent: Option<String>) -> Res
             .spawn()
             .map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
-    runs.insert(dir, (child, log));
+    runs.insert(key, (child, log));
     Ok(())
 }
 
+/// Stop a running roadmap session: SIGTERM, a grace period, then SIGKILL — always reaped.
+/// Wired to every dismiss path and to agent-switch (cancel before respawn).
 #[tauri::command]
-fn init_status(init: State<InitState>, dir: String) -> Result<Value, String> {
-    let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
-    match runs.get_mut(&dir) {
-        None => Ok(json!({"running": false, "started": false})),
-        Some((child, log)) => {
-            let code = child.try_wait().map_err(|e| e.to_string())?;
-            let tail = std::fs::read_to_string(&*log).unwrap_or_default();
-            let tail: String = tail.chars().rev().take(30000).collect::<String>().chars().rev().collect();
-            Ok(json!({
-                "running": code.is_none(), "started": true,
-                "code": code.and_then(|c| c.code()),
-                "log_tail": tail,
-            }))
+async fn init_cancel(init: State<'_, InitState>, dir: String) -> Result<(), String> {
+    let (key, _) = canon_key(&dir)?;
+    let entry = init.runs.lock().map_err(|e| e.to_string())?.remove(&key);
+    if let Some((mut child, _log)) = entry {
+        term_then_kill(&mut child);
+    }
+    Ok(())
+}
+
+/// Persist the user's per-project consent choice for the roadmap session
+/// ("auto" build it for me · "manual" I'll run it myself · "basic" basic view).
+/// Survives relaunch; get_state reports it as "init_consent".
+#[tauri::command]
+fn set_init_consent(roots: State<OpenRoots>, dir: String, choice: String) -> Result<(), String> {
+    if !matches!(choice.as_str(), "auto" | "manual" | "basic") {
+        return Err("unknown choice".into());
+    }
+    let d = project_for(&roots, &dir)?.dir;
+    let mut cfg = load_config();
+    let obj = cfg.as_object_mut().ok_or("bad config")?;
+    let map = obj.entry("initConsent").or_insert(json!({}));
+    if let Some(m) = map.as_object_mut() {
+        m.insert(d.to_string_lossy().to_string(), json!(choice));
+    }
+    let _ = std::fs::create_dir_all(config_dir());
+    std::fs::write(config_dir().join("config.json"),
+        serde_json::to_string_pretty(&cfg).unwrap_or_default()).map_err(|e| e.to_string())
+}
+
+fn init_consent_for(dir: &Path) -> Value {
+    load_config().get("initConsent")
+        .and_then(|m| m.get(dir.to_string_lossy().as_ref()))
+        .cloned().unwrap_or(Value::Null)
+}
+
+/// Read at most `max` bytes from the END of the log — never the whole file, and never
+/// while holding the runs lock.
+fn read_tail(path: &Path, max: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut f) = std::fs::File::open(path) else { return String::new() };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let _ = f.seek(SeekFrom::Start(len.saturating_sub(max)));
+    let mut buf = Vec::new();
+    let _ = f.read_to_end(&mut buf);
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
+#[tauri::command]
+async fn init_status(init: State<'_, InitState>, dir: String) -> Result<Value, String> {
+    let (key, _) = canon_key(&dir)?;
+    // probe under the lock (fast), read the log AFTER releasing it
+    let probed = {
+        let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
+        match runs.get_mut(&key) {
+            None => None,
+            Some((child, log)) => Some((child.try_wait().map_err(|e| e.to_string())?, log.clone())),
         }
+    };
+    match probed {
+        None => Ok(json!({"running": false, "started": false})),
+        Some((code, log)) => Ok(json!({
+            "running": code.is_none(), "started": true,
+            "code": code.and_then(|c| c.code()),
+            "log_tail": read_tail(&log, 30000),
+        })),
     }
 }
 
 fn state_for_project(p: &Project) -> Value {
     let ctx = Ctx::build(p);
 
-    let branch = git_in(&p.repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    let branch_probe = git_in_checked(&p.repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
+    let git_degraded = branch_probe.is_err(); // git didn't run — not the same as "not a repo"
+    let branch = branch_probe.unwrap_or_default();
     let is_git = !branch.is_empty();
     // does this project have an online home at all? (no network — just the configured remote)
     let remote_url = git_in(&p.repo, &["remote", "get-url", "origin"]);
@@ -610,7 +727,7 @@ fn state_for_project(p: &Project) -> Value {
             // existence for every path the manifest references (paste + docs)
             let mut docs = serde_json::Map::new();
             let mut walk = |path: &str| {
-                docs.insert(path.to_string(), json!(ctx.resolve(path).exists()));
+                docs.insert(path.to_string(), json!(ctx.resolve_jailed(path).is_some()));
             };
             if let Some(stages) = m.get("stages").and_then(|v| v.as_array()) {
                 for st in stages {
@@ -633,9 +750,11 @@ fn state_for_project(p: &Project) -> Value {
                     if let (Some(pp), Some(want)) =
                         (g.get("path").and_then(|v| v.as_str()), g.get("sha256").and_then(|v| v.as_str()))
                     {
-                        let got = std::fs::read(ctx.resolve(pp)).map(|b| {
-                            let mut h = Sha256::new(); h.update(&b); format!("{:x}", h.finalize())
-                        }).unwrap_or_default();
+                        let got = ctx.resolve_jailed(pp)
+                            .and_then(|full| std::fs::read(full).ok())
+                            .map(|b| {
+                                let mut h = Sha256::new(); h.update(&b); format!("{:x}", h.finalize())
+                            }).unwrap_or_default();
                         if got != want { stale.push(json!(pp)); }
                     }
                 }
@@ -660,7 +779,8 @@ fn state_for_project(p: &Project) -> Value {
     json!({
         "repo": p.repo.to_string_lossy(), "dir": p.dir.to_string_lossy(),
         "manifest_present": p.manifest.is_some(), "manifest_error": p.manifest_error,
-        "is_git": is_git, "branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind,
+        "is_git": is_git, "git_degraded": git_degraded,
+        "branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind,
         "remote_url": remote_url, "commits": commits,
         "last_commit": git_in(&p.repo, &["log", "-1", "--format=%h · %s"]),
         "tags": tags_sorted,
@@ -685,8 +805,8 @@ fn git_full(repo: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn git_status_detail(dir: String) -> Result<Value, String> {
-    let p = project_for(&dir)?;
+async fn git_status_detail(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
     let raw = git_full(&p.repo, &["status", "--porcelain=v1"])?;
     let mut staged = Vec::new();
     let mut unstaged = Vec::new();
@@ -703,8 +823,8 @@ fn git_status_detail(dir: String) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn git_stage(dir: String, path: Option<String>) -> Result<(), String> {
-    let p = project_for(&dir)?;
+async fn git_stage(roots: State<'_, OpenRoots>, dir: String, path: Option<String>) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
     match path {
         Some(f) => git_full(&p.repo, &["add", "--", &f]).map(|_| ()),
         None => git_full(&p.repo, &["add", "-A"]).map(|_| ()),
@@ -712,23 +832,23 @@ fn git_stage(dir: String, path: Option<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn git_unstage(dir: String, path: String) -> Result<(), String> {
-    let p = project_for(&dir)?;
+async fn git_unstage(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
     git_full(&p.repo, &["reset", "-q", "HEAD", "--", &path]).map(|_| ())
 }
 
 /// Destructive; the UI always confirms first. Untracked files are deleted, tracked restored.
 #[tauri::command]
-fn git_discard(dir: String, path: String, untracked: bool) -> Result<(), String> {
-    let p = project_for(&dir)?;
+async fn git_discard(roots: State<'_, OpenRoots>, dir: String, path: String, untracked: bool) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
     if untracked { git_full(&p.repo, &["clean", "-fd", "--", &path]).map(|_| ()) }
     else { git_full(&p.repo, &["checkout", "--", &path]).map(|_| ()) }
 }
 
 /// Turn a plain folder into a tracked project: git init + a first save.
 #[tauri::command]
-fn git_init_here(dir: String) -> Result<(), String> {
-    let d = PathBuf::from(&dir).canonicalize().map_err(|e| e.to_string())?;
+async fn git_init_here(roots: State<'_, OpenRoots>, dir: String) -> Result<(), String> {
+    let d = project_for(&roots, &dir)?.dir;
     if d.join(".git").exists() { return Ok(()); }
     git_full(&d, &["init"])?;
     git_full(&d, &["add", "-A"])?;
@@ -737,8 +857,8 @@ fn git_init_here(dir: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn git_commit(dir: String, message: String, stage_all: bool) -> Result<(), String> {
-    let p = project_for(&dir)?;
+async fn git_commit(roots: State<'_, OpenRoots>, dir: String, message: String, stage_all: bool) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
     if message.trim().is_empty() { return Err("give the save a short message".into()); }
     if stage_all { git_full(&p.repo, &["add", "-A"])?; }
     git_full(&p.repo, &["commit", "-m", &message]).map(|_| ())
@@ -746,8 +866,8 @@ fn git_commit(dir: String, message: String, stage_all: bool) -> Result<(), Strin
 
 /// Plain push only. No force flag exists anywhere in this app.
 #[tauri::command]
-fn git_push(dir: String) -> Result<(), String> {
-    let p = project_for(&dir)?;
+async fn git_push(roots: State<'_, OpenRoots>, dir: String) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
     let upstream = Command::new("git").arg("-C").arg(&p.repo)
         .args(["rev-parse", "--abbrev-ref", "@{u}"]).output()
         .map(|o| o.status.success()).unwrap_or(false);
@@ -759,14 +879,14 @@ fn git_push(dir: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn git_pull(dir: String) -> Result<(), String> {
-    let p = project_for(&dir)?;
+async fn git_pull(roots: State<'_, OpenRoots>, dir: String) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
     git_full(&p.repo, &["pull", "--ff-only"]).map(|_| ())
 }
 
 #[tauri::command]
-fn git_log_graph(dir: String, limit: Option<u32>) -> Result<Value, String> {
-    let p = project_for(&dir)?;
+async fn git_log_graph(roots: State<'_, OpenRoots>, dir: String, limit: Option<u32>) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
     let n = limit.unwrap_or(30).min(200).to_string();
     // --all + topo-order so diverged branches (main vs a feature branch) render as real lanes,
     // not just the current branch as one straight line.
@@ -786,8 +906,8 @@ fn git_log_graph(dir: String, limit: Option<u32>) -> Result<Value, String> {
 }
 
 #[tauri::command]
-fn git_diff(dir: String, path: String, staged: bool, untracked: bool) -> Result<String, String> {
-    let p = project_for(&dir)?;
+async fn git_diff(roots: State<'_, OpenRoots>, dir: String, path: String, staged: bool, untracked: bool) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
     if untracked {
         // no-index diff exits 1 when files differ; capture output regardless
         let out = Command::new("git").arg("-C").arg(&p.repo)
@@ -804,8 +924,8 @@ fn git_diff(dir: String, path: String, staged: bool, untracked: bool) -> Result<
 // run a suggested command in the project's repo dir (login shell so PATH matches the user's).
 // used by the roadmap "what needs you" / stale actions instead of copy-to-clipboard.
 #[tauri::command]
-fn run_command(dir: String, cmd: String) -> Result<String, String> {
-    let p = project_for(&dir)?;
+async fn run_command(roots: State<'_, OpenRoots>, dir: String, cmd: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
     let out = std::process::Command::new("/bin/zsh")
         .args(["-lc", &cmd]).current_dir(&p.repo).output()
         .map_err(|e| e.to_string())?;
@@ -849,14 +969,28 @@ fn jailed(p: &Project, path: &str) -> Result<PathBuf, String> {
 #[derive(Serialize)]
 struct Entry { name: String, is_dir: bool, size: u64 }
 
-fn project_for(dir: &str) -> Result<Project, String> {
+/// Resolve a command's `dir` argument against the opened-roots allowlist. The webview
+/// never gets to name an arbitrary folder: only projects the user opened (or created,
+/// or that live in the recents list) resolve — everything else is rejected before any
+/// filesystem or git access happens.
+fn project_for(roots: &OpenRoots, dir: &str) -> Result<Project, String> {
     let d = PathBuf::from(dir).canonicalize().map_err(|e| e.to_string())?;
+    let allowed = roots.0.lock().map_err(|e| e.to_string())?.contains(&d);
+    if !allowed {
+        return Err("this folder isn't an open project".into());
+    }
     Ok(load_project(&d))
 }
 
+fn allow_root(roots: &OpenRoots, dir: &Path) {
+    if let Ok(mut g) = roots.0.lock() {
+        g.insert(dir.to_path_buf());
+    }
+}
+
 #[tauri::command]
-fn list_dir(dir: String, path: String) -> Result<Vec<Entry>, String> {
-    let p = project_for(&dir)?;
+async fn list_dir(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<Vec<Entry>, String> {
+    let p = project_for(&roots, &dir)?;
     let p = &p;
     let dir = if path.is_empty() { p.repo.clone() } else { jailed(p, &path)? };
     let mut out: Vec<Entry> = std::fs::read_dir(&dir).map_err(|e| e.to_string())?
@@ -872,20 +1006,26 @@ fn list_dir(dir: String, path: String) -> Result<Vec<Entry>, String> {
 }
 
 #[tauri::command]
-fn read_file(dir: String, path: String) -> Result<String, String> {
-    let p = project_for(&dir)?;
+async fn read_file(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
     let full = jailed(&p, &path)?;
-    let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
-    if bytes.len() > 1_500_000 {
-        return Ok(format!("[file is {} bytes — too large to preview; click-to-copy still works]", bytes.len()));
+    // size gate from METADATA — never read a huge file just to refuse it
+    let len = std::fs::metadata(&full).map_err(|e| e.to_string())?.len();
+    if len > 1_500_000 {
+        return Ok(format!("[file is {len} bytes — too large to preview; click-to-copy still works]"));
     }
+    let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
     match String::from_utf8(bytes) { Ok(s) => Ok(s), Err(_) => Ok("[binary file — no preview]".into()) }
 }
 
 #[tauri::command]
-fn copy_file(dir: String, path: String) -> Result<String, String> {
-    let p = project_for(&dir)?;
+async fn copy_file(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
     let full = jailed(&p, &path)?;
+    let len = std::fs::metadata(&full).map_err(|e| e.to_string())?.len();
+    if len > 5_000_000 {
+        return Err(format!("that file is {len} bytes — too large to copy to the clipboard"));
+    }
     let text = std::fs::read_to_string(&full).map_err(|e| e.to_string())?;
     let n = text.chars().count();
     arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).map_err(|e| e.to_string())?;
@@ -901,17 +1041,27 @@ fn copy_text(text: String) -> Result<(), String> {
 
 struct PtyHandles {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    // its own lock: pty_write must never hold the SESSIONS lock across blocking I/O
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn Child + Send + Sync>,
 }
 struct PtyState {
-    sessions: Mutex<std::collections::HashMap<u32, PtyHandles>>,
+    // Arc: the per-session reader thread removes its own entry (and reaps) on exit
+    sessions: Arc<Mutex<std::collections::HashMap<u32, PtyHandles>>>,
     next_id: std::sync::atomic::AtomicU32,
 }
 
+fn reap_pty(h: PtyHandles) {
+    drop(h.writer);
+    drop(h.master);
+    let mut child = h.child;
+    let _ = child.kill();
+    let _ = child.wait(); // always reap — no zombies
+}
+
 #[tauri::command]
-fn pty_spawn(app: tauri::AppHandle, pty: State<PtyState>, dir: String, cols: u16, rows: u16) -> Result<u32, String> {
-    let cwd = project_for(&dir).map(|p| p.repo)
+fn pty_spawn(app: tauri::AppHandle, roots: State<OpenRoots>, pty: State<PtyState>, dir: String, cols: u16, rows: u16) -> Result<u32, String> {
+    let cwd = project_for(&roots, &dir).map(|p| p.repo)
         .unwrap_or_else(|_| PathBuf::from(std::env::var("HOME").unwrap_or_default()));
     let id = pty.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let opened = native_pty_system()
@@ -924,12 +1074,20 @@ fn pty_spawn(app: tauri::AppHandle, pty: State<PtyState>, dir: String, cols: u16
     cmd.env("TERM", "xterm-256color");
     let child = opened.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     let mut reader = opened.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = opened.master.take_writer().map_err(|e| e.to_string())?;
+    let writer = Arc::new(Mutex::new(opened.master.take_writer().map_err(|e| e.to_string())?));
+    let sessions = pty.sessions.clone();
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match std::io::Read::read(&mut reader, &mut buf) {
-                Ok(0) | Err(_) => { let _ = app.emit("pty-exit", id); break; }
+                Ok(0) | Err(_) => {
+                    let _ = app.emit("pty-exit", id);
+                    // natural exit: remove the entry and reap — sessions never leak
+                    if let Ok(mut g) = sessions.lock() {
+                        if let Some(h) = g.remove(&id) { reap_pty(h); }
+                    }
+                    break;
+                }
                 Ok(n) => {
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
                     let _ = app.emit("pty-out", (id, b64));
@@ -944,10 +1102,14 @@ fn pty_spawn(app: tauri::AppHandle, pty: State<PtyState>, dir: String, cols: u16
 
 #[tauri::command]
 fn pty_write(pty: State<PtyState>, id: u32, data: String) -> Result<(), String> {
-    let mut guard = pty.sessions.lock().map_err(|e| e.to_string())?;
-    if let Some(h) = guard.get_mut(&id) {
-        h.writer.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
-        h.writer.flush().map_err(|e| e.to_string())?;
+    // clone the writer handle under the map lock, WRITE outside it (lock hygiene:
+    // a slow pty must not stall every other terminal + spawn/resize)
+    let writer = pty.sessions.lock().map_err(|e| e.to_string())?
+        .get(&id).map(|h| h.writer.clone());
+    if let Some(w) = writer {
+        let mut w = w.lock().map_err(|e| e.to_string())?;
+        w.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+        w.flush().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -964,9 +1126,7 @@ fn pty_resize(pty: State<PtyState>, id: u32, cols: u16, rows: u16) -> Result<(),
 #[tauri::command]
 fn pty_kill(pty: State<PtyState>, id: u32) -> Result<(), String> {
     if let Some(h) = pty.sessions.lock().map_err(|e| e.to_string())?.remove(&id) {
-        drop(h.writer);
-        let mut child = h.child;
-        let _ = child.kill();
+        reap_pty(h);
     }
     Ok(())
 }
@@ -1004,19 +1164,139 @@ fn main() {
         })).unwrap());
         std::process::exit(0);
     }
+    // Seed the allowlist from the recents the user built up — those were all opened
+    // through open_project at some point, so they carry the same trust.
+    let seeded: HashSet<PathBuf> = load_recents().iter()
+        .filter_map(|r| r.get("path").and_then(|v| v.as_str()))
+        .filter_map(|p| PathBuf::from(p).canonicalize().ok())
+        .collect();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(OpenRoots(Mutex::new(seeded)))
         .manage(InitState { runs: Mutex::new(std::collections::HashMap::new()) })
         .manage(PtyState {
-            sessions: Mutex::new(std::collections::HashMap::new()),
+            sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             next_id: std::sync::atomic::AtomicU32::new(1),
         })
+        .on_window_event(|window, event| {
+            // the window is gone: no orphaned children, ever — kill + reap every PTY
+            // shell and every background roadmap session.
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let app = window.app_handle();
+                if let Some(pty) = app.try_state::<PtyState>() {
+                    if let Ok(mut g) = pty.sessions.lock() {
+                        for (_, h) in g.drain() { reap_pty(h); }
+                    }
+                }
+                if let Some(init) = app.try_state::<InitState>() {
+                    if let Ok(mut g) = init.runs.lock() {
+                        for (_, (mut child, _)) in g.drain() { term_then_kill(&mut child); }
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
-            get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state, init_start, init_status, agents_available, set_default_agent,
+            get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
+            init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             list_dir, read_file, copy_file, copy_text,
             pty_spawn, pty_write, pty_resize, pty_kill
         ])
         .run(tauri::generate_context!())
         .expect("error while running Chronicle");
+}
+
+/* ================= R1 gate tests (the jail, the allowlist, the reaper) ================= */
+
+#[cfg(test)]
+mod r1_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("chronicle-test-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    fn ctx_for(repo: &Path) -> Ctx {
+        Ctx { repo: repo.to_path_buf(), extras: vec![], tags: HashSet::new(), subjects: vec![] }
+    }
+
+    #[test]
+    fn jail_rejects_absolute_and_parent_paths() {
+        let repo = tmp("jail");
+        std::fs::write(repo.join("inside.txt"), "ok").unwrap();
+        let ctx = ctx_for(&repo);
+        assert!(ctx.resolve_jailed("inside.txt").is_some(), "in-root file must resolve");
+        assert!(ctx.resolve_jailed("/etc/passwd").is_none(), "absolute path must be rejected");
+        assert!(ctx.resolve_jailed("../outside.txt").is_none(), "parent traversal must be rejected");
+        assert!(ctx.resolve_jailed("a/../../outside.txt").is_none(), "embedded traversal must be rejected");
+    }
+
+    #[test]
+    fn jail_rejects_symlink_escape() {
+        let repo = tmp("jail-sym");
+        let outside = tmp("jail-sym-outside");
+        std::fs::write(outside.join("secret.txt"), "secret").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.txt"), repo.join("link.txt")).unwrap();
+        let ctx = ctx_for(&repo);
+        assert!(ctx.resolve_jailed("link.txt").is_none(), "a symlink escaping the root must be rejected");
+    }
+
+    #[test]
+    fn eval_cond_cannot_read_outside_roots() {
+        let repo = tmp("cond");
+        let ctx = ctx_for(&repo);
+        // an absolute file_matches path used to read anywhere on disk — must be dead
+        let cond = json!({"file_matches": {"path": "/etc/passwd", "pattern": "root"}});
+        assert!(!eval_cond(&ctx, &cond));
+        let cond = json!({"file_exists": "/etc/passwd"});
+        assert!(!eval_cond(&ctx, &cond));
+        let cond = json!({"file_exists": "/etc/passwd", "not": true});
+        assert!(eval_cond(&ctx, &cond), "negated escape reports the jail verdict, not the disk");
+    }
+
+    #[test]
+    fn allowlist_rejects_unopened_dirs() {
+        let opened = tmp("allow-open");
+        let stranger = tmp("allow-stranger");
+        let roots = OpenRoots(Mutex::new(HashSet::from([opened.clone()])));
+        assert!(project_for(&roots, opened.to_string_lossy().as_ref()).is_ok());
+        let err = match project_for(&roots, stranger.to_string_lossy().as_ref()) {
+            Err(e) => e, Ok(_) => panic!("a never-opened dir resolved"),
+        };
+        assert!(err.contains("isn't an open project"), "got: {err}");
+        assert!(project_for(&roots, "/").is_err(), "the filesystem root must never resolve");
+    }
+
+    #[test]
+    fn canon_key_is_collision_free_for_same_named_dirs() {
+        let a = tmp("proj-a").join("weave"); std::fs::create_dir_all(&a).unwrap();
+        let b = tmp("proj-b").join("weave"); std::fs::create_dir_all(&b).unwrap();
+        let (ka, la) = canon_key(a.to_string_lossy().as_ref()).unwrap();
+        let (kb, lb) = canon_key(b.to_string_lossy().as_ref()).unwrap();
+        assert_ne!(ka, kb, "same-named folders must not share a run key");
+        assert_ne!(la, lb, "same-named folders must not share a log file");
+    }
+
+    #[test]
+    fn term_then_kill_stops_and_reaps() {
+        let mut child = std::process::Command::new("sleep").arg("100").spawn().unwrap();
+        let pid = child.id();
+        term_then_kill(&mut child);
+        // reaped: the pid must be gone from the process table
+        let alive = std::process::Command::new("ps").args(["-p", &pid.to_string()])
+            .output().map(|o| o.status.success()).unwrap_or(false);
+        assert!(!alive, "the child must be dead and reaped (ps -p must fail)");
+    }
+
+    #[test]
+    fn read_tail_reads_only_the_end() {
+        let d = tmp("tail");
+        let f = d.join("log.txt");
+        std::fs::write(&f, format!("{}END", "x".repeat(100_000))).unwrap();
+        let t = read_tail(&f, 100);
+        assert!(t.len() <= 100 && t.ends_with("END"));
+    }
 }

@@ -16,6 +16,7 @@ portable-pty = "0.9"
 base64 = "0.22"
 regex = "1"
 sha2 = "0.10"
+libc = "0.2" # SIGTERM for init_cancel (graceful stop before SIGKILL)
 
 [profile.release]
 strip = true
