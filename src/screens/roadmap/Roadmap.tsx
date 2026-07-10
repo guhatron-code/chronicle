@@ -36,7 +36,7 @@ export function Roadmap(p: RoadmapProps) {
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div
         className={cn(
-          "mx-auto flex max-w-[700px] flex-col gap-3.5 px-7 py-[22px]",
+          "mx-auto flex max-w-[900px] flex-col gap-3.5 px-7 py-[22px]",
           p.className,
         )}
       >
