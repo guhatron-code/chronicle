@@ -884,6 +884,63 @@ async fn git_pull(roots: State<'_, OpenRoots>, dir: String) -> Result<(), String
     git_full(&p.repo, &["pull", "--ff-only"]).map(|_| ())
 }
 
+/// One-click "Switch branch" from the needs-you queue. Plain checkout — git itself
+/// refuses if uncommitted changes would be clobbered, and that error is surfaced as-is.
+#[tauri::command]
+async fn git_checkout(roots: State<'_, OpenRoots>, dir: String, branch: String) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    git_full(&p.repo, &["checkout", &branch]).map(|_| ())
+}
+
+/// One-click "Clean up stale workspaces". Returns the surviving worktree list.
+#[tauri::command]
+async fn git_worktree_prune(roots: State<'_, OpenRoots>, dir: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    git_full(&p.repo, &["worktree", "prune"])?;
+    git_full(&p.repo, &["worktree", "list"])
+}
+
+/// Viewer freshness: size + mtime (cheap poll/focus re-check) + a content kind so the
+/// viewer can choose text · image preview · binary card · huge-file guard.
+#[tauri::command]
+async fn stat_file(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let full = jailed(&p, &path)?;
+    let md = std::fs::metadata(&full).map_err(|e| e.to_string())?;
+    let mtime = md.modified().ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs()).unwrap_or(0);
+    Ok(json!({ "size": md.len(), "mtime": mtime, "kind": sniff_kind(&full) }))
+}
+
+/// "text" | "image" | "binary" — image by extension (the viewer renders these as
+/// data: URIs), binary by a NUL byte in the first 8 KB, text otherwise.
+fn sniff_kind(full: &Path) -> &'static str {
+    let ext = full.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico" | "heic" | "avif") {
+        return "image";
+    }
+    let mut buf = [0u8; 8192];
+    let n = std::fs::File::open(full)
+        .and_then(|mut f| std::io::Read::read(&mut f, &mut buf))
+        .unwrap_or(0);
+    if buf[..n].contains(&0) { "binary" } else { "text" }
+}
+
+/// Image preview bytes for the viewer (data: URI; img-src data: is in the CSP).
+/// Capped — the huge-file guard applies before this is ever called.
+#[tauri::command]
+async fn read_file_b64(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    let full = jailed(&p, &path)?;
+    let len = std::fs::metadata(&full).map_err(|e| e.to_string())?.len();
+    if len > 8_000_000 {
+        return Err(format!("that file is {len} bytes — too large to preview"));
+    }
+    let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 #[tauri::command]
 async fn git_log_graph(roots: State<'_, OpenRoots>, dir: String, limit: Option<u32>) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
@@ -1199,6 +1256,7 @@ fn main() {
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
             init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
+            git_checkout, git_worktree_prune, stat_file, read_file_b64,
             list_dir, read_file, copy_file, copy_text,
             pty_spawn, pty_write, pty_resize, pty_kill
         ])
@@ -1289,6 +1347,33 @@ mod r1_tests {
         let alive = std::process::Command::new("ps").args(["-p", &pid.to_string()])
             .output().map(|o| o.status.success()).unwrap_or(false);
         assert!(!alive, "the child must be dead and reaped (ps -p must fail)");
+    }
+
+    #[test]
+    fn sniff_kind_classifies() {
+        let d = tmp("sniff");
+        std::fs::write(d.join("a.txt"), "hello").unwrap();
+        std::fs::write(d.join("b.png"), [0x89u8, 0x50, 0x4e, 0x47]).unwrap();
+        std::fs::write(d.join("c.bin"), [1u8, 0, 2, 0]).unwrap();
+        assert_eq!(sniff_kind(&d.join("a.txt")), "text");
+        assert_eq!(sniff_kind(&d.join("b.png")), "image");
+        assert_eq!(sniff_kind(&d.join("c.bin")), "binary");
+    }
+
+    #[test]
+    fn checkout_and_prune_work_on_a_real_repo() {
+        let d = tmp("r2-git");
+        let run = |args: &[&str]| {
+            let o = std::process::Command::new("git").arg("-C").arg(&d).args(args).output().unwrap();
+            assert!(o.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&o.stderr));
+        };
+        run(&["init", "-q", "-b", "main"]);
+        run(&["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "first"]);
+        run(&["branch", "side"]);
+        git_full(&d, &["checkout", "side"]).unwrap();
+        assert_eq!(git_in(&d, &["rev-parse", "--abbrev-ref", "HEAD"]), "side");
+        let list = { git_full(&d, &["worktree", "prune"]).unwrap(); git_full(&d, &["worktree", "list"]).unwrap() };
+        assert!(list.contains(d.to_string_lossy().as_ref()));
     }
 
     #[test]

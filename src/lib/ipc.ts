@@ -78,6 +78,24 @@ export const gitDiff = (
   staged: boolean,
   untracked: boolean,
 ) => invoke<string>("git_diff", { dir, path, staged, untracked });
+/** One-click "Switch branch" (plain checkout; git's own refusal surfaces as the error). */
+export const gitCheckout = (dir: string, branch: string) =>
+  invoke<void>("git_checkout", { dir, branch });
+/** One-click "Clean up stale workspaces"; returns the surviving worktree list. */
+export const gitWorktreePrune = (dir: string) =>
+  invoke<string>("git_worktree_prune", { dir });
+
+/* ---------- viewer freshness ---------- */
+export interface FileStat {
+  size: number;
+  mtime: number; // unix seconds
+  kind: "text" | "image" | "binary";
+}
+export const statFile = (dir: string, path: string) =>
+  invoke<FileStat>("stat_file", { dir, path });
+/** Image preview bytes (render as a data: URI — img-src data: is in the CSP). */
+export const readFileB64 = (dir: string, path: string) =>
+  invoke<string>("read_file_b64", { dir, path });
 
 /* ---------- fs / shell / clipboard ---------- */
 export const runCommand = (dir: string, cmd: string) =>
