@@ -62,32 +62,28 @@ const TONE: Record<NonNullable<CodeSeg["tone"]>, string> = {
 };
 
 function CodeView({ lines }: { lines: CodeLine[] }) {
+  // a grid pairs each gutter number with its line, so long lines WRAP and the
+  // numbers stay aligned to the first visual row of their line
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-surface-input font-mono text-xs leading-[1.75]">
-      <div className="flex min-h-full">
-        <div
-          aria-hidden
-          className="w-11 select-none border-r border-divider-faint py-3 text-right text-text-dimmer tabular-nums"
-        >
-          {lines.map((_, i) => (
-            <div key={i} className="pr-3">
+    <div className="relative min-h-0 flex-1 overflow-y-auto bg-surface-input font-mono text-xs leading-[1.75]">
+      <span aria-hidden className="absolute inset-y-0 left-11 w-px bg-divider-faint" />
+      <div className="grid min-h-full grid-cols-[44px_1fr] content-start py-3">
+        {lines.map((line, i) => (
+          <div key={i} className="col-span-2 grid grid-cols-subgrid">
+            <span aria-hidden className="select-none pr-3 text-right text-text-dimmer tabular-nums">
               {i + 1}
-            </div>
-          ))}
-        </div>
-        <div className="min-w-0 px-4 py-3 text-text-secondary [overflow-wrap:anywhere]">
-          {lines.map((line, i) => (
-            <div key={i} className="whitespace-pre">
+            </span>
+            <div className="min-w-0 whitespace-pre-wrap px-4 text-text-secondary [overflow-wrap:anywhere]">
               {line.length === 0
-                ? " "
+                ? " "
                 : line.map((seg, j) => (
                     <span key={j} className={seg.tone ? TONE[seg.tone] : undefined}>
                       {seg.t}
                     </span>
                   ))}
             </div>
-          ))}
-        </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -126,7 +122,7 @@ function DiffView({ rows }: { rows: DiffRow[] }) {
             </span>
             {row.kind === "add" && <span className="text-state-success">{"+ "}</span>}
             {row.kind === "del" && <span className="text-state-error">{"− "}</span>}
-            <span className="whitespace-pre text-text-secondary">{row.text}</span>
+            <span className="min-w-0 flex-1 whitespace-pre-wrap text-text-secondary [overflow-wrap:anywhere]">{row.text}</span>
           </div>
         );
       })}
