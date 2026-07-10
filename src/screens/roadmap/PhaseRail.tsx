@@ -121,6 +121,7 @@ function ExpandedCard({ phase }: { phase: Extract<RailPhase, { kind: "expanded" 
         <Twisty open label={`Collapse ${phase.id}`} onClick={phase.onToggle} />
       </div>
       <div className="text-[12.5px] leading-[1.55] text-text-muted">{phase.description}</div>
+      {phase.steps.length > 0 && (
       <div className="flex flex-col gap-1.5">
         {phase.steps.map((step) =>
           step.done ? (
@@ -142,32 +143,39 @@ function ExpandedCard({ phase }: { phase: Extract<RailPhase, { kind: "expanded" 
           ),
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11.5px] text-text-dim">You paste</span>
-        {phase.paste.map((chip) => (
-          <PasteChip
-            key={chip.name}
-            name={chip.name}
-            hint={chip.hint}
-            height={27}
-            onClick={() => phase.onChip?.(chip.name)}
-          />
-        ))}
-        {phase.reference && phase.reference.length > 0 && (
-          <>
-            <span className="text-[11.5px] text-text-dim">reference</span>
-            {phase.reference.map((chip) => (
-              <PasteChip
-                key={chip.name}
-                name={chip.name}
-                hint={chip.hint}
-                height={27}
-                onClick={() => phase.onChip?.(chip.name)}
-              />
-            ))}
-          </>
-        )}
-      </div>
+      )}
+      {(phase.paste.length > 0 || (phase.reference?.length ?? 0) > 0) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {phase.paste.length > 0 && (
+            <>
+              <span className="text-[11.5px] text-text-dim">You paste</span>
+              {phase.paste.map((chip) => (
+                <PasteChip
+                  key={chip.name}
+                  name={chip.name}
+                  hint={chip.hint}
+                  height={27}
+                  onClick={() => phase.onChip?.(chip.name)}
+                />
+              ))}
+            </>
+          )}
+          {phase.reference && phase.reference.length > 0 && (
+            <>
+              <span className="text-[11.5px] text-text-dim">reference</span>
+              {phase.reference.map((chip) => (
+                <PasteChip
+                  key={chip.name}
+                  name={chip.name}
+                  hint={chip.hint}
+                  height={27}
+                  onClick={() => phase.onChip?.(chip.name)}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      )}
       <button
         onClick={phase.onViewDetails}
         className="h-8 w-full rounded-md border border-border-hairline text-[12.5px] font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"

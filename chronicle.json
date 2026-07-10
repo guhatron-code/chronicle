@@ -2,17 +2,37 @@
   "chronicleVersion": 1,
   "name": "chronicle",
   "description": "The Chronicle app itself · being rebuilt on React + shadcn with a full redesign on the Weave design system.",
-  "roots": { "repo": "." },
+  "roots": {
+    "repo": "."
+  },
   "workBranch": "react-shadcn",
   "generatedFrom": [
-    { "path": "PRODUCT.md", "sha256": "08185b98f4200dfe2c0932cd784a55149933aac3f76b3992692e9d80a8f1686c" },
-    { "path": "artifacts/audit/FIX-PLAN.md", "sha256": "0ef5928660bdb90d8ba1f3960d2430b9e01713c6e44349ee586d3de5a8e90554" },
-    { "path": "design/CHRONICLE_DESIGN_PROMPT.md", "sha256": "d8ce161a01232a83ed17846e5932e49c1d7725028690d0b2a16ea66dc301a3ce" }
+    {
+      "path": "PRODUCT.md",
+      "sha256": "08185b98f4200dfe2c0932cd784a55149933aac3f76b3992692e9d80a8f1686c"
+    },
+    {
+      "path": "artifacts/audit/FIX-PLAN.md",
+      "sha256": "0ef5928660bdb90d8ba1f3960d2430b9e01713c6e44349ee586d3de5a8e90554"
+    },
+    {
+      "path": "design/CHRONICLE_DESIGN_PROMPT.md",
+      "sha256": "d8ce161a01232a83ed17846e5932e49c1d7725028690d0b2a16ea66dc301a3ce"
+    }
   ],
   "spine": [
-    { "path": "PRODUCT.md" },
-    { "path": "artifacts/audit/FIX-PLAN.md" },
-    { "path": "design/CHRONICLE_DESIGN_PROMPT.md" }
+    {
+      "path": "PRODUCT.md"
+    },
+    {
+      "path": "artifacts/audit/FIX-PLAN.md"
+    },
+    {
+      "path": "design/CHRONICLE_DESIGN_PROMPT.md"
+    },
+    {
+      "path": "design/CHRONICLE_V2_HANDOFF.md"
+    }
   ],
   "stages": [
     {
@@ -23,31 +43,89 @@
           "id": "PA",
           "name": "The new toolchain",
           "desc": "React + Vite + every shadcn/Kibo component, themed from the Weave design system; the app builds and runs both ways.",
-          "status": { "done_when": [ { "tag": "phase-a" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "phase-a"
+              }
+            ]
+          },
+          "items": [
+            "Vite + React + every shadcn and Kibo component, themed from the Weave tokens.",
+            "Tauri serves the dev server in dev and the built bundle in release.",
+            "A typed bridge for every backend command."
+          ],
+          "docs": [
+            {
+              "path": "design/CHRONICLE_V2_HANDOFF.md"
+            }
+          ]
         },
         {
           "id": "R1",
           "name": "Trust and safety",
           "desc": "The app can only read the folders you opened; roadmap sessions ask consent and can be cancelled; nothing outlives the window.",
-          "status": { "done_when": [ { "tag": "r1" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "r1"
+              }
+            ]
+          },
+          "items": [
+            "Roadmap sessions ask consent first and can be cancelled.",
+            "The app can only read folders you opened.",
+            "Nothing outlives the window — every child process is stopped and cleaned up."
+          ]
         },
         {
           "id": "R2",
           "name": "One-click helpers",
           "desc": "Switch branch, clean up workspaces, and file freshness checks become real actions instead of copied commands.",
-          "status": { "done_when": [ { "tag": "r2" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "r2"
+              }
+            ]
+          },
+          "items": [
+            "Switch branch and clean up workspaces become real buttons.",
+            "The file reader learns size, freshness, and file kind."
+          ]
         },
         {
           "id": "R3",
           "name": "Honest rules",
           "desc": "A roadmap rule that can't be checked now says so; the rule engine is tested against a fixture project.",
-          "status": { "done_when": [ { "tag": "r3" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "r3"
+              }
+            ]
+          },
+          "items": [
+            "A rule that can't be checked says so instead of silently failing.",
+            "The rule engine is tested against a fixture project.",
+            "This roadmap file itself was rewritten to track the rebuild."
+          ]
         },
         {
           "id": "R4",
           "name": "The kanban engine",
           "desc": "Task storage, image attachments, and the session that turns queued tasks into a fix plan.",
-          "status": { "done_when": [ { "tag": "r4" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "r4"
+              }
+            ]
+          },
+          "items": [
+            "Tasks and screenshots live inside the project and travel with it.",
+            "'Ready to execute' turns queued tasks into a fix plan the roadmap can track."
+          ]
         }
       ]
     },
@@ -60,15 +138,35 @@
           "name": "All 30 screens get drawn",
           "desc": "The full redesign — picker, sidebar, roadmap, repo, terminal, and the new kanban — drawn in Claude Design on the Weave design system.",
           "paste": [
-            { "path": "design/CHRONICLE_DESIGN_PROMPT.md", "into": "Claude Design", "when": "run the whole file as one batch" }
+            {
+              "path": "design/CHRONICLE_DESIGN_PROMPT.md",
+              "into": "Claude Design",
+              "when": "run the whole file as one batch"
+            }
           ],
           "status": {
-            "done_when": [ { "tag": "design-accepted" } ],
+            "done_when": [
+              {
+                "tag": "design-accepted"
+              }
+            ],
             "current_labels": [
-              { "when": [ { "file_exists": "design/CHRONICLE_DESIGN_PROMPT.md" } ], "label": "with the designer" }
+              {
+                "when": [
+                  {
+                    "file_exists": "design/CHRONICLE_DESIGN_PROMPT.md"
+                  }
+                ],
+                "label": "with the designer"
+              }
             ],
             "default_label": "being written"
-          }
+          },
+          "docs": [
+            {
+              "path": "design/CHRONICLE_V2_HANDOFF.md"
+            }
+          ]
         }
       ]
     },
@@ -80,49 +178,132 @@
           "id": "C1",
           "name": "Launch screen and dialogs",
           "desc": "The picker, the project switcher, confirms, toasts, and the shortcuts overlay.",
-          "status": { "done_when": [ { "tag": "slice-c1" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "slice-c1"
+              }
+            ]
+          },
+          "items": [
+            "The launch screen with live recents.",
+            "The project switcher, confirms, toasts, and the shortcuts overlay."
+          ],
+          "docs": [
+            {
+              "path": "design/CHRONICLE_V2_HANDOFF.md"
+            }
+          ]
         },
         {
           "id": "C2",
           "name": "The window frame and sidebar",
           "desc": "Project tabs, the new icon sidebar, and the live status header.",
-          "status": { "done_when": [ { "tag": "slice-c2" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "slice-c2"
+              }
+            ]
+          },
+          "items": [
+            "Project tabs and the icon sidebar.",
+            "The live status header and the resizable terminal column."
+          ]
         },
         {
           "id": "C3",
           "name": "The roadmap",
           "desc": "Current state, what needs you, the phase timeline, and the consent-first roadmap builder.",
-          "status": { "done_when": [ { "tag": "slice-c3" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "slice-c3"
+              }
+            ]
+          },
+          "items": [
+            "The current state, what needs you, and the phase timeline.",
+            "The consent-first roadmap builder with a visible cancel.",
+            "The full phase view with its documents and saves."
+          ]
         },
         {
           "id": "C4",
           "name": "Phase detail",
           "desc": "The full phase view with its documents and saves — plus the one-click Start this phase button.",
-          "status": { "done_when": [ { "tag": "slice-c4" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "slice-c4"
+              }
+            ]
+          }
         },
         {
           "id": "C5",
           "name": "Files and history",
           "desc": "The file tree, the reader with live freshness, and the plain-language history pane.",
-          "status": { "done_when": [ { "tag": "slice-c5" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "slice-c5"
+              }
+            ]
+          },
+          "items": [
+            "The file tree with live change markers.",
+            "The reader that notices when a file changes on disk.",
+            "The plain-language history pane."
+          ]
         },
         {
           "id": "C6",
           "name": "Terminals",
           "desc": "The terminal tabs and agent start buttons, rebuilt.",
-          "status": { "done_when": [ { "tag": "slice-c6" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "slice-c6"
+              }
+            ]
+          },
+          "items": [
+            "Terminal tabs that survive switching views.",
+            "One-click agent starts."
+          ]
         },
         {
           "id": "C7",
           "name": "The kanban",
           "desc": "The four-column board: write tasks, attach screenshots, and turn a round into a fix plan on the roadmap.",
-          "status": { "done_when": [ { "tag": "slice-c7" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "slice-c7"
+              }
+            ]
+          },
+          "items": [
+            "The four-column board: write tasks, attach screenshots.",
+            "Turn a round into a fix plan that appears on the roadmap."
+          ]
         },
         {
           "id": "C8",
           "name": "Ship it",
           "desc": "Final cleanup, the full walkthrough of every journey, and the merge back to main.",
-          "status": { "done_when": [ { "tag": "v2-merged" } ] }
+          "status": {
+            "done_when": [
+              {
+                "tag": "v2-merged"
+              }
+            ]
+          },
+          "items": [
+            "The full walkthrough of every journey.",
+            "Merge back to main."
+          ]
         }
       ]
     }
