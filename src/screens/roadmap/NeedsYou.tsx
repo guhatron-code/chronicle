@@ -37,7 +37,7 @@ function Row({ row, last }: { row: NeedsYouRow; last: boolean }) {
   return (
     <div
       className={cn(
-        "flex gap-3 px-[18px] py-3.5",
+        "flex gap-3 px-[13px] py-3",
         !last && "border-b border-divider-faint",
         hi && "bg-fill-subtle",
       )}
@@ -97,7 +97,7 @@ export function NeedsYou(p: NeedsYouProps) {
     return (
       <div
         className={cn(
-          "flex items-center gap-2.5 rounded-lg border border-border-hairline bg-surface-card px-[18px] py-[22px]",
+          "flex items-center gap-2.5 rounded-lg border border-border-hairline bg-surface-card px-[13px] py-[13px]",
           p.className,
         )}
       >
@@ -114,7 +114,7 @@ export function NeedsYou(p: NeedsYouProps) {
         p.className,
       )}
     >
-      <div className="border-b border-divider px-[18px] py-[15px] text-[15px] font-semibold text-text-primary">
+      <div className="border-b border-divider px-[13px] py-[9px] text-[15px] font-semibold text-text-primary">
         What needs you
       </div>
       {p.rows.map((row, i) => (

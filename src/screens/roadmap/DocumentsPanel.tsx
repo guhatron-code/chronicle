@@ -62,7 +62,7 @@ export function DocumentsPanel({ chips, className }: DocumentsPanelProps) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-3 rounded-lg border border-border-hairline bg-surface-card px-[18px] py-[15px]",
+        "flex flex-col gap-2.5 rounded-lg border border-border-hairline bg-surface-card px-[13px] py-[10px]",
         className,
       )}
     >
