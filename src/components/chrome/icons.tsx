@@ -214,3 +214,22 @@ export const AgentStarGlyph = ({ size = 9, ...p }: P) => (
     <path d="M6 .8 7 4.2 10.5 3 8.2 5.8 11.4 7.2 8 7.6 9.2 11 6.4 8.8 5 12 4.6 8.5 1.2 9.8 3.4 7 .4 5.6 3.9 5.1 2.6 1.8 5.4 4z" />
   </svg>
 );
+
+/* ---- Deck-4 glyphs (repo pane F23–F25) — paths transcribed from the comps ---- */
+
+/** Clock with a rewind arrow — the Explorer-head "Project history" button (F23). */
+export const HistoryClockGlyph = ({ size = 13, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" {...p}>
+    <path d="M13.2 8A5.2 5.2 0 1 1 8 2.8c2 0 3.7 1.1 4.6 2.7M12.8 2.8v2.9h-2.9" />
+    <path d="M8 5.3V8l2 1.2" />
+  </svg>
+);
+
+/** Picture-in-frame (F24 image-preview thumb). */
+export const ImageGlyph = ({ size = 22, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" {...p}>
+    <rect x="2.5" y="3.5" width="15" height="13" rx="1.5" />
+    <circle cx="7" cy="8" r="1.5" />
+    <path d="m3.5 14.5 4-4 3 3 2.5-2.5 3.5 3.5" />
+  </svg>
+);
