@@ -18,7 +18,22 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 /* ---------- domain types (refine per-slice; see header note) ---------- */
-export type PickerData = unknown; // get_picker → { recents: [...] }
+/** get_picker → one recents row (shape read from main.rs get_picker). */
+export interface PickerRecent {
+  name: string;
+  path: string;
+  opened_at: string; // epoch seconds as a string
+  description?: string;
+  summary?: string;
+  missing?: boolean;
+  current?: { id?: string; name?: string; label?: string } | null;
+  done?: number;
+  total?: number;
+  needs?: number;
+}
+export interface PickerData {
+  recents: PickerRecent[];
+}
 export type ProjectData = unknown; // open_project → { dir, name, repo, extras, manifest, ... }
 export type StateData = unknown; // get_state → the derived roadmap/git state
 export type InitStatusData = unknown; // init_status → { phase, code, log_tail, ... }

@@ -14,12 +14,14 @@ export function NewProjectDialog({
   onOpenChange,
   error,
   onCreate,
+  onClearError,
   basePath = "~/Documents",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   error: string | null;
   onCreate: (name: string) => void;
+  onClearError?: () => void;
   basePath?: string;
 }) {
   const [name, setName] = useState("");
@@ -56,7 +58,10 @@ export function NewProjectDialog({
             id="np-name"
             autoFocus
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (error) onClearError?.(); // a stale error must not outlive the edit
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && name.trim()) onCreate(name.trim());
             }}

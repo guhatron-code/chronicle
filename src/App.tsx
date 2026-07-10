@@ -1,9 +1,9 @@
 /*
- * C1 — the picker surface + overlays (F1–F9), composed per L6.
- * Data is the deck's specimen set until the C1 wiring step replaces it with
- * get_picker; window controls are live (proven in Phase A/R1).
+ * C1 wired — the picker + overlays on live IPC (get_picker · open_project ·
+ * remove_recent · create_project · pickFolder · agents_available). Opening a
+ * project lands on a blank held surface until C2 builds the shell.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Picker } from "@/screens/Picker";
 import type { RecentProject } from "@/screens/RecentCard";
 import { CommandPalette, type PaletteProject } from "@/overlays/CommandPalette";
@@ -11,94 +11,102 @@ import { ConfirmDialog, type ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { NewProjectDialog } from "@/overlays/NewProjectDialog";
 import { ShortcutsOverlay } from "@/overlays/ShortcutsOverlay";
 import { ChronicleToaster, toastSuccess, toastError } from "@/overlays/toasts";
-import { windowControls, pickFolder } from "@/lib/ipc";
-
-/* Deck-1 specimen data — replaced by get_picker at the C1 wiring step. */
-const SPECIMEN_RECENTS: RecentProject[] = [
-  {
-    path: "/dev/lumen-site",
-    name: "lumen-site",
-    tildePath: "~/dev/lumen-site",
-    description: "Marketing site for the Lumen launch — five pages, static, shipped from this folder.",
-    mark: 3,
-    markLabel: "lu",
-    ago: "2h ago",
-    variant: {
-      kind: "phase",
-      phaseId: "R-1",
-      phaseName: "Missing screens get drawn",
-      statusWord: "in design",
-      progress: 0.45,
-      waiting: 3,
-    },
-  },
-  {
-    path: "/dev/field-notes",
-    name: "field-notes",
-    tildePath: "~/dev/field-notes",
-    description: "Plain-file notes app. Sync is boring on purpose.",
-    mark: 5,
-    markLabel: "fn",
-    ago: "20m ago",
-    variant: {
-      kind: "phase",
-      phaseId: "P-4",
-      phaseName: "Sync engine hardening",
-      statusWord: "running",
-      running: true,
-      progress: 0.78,
-      waiting: 1,
-    },
-  },
-  {
-    path: "/dev/tidepool",
-    name: "tidepool",
-    tildePath: "~/dev/tidepool",
-    description: "Weather widget for the studio wall display.",
-    mark: 4,
-    markLabel: "tp",
-    ago: "3d ago",
-    variant: { kind: "all-done" },
-  },
-  {
-    path: "/code/sparrow",
-    name: "sparrow",
-    tildePath: "~/code/sparrow",
-    description: "A folder with code in it — Chronicle hasn't written a plan for it yet.",
-    mark: 6,
-    markLabel: "sp",
-    ago: "1w ago",
-    variant: { kind: "no-roadmap", agent: "Claude" },
-  },
-];
-
-const SPECIMEN_PALETTE: PaletteProject[] = [
-  { path: "/dev/lumen-site", name: "lumen-site", tildePath: "~/dev/lumen-site", mark: 3, markLabel: "lu", statusWord: "in design", statusKind: "neutral" },
-  { path: "/dev/field-notes", name: "field-notes", tildePath: "~/dev/field-notes", mark: 5, markLabel: "fn", statusWord: "running", statusKind: "running" },
-];
-const SPECIMEN_PALETTE_RECENTS: PaletteProject[] = [
-  { path: "/dev/tidepool", name: "tidepool", tildePath: "~/dev/tidepool", mark: 4, markLabel: "tp", statusWord: "done", statusKind: "success" },
-];
-
-const PRESET_EXTRA: Record<string, RecentProject[]> = {
-  default: SPECIMEN_RECENTS,
-  empty: [],
-  missing: [{ ...SPECIMEN_RECENTS[0], variant: { kind: "missing" } }],
-  writing: [{ ...SPECIMEN_RECENTS[3], variant: { kind: "writing" } }],
-};
+import {
+  agentsAvailable,
+  createProject,
+  getPicker,
+  openProject,
+  pickFolder,
+  removeRecent,
+  windowControls,
+  type PickerRecent,
+} from "@/lib/ipc";
+import { toPaletteProject, toRecentProject, tildify } from "@/lib/picker-data";
 
 export default function App() {
-  const [recents, setRecents] = useState<RecentProject[]>(SPECIMEN_RECENTS);
+  const [rows, setRows] = useState<PickerRecent[]>([]);
+  const [agent, setAgent] = useState("Claude");
+  const [openDir, setOpenDir] = useState<string | null>(null); // C2 replaces with the shell
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [newProjOpen, setNewProjOpen] = useState(false);
   const [newProjError, setNewProjError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null);
+  const devPreset = useRef<RecentProject[] | null>(null);
+  const [, bump] = useState(0);
 
-  const openDialog = () => {
+  const refresh = useCallback(() => {
+    getPicker()
+      .then((d) => setRows(d.recents ?? []))
+      .catch(() => {/* picker data is best-effort; the empty state renders */});
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    agentsAvailable()
+      .then((a) => {
+        const d = (a as { default?: string } | null)?.default;
+        if (d) setAgent(d === "codex" ? "Codex" : "Claude");
+      })
+      .catch(() => {});
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
+
+  const doOpenProject = useCallback((path: string) => {
+    openProject(path)
+      .then((p) => {
+        const dir = (p as { dir?: string } | null)?.dir ?? path;
+        setOpenDir(dir);
+        setPaletteOpen(false);
+        refresh();
+      })
+      .catch((e) =>
+        toastError("Couldn't open the project", String(e).split("\n")[0].slice(0, 90)),
+      );
+  }, [refresh]);
+
+  const openDialog = useCallback(() => {
     setPaletteOpen(false);
-    void pickFolder();
-  };
+    pickFolder()
+      .then((sel) => {
+        if (typeof sel === "string" && sel) doOpenProject(sel);
+      })
+      .catch(() => {});
+  }, [doOpenProject]);
+
+  const doRemoveRecent = useCallback((path: string, name: string) => {
+    setConfirm({
+      title: `Remove ${name} from recents?`,
+      body: "Removes it from this list — the folder itself isn't touched.",
+      cancelLabel: "Keep it",
+      confirmLabel: "Remove from recents",
+      danger: true,
+      onConfirm: () => {
+        removeRecent(path)
+          .then(refresh)
+          .catch((e) => toastError("Couldn't remove it", String(e).slice(0, 90)));
+      },
+    });
+  }, [refresh]);
+
+  const doCreate = useCallback((name: string) => {
+    createProject(name)
+      .then((dir) => {
+        setNewProjOpen(false);
+        setNewProjError(null);
+        doOpenProject(dir);
+      })
+      .catch((e) => {
+        const msg = String(e);
+        setNewProjError(
+          /already exists/i.test(msg)
+            ? "A folder with this name already exists. Pick another name, or open the existing folder."
+            : msg.slice(0, 120),
+        );
+      });
+  }, [doOpenProject]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -109,13 +117,25 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [openDialog]);
 
-  // Dev-only handle so the cleanroom harness can reach every overlay state.
+  // Dev-only handle so the cleanroom harness can reach every state.
   useEffect(() => {
     if (!import.meta.env.DEV) return;
+    const presets: Record<string, RecentProject[] | null> = {
+      default: null,
+      empty: [],
+      missing: [{
+        path: "/tmp/x", name: "lumen-site", tildePath: "~/dev/lumen-site", mark: 3,
+        markLabel: "lu", ago: "2h ago", variant: { kind: "missing" },
+      }],
+      writing: [{
+        path: "/tmp/y", name: "sparrow", tildePath: "~/code/sparrow", mark: 6,
+        markLabel: "sp", ago: "1w ago", variant: { kind: "writing" },
+      }],
+    };
     (window as never as Record<string, unknown>).__c1 = {
-      recentsPreset: (name: keyof typeof PRESET_EXTRA) => setRecents(PRESET_EXTRA[name] ?? SPECIMEN_RECENTS),
+      recentsPreset: (name: string) => { devPreset.current = presets[name] ?? null; bump((n) => n + 1); },
       palette: setPaletteOpen,
       shortcuts: setShortcutsOpen,
       newProject: (err: string | null) => { setNewProjError(err); setNewProjOpen(true); },
@@ -124,6 +144,12 @@ export default function App() {
       toastError,
     };
   }, []);
+
+  const recents: RecentProject[] =
+    devPreset.current ?? rows.map((r) => toRecentProject(r, { agent }));
+  const paletteRecents: PaletteProject[] = rows
+    .filter((r) => r.path !== openDir)
+    .map((r) => toPaletteProject(r));
 
   return (
     <div className="flex h-full flex-col bg-surface-app font-sans text-text-primary">
@@ -139,33 +165,35 @@ export default function App() {
       </div>
 
       <div className="min-h-0 flex-1">
-        <Picker
-          recents={recents}
-          onOpenDialog={openDialog}
-          onNewProject={() => { setNewProjError(null); setNewProjOpen(true); }}
-          onOpenProject={() => {/* C1 wiring: open_project */}}
-          onRemoveRecent={(path) => {
-            const name = recents.find((r) => r.path === path)?.name ?? "project";
-            setConfirm({
-              title: `Remove ${name} from recents?`,
-              body: "Removes it from this list — the folder itself isn't touched.",
-              cancelLabel: "Keep it",
-              confirmLabel: "Remove from recents",
-              danger: true,
-              onConfirm: () => {/* C1 wiring: remove_recent */},
-            });
-          }}
-          onLocate={() => void pickFolder()}
-        />
+        {openDir ? (
+          /* C2 builds the shell here; the held surface is deliberately blank. */
+          <div className="flex h-full items-center justify-center">
+            <span className="font-mono text-[11.5px] text-text-dim">
+              {tildify(openDir)} — the project shell arrives with slice C2.
+            </span>
+          </div>
+        ) : (
+          <Picker
+            recents={recents}
+            onOpenDialog={openDialog}
+            onNewProject={() => { setNewProjError(null); setNewProjOpen(true); }}
+            onOpenProject={doOpenProject}
+            onRemoveRecent={(path) => {
+              const name = rows.find((r) => r.path === path)?.name ?? "this project";
+              doRemoveRecent(path, name);
+            }}
+            onLocate={openDialog}
+          />
+        )}
       </div>
 
       <CommandPalette
         open={paletteOpen}
         onOpenChange={setPaletteOpen}
-        openProjects={SPECIMEN_PALETTE}
-        recents={SPECIMEN_PALETTE_RECENTS}
-        onSwitch={() => setPaletteOpen(false)}
-        onOpenRecent={() => setPaletteOpen(false)}
+        openProjects={[]}
+        recents={paletteRecents}
+        onSwitch={doOpenProject}
+        onOpenRecent={doOpenProject}
         onOpenDialog={openDialog}
         onNewProject={() => { setPaletteOpen(false); setNewProjError(null); setNewProjOpen(true); }}
       />
@@ -174,7 +202,8 @@ export default function App() {
         open={newProjOpen}
         onOpenChange={setNewProjOpen}
         error={newProjError}
-        onCreate={() => {/* C1 wiring: create_project */}}
+        onCreate={doCreate}
+        onClearError={() => setNewProjError(null)}
         basePath="~/Documents"
       />
       <ShortcutsOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
