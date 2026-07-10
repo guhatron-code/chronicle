@@ -212,6 +212,7 @@ function FxCard({ phase }: { phase: Extract<RailPhase, { kind: "fx" }> }) {
         <span className="flex-1" />
         <Twisty label={`Expand ${phase.id}`} onClick={phase.onToggle} />
       </div>
+      {phase.chips.length > 0 && (
       <div className="flex items-center gap-2">
         <span className="text-[11.5px] text-text-dim">You paste</span>
         {phase.chips.map((name) => (
@@ -224,6 +225,7 @@ function FxCard({ phase }: { phase: Extract<RailPhase, { kind: "fx" }> }) {
           />
         ))}
       </div>
+      )}
     </div>
   );
 }
