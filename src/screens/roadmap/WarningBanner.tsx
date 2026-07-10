@@ -1,0 +1,44 @@
+/*
+ * F14 (Deck 2) — the roadmap warning banner. Non-alarming: hairline card, glyph +
+ * words, a pill action, a quiet dismiss. Presentational only.
+ */
+import { WarnGlyph, XGlyph } from "@/components/chrome/icons";
+import { cn } from "@/lib/utils";
+
+export type WarningBannerProps = {
+  /** N in "N rules in this roadmap can't be checked". */
+  count: number;
+  onRebuild?: () => void;
+  onDismiss?: () => void;
+  className?: string;
+};
+
+export function WarningBanner({ count, onRebuild, onDismiss, className }: WarningBannerProps) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-[11px] rounded-lg border border-border-hairline bg-surface-card px-[15px] py-[11px]",
+        className,
+      )}
+    >
+      <WarnGlyph size={14} className="shrink-0 text-text-subtle" />
+      <span className="text-[12.5px] text-text-secondary">
+        {count} rules in this roadmap can't be checked — statuses may be incomplete.
+      </span>
+      <span className="flex-1" />
+      <button
+        onClick={onRebuild}
+        className="h-[27px] shrink-0 rounded-full border border-border-strong px-[11px] text-xs font-medium text-text-primary hover:bg-fill-hover"
+      >
+        Rebuild the roadmap
+      </button>
+      <button
+        aria-label="Dismiss"
+        onClick={onDismiss}
+        className="flex size-6 shrink-0 items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+      >
+        <XGlyph size={10} />
+      </button>
+    </div>
+  );
+}

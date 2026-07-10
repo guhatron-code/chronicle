@@ -27,21 +27,18 @@ import {
   type PickerRecent,
 } from "@/lib/ipc";
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
-
-/** The slice of get_state the shell chrome consumes (refined in C3 for the panes). */
-interface ShellState {
-  checked_at?: string;
-  manifest_present?: boolean;
-  statuses?: { id: string; state: string; label: string }[];
-}
+import { RoadmapPane } from "@/screens/roadmap/RoadmapPane";
+import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
   dir: string;
   name: string;
-  state: ShellState | null;
+  state: StateData | null;
+  partOf: { name: string; path: string } | null;
   updated: boolean; // finished/changed while in the background
   updatedHint?: string;
   prevNowId?: string;
+  justSwitchedAt?: number; // the ~2s banner emphasis window
 }
 
 const PANES: Pane[] = ["road", "repo", "kanban"];
@@ -49,7 +46,7 @@ const splitKey = (dir: string) => `chronicle.split.${dir}`;
 
 export default function App() {
   const [rows, setRows] = useState<PickerRecent[]>([]);
-  const [agent, setAgent] = useState("Claude");
+  const [agent, setAgent] = useState<"claude" | "codex">("claude");
   const [projects, setProjects] = useState<Map<string, ProjectEntry>>(new Map());
   const [activeDir, setActiveDir] = useState<string | null>(null);
   const [pane, setPane] = useState<Pane>("road");
@@ -76,7 +73,7 @@ export default function App() {
   /* ---- the ground-truth poll: every open project, every 8s ---- */
   const pollOne = useCallback(async (dir: string) => {
     try {
-      const s = (await getState(dir)) as ShellState;
+      const s = await getState(dir);
       setProjects((prev) => {
         const next = new Map(prev);
         const e = next.get(dir);
@@ -89,6 +86,7 @@ export default function App() {
           prevNowId: nowId,
           updated: e.updated || (changed && dir !== activeRef.current),
           updatedHint: changed ? `${e.name} moved to ${nowId ?? "done"}` : e.updatedHint,
+          justSwitchedAt: changed && dir === activeRef.current ? Date.now() : e.justSwitchedAt,
         });
         return next;
       });
@@ -109,7 +107,7 @@ export default function App() {
     agentsAvailable()
       .then((a) => {
         const d = (a as { default?: string } | null)?.default;
-        if (d) setAgent(d === "codex" ? "Codex" : "Claude");
+        if (d) setAgent(d === "codex" ? "codex" : "claude");
       })
       .catch(() => {});
     const onFocus = () => { refreshPicker(); for (const dir of projectsRef.current.keys()) void pollOne(dir); };
@@ -135,13 +133,15 @@ export default function App() {
     openProject(path)
       .then((p) => {
         const dir = (p as { dir?: string } | null)?.dir ?? path;
-        const name =
-          (p as { manifest?: { name?: string } | null } | null)?.manifest?.name ??
-          dir.split("/").filter(Boolean).pop() ?? dir;
+        const info = p as { manifest?: { name?: string } | null; part_of?: { name?: string; path?: string } | null } | null;
+        const name = info?.manifest?.name ?? dir.split("/").filter(Boolean).pop() ?? dir;
+        const partOf = info?.part_of?.path
+          ? { name: String(info.part_of.name ?? ""), path: String(info.part_of.path) }
+          : null;
         setProjects((prev) => {
           if (prev.has(dir)) return prev;
           const next = new Map(prev);
-          next.set(dir, { dir, name, state: null, updated: false });
+          next.set(dir, { dir, name, state: null, partOf, updated: false });
           return next;
         });
         setPaletteOpen(false);
@@ -269,7 +269,7 @@ export default function App() {
     updatedHint: p.updatedHint,
   }));
   const recents: RecentProject[] =
-    devPreset.current ?? rows.map((r) => toRecentProject(r, { agent }));
+    devPreset.current ?? rows.map((r) => toRecentProject(r, { agent: agent === "codex" ? "Codex" : "Claude" }));
   const openPalette: PaletteProject[] = tabs.map((t) => {
     const row = rows.find((r) => r.path === t.dir);
     const base = row ? toPaletteProject(row) : null;
@@ -362,14 +362,27 @@ export default function App() {
         onNewTerminal={() => {/* C6 */}}
         onStartAgent={() => {/* C6 */}}
       >
-        {/* the content panes land in C3 (roadmap) · C5 (repo) · C7 (kanban) */}
-        <div className="flex h-full items-center justify-center">
-          <span className="font-mono text-[11.5px] text-text-dim">
-            {pane === "road" ? "the roadmap arrives with slice C3"
-              : pane === "repo" ? "the repo arrives with slice C5"
-              : "the kanban arrives with slice C7"}
-          </span>
-        </div>
+        {pane === "road" ? (
+          <RoadmapPane
+            dir={active.dir}
+            state={active.state}
+            agent={agent}
+            partOf={active.partOf}
+            justSwitched={!!active.justSwitchedAt && Date.now() - active.justSwitchedAt < 2000}
+            onAgentChange={setAgent}
+            onOpenProject={doOpenProject}
+            onGoRepo={() => setPane("repo")}
+            onGoKanban={() => setPane("kanban")}
+            onConfirm={setConfirm}
+            onPollNow={() => void pollOne(active.dir)}
+          />
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <span className="font-mono text-[11.5px] text-text-dim">
+              {pane === "repo" ? "the repo arrives with slice C5" : "the kanban arrives with slice C7"}
+            </span>
+          </div>
+        )}
       </Shell>
       {overlays}
     </>

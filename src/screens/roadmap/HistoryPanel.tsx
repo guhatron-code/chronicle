@@ -1,0 +1,188 @@
+/*
+ * F18 (Deck 3) — the project-history panel: the sync pipeline (edits on disk → saved
+ * to history → published online), milestone pills, the changed-files group. Custom
+ * surface on the tokens. The arrow dash animates ONLY while saving/publishing is
+ * active; frozen = the words carry the state. Presentational only.
+ */
+import { CheckGlyph } from "@/components/chrome/icons";
+import { cn } from "@/lib/utils";
+import { TinyBadge } from "./bits";
+
+export type HistoryStatus =
+  | { kind: "waiting"; label: string } // e.g. "2 saves waiting to publish"
+  | { kind: "published" } // "everything published online" — the one success header
+  | { kind: "untracked" }; // "not tracked yet"
+
+export type PipelineNode = {
+  label: string;
+  count: string; // mono line under the label, e.g. "4 files" · "2 waiting" · "behind by 2"
+  marker: "dot" | "done" | "pending";
+};
+
+export type ChangedFile = { path: string; badge: string };
+
+export type HistoryPanelProps =
+  | {
+      kind: "panel";
+      status: HistoryStatus;
+      nodes: [PipelineNode, PipelineNode, PipelineNode];
+      /** Dash animation per arrow — active only while that hop is in flight. */
+      arrowsActive: [boolean, boolean];
+      milestones: string[];
+      files: ChangedFile[];
+      /** "…and N more" footer row. */
+      moreCount?: number;
+      onViewDetails?: () => void;
+      className?: string;
+    }
+  | { kind: "no-history"; onStartHistory?: () => void; className?: string };
+
+function StatusWordmark({ status }: { status: HistoryStatus }) {
+  if (status.kind === "published") {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-state-success">
+        <CheckGlyph size={11} />
+        everything published online
+      </span>
+    );
+  }
+  return (
+    <span className="text-xs text-text-subtle">
+      {status.kind === "waiting" ? status.label : "not tracked yet"}
+    </span>
+  );
+}
+
+function NodeMarker({ marker }: { marker: PipelineNode["marker"] }) {
+  if (marker === "done") return <CheckGlyph size={11} className="text-state-success" />;
+  if (marker === "pending")
+    return <span className="size-[9px] rounded-full border-[1.4px] border-border-strong" />;
+  return <span className="size-[9px] rounded-full bg-state-neutral" />;
+}
+
+function PipelineArrow({ active }: { active: boolean }) {
+  const stroke = active ? "var(--state-neutral)" : "var(--border-strong)";
+  return (
+    <svg width="70" height="14" viewBox="0 0 70 14" className="shrink-0" aria-hidden>
+      <path
+        d="M2 7h58"
+        stroke={stroke}
+        strokeWidth="1.4"
+        strokeDasharray="5 7"
+        style={active ? { animation: "wv-dash 1s linear infinite" } : undefined}
+      />
+      <path d="m60 3.4 6 3.6-6 3.6" fill="none" stroke={stroke} strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+export function HistoryPanel(p: HistoryPanelProps) {
+  if (p.kind === "no-history") {
+    return (
+      <div
+        className={cn(
+          "flex flex-col gap-2.5 rounded-lg border border-border-hairline bg-surface-card p-[18px]",
+          p.className,
+        )}
+      >
+        <div className="text-sm font-medium text-text-primary">No history yet</div>
+        <div className="text-[12.5px] leading-[1.5] text-text-muted">
+          This folder isn't keeping a record of its changes. Starting one is safe — it only adds a
+          hidden folder.
+        </div>
+        <button
+          onClick={p.onStartHistory}
+          className="self-start text-[12.5px] font-medium text-text-primary underline underline-offset-2"
+        >
+          Start keeping history →
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        "overflow-hidden rounded-lg border border-border-hairline bg-surface-card",
+        p.className,
+      )}
+    >
+      {/* wv-dash lives in the deck helmet, not index.css — defined locally, frozen by the
+          global reduced-motion rule like everything else. */}
+      <style>{"@keyframes wv-dash { to { stroke-dashoffset: -12; } }"}</style>
+
+      <div className="flex items-center justify-between border-b border-divider px-[18px] py-[15px]">
+        <span className="text-[15px] font-semibold text-text-primary">Project history</span>
+        <StatusWordmark status={p.status} />
+      </div>
+
+      <div className="flex flex-col gap-4 p-[18px]">
+        {/* pipeline */}
+        <div className="flex items-center">
+          {p.nodes.map((node, i) => (
+            <div key={node.label} className="contents">
+              {i > 0 && <PipelineArrow active={p.arrowsActive[(i - 1) as 0 | 1]} />}
+              <div className="flex w-[170px] flex-col items-center gap-1.5">
+                <div className="flex items-center gap-[7px]">
+                  <NodeMarker marker={node.marker} />
+                  <span
+                    className={cn(
+                      "text-[13px]",
+                      node.marker === "pending" ? "text-text-secondary" : "text-text-primary",
+                    )}
+                  >
+                    {node.label}
+                  </span>
+                </div>
+                <span className="font-mono text-[11.5px] text-text-dim tabular-nums">
+                  {node.count}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* milestones */}
+        <div className="flex items-center gap-2">
+          <span className="text-[11.5px] text-text-dim">Milestones reached</span>
+          {p.milestones.map((m) => (
+            <span
+              key={m}
+              className="rounded-full bg-fill-subtle px-[9px] py-0.5 font-mono text-[10.5px] text-text-subtle"
+            >
+              {m}
+            </span>
+          ))}
+        </div>
+
+        {/* changed files — grouped list: fill-subtle block, divider-faint rows, no outer border */}
+        <div className="flex flex-col overflow-hidden rounded-md bg-fill-subtle">
+          {p.files.map((f, i) => (
+            <div
+              key={f.path}
+              className={cn(
+                "flex items-center gap-[9px] px-3 py-2",
+                i < p.files.length - 1 && "border-b border-divider-faint",
+              )}
+            >
+              <span className="flex-1 font-mono text-xs text-text-secondary">{f.path}</span>
+              <TinyBadge>{f.badge}</TinyBadge>
+            </div>
+          ))}
+          {p.moreCount != null && p.moreCount > 0 && (
+            <div className="border-t border-divider-faint px-3 py-[7px] text-[11.5px] text-text-dim">
+              …and {p.moreCount} more
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={p.onViewDetails}
+          className="h-[34px] w-full rounded-md border border-border-hairline text-[12.5px] font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"
+        >
+          View details ›
+        </button>
+      </div>
+    </div>
+  );
+}

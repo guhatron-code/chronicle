@@ -35,7 +35,73 @@ export interface PickerData {
   recents: PickerRecent[];
 }
 export type ProjectData = unknown; // open_project → { dir, name, repo, extras, manifest, ... }
-export type StateData = unknown; // get_state → the derived roadmap/git state
+
+/** One derived phase status (get_state.statuses / --derive). */
+export interface PhaseStatus {
+  id: string;
+  state: "done" | "now" | "later" | "window" | "pool";
+  label: string;
+}
+
+/** A manifest phase as the MERGED manifest carries it (incl. kanban FX overlays). */
+export interface ManifestPhase {
+  id?: string;
+  name?: string;
+  desc?: string;
+  items?: string[];
+  paste?: { path?: string; label?: string; into?: string; when?: string }[];
+  docs?: { path: string }[];
+  pool?: boolean;
+  window?: boolean;
+  status?: { blocked_note?: string };
+  fixRound?: number;
+}
+
+export interface ManifestStage {
+  title?: string;
+  note?: string;
+  synthetic?: boolean;
+  phases?: ManifestPhase[];
+}
+
+export interface Manifest {
+  name?: string;
+  description?: string;
+  workBranch?: string;
+  spine?: { path: string }[];
+  stages?: ManifestStage[];
+}
+
+/** get_state — the full derived shape (read from main.rs state_for_project). */
+export interface StateData {
+  repo: string;
+  dir: string;
+  manifest_present: boolean;
+  manifest_error: string | null;
+  manifest: Manifest | null;
+  is_git: boolean;
+  git_degraded?: boolean;
+  branch: string;
+  upstream: boolean;
+  ahead: number;
+  behind: number;
+  remote_url: string;
+  commits: number;
+  last_commit: string;
+  tags: string[];
+  worktrees: { path: string; branch: string; prunable: boolean }[];
+  dirty: { code: string; path: string }[];
+  statuses: PhaseStatus[];
+  docs: Record<string, boolean>;
+  stale: string[];
+  custom_actions: { text?: string; cmd?: string; level?: string }[];
+  manifest_warnings: string[];
+  work_branch: string | null;
+  init_consent: "auto" | "manual" | "basic" | null;
+  blank?: boolean;
+  misplaced?: string | null;
+  checked_at: string;
+}
 export type InitStatusData = unknown; // init_status → { phase, code, log_tail, ... }
 export type AgentsData = unknown; // agents_available → { claude, codex, default }
 export type GitStatusDetail = unknown; // git_status_detail → { staged: [...], unstaged: [...] }
