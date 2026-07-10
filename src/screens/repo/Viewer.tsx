@@ -24,7 +24,7 @@ export type ViewerBody =
   | { kind: "code"; lines: CodeLine[] }
   | { kind: "diff"; rows: DiffRow[] }
   | { kind: "read-error"; message: string; detail: string } // "This file couldn't be read" · "EACCES · permission denied"
-  | { kind: "image"; caption: string } // "hero.png · 1440×960 · 212 KB"
+  | { kind: "image"; caption: string; src?: string } // "hero.png · 1440×960 · 212 KB" · src = data: URI when wired
   | { kind: "binary"; message: string; note: string; detail: string }
   | { kind: "huge"; message: string; note: string }; // "This file is 2.4 MB" · "Reading it may be slow."
 
@@ -281,9 +281,17 @@ export function Viewer(p: ViewerProps) {
       )}
       {p.body.kind === "image" && (
         <Stage className="gap-[9px]">
-          <div className="flex h-[74px] w-[110px] items-center justify-center rounded-lg border border-border-strong bg-surface-card-raised">
-            <ImageGlyph size={22} className="text-text-dim" />
-          </div>
+          {p.body.src ? (
+            <img
+              src={p.body.src}
+              alt={p.body.caption}
+              className="max-h-[60vh] max-w-[80%] rounded-lg border border-border-strong object-contain"
+            />
+          ) : (
+            <div className="flex h-[74px] w-[110px] items-center justify-center rounded-lg border border-border-strong bg-surface-card-raised">
+              <ImageGlyph size={22} className="text-text-dim" />
+            </div>
+          )}
           <span className="font-mono text-[11px] text-text-dim tabular-nums">{p.body.caption}</span>
         </Stage>
       )}
@@ -299,12 +307,14 @@ export function Viewer(p: ViewerProps) {
         <Stage className="gap-[9px] p-4 text-center">
           <span className="text-[12.5px] text-text-secondary">{p.body.message}</span>
           <span className="text-[11.5px] text-text-dim">{p.body.note}</span>
+          {p.onOpenAnyway && (
           <button
             onClick={p.onOpenAnyway}
             className="h-7 rounded-lg border border-border-strong px-3 text-xs font-medium text-text-primary hover:bg-fill-hover"
           >
             Open anyway
           </button>
+          )}
         </Stage>
       )}
     </div>

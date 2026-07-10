@@ -104,13 +104,29 @@ export interface StateData {
 }
 export type InitStatusData = unknown; // init_status → { phase, code, log_tail, ... }
 export type AgentsData = unknown; // agents_available → { claude, codex, default }
-export type GitStatusDetail = unknown; // git_status_detail → { staged: [...], unstaged: [...] }
-export type GitLogRow = unknown; // git_log_graph rows → { hash, parents, subject, author, ago, refs }
+export interface GitStatusFile {
+  path: string;
+  code: string; // porcelain letter: M A D R C ? …
+  untracked?: boolean; // unstaged rows only
+}
+export interface GitStatusDetail {
+  staged: GitStatusFile[];
+  unstaged: GitStatusFile[];
+}
+export interface GitLogRow {
+  hash: string;
+  parents: string[];
+  subject: string;
+  author: string;
+  ago: string;
+  refs: string; // raw %D decoration string
+}
 
+/** Matches the Rust `Entry` (list_dir). */
 export interface DirEntry {
   name: string;
-  path: string;
-  dir: boolean;
+  is_dir: boolean;
+  size: number;
 }
 
 /* ---------- agents / project lifecycle ---------- */

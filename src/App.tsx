@@ -28,6 +28,7 @@ import {
 } from "@/lib/ipc";
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
 import { RoadmapPane } from "@/screens/roadmap/RoadmapPane";
+import { RepoPane } from "@/screens/repo/RepoPane";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -376,10 +377,17 @@ export default function App() {
             onConfirm={setConfirm}
             onPollNow={() => void pollOne(active.dir)}
           />
+        ) : pane === "repo" ? (
+          <RepoPane
+            dir={active.dir}
+            state={active.state}
+            onConfirm={setConfirm}
+            onPollNow={() => void pollOne(active.dir)}
+          />
         ) : (
           <div className="flex h-full items-center justify-center">
             <span className="font-mono text-[11.5px] text-text-dim">
-              {pane === "repo" ? "the repo arrives with slice C5" : "the kanban arrives with slice C7"}
+              The kanban arrives with slice C7
             </span>
           </div>
         )}

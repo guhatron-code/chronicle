@@ -22,8 +22,8 @@ import { GitBadge, type GitLetter } from "./FileTree";
 
 /* ---- data types ---- */
 
-export type SaveFile = { name: string; dir: string }; // dir is the small mono detail
-export type ChangeFile = { name: string; git?: GitLetter };
+export type SaveFile = { name: string; dir: string; path?: string }; // dir is the small mono detail; path = full repo path for callbacks
+export type ChangeFile = { name: string; git?: GitLetter; path?: string };
 export type ChangeGroup = { dir: string; open: boolean; files: ChangeFile[] };
 
 export type PublishState =
@@ -68,10 +68,10 @@ export type HistoryPaneProps = {
   onCloseHistory?: () => void;
   onMessageChange?: (message: string) => void;
   onSave?: () => void;
-  onSkip?: (name: string) => void;
+  onSkip?: (path: string) => void;
   onToggleGroup?: (dir: string) => void;
-  onInclude?: (name: string) => void;
-  onDiscard?: (name: string) => void;
+  onInclude?: (path: string) => void;
+  onDiscard?: (path: string) => void;
   onPush?: () => void;
   onPull?: () => void;
   onCopySetup?: () => void;
@@ -400,7 +400,7 @@ export function HistoryPane(p: HistoryPaneProps) {
                   <span className="text-[12.5px] text-text-primary">{f.name}</span>
                   <span className="font-mono text-[10.5px] text-text-dim">{f.dir}</span>
                   <span className="flex-1" />
-                  <RowAction label="Skip" onClick={() => p.onSkip?.(f.name)} />
+                  <RowAction label="Skip" onClick={() => p.onSkip?.(f.path ?? f.name)} />
                 </div>
               ))}
             </div>
@@ -455,10 +455,10 @@ export function HistoryPane(p: HistoryPaneProps) {
                           </span>
                           {f.git && <GitBadge letter={f.git} />}
                           <span className="flex-1" />
-                          <RowAction label="Include" onClick={() => p.onInclude?.(f.name)} />
+                          <RowAction label="Include" onClick={() => p.onInclude?.(f.path ?? f.name)} />
                           <button
                             aria-label={`Discard changes to ${f.name}`}
-                            onClick={() => p.onDiscard?.(f.name)}
+                            onClick={() => p.onDiscard?.(f.path ?? f.name)}
                             className="h-[21px] shrink-0 rounded-[5px] border border-border-hairline px-2 text-[10.5px] text-text-dim opacity-0 hover:border-border-strong hover:text-state-error focus-visible:opacity-100 group-hover:opacity-100"
                           >
                             Discard…
