@@ -1,0 +1,554 @@
+/*
+ * Chronicle global stylesheet — ported from the Weave design system
+ * (weave/packages/ui/src/styles/{tokens.css,globals.css}; DESIGN.md is the supreme visual arbiter).
+ *
+ * The design-grounding bridge: every shadcn/Radix variable maps to a DESIGN.md §1 token.
+ * Components consume the shadcn vars (bg-primary, border-border, …) via Tailwind v4 `@theme inline`
+ * — NEVER a raw hex, NEVER a shadcn-default grey. Dark = default (:root); light is first-class via
+ * [data-theme="light"].
+ *
+ * NOTE: `shadcn add` appends default grey `:root`/`.dark` token blocks. They are DELETED on purpose
+ * every time — this file's bridge is the single source of truth.
+ */
+
+/* Geist Sans (UI) + Geist Mono (keys/paths/numeric metadata) — self-hosted, local-first. */
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* Dark is DEFAULT. [data-theme] is set explicitly on <html>, so the `dark:` utility keys off
+   [data-theme="dark"] rather than prefers-color-scheme. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/* ============ DESIGN.md §1 — foundation tokens (DARK default) ============ */
+:root,
+[data-theme='dark'] {
+  /* §1.1 Surfaces — elevation ramp (lighter = forward) */
+  --surface-app: #0a0a0a;
+  --surface-panel: #0d0d0d;
+  --surface-sidebar: #131313;
+  --surface-card: #101010;
+  --surface-card-raised: #111111;
+  --surface-input: #0b0b0b;
+  --surface-overlay: #161616;
+
+  /* §1.2 Text ramp */
+  --text-primary: #ededed;
+  --text-secondary: #cfcfcf;
+  --text-muted: #9a9a9a;
+  --text-subtle: #8a8a8a;
+  --text-faint: #7e7e7e;
+  --text-dim: #6e6e6e;
+  --text-dimmer: #5a5a5a;
+
+  /* §1.3 Borders & dividers */
+  --border-hairline: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --border-field: rgba(255, 255, 255, 0.09);
+  --border-field-focus: rgba(255, 255, 255, 0.28);
+  --divider: rgba(255, 255, 255, 0.055);
+  --divider-faint: rgba(255, 255, 255, 0.04);
+
+  /* §1.4 Fills & interaction */
+  --fill-hover: rgba(255, 255, 255, 0.06);
+  --fill-subtle: rgba(255, 255, 255, 0.03);
+  --primary: #ededed;
+  --primary-hover: #ffffff;
+  --primary-fg: #0a0a0a;
+  --selected-bg: #ffffff;
+  --selected-fg: #0a0a0a;
+  --focus-ring: 0 0 0 2px #0d0d0d, 0 0 0 3px rgba(255, 255, 255, 0.22);
+
+  /* §1.5 State — the ONLY chromatic colour (desaturated) */
+  --state-success: #7fae8a;
+  --state-error: #cf8a86;
+  --state-error-label: #8a6b6b;
+  --state-neutral: #9a9a9a;
+
+  /* §1.9 Elevation */
+  --shadow-overlay: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --shadow-panel: none; /* dark: borders separate, not shadows */
+
+  /* §1.5 Project mark palette — the one place hue appears (brand data, not UI) */
+  --mark-1: #71717a;
+  --mark-2: #6b7280;
+  --mark-3: #7c8a6b;
+  --mark-4: #8a7c6b;
+  --mark-5: #6b7c8a;
+  --mark-6: #8a6b7c;
+}
+
+[data-theme='light'] {
+  /* §1.1 Surfaces — gray base, white working surfaces; forward layers add shadow */
+  --surface-app: #e9e9ec;
+  --surface-panel: #ffffff;
+  --surface-sidebar: #f4f4f6;
+  --surface-card: #ffffff;
+  --surface-card-raised: #ffffff;
+  --surface-input: #f5f5f7;
+  --surface-overlay: #ffffff;
+
+  /* §1.2 Text ramp (faint/dim/dimmer darkened to meet WCAG AA ≥4.5:1 on white) */
+  --text-primary: #161616;
+  --text-secondary: #363636;
+  --text-muted: #5c5c5c;
+  --text-subtle: #6e6e6e;
+  --text-faint: #737373;
+  --text-dim: #6b6b6b;
+  --text-dimmer: #767676;
+
+  /* §1.3 Borders & dividers */
+  --border-hairline: rgba(0, 0, 0, 0.1);
+  --border-strong: rgba(0, 0, 0, 0.15);
+  --border-field: rgba(0, 0, 0, 0.12);
+  --border-field-focus: rgba(0, 0, 0, 0.32);
+  --divider: rgba(0, 0, 0, 0.07);
+  --divider-faint: rgba(0, 0, 0, 0.05);
+
+  /* §1.4 Fills & interaction */
+  --fill-hover: rgba(0, 0, 0, 0.045);
+  --fill-subtle: rgba(0, 0, 0, 0.03);
+  --primary: #1a1a1a;
+  --primary-hover: #000000;
+  --primary-fg: #ffffff;
+  --selected-bg: #161616;
+  --selected-fg: #ffffff;
+  --focus-ring: 0 0 0 2px #ffffff, 0 0 0 3px rgba(0, 0, 0, 0.3);
+
+  /* §1.5 State — contrast-tuned for light */
+  --state-success: #3f7d57;
+  --state-error: #b3534d;
+  --state-error-label: #9a615d;
+  --state-neutral: #6e6e6e;
+
+  /* §1.9 Elevation — light uses shadow for elevation */
+  --shadow-overlay: 0 12px 32px rgba(0, 0, 0, 0.12);
+  --shadow-panel: 0 1px 3px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.05);
+}
+
+/* ============ shadcn/Radix semantic variables → DESIGN.md §1 tokens ============
+   Theme-agnostic: the tokens swap underneath. */
+:root {
+  --background: var(--surface-app);
+  --foreground: var(--text-primary);
+
+  --card: var(--surface-card);
+  --card-foreground: var(--text-primary);
+  --popover: var(--surface-overlay);
+  --popover-foreground: var(--text-primary);
+
+  /* --primary / --primary-hover already defined in the tokens (DESIGN §1.4). */
+  --primary-foreground: var(--primary-fg);
+
+  --secondary: var(--surface-card-raised);
+  --secondary-foreground: var(--text-secondary);
+
+  --muted: var(--surface-input);
+  --muted-foreground: var(--text-muted);
+
+  --accent: var(--fill-hover);
+  --accent-foreground: var(--text-primary);
+
+  --destructive: var(--state-error);
+  --destructive-foreground: var(--surface-app);
+
+  --border: var(--border-hairline);
+  --input: var(--border-field);
+  --ring: var(--border-field-focus);
+
+  --radius: 8px; /* DESIGN §1.7 base; the rounded-* scale is in @theme inline below */
+
+  /* The full --sidebar-* block — the floating rail. */
+  --sidebar: var(--surface-sidebar);
+  --sidebar-foreground: var(--text-primary);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-fg);
+  --sidebar-accent: var(--fill-hover);
+  --sidebar-accent-foreground: var(--text-primary);
+  --sidebar-border: var(--border-hairline);
+  --sidebar-ring: var(--border-field-focus);
+
+  /* Charts stay monochrome/neutral (colour only signals state). */
+  --chart-1: var(--text-secondary);
+  --chart-2: var(--text-muted);
+  --chart-3: var(--text-subtle);
+  --chart-4: var(--text-faint);
+  --chart-5: var(--text-dim);
+}
+
+/* Surface DESIGN tokens + the shadcn vars to Tailwind utilities (bg-background, text-foreground, …). */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* DESIGN tokens exposed as utilities for the custom surfaces (state, surfaces, text ramp). */
+  --color-surface-app: var(--surface-app);
+  --color-surface-panel: var(--surface-panel);
+  --color-surface-sidebar: var(--surface-sidebar);
+  --color-surface-card: var(--surface-card);
+  --color-surface-card-raised: var(--surface-card-raised);
+  --color-surface-input: var(--surface-input);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+  --color-text-faint: var(--text-faint);
+  --color-text-dim: var(--text-dim);
+  --color-text-dimmer: var(--text-dimmer);
+  --color-state-success: var(--state-success);
+  --color-state-error: var(--state-error);
+  --color-state-neutral: var(--state-neutral);
+
+  /* §1.7 Radius scale → rounded-* utilities. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+
+  /* §1.6 Typography — Geist Sans (UI) + Geist Mono (keys/paths/numeric metadata). */
+  --font-sans: 'Geist Variable', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', monospace;
+}
+
+/* ============ Base ============ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* Frameless transparent Tauri window: the page itself is transparent; #root is the opaque,
+   rounded app container (present from first paint — no white flash before React mounts). */
+html,
+body {
+  background: transparent;
+  overflow: hidden;
+}
+
+#root {
+  background: var(--surface-app);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  border-radius: 11px;
+  overflow: hidden;
+}
+
+/* Indeterminate progress — a running task whose real % the backend does not emit per tick. */
+@keyframes ch-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+/* NOTE: `shadcn add sidebar` appended a default `.dark { --sidebar: hsl(240 5.9% 10%); … }` block of
+   shadcn-default greys + a blue accent. It is DELETED on purpose — the DESIGN bridge above owns the
+   --sidebar-* vars. If a future `shadcn add` re-appends it, delete it again. */
+
+/* Kibo UI typography style (registry:style @kibo-ui/typography). */
+@layer base {
+  .typography {
+    max-width: 65ch;
+    color: var(--color-foreground);
+  }
+  .typography h1:not(.not-typography h1) {
+    scroll-margin: calc(var(--spacing) * 20);
+    font-size: var(--text-4xl);
+    line-height: var(--text-4xl--line-height);
+    font-weight: 800;
+    letter-spacing: var(--tracking-tight);
+  }
+  .typography h2:not(.not-typography h2) {
+    scroll-margin: calc(var(--spacing) * 20);
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: calc(var(--spacing) * 2);
+    font-size: var(--text-3xl);
+    line-height: var(--text-3xl--line-height);
+    font-weight: 600;
+    letter-spacing: var(--tracking-tight);
+    margin-top: calc(var(--spacing) * 12);
+  }
+  .typography h2:not(.not-typography h2):first-child {
+    margin-top: 0;
+  }
+  .typography h3:not(.not-typography h3) {
+    scroll-margin: calc(var(--spacing) * 20);
+    font-size: var(--text-2xl);
+    line-height: var(--text-2xl--line-height);
+    font-weight: 600;
+    letter-spacing: var(--tracking-tight);
+    margin-top: calc(var(--spacing) * 12);
+  }
+  .typography h3:not(.not-typography h3):first-child {
+    margin-top: 0;
+  }
+  .typography h4:not(.not-typography h4) {
+    scroll-margin: calc(var(--spacing) * 20);
+    font-size: var(--text-xl);
+    line-height: var(--text-xl--line-height);
+    font-weight: 600;
+    letter-spacing: var(--tracking-tight);
+    margin-top: calc(var(--spacing) * 12);
+  }
+  .typography h4:not(.not-typography h4):first-child {
+    margin-top: 0;
+  }
+  .typography h5:not(.not-typography h5) {
+    scroll-margin: calc(var(--spacing) * 20);
+    font-size: var(--text-lg);
+    line-height: var(--text-lg--line-height);
+    font-weight: 600;
+    letter-spacing: var(--tracking-tight);
+    margin-top: calc(var(--spacing) * 12);
+  }
+  .typography h5:not(.not-typography h5):first-child {
+    margin-top: 0;
+  }
+  .typography h6:not(.not-typography h6) {
+    scroll-margin: calc(var(--spacing) * 20);
+    font-size: var(--text-base);
+    line-height: var(--text-base--line-height);
+    font-weight: 600;
+    letter-spacing: var(--tracking-tight);
+    margin-top: calc(var(--spacing) * 12);
+  }
+  .typography h6:not(.not-typography h6):first-child {
+    margin-top: 0;
+  }
+  .typography h1:not(.not-typography h1) + p, .typography h2:not(.not-typography h2) + p, .typography h3:not(.not-typography h3) + p, .typography h4:not(.not-typography h4) + p, .typography h5:not(.not-typography h5) + p, .typography h6:not(.not-typography h6) + p {
+    margin-top: 0;
+  }
+  .typography p:not(.not-typography p) {
+    line-height: 1.75;
+  }
+  .typography p:not(.not-typography p):not(:first-child) {
+    margin-top: calc(var(--spacing) * 6);
+  }
+  .typography li:not(.not-typography li) {
+    line-height: 1.75;
+  }
+  .typography a:not(.not-typography a) {
+    font-weight: 500;
+    color: var(--color-primary);
+    text-decoration: underline;
+    text-underline-offset: var(--spacing);
+  }
+  .typography blockquote:not(.not-typography blockquote) {
+    margin-top: calc(var(--spacing) * 6);
+    border-left: 2px solid var(--color-border);
+    padding-left: calc(var(--spacing) * 6);
+    font-style: italic;
+  }
+  .typography table:not(.not-typography table) {
+    margin-top: calc(var(--spacing) * 6);
+    margin-bottom: calc(var(--spacing) * 6);
+    width: 100%;
+    overflow-y: auto;
+  }
+  .typography table:not(.not-typography table) thead tr {
+    margin: 0;
+    border-top: 1px solid var(--color-border);
+    padding: 0;
+  }
+  .typography table:not(.not-typography table) thead tr:nth-child(even) {
+    background-color: var(--color-muted);
+  }
+  .typography table:not(.not-typography table) th {
+    border: 1px solid var(--color-border);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 4);
+    text-align: left;
+    font-weight: 700;
+  }
+  .typography table:not(.not-typography table) th[align="center"] {
+    text-align: center;
+  }
+  .typography table:not(.not-typography table) th[align="right"] {
+    text-align: right;
+  }
+  .typography table:not(.not-typography table) tbody tr {
+    margin: 0;
+    border-top: 1px solid var(--color-border);
+    padding: 0;
+  }
+  .typography table:not(.not-typography table) tbody tr:nth-child(even) {
+    background-color: var(--color-muted);
+  }
+  .typography table:not(.not-typography table) td {
+    border: 1px solid var(--color-border);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 4);
+    text-align: left;
+  }
+  .typography table:not(.not-typography table) td[align="center"] {
+    text-align: center;
+  }
+  .typography table:not(.not-typography table) td[align="right"] {
+    text-align: right;
+  }
+  .typography ul:not(.not-typography ul) {
+    margin-top: calc(var(--spacing) * 6);
+    margin-left: calc(var(--spacing) * 6);
+    list-style: disc;
+  }
+  .typography ul:not(.not-typography ul) > li {
+    margin-top: calc(var(--spacing) * 2);
+  }
+  .typography ul:not(.not-typography ul) p {
+    margin-top: 0;
+    margin-bottom: 0;
+    display: inline;
+  }
+  .typography ol:not(.not-typography ol) {
+    margin-top: calc(var(--spacing) * 6);
+    margin-left: calc(var(--spacing) * 6);
+    list-style: decimal;
+  }
+  .typography ol:not(.not-typography ol) > li {
+    margin-top: calc(var(--spacing) * 2);
+  }
+  .typography ol:not(.not-typography ol) p {
+    margin-top: 0;
+    margin-bottom: 0;
+    display: inline;
+  }
+  .typography pre:not(.not-typography pre) {
+    background-color: var(--color-muted);
+    border-radius: calc(var(--radius) - 2px);
+    padding: calc(var(--spacing) * 4);
+    margin-top: calc(var(--spacing) * 6);
+    margin-bottom: calc(var(--spacing) * 6);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    overflow-y: auto;
+  }
+  .typography code:not(pre code):not(.not-typography code) {
+    position: relative;
+    border-radius: var(--radius);
+    background-color: var(--color-muted);
+    padding: calc(var(--spacing) * 0.2) calc(var(--spacing) * 0.3);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    font-weight: 600;
+  }
+  .typography .lead:not(.not-typography .lead) {
+    font-size: var(--text-xl);
+    line-height: var(--text-xl--line-height);
+    color: var(--color-muted-foreground);
+  }
+  .typography .large:not(.not-typography .large) {
+    font-size: var(--text-lg);
+    line-height: var(--text-lg--line-height);
+    font-weight: 600;
+  }
+  .typography .small:not(.not-typography .small) {
+    font-size: var(--text-sm);
+    line-height: 1;
+    font-weight: 500;
+  }
+  .typography .muted:not(.not-typography .muted) {
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    color: var(--color-muted-foreground);
+  }
+  .typography img:not(.not-typography img),
+    .typography picture:not(.not-typography picture),
+    .typography video:not(.not-typography video) {
+    margin-top: calc(var(--spacing) * 6);
+    margin-bottom: calc(var(--spacing) * 6);
+  }
+  .typography picture > img:not(.not-typography picture > img) {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+  .typography kbd:not(.not-typography kbd) {
+    border-radius: calc(var(--radius) - 2px);
+    background-color: var(--color-muted);
+    padding: calc(var(--spacing) * 0.5) calc(var(--spacing) * 1.5);
+    font-size: var(--text-xs);
+    line-height: var(--text-xs--line-height);
+    font-weight: 600;
+  }
+  .typography hr {
+    margin-top: calc(var(--spacing) * 10);
+    margin-bottom: calc(var(--spacing) * 10);
+  }
+  .typography dl:not(.not-typography dl) {
+    margin-top: calc(var(--spacing) * 6);
+    margin-bottom: calc(var(--spacing) * 6);
+  }
+  .typography dl:not(.not-typography dl) dt {
+    font-weight: 600;
+    margin-top: calc(var(--spacing) * 6);
+    letter-spacing: var(--tracking-tight);
+  }
+  .typography dl:not(.not-typography dl) dt:first-child {
+    margin-top: 0;
+  }
+  .typography details:not(.not-typography details) {
+    margin-top: calc(var(--spacing) * 6);
+  }
+  .typography details:not(.not-typography details) summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-top: calc(var(--spacing) * 6);
+    letter-spacing: var(--tracking-tight);
+  }
+  .typography details:not(.not-typography details) p:first-of-type {
+    margin-top: calc(var(--spacing) * 2);
+  }
+  .typography mark:not(.not-typography mark) {
+    background-color: var(--color-yellow-300);
+  }
+  .typography small:not(.not-typography small) {
+    font-size: var(--text-xs);
+    line-height: 1;
+  }
+/*
+ ---break---
+ */
+@media (min-width: 1024px) {
+  .typography h1:not(.not-typography h1) {
+    font-size: var(--text-5xl);
+    line-height: var(--text-5xl--line-height);
+    }
+  }
+}
