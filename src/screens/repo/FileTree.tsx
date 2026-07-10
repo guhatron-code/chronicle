@@ -72,6 +72,7 @@ export function GitBadge({ letter }: { letter: GitLetter }) {
 function Row({
   node,
   depth,
+  notFirstRoot,
   selectedId,
   onSelect,
   onToggleDir,
@@ -79,6 +80,8 @@ function Row({
 }: {
   node: TreeNode;
   depth: number;
+  /** Second+ roots get a 4px separation margin (deck F23). */
+  notFirstRoot?: boolean;
   selectedId?: string | null;
   onSelect?: (id: string) => void;
   onToggleDir?: (id: string) => void;
@@ -115,7 +118,7 @@ function Row({
       <button
         onClick={() => onSelect?.(node.id)}
         className={cn(
-          "relative flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left",
+          "relative flex h-7 w-full items-center gap-1.5 rounded-sm px-1.5 text-left",
           selected ? "bg-fill-hover text-text-primary" : "hover:bg-fill-hover",
           deleted && !selected && "text-text-dim",
         )}
@@ -144,11 +147,11 @@ function Row({
       <button
         onClick={() => onToggleDir?.(node.id)}
         className={cn(
-          "flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left",
-          root && !node.empty && "text-text-primary",
+          "flex h-7 w-full items-center gap-1.5 rounded-sm px-1.5 text-left",
+          root && !node.empty && !node.workspace && "text-text-primary",
           node.empty ? "text-text-dim" : "hover:bg-fill-hover",
           !root && node.hasChanges && "bg-fill-subtle",
-          root && node.workspace && "mt-1",
+          notFirstRoot && "mt-1",
         )}
       >
         {node.open ? (
@@ -167,7 +170,7 @@ function Row({
           strokeWidth={1.3}
           className={cn("shrink-0", node.empty ? "text-current" : "text-text-subtle")}
         />
-        <span className={cn(root && !node.empty && "font-medium")}>
+        <span className={cn(root && !node.empty && !node.workspace && "font-medium")}>
           {node.name}
           {node.workspace && (
             <span className="pl-1 text-[10.5px] text-text-dimmer">workspace</span>
@@ -212,17 +215,18 @@ export function FileTree(p: FileTreeProps) {
           aria-label="Project history"
           title="Project history — saves, publish, bring down"
           onClick={p.onOpenHistory}
-          className="flex size-[26px] items-center justify-center rounded-md text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+          className="flex size-[26px] items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover hover:text-text-secondary"
         >
           <HistoryClockGlyph size={13} />
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 text-[12.5px] text-text-secondary">
-        {p.roots.map((node) => (
+        {p.roots.map((node, i) => (
           <Row
             key={node.id}
             node={node}
             depth={0}
+            notFirstRoot={i > 0}
             selectedId={p.selectedId}
             onSelect={p.onSelect}
             onToggleDir={p.onToggleDir}

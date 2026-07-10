@@ -63,6 +63,8 @@ export type HistoryReady = {
 
 export type HistoryPaneProps = {
   branch?: string;
+  /** Where the back link returns to — "Repo" (Explorer entry) or "Roadmap". */
+  backLabel?: string;
   state: { kind: "loading" } | { kind: "no-history" } | HistoryReady;
   onBack?: () => void;
   onCloseHistory?: () => void;
@@ -83,12 +85,14 @@ export type HistoryPaneProps = {
 
 /* ---- pieces ---- */
 
+/* Deck F25/L4: trunk = mark-1, first branch = mark-3 (mark-2 is a near-trunk grey
+ * and never used for a lane). */
 const LANE_COLOR = [
   "var(--mark-1)",
-  "var(--mark-2)",
   "var(--mark-3)",
   "var(--mark-4)",
   "var(--mark-5)",
+  "var(--mark-6)",
 ] as const;
 
 const ROW_H = 44;
@@ -228,7 +232,7 @@ function PublishFooter({
           <span className="flex-1 text-[12.5px] text-text-secondary">Not on GitHub yet</span>
           <button
             onClick={onCopySetup}
-            className="h-7 shrink-0 rounded-lg border border-border-strong px-[11px] text-[11.5px] font-medium text-text-primary hover:bg-fill-hover"
+            className="h-7 shrink-0 rounded-md border border-border-strong px-[11px] text-[11.5px] font-medium text-text-primary hover:bg-fill-hover"
           >
             Copy the setup command
           </button>
@@ -253,16 +257,16 @@ function PublishFooter({
   return (
     <div className="flex flex-col gap-2 border-t border-divider px-[18px] py-3.5">
       <div className="flex items-center gap-2">
-        <span className="flex-1 text-[12.5px] text-text-secondary">{sentence(publish.label)}</span>
+        <span className="flex-1 text-[12px] text-text-secondary">{sentence(publish.label)}</span>
         {publish.behindLabel && (
           <button
             onClick={onPull}
-            className="h-[29px] shrink-0 rounded-lg border border-border-strong px-[11px] text-xs font-medium text-text-primary hover:bg-fill-hover"
+            className="h-[29px] shrink-0 rounded-md border border-border-strong px-[10px] text-[11.5px] font-medium text-text-primary hover:bg-fill-hover"
           >
             {sentence(publish.behindLabel)}
           </button>
         )}
-        <BtnPrimary onClick={onPush} className="h-[29px] shrink-0 px-[11px] text-xs">
+        <BtnPrimary onClick={onPush} className="h-[29px] shrink-0 px-[10px] text-[11.5px]">
           Publish online
         </BtnPrimary>
       </div>
@@ -284,7 +288,7 @@ export function HistoryPane(p: HistoryPaneProps) {
         className="inline-flex items-center gap-[5px] text-[12.5px] text-text-muted hover:text-text-primary"
       >
         <ChevronLeftGlyph size={10} />
-        Repo
+        {p.backLabel ?? "Repo"}
       </button>
       <span className="text-text-dimmer">/</span>
       <span className="text-sm font-semibold text-text-primary">Project history</span>
@@ -297,7 +301,7 @@ export function HistoryPane(p: HistoryPaneProps) {
       <button
         aria-label="Close"
         onClick={p.onCloseHistory}
-        className="flex size-[26px] items-center justify-center rounded-md text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+        className="flex size-[26px] items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover hover:text-text-secondary"
       >
         <XGlyph size={10} />
       </button>
@@ -351,7 +355,7 @@ export function HistoryPane(p: HistoryPaneProps) {
         {/* control column */}
         <div className="flex w-[340px] shrink-0 flex-col overflow-y-auto border-r border-divider">
           {s.banner && (
-            <div className="mx-[18px] mt-3 flex items-center gap-[9px] rounded-lg border border-border-hairline px-3 py-[9px]">
+            <div className="mx-[18px] mt-3 flex items-center gap-[9px] rounded-md border border-border-hairline px-3 py-[9px]">
               <ErrorGlyph size={12} className="shrink-0 text-state-error" />
               <span className="text-[11.5px] text-state-error">{sentence(s.banner)}</span>
             </div>
@@ -365,7 +369,7 @@ export function HistoryPane(p: HistoryPaneProps) {
               aria-label="Save message"
               onChange={(e) => p.onMessageChange?.(e.target.value)}
               className={cn(
-                "h-9 rounded-lg border-border-field bg-surface-input px-3 text-[12.5px] text-text-primary shadow-none placeholder:text-text-dimmer dark:bg-surface-input md:text-[12.5px]",
+                "h-9 rounded-md border-border-field bg-surface-input px-3 text-[12.5px] text-text-primary shadow-none placeholder:text-text-dimmer dark:bg-surface-input md:text-[12.5px]",
                 "focus-visible:border-border-field-focus focus-visible:ring-0 focus-visible:[box-shadow:var(--focus-ring)]!",
               )}
             />
@@ -395,7 +399,7 @@ export function HistoryPane(p: HistoryPaneProps) {
               {s.readyToSave.map((f) => (
                 <div
                   key={f.name}
-                  className="group flex h-7 items-center gap-2 rounded-md px-2 hover:bg-fill-subtle"
+                  className="group flex h-7 items-center gap-2 rounded-sm px-2 hover:bg-fill-subtle"
                 >
                   <span className="text-[12.5px] text-text-primary">{f.name}</span>
                   <span className="font-mono text-[10.5px] text-text-dim">{f.dir}</span>
@@ -441,7 +445,7 @@ export function HistoryPane(p: HistoryPaneProps) {
                       return (
                         <div
                           key={f.name}
-                          className="group flex h-7 items-center gap-2 rounded-md pl-[22px] pr-2 hover:bg-fill-subtle"
+                          className="group flex h-7 items-center gap-2 rounded-sm pl-[22px] pr-2 hover:bg-fill-subtle"
                         >
                           <span
                             className={cn(
@@ -498,7 +502,7 @@ export function HistoryPane(p: HistoryPaneProps) {
           {s.hasMore && (
             <button
               onClick={p.onShowMore}
-              className="mx-[18px] my-1.5 h-[30px] self-start rounded-lg border border-border-hairline px-3.5 text-xs font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"
+              className="mx-[18px] my-1.5 h-[30px] self-start rounded-md border border-border-hairline px-3.5 text-xs font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"
             >
               Show more
             </button>

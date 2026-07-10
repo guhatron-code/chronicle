@@ -192,7 +192,8 @@ export function publishStateFrom(s: {
   if (ahead > 0)
     return {
       kind: "waiting",
-      label: `${ahead} save${ahead === 1 ? "" : "s"} waiting to publish`,
+      // the L4 in-column footer uses the short form so label + both buttons fit one row
+      label: `${ahead} save${ahead === 1 ? "" : "s"} waiting`,
       behindLabel: behind > 0 ? `Bring down ${behind} newer` : undefined,
     };
   return { kind: "published" };

@@ -116,8 +116,8 @@ const homeDiff: DiffRow[] = [
   { kind: "ctx", old: 18, new: 18, text: "  const copy = useCopy();" },
   { kind: "del", old: 19, text: " return <h1>{copy.title}</h1>;" },
   { kind: "add", new: 19, text: " return (" },
-  { kind: "add", new: 20, text: '    <header className="hero">' },
-  { kind: "add", new: 21, text: "      <h1>{copy.title}</h1>" },
+  { kind: "add", new: 20, text: '   <header className="hero">' },
+  { kind: "add", new: 21, text: "     <h1>{copy.title}</h1>" },
   { kind: "ctx", old: 20, new: 22, text: "  }" },
 ];
 
@@ -293,5 +293,15 @@ export const repoFiles: RepoProps = {
 };
 
 export const repoHistory: RepoProps = {
-  view: { kind: "history", history: historyReady },
+  view: {
+    kind: "history",
+    history: {
+      ...historyReady,
+      state: {
+        ...(historyReady.state as Extract<HistoryPaneProps["state"], { kind: "ready" }>),
+        // L4 shortens the footer label so label + both buttons fit the 340px column
+        publish: { kind: "waiting", label: "2 saves waiting", behindLabel: "Bring down 3 newer" },
+      },
+    },
+  },
 };

@@ -199,7 +199,7 @@ export function Viewer(p: ViewerProps) {
             {p.path}
           </span>
           <span className="flex-1" />
-          <div className="flex shrink-0 overflow-hidden rounded-lg border border-border-hairline">
+          <div className="flex shrink-0 overflow-hidden rounded-md border border-border-hairline">
             <button
               onClick={() => p.onModeChange?.("contents")}
               className={cn(
@@ -237,7 +237,7 @@ export function Viewer(p: ViewerProps) {
           {p.mode === "contents" && (
             <button
               onClick={p.onCopy}
-              className="inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-lg border border-border-strong px-2.5 text-[11.5px] font-medium text-text-secondary hover:bg-fill-hover"
+              className="inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-md border border-border-strong px-2.5 text-[11.5px] font-medium text-text-secondary hover:bg-fill-hover"
             >
               <CopyGlyph size={11} />
               Copy contents
@@ -255,7 +255,7 @@ export function Viewer(p: ViewerProps) {
           </span>
           <button
             onClick={p.onReload}
-            className="h-[23px] rounded-md border border-border-strong px-[9px] text-[11px] font-medium text-text-primary hover:bg-fill-hover"
+            className="h-[23px] rounded-sm border border-border-strong px-[9px] text-[11px] font-medium text-text-primary hover:bg-fill-hover"
           >
             Reload
           </button>
@@ -273,7 +273,7 @@ export function Viewer(p: ViewerProps) {
           <span className="font-mono text-[11px] text-text-dim">{p.body.detail}</span>
           <button
             onClick={p.onRetry}
-            className="h-7 rounded-lg border border-border-strong px-3 text-xs font-medium text-text-primary hover:bg-fill-hover"
+            className="h-7 rounded-md border border-border-strong px-3 text-xs font-medium text-text-primary hover:bg-fill-hover"
           >
             Retry
           </button>
@@ -285,10 +285,10 @@ export function Viewer(p: ViewerProps) {
             <img
               src={p.body.src}
               alt={p.body.caption}
-              className="max-h-[60vh] max-w-[80%] rounded-lg border border-border-strong object-contain"
+              className="max-h-[60vh] max-w-[80%] rounded-md border border-border-strong object-contain"
             />
           ) : (
-            <div className="flex h-[74px] w-[110px] items-center justify-center rounded-lg border border-border-strong bg-surface-card-raised">
+            <div className="flex h-[74px] w-[110px] items-center justify-center rounded-md border border-border-strong bg-surface-card-raised">
               <ImageGlyph size={22} className="text-text-dim" />
             </div>
           )}
@@ -310,7 +310,7 @@ export function Viewer(p: ViewerProps) {
           {p.onOpenAnyway && (
           <button
             onClick={p.onOpenAnyway}
-            className="h-7 rounded-lg border border-border-strong px-3 text-xs font-medium text-text-primary hover:bg-fill-hover"
+            className="h-7 rounded-md border border-border-strong px-3 text-xs font-medium text-text-primary hover:bg-fill-hover"
           >
             Open anyway
           </button>
