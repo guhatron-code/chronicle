@@ -20,8 +20,8 @@ export const CheckGlyph = ({ size = 12, ...p }: P) => (
   </svg>
 );
 
-export const ErrorGlyph = ({ size = 12, ...p }: P) => (
-  <svg width={size} height={size} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
+export const ErrorGlyph = ({ size = 12, strokeWidth = 1.5, ...p }: P & { strokeWidth?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth={strokeWidth} {...p}>
     <circle cx="6" cy="6" r="5" />
     <path d="M6 3.4v3M6 8.4v.1" />
   </svg>
@@ -54,7 +54,7 @@ export const FolderPlusGlyph = ({ size = 16, ...p }: P) => (
 );
 
 export const PlusGlyph = ({ size = 14, ...p }: P) => (
-  <svg width={size} height={size} viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" {...p}>
+  <svg width={size} height={size} viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
     <path d="M7 2.5v9M2.5 7h9" />
   </svg>
 );

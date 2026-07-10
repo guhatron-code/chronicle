@@ -130,7 +130,7 @@ export function TitleBar({
       <span className="flex-1" data-tauri-drag-region />
       {degraded ? (
         <span className="inline-flex items-center gap-1.5 text-[11.5px] text-text-subtle">
-          <ErrorGlyph size={11} />
+          <ErrorGlyph size={11} strokeWidth={1.4} />
           {degraded}
         </span>
       ) : (
