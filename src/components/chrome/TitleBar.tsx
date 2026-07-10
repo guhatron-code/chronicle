@@ -93,7 +93,7 @@ export function TitleBar({
                   </span>
                   {t.updated ? (
                     <span className="rounded-[5px] bg-fill-subtle px-[5px] text-[10.5px] leading-[15px] text-text-subtle">
-                      updated
+                      Updated
                     </span>
                   ) : (
                     <button

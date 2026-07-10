@@ -19,7 +19,7 @@ export type NeedsYouRow = {
 } & (
   | {
       kind: "one-click";
-      /** The highlighted first row — fill-subtle bg, bordered tile, "next up" badge. */
+      /** The highlighted first row — fill-subtle bg, bordered tile, "Next up" badge. */
       hi?: boolean;
       primary?: boolean;
       actionLabel: string;
@@ -53,9 +53,9 @@ function Row({ row, last }: { row: NeedsYouRow; last: boolean }) {
       <div className="flex flex-1 flex-col gap-1.5">
         <div className="flex items-center gap-2">
           <span className="text-[13.5px] font-medium text-text-primary">{row.title}</span>
-          {hi && <TinyBadge>next up</TinyBadge>}
+          {hi && <TinyBadge>Next up</TinyBadge>}
           {row.kind === "copy-only" && (
-            <DashedBadge>from the roadmap · review before running</DashedBadge>
+            <DashedBadge>From the roadmap · review before running</DashedBadge>
           )}
         </div>
         <div className="text-[12.5px] text-text-muted">{row.sub}</div>

@@ -100,10 +100,10 @@ function PhaseCard({ phase }: { phase: Extract<RailPhase, { kind: "phase" }> }) 
         </span>
         {phase.status === "done" || phase.status === "just-done" ? (
           <StateWord kind="success" glyphSize={11} className="gap-[5px] text-xs">
-            {phase.status === "just-done" ? "done · just now" : "done"}
+            {phase.status === "just-done" ? "Done · just now" : "Done"}
           </StateWord>
         ) : phase.status === "later" && !open ? (
-          <span className="text-xs text-text-subtle">later</span>
+          <span className="text-xs text-text-subtle">Later</span>
         ) : (
           <StateWord kind="neutral" dotSize={5} className="text-xs">
             {phase.statusWord}
@@ -152,7 +152,7 @@ function PhaseCard({ phase }: { phase: Extract<RailPhase, { kind: "phase" }> }) 
           )}
           {phase.reference && phase.reference.length > 0 && (
             <div className="flex flex-col gap-1.5">
-              <span className="text-[11.5px] text-text-dim">reference</span>
+              <span className="text-[11.5px] text-text-dim">Reference</span>
               {phase.reference.map((chip) => (
                 <div key={chip.name} className="flex flex-wrap items-center gap-2.5">
                   <PasteChip

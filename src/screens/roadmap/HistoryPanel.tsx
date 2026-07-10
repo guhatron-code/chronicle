@@ -10,7 +10,7 @@ import { TinyBadge } from "./bits";
 
 export type HistoryStatus =
   | { kind: "waiting"; label: string } // e.g. "2 saves waiting to publish"
-  | { kind: "published" } // "everything published online" — the one success header
+  | { kind: "published" } // "Everything published online" — the one success header
   | { kind: "untracked" }; // "not tracked yet"
 
 export type PipelineNode = {
@@ -42,13 +42,13 @@ function StatusWordmark({ status }: { status: HistoryStatus }) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs text-state-success">
         <CheckGlyph size={11} />
-        everything published online
+        Everything published online
       </span>
     );
   }
   return (
     <span className="text-xs text-text-subtle">
-      {status.kind === "waiting" ? status.label : "not tracked yet"}
+      {status.kind === "waiting" ? status.label : "Not tracked yet"}
     </span>
   );
 }

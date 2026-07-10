@@ -69,7 +69,7 @@ export function CurrentStateBanner(p: CurrentStateBannerProps) {
       {p.kind === "just-switched" ? (
         <div className="flex items-center gap-2">
           <Eyebrow>Current state</Eyebrow>
-          <TinyBadge>changed just now</TinyBadge>
+          <TinyBadge>Changed just now</TinyBadge>
         </div>
       ) : (
         <Eyebrow>Current state</Eyebrow>
@@ -106,7 +106,7 @@ export function CurrentStateBanner(p: CurrentStateBannerProps) {
 
       {(p.kind === "normal" || p.kind === "just-switched") && p.upNext && (
         <div className="text-xs text-text-dim">
-          up next:{" "}
+          Up next:{" "}
           <span className="font-mono text-[11px] text-text-subtle">{p.upNext.id}</span> ·{" "}
           {p.upNext.name}
         </div>

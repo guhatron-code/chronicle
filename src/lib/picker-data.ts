@@ -6,6 +6,7 @@ import type { PickerRecent } from "./ipc";
 import type { RecentProject } from "@/screens/RecentCard";
 import type { PaletteProject } from "@/overlays/CommandPalette";
 import type { MarkIndex, StateKind } from "@/components/chrome/atoms";
+import { sentence } from "./utils";
 
 export function markFor(path: string): MarkIndex {
   let h = 0;
@@ -62,7 +63,7 @@ export function toRecentProject(
         kind: "phase",
         phaseId: r.current.id,
         phaseName: r.current.name ?? "",
-        statusWord: label || "up next",
+        statusWord: sentence(label) || "Up next",
         running: /running|scanning|building/i.test(label),
         progress: total > 0 ? done / total : 0,
         waiting: r.needs ?? 0,
@@ -74,16 +75,16 @@ export function toRecentProject(
 }
 
 export function toPaletteProject(r: PickerRecent, home?: string): PaletteProject {
-  let statusWord = "no roadmap yet";
+  let statusWord = "No roadmap yet";
   let statusKind: StateKind = "neutral";
   if (r.missing) {
-    statusWord = "folder missing";
+    statusWord = "Folder missing";
     statusKind = "error";
   } else if (r.current?.id) {
-    statusWord = r.current.label || "up next";
+    statusWord = sentence(r.current.label || "Up next");
     statusKind = /running|scanning|building/i.test(statusWord) ? "running" : "neutral";
   } else if ((r.total ?? 0) > 0 && r.done === r.total) {
-    statusWord = "done";
+    statusWord = "Done";
     statusKind = "success";
   }
   return {

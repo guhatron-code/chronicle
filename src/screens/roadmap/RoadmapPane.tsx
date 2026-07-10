@@ -94,7 +94,7 @@ export function RoadmapPane({
           running: st.running ?? false,
           startedAt,
           logLines: lines,
-          activeLine: lines[lines.length - 1] ?? "starting the session…",
+          activeLine: lines[lines.length - 1] ?? "Starting the session…",
           progress: initProgress(tail),
           code: st.code ?? null,
           elapsedS: Math.round((Date.now() - startedAt) / 1000),
@@ -115,7 +115,7 @@ export function RoadmapPane({
 
   const startInit = useCallback(() => {
     const startedAt = Date.now();
-    setInitRun({ running: true, startedAt, logLines: [], activeLine: "starting the session…", progress: 0.06, code: null, elapsedS: 0 });
+    setInitRun({ running: true, startedAt, logLines: [], activeLine: "Starting the session…", progress: 0.06, code: null, elapsedS: 0 });
     initStart(dir, agent).catch((e) => {
       setInitRun(null);
       toastError("Couldn't start the session", String(e).slice(0, 90));
@@ -134,7 +134,7 @@ export function RoadmapPane({
   }, [dir]);
 
   if (!state) {
-    return <div className="flex h-full items-center justify-center font-mono text-[11.5px] text-text-dim">checking…</div>;
+    return <div className="flex h-full items-center justify-center font-mono text-[11.5px] text-text-dim">Checking…</div>;
   }
 
   /* the phase-detail route */

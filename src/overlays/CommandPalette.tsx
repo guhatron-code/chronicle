@@ -137,10 +137,10 @@ export function CommandPalette({
 
           <div className="flex items-center gap-3 border-t border-divider px-3.5 py-[9px] text-[11.5px] text-text-dim">
             <span className="inline-flex items-center gap-[5px]">
-              <Kbd className="text-text-dim">↵</Kbd>open
+              <Kbd className="text-text-dim">↵</Kbd>Open
             </span>
             <span className="inline-flex items-center gap-[5px]">
-              <Kbd className="text-text-dim">esc</Kbd>close
+              <Kbd className="text-text-dim">esc</Kbd>Close
             </span>
           </div>
         </Command>

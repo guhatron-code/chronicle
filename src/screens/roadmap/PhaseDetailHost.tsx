@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PhaseDetail, type DetailDoc, type DetailSaves } from "./PhaseDetail";
 import type { ManifestPhase, PhaseStatus } from "@/lib/ipc";
 import { gitLogGraph, readFile } from "@/lib/ipc";
+import { sentence } from "@/lib/utils";
 
 interface LogRow { hash?: string; subject?: string; author?: string; ago?: string }
 
@@ -80,12 +81,12 @@ export function PhaseDetailHost({
     });
   }, [phase, openDoc, docContent, fetchDoc, onCopyDoc]);
 
-  const label = status?.label ?? "up next";
+  const label = status?.label ?? "Up next";
   return (
     <PhaseDetail
       phaseId={id}
       phaseName={phase.name ?? ""}
-      statusWord={status?.state === "done" ? "done" : label}
+      statusWord={status?.state === "done" ? "Done" : sentence(label)}
       startHelper={`Opens a terminal, starts the agent, and copies ${
         (phase.paste ?? []).find((x) => x.path)?.path?.split("/").pop() ?? "the paste file"
       } — you paste it as the first message.`}
@@ -94,7 +95,7 @@ export function PhaseDetailHost({
       steps={(phase.items ?? []).map((t, i) => ({
         label: t.replace(/<[^>]+>/g, ""),
         state: status?.state === "done" ? ("done" as const) : i === 0 ? ("active" as const) : ("todo" as const),
-        note: status?.state !== "done" && i === 0 ? "· being worked on" : undefined,
+        note: status?.state !== "done" && i === 0 ? "· Being worked on" : undefined,
       }))}
       paste={(phase.paste ?? []).map((c) => ({
         name: c.path ? (c.path.split("/").pop() ?? "") : (c.label ?? ""),

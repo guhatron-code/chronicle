@@ -5,6 +5,7 @@
  */
 import { createElement } from "react";
 import type { StateData, ManifestPhase, PhaseStatus } from "./ipc";
+import { sentence } from "./utils";
 import type { RoadmapProps } from "@/screens/roadmap/Roadmap";
 import type { NeedsYouRow } from "@/screens/roadmap/NeedsYou";
 import type { RailPhase, RailStage, RailChip } from "@/screens/roadmap/PhaseRail";
@@ -277,7 +278,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
         props.banner = {
           kind: ctx.justSwitched ? "just-switched" : "normal",
           phaseId: st.id, phaseName: ph?.name ?? "",
-          statusWord: st.label,
+          statusWord: sentence(st.label),
           running: /running|scanning|building/i.test(st.label),
           body: (ph?.desc ?? "").replace(/<[^>]+>/g, ""),
           upNext,
@@ -373,8 +374,8 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
         if (ph.fixRound !== undefined) {
           railPhases.push({
             kind: "fx", id, name: ph.name ?? "",
-            badge: `from the Kanban · ${(ph.desc?.match(/^(\d+)/)?.[1]) ?? "?"} tasks`,
-            statusWord: status.state === "done" ? "done" : status.label,
+            badge: `From the Kanban · ${(ph.desc?.match(/^(\d+)/)?.[1]) ?? "?"} tasks`,
+            statusWord: status.state === "done" ? "Done" : sentence(status.label),
             chips: [...(ph.paste ?? []), ...(ph.docs ?? [])].map((c) => (c.path ?? "").split("/").pop() ?? "").filter(Boolean),
             onChip: (n) => {
               const hit = [...(ph.paste ?? []), ...(ph.docs ?? [])].find((c) => (c.path ?? "").endsWith(n));
@@ -384,7 +385,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
           continue;
         }
         if (status.state === "window" || ph.window) {
-          railPhases.push({ kind: "window", id, name: ph.name ?? "", eyebrow: `WINDOW · RUNS ALONGSIDE`, note: status.label });
+          railPhases.push({ kind: "window", id, name: ph.name ?? "", eyebrow: `WINDOW · RUNS ALONGSIDE`, note: sentence(status.label) });
           continue;
         }
         const open =
@@ -398,7 +399,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
         railPhases.push({
           kind: "phase", id, name: ph.name ?? "", open,
           status: status.state === "done" ? "done" : status.state === "now" ? "now" : "later",
-          statusWord: status.state === "done" ? "done" : status.label,
+          statusWord: status.state === "done" ? "Done" : sentence(status.label),
           description: (ph.desc ?? "").replace(/<[^>]+>/g, ""),
           steps: (ph.items ?? []).map((t) => ({ label: t.replace(/<[^>]+>/g, ""), done: status.state === "done" })),
           paste,
