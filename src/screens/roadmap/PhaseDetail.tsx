@@ -83,8 +83,10 @@ function StepRow({ step }: { step: DetailStep }) {
           step.state === "active" ? "border-state-neutral" : "border-border-strong",
         )}
       />
-      {step.label}
-      {step.note && <span className="text-[11px] text-state-neutral">{step.note}</span>}
+      <span>
+        {step.label}
+        {step.note && <span className="pl-1.5 text-[11px] text-state-neutral">{step.note}</span>}
+      </span>
     </div>
   );
 }
@@ -209,7 +211,7 @@ export function PhaseDetail(p: PhaseDetailProps) {
   return (
     <div
       className={cn(
-        "flex h-full flex-col overflow-hidden rounded-[11px] border border-border-hairline bg-surface-panel", // L2: full-height pane
+        "flex h-full flex-col overflow-hidden", // flat, flush with the pane (operator-directed)
         p.className,
       )}
     >
@@ -259,6 +261,7 @@ export function PhaseDetail(p: PhaseDetailProps) {
             </div>
           </div>
 
+          {p.paste.length > 0 && (
           <div className="flex flex-col gap-2">
             <Eyebrow>You paste</Eyebrow>
             <div className="flex flex-col gap-1.5">
@@ -276,7 +279,9 @@ export function PhaseDetail(p: PhaseDetailProps) {
               ))}
             </div>
           </div>
+          )}
 
+          {p.docs.length > 0 && (
           <div className="flex flex-col gap-2">
             <Eyebrow>Documents</Eyebrow>
             <div className="overflow-hidden rounded-md bg-fill-subtle">
@@ -285,6 +290,7 @@ export function PhaseDetail(p: PhaseDetailProps) {
               ))}
             </div>
           </div>
+          )}
         </div>
 
         {/* right column: saves */}
