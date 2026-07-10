@@ -61,7 +61,7 @@ All file access is jailed to the declared roots.
 - The **first** phase (document order) that is not done, not `pool`, not `window` is **now**.
 - Everything after is **later**; `window` phases show as their own dashed state.
 - The now/window label = the first `current_labels` entry whose `when` conditions ALL hold,
-  else `default_label`, else a built-in ("in progress" / "waiting").
+  else `default_label`, else a built-in ("up next" for the current phase, "ongoing" for windows).
 
 ```jsonc
 "status": {
@@ -79,18 +79,26 @@ Exactly one key per object, plus optional `"not": true` to invert:
 |---|---|---|
 | `tag` | `"phase-2"` | a git tag with that exact name exists |
 | `file_exists` | `"progress/p3.md"` | the path exists (any root via `@alias/…`) |
-| `file_matches` | `{ "path": "REPORT.md", "pattern": "\\*\\*R-1\\*\\*.*CLOSED" }` | the file exists AND the regex (multiline: `(?m)` supported) matches its contents |
-| `commit_subject` | `"(?i)phase[- ]3 sign-off"` | any of the last 200 commit subjects on the repo matches |
-| `file_glob` | `{ "dir": "@canon", "contains": "handoff" }` | some filename directly in `dir` contains the substring (case-insensitive) |
-| `worktree_branch` | `"medan"` | a git worktree is checked out on that branch |
+| `file_matches` | `{ "path": "REPORT.md", "pattern": "\\*\\*R-1\\*\\*.*CLOSED" }` | the file exists AND the regex matches its contents (multiline mode is ALWAYS on: `^`/`$` are line boundaries) |
+| `commit_subject` | `"(?i)phase[- ]3 sign-off"` | any of the last 200 commit subjects, across ALL branches (the same history the graph shows) |
+| `file_glob` | `{ "dir": "@canon", "contains": "handoff" }` | some filename directly in `dir` contains the substring (case-insensitive). `contains` is REQUIRED — without it the rule can't be checked |
+| `worktree_branch` | `"medan"` | a LINKED worktree (not the main checkout) is on that branch |
 
 **Pattern discipline:** regexes are matched against the whole file. Anchor tightly — require
 the marker's literal punctuation, or use `(?m)^` — so prose *describing* the marker can't
 satisfy the rule.
 
+**Unknown rules never satisfy.** A typo'd key (`file_exist`), a malformed regex, or a
+`file_glob` without `contains` makes the condition permanently unsatisfiable — even under
+`"not": true` — and Chronicle surfaces it as a warning ("N rules in this roadmap can't be
+checked"). `chronicle --derive` prints the same warnings and exits non-zero when the
+manifest itself is missing or unparseable. A `chronicleVersion` newer than the app
+understands is also surfaced honestly.
+
 ## Action
 
-Project-specific "what needs you" rows, shown when ALL `when` conditions hold:
+Project-specific "what needs you" rows, shown when ALL `when` conditions hold.
+**Omit `when` entirely to show the row always.**
 
 ```jsonc
 {
@@ -100,6 +108,10 @@ Project-specific "what needs you" rows, shown when ALL `when` conditions hold:
   "cmd": "git worktree remove --force …"  // optional; rendered as a copy-command link
 }
 ```
+
+**Text convention (load-bearing):** the first `" — "` or `" · "` in `text` splits it into a
+bold-able title and a one-line sub ("<b>Title</b> — the sub sentence."). Write exactly one
+such separator, or none for a title-only row.
 
 Built-in actions (do not duplicate): unpublished branch, unpushed/behind commits, wrong
 branch vs `workBranch`, prunable worktrees, and a "next build step" pointer derived from the

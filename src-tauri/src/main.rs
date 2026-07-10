@@ -192,7 +192,9 @@ impl Ctx {
             repo: p.repo.clone(),
             extras: p.extras.clone(),
             tags: git_in(&p.repo, &["tag"]).lines().map(String::from).collect(),
-            subjects: git_in(&p.repo, &["log", "--format=%s"]).lines().map(String::from).collect(),
+            // bounded + --all: the doc promises "the last 200 subjects", and the graph
+            // shows all branches — the rules must see the same history the user sees.
+            subjects: git_in(&p.repo, &["log", "--all", "-n", "200", "--format=%s"]).lines().map(String::from).collect(),
         }
     }
     fn resolve(&self, path: &str) -> PathBuf {
@@ -237,64 +239,185 @@ impl Ctx {
 ///   commit_subject   — regex matches any commit subject in the log
 ///   file_glob        — { dir?, contains } — some entry in dir (default the project dir)
 ///                      whose lowercased name contains this string exists
-fn eval_cond(ctx: &Ctx, cond: &Value) -> bool {
+/// Three-valued: Some(bool) for a recognized rule, None for an UNKNOWN condition.
+/// Unknown is unknown — it never satisfies, even under "not": true (a typo'd rule must
+/// not silently flip a phase done). Validation (validate_manifest) surfaces the typo.
+fn eval_cond(ctx: &Ctx, cond: &Value) -> Option<bool> {
     let negate = cond.get("not").and_then(|v| v.as_bool()).unwrap_or(false);
     let result = (|| {
         if let Some(t) = cond.get("tag").and_then(|v| v.as_str()) {
-            return ctx.tags.contains(t);
+            return Some(ctx.tags.contains(t));
         }
         if let Some(p) = cond.get("file_exists").and_then(|v| v.as_str()) {
-            return ctx.resolve_jailed(p).is_some();
+            return Some(ctx.resolve_jailed(p).is_some());
         }
         if let Some(fm) = cond.get("file_matches") {
             if let (Some(p), Some(pat)) = (
                 fm.get("path").and_then(|v| v.as_str()),
                 fm.get("pattern").and_then(|v| v.as_str()),
             ) {
-                let Some(full) = ctx.resolve_jailed(p) else { return false };
+                let Some(full) = ctx.resolve_jailed(p) else { return Some(false) };
                 let text = std::fs::read_to_string(full).unwrap_or_default();
-                return Regex::new(&format!("(?m){pat}")).map(|re| re.is_match(&text)).unwrap_or(false);
+                return Some(Regex::new(&format!("(?m){pat}")).map(|re| re.is_match(&text)).unwrap_or(false));
             }
-            return false;
+            return Some(false);
         }
         if let Some(pat) = cond.get("commit_subject").and_then(|v| v.as_str()) {
             if let Ok(re) = Regex::new(pat) {
-                return ctx.subjects.iter().any(|s| re.is_match(s));
+                return Some(ctx.subjects.iter().any(|s| re.is_match(s)));
             }
-            return false;
+            return Some(false);
         }
         if let Some(wb) = cond.get("worktree_branch").and_then(|v| v.as_str()) {
-            return git_in(&ctx.repo, &["worktree", "list", "--porcelain"])
-                .lines()
-                .any(|l| l.strip_prefix("branch refs/heads/") == Some(wb));
+            // LINKED worktrees only — the primary checkout (first block) being on a
+            // branch is normal life, not a leftover workspace.
+            return Some(git_in(&ctx.repo, &["worktree", "list", "--porcelain"])
+                .split("\n\n").skip(1)
+                .any(|b| b.lines().any(|l| l.strip_prefix("branch refs/heads/") == Some(wb))));
         }
         if let Some(fg) = cond.get("file_glob") {
             let dir = match fg.get("dir").and_then(|v| v.as_str()) {
-                Some(d) => match ctx.resolve_jailed(d) { Some(p) => p, None => return false },
+                Some(d) => match ctx.resolve_jailed(d) { Some(p) => p, None => return Some(false) },
                 None => ctx.repo.clone(),
             };
-            let needle = fg.get("contains").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+            // "contains" is REQUIRED — an omitted needle must not match everything
+            let Some(needle) = fg.get("contains").and_then(|v| v.as_str()) else { return None };
+            let needle = needle.to_lowercase();
             if let Ok(rd) = std::fs::read_dir(dir) {
-                return rd.flatten().any(|e| e.file_name().to_string_lossy().to_lowercase().contains(&needle));
+                return Some(rd.flatten().any(|e| e.file_name().to_string_lossy().to_lowercase().contains(&needle)));
             }
-            return false;
+            return Some(false);
         }
-        false
+        None // unknown condition key
     })();
-    if negate { !result } else { result }
+    result.map(|r| if negate { !r } else { r })
 }
 
 fn all_conds(ctx: &Ctx, conds: Option<&Value>) -> bool {
     match conds.and_then(|v| v.as_array()) {
         None => false,
-        Some(arr) => !arr.is_empty() && arr.iter().all(|c| eval_cond(ctx, c)),
+        Some(arr) => !arr.is_empty() && arr.iter().all(|c| eval_cond(ctx, c) == Some(true)),
     }
 }
 fn any_conds(ctx: &Ctx, conds: Option<&Value>) -> bool {
     match conds.and_then(|v| v.as_array()) {
         None => false,
-        Some(arr) => arr.iter().any(|c| eval_cond(ctx, c)),
+        Some(arr) => arr.iter().any(|c| eval_cond(ctx, c) == Some(true)),
     }
+}
+
+/// The ONE definition of "does this manifest action fire" — an omitted `when` means
+/// always-on. (get_state and get_picker previously disagreed on this.)
+fn action_fires(ctx: &Ctx, action: &Value) -> bool {
+    match action.get("when") {
+        None => true,
+        Some(w) => all_conds(ctx, Some(w)),
+    }
+}
+
+/* ================= manifest validation (structured warnings) ================= */
+
+const KNOWN_COND_KEYS: [&str; 6] =
+    ["tag", "file_exists", "file_matches", "commit_subject", "worktree_branch", "file_glob"];
+const SUPPORTED_CHRONICLE_VERSION: u64 = 1;
+
+fn validate_conds(conds: Option<&Value>, at: &str, warns: &mut Vec<String>) {
+    let Some(arr) = conds.and_then(|v| v.as_array()) else { return };
+    for c in arr {
+        let Some(obj) = c.as_object() else {
+            warns.push(format!("{at}: a condition must be an object"));
+            continue;
+        };
+        let keys: Vec<&str> = obj.keys().map(|k| k.as_str()).filter(|k| *k != "not").collect();
+        let known: Vec<&&str> = keys.iter().filter(|k| KNOWN_COND_KEYS.contains(*k)).collect();
+        if known.len() != 1 {
+            warns.push(format!(
+                "{at}: a condition needs exactly one known rule key (got {keys:?}) — this rule can't be checked"
+            ));
+            continue;
+        }
+        if let Some(fm) = obj.get("file_matches") {
+            match (fm.get("path").and_then(|v| v.as_str()), fm.get("pattern").and_then(|v| v.as_str())) {
+                (Some(p), Some(pat)) => {
+                    if Regex::new(&format!("(?m){pat}")).is_err() {
+                        warns.push(format!("{at}: file_matches pattern {pat:?} isn't a valid regex"));
+                    }
+                    check_manifest_path(p, at, warns);
+                }
+                _ => warns.push(format!("{at}: file_matches needs both path and pattern")),
+            }
+        }
+        if let Some(pat) = obj.get("commit_subject").and_then(|v| v.as_str()) {
+            if Regex::new(pat).is_err() {
+                warns.push(format!("{at}: commit_subject pattern {pat:?} isn't a valid regex"));
+            }
+        }
+        if let Some(fg) = obj.get("file_glob") {
+            if fg.get("contains").and_then(|v| v.as_str()).is_none() {
+                warns.push(format!("{at}: file_glob needs \"contains\" — this rule can't be checked"));
+            }
+            if let Some(d) = fg.get("dir").and_then(|v| v.as_str()) { check_manifest_path(d, at, warns); }
+        }
+        if let Some(p) = obj.get("file_exists").and_then(|v| v.as_str()) { check_manifest_path(p, at, warns); }
+    }
+}
+
+fn check_manifest_path(p: &str, at: &str, warns: &mut Vec<String>) {
+    if Path::new(p).is_absolute() {
+        warns.push(format!("{at}: path {p:?} is absolute — paths are root-relative and this one will never resolve"));
+    } else if Path::new(p).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        warns.push(format!("{at}: path {p:?} climbs out of the roots (\"..\") and will never resolve"));
+    }
+}
+
+/// Every problem that would make a rule silently unevaluable, as plain sentences the
+/// UI can count ("N rules in this roadmap can't be checked") and --derive can print.
+fn validate_manifest(m: &Value) -> Vec<String> {
+    let mut warns = Vec::new();
+    if let Some(v) = m.get("chronicleVersion").and_then(|v| v.as_u64()) {
+        if v > SUPPORTED_CHRONICLE_VERSION {
+            warns.push(format!(
+                "this roadmap is from a newer Chronicle (version {v}; this app understands {SUPPORTED_CHRONICLE_VERSION}) — statuses may be incomplete"
+            ));
+        }
+    }
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    if let Some(stages) = m.get("stages").and_then(|v| v.as_array()) {
+        for st in stages {
+            for ph in st.get("phases").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+                let id = match ph.get("id").and_then(|v| v.as_str()) {
+                    Some(i) => i.to_string(),
+                    None => { warns.push("a phase is missing its \"id\"".into()); continue; }
+                };
+                if !seen_ids.insert(id.clone()) {
+                    warns.push(format!("phase id {id:?} appears more than once — statuses for it are ambiguous"));
+                }
+                if let Some(status) = ph.get("status") {
+                    validate_conds(status.get("done_when"), &format!("phase {id} done_when"), &mut warns);
+                    if let Some(labels) = status.get("current_labels").and_then(|v| v.as_array()) {
+                        for l in labels {
+                            validate_conds(l.get("when"), &format!("phase {id} current_labels"), &mut warns);
+                        }
+                    }
+                }
+                for key in ["paste", "docs"] {
+                    for d in ph.get(key).and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+                        if let Some(pp) = d.get("path").and_then(|v| v.as_str()) {
+                            check_manifest_path(pp, &format!("phase {id} {key}"), &mut warns);
+                        } else if key == "paste" && d.get("label").is_none() {
+                            warns.push(format!("phase {id}: a paste row needs a path or a label"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if let Some(actions) = m.get("actions").and_then(|v| v.as_array()) {
+        for (i, a) in actions.iter().enumerate() {
+            validate_conds(a.get("when"), &format!("action {}", i + 1), &mut warns);
+        }
+    }
+    warns
 }
 
 /* ================= status derivation ================= */
@@ -350,7 +473,11 @@ fn derive_for_dir(dir: &Path) -> Value {
         None => json!({"error": p.manifest_error.unwrap_or_else(|| "no manifest".into())}),
         Some(m) => {
             let ctx = Ctx::build(&p);
-            json!({ "name": m.get("name"), "statuses": derive_statuses(&ctx, m) })
+            json!({
+                "name": m.get("name"),
+                "statuses": derive_statuses(&ctx, m),
+                "warnings": validate_manifest(m),
+            })
         }
     }
 }
@@ -399,7 +526,7 @@ async fn get_picker() -> Value {
                     // needs-you: firing custom actions + the built-in publish nags
                     let mut needs = 0usize;
                     if let Some(actions) = m.get("actions").and_then(|v| v.as_array()) {
-                        for a in actions { if all_conds(&ctx, a.get("when")) { needs += 1; } }
+                        for a in actions { if action_fires(&ctx, a) { needs += 1; } }
                     }
                     let branch = git_in(&p.repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
                     if !branch.is_empty() {
@@ -763,11 +890,7 @@ fn state_for_project(p: &Project) -> Value {
             let mut acts = Vec::new();
             if let Some(actions) = m.get("actions").and_then(|v| v.as_array()) {
                 for a in actions {
-                    let fire = match a.get("when") {
-                        None => true,
-                        Some(w) => all_conds(&ctx, Some(w)),
-                    };
-                    if fire { acts.push(a.clone()); }
+                    if action_fires(&ctx, a) { acts.push(a.clone()); }
                 }
             }
             (statuses, Value::Object(docs), json!(stale), json!(acts))
@@ -786,6 +909,7 @@ fn state_for_project(p: &Project) -> Value {
         "tags": tags_sorted,
         "worktrees": worktrees, "dirty": dirty,
         "statuses": statuses, "docs": doc_existence, "stale": stale, "custom_actions": custom_actions,
+        "manifest_warnings": p.manifest.as_ref().map(validate_manifest).unwrap_or_default(),
         "work_branch": p.manifest.as_ref().and_then(|m| m.get("workBranch")).cloned().unwrap_or(Value::Null),
         "checked_at": Command::new("date").arg("+%H:%M:%S").output()
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default(),
@@ -1194,8 +1318,10 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(i) = args.iter().position(|a| a == "--derive") {
         let dir = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-        println!("{}", serde_json::to_string_pretty(&derive_for_dir(&dir)).unwrap());
-        std::process::exit(0);
+        let out = derive_for_dir(&dir);
+        println!("{}", serde_json::to_string_pretty(&out).unwrap());
+        // a missing/broken manifest is an ERROR exit — scripts must not read it as fine
+        std::process::exit(if out.get("error").is_some() { 1 } else { 0 });
     }
     if let Some(i) = args.iter().position(|a| a == "--state") {
         let dir = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
@@ -1308,11 +1434,11 @@ mod r1_tests {
         let ctx = ctx_for(&repo);
         // an absolute file_matches path used to read anywhere on disk — must be dead
         let cond = json!({"file_matches": {"path": "/etc/passwd", "pattern": "root"}});
-        assert!(!eval_cond(&ctx, &cond));
+        assert_eq!(eval_cond(&ctx, &cond), Some(false));
         let cond = json!({"file_exists": "/etc/passwd"});
-        assert!(!eval_cond(&ctx, &cond));
+        assert_eq!(eval_cond(&ctx, &cond), Some(false));
         let cond = json!({"file_exists": "/etc/passwd", "not": true});
-        assert!(eval_cond(&ctx, &cond), "negated escape reports the jail verdict, not the disk");
+        assert_eq!(eval_cond(&ctx, &cond), Some(true), "negated escape reports the jail verdict, not the disk");
     }
 
     #[test]
@@ -1383,5 +1509,107 @@ mod r1_tests {
         std::fs::write(&f, format!("{}END", "x".repeat(100_000))).unwrap();
         let t = read_tail(&f, 100);
         assert!(t.len() <= 100 && t.ends_with("END"));
+    }
+}
+
+#[cfg(test)]
+mod r3_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("chronicle-r3-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    fn git(d: &Path, args: &[&str]) {
+        let o = std::process::Command::new("git").arg("-C").arg(d).args(args).output().unwrap();
+        assert!(o.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&o.stderr));
+    }
+
+    fn repo(name: &str) -> PathBuf {
+        let d = tmp(name);
+        git(&d, &["init", "-q", "-b", "main"]);
+        git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "feat: first save"]);
+        d
+    }
+
+    #[test]
+    fn every_condition_type_true_and_false() {
+        let d = repo("conds");
+        git(&d, &["tag", "phase-1"]);
+        std::fs::write(d.join("REPORT.md"), "Status: **CLOSED**\n").unwrap();
+        let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
+
+        assert_eq!(eval_cond(&ctx, &json!({"tag": "phase-1"})), Some(true));
+        assert_eq!(eval_cond(&ctx, &json!({"tag": "phase-9"})), Some(false));
+        assert_eq!(eval_cond(&ctx, &json!({"file_exists": "REPORT.md"})), Some(true));
+        assert_eq!(eval_cond(&ctx, &json!({"file_exists": "MISSING.md"})), Some(false));
+        assert_eq!(eval_cond(&ctx, &json!({"file_matches": {"path": "REPORT.md", "pattern": "\\*\\*CLOSED\\*\\*"}})), Some(true));
+        assert_eq!(eval_cond(&ctx, &json!({"file_matches": {"path": "REPORT.md", "pattern": "OPEN"}})), Some(false));
+        assert_eq!(eval_cond(&ctx, &json!({"commit_subject": "(?i)first save"})), Some(true));
+        assert_eq!(eval_cond(&ctx, &json!({"commit_subject": "nope"})), Some(false));
+        assert_eq!(eval_cond(&ctx, &json!({"file_glob": {"contains": "report"}})), Some(true));
+        assert_eq!(eval_cond(&ctx, &json!({"file_glob": {"contains": "zzz"}})), Some(false));
+        assert_eq!(eval_cond(&ctx, &json!({"worktree_branch": "main"})), Some(false),
+            "the PRIMARY checkout must not count as a worktree");
+    }
+
+    #[test]
+    fn failure_modes_are_dead() {
+        let d = repo("fail");
+        let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
+        // a regex that matches empty used to pass on a MISSING file
+        assert_eq!(eval_cond(&ctx, &json!({"file_matches": {"path": "MISSING.md", "pattern": ".*"}})), Some(false));
+        // unknown key: unsatisfiable, negated or not
+        assert_eq!(eval_cond(&ctx, &json!({"file_exist": "typo.md"})), None);
+        assert_eq!(eval_cond(&ctx, &json!({"file_exist": "typo.md", "not": true})), None,
+            "a negated TYPO must not evaluate true");
+        assert!(!any_conds(&ctx, Some(&json!([{"file_exist": "typo.md", "not": true}]))));
+        // file_glob without contains: unsatisfiable, not match-everything
+        assert_eq!(eval_cond(&ctx, &json!({"file_glob": {"dir": "."}})), None);
+    }
+
+    #[test]
+    fn linked_worktree_counts() {
+        let d = repo("wt");
+        let wt = std::env::temp_dir().join(format!("chronicle-r3-wt-linked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&wt);
+        git(&d, &["worktree", "add", "-q", "-b", "medan", wt.to_string_lossy().as_ref()]);
+        let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
+        assert_eq!(eval_cond(&ctx, &json!({"worktree_branch": "medan"})), Some(true));
+        assert_eq!(eval_cond(&ctx, &json!({"worktree_branch": "main"})), Some(false));
+        let _ = std::fs::remove_dir_all(&wt);
+    }
+
+    #[test]
+    fn validation_catches_the_audit_findings() {
+        let m = json!({
+            "chronicleVersion": 9,
+            "stages": [{"phases": [
+                {"id": "A", "status": {"done_when": [{"file_exist": "typo.md"}]}},
+                {"id": "A", "status": {"done_when": [{"file_matches": {"path": "x.md", "pattern": "(unclosed"}}]}},
+                {"id": "B", "status": {"done_when": [{"file_glob": {"dir": "docs"}}, {"file_exists": "/etc/passwd"}]}}
+            ]}],
+            "actions": [{"when": [{"commit_subject": "(bad"}], "text": "x"}]
+        });
+        let w = validate_manifest(&m);
+        let all = w.join("\n");
+        assert!(all.contains("newer Chronicle"), "version: {all}");
+        assert!(all.contains("exactly one known rule key"), "typo key: {all}");
+        assert!(all.contains("appears more than once"), "dup id: {all}");
+        assert!(all.contains("isn't a valid regex"), "regex: {all}");
+        assert!(all.contains("contains"), "file_glob contains: {all}");
+        assert!(all.contains("absolute"), "absolute path: {all}");
+        assert!(validate_manifest(&json!({"chronicleVersion": 1, "stages": []})).is_empty());
+    }
+
+    #[test]
+    fn action_fires_treats_omitted_when_as_always() {
+        let d = repo("acts");
+        let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
+        assert!(action_fires(&ctx, &json!({"text": "always on"})));
+        assert!(!action_fires(&ctx, &json!({"text": "gated", "when": [{"tag": "nope"}]})));
     }
 }
