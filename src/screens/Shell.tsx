@@ -54,6 +54,12 @@ export function Shell({
   const rowRef = useRef<HTMLDivElement>(null);
   const showTerminal = pane !== "kanban";
 
+  /* the roadmap content column is max-w-[900px] + 2×28px padding — the pane
+   * never grows past what the content can use, and never shrinks below the
+   * width where the cards start to distort */
+  const ROAD_MAX_W = 956;
+  const paneMinW = pane === "road" ? 560 : 520;
+
   const onSplitterDown = useCallback(
     (down: React.PointerEvent<HTMLDivElement>) => {
       down.preventDefault();
@@ -66,7 +72,10 @@ export function Shell({
         const railW = 52;
         const usable = rect.width - railW - 7;
         const pct = ((e.clientX - rect.left - railW) / usable) * 100;
-        onSplitPct(Math.min(75, Math.max(30, pct)));
+        // the roadmap column maxes at 956px (900 content + padding) — dragging
+        // past it would only add empty margin, so the splitter stops there
+        const maxPct = pane === "road" ? Math.min(75, (ROAD_MAX_W / usable) * 100) : 75;
+        onSplitPct(Math.min(maxPct, Math.max(30, pct)));
       };
       const onUp = () => {
         el.removeEventListener("pointermove", onMove);
@@ -77,7 +86,7 @@ export function Shell({
       el.addEventListener("pointerup", onUp);
       el.addEventListener("pointercancel", onUp);
     },
-    [onSplitPct],
+    [onSplitPct, pane],
   );
 
   return (
@@ -102,7 +111,17 @@ export function Shell({
         />
         <div
           className="flex min-w-0 flex-col overflow-hidden"
-          style={showTerminal ? { width: `calc((100% - 59px) * ${splitPct / 100})` } : { flex: 1 }}
+          style={
+            showTerminal
+              ? {
+                  width:
+                    pane === "road"
+                      ? `min(calc((100% - 59px) * ${splitPct / 100}), ${ROAD_MAX_W}px)`
+                      : `calc((100% - 59px) * ${splitPct / 100})`,
+                  minWidth: paneMinW,
+                }
+              : { flex: 1 }
+          }
         >
           {children}
         </div>
