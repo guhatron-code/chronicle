@@ -232,10 +232,12 @@ export function PhaseRail({ stages, className }: PhaseRailProps) {
     >
       {stages.map((stage, si) => (
         <div key={stage.name} className="contents">
-          <div className={cn("flex items-baseline gap-3 pb-3.5", si > 0 && "pt-3.5")}>
-            <span className="text-[15px] font-semibold text-text-primary">{stage.name}</span>
+          <div className={cn("flex flex-col gap-1 pb-3.5", si > 0 && "pt-3.5")}>
+            <div className="flex items-center gap-3">
+              <span className="text-[15px] font-semibold text-text-primary">{stage.name}</span>
+              <span className="h-px flex-1 bg-divider" />
+            </div>
             <span className="text-xs text-text-dim">{stage.sub}</span>
-            <span className="h-px flex-1 self-center bg-divider" />
           </div>
           {stage.phases.map((phase) => {
             seen += 1;
