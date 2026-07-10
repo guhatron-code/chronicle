@@ -58,3 +58,63 @@ export const PlusGlyph = ({ size = 14, ...p }: P) => (
     <path d="M7 2.5v9M2.5 7h9" />
   </svg>
 );
+
+/* ---- Deck-2 glyphs (rail, tabs, terminal strip) ---- */
+
+export const RoadmapGlyph = ({ size = 15, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
+    <path d="M3 3v7.5M3 3c1.5 0 2 1 4 1s2.5-1 4-1 2 1 2 1v7.5s-.5-1-2-1-2.5 1-4 1-2.5-1-4-1" />
+    <path d="M3 13.5v-3" />
+  </svg>
+);
+
+export const RepoGlyph = ({ size = 15, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
+    <circle cx="5" cy="4" r="1.8" />
+    <circle cx="5" cy="12" r="1.8" />
+    <circle cx="11" cy="8" r="1.8" />
+    <path d="M5 5.8v4.4M6.8 11.3c2.4-.4 4.2-1.1 4.2-3.3v-.2" />
+  </svg>
+);
+
+export const KanbanGlyph = ({ size = 15, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
+    <rect x="2.2" y="2.5" width="3.4" height="11" rx="1" />
+    <rect x="6.9" y="2.5" width="3.4" height="7" rx="1" />
+    <rect x="11.6" y="2.5" width="3.4" height="4.5" rx="1" />
+  </svg>
+);
+
+export const RefreshGlyph = ({ size = 14, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
+    <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.8v3h-3" />
+  </svg>
+);
+
+export const HelpGlyph = ({ size = 14, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M6.2 6.2c.2-1 1-1.6 1.9-1.6 1 0 1.9.7 1.9 1.7 0 1.3-1.9 1.4-1.9 2.7M8 11.4v.1" />
+  </svg>
+);
+
+export const XGlyph = ({ size = 9, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
+    <path d="m1.5 1.5 7 7M8.5 1.5l-7 7" />
+  </svg>
+);
+
+/** Claude starburst — brand colour, one of the two chroma exceptions. */
+export const ClaudeStar = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="#D97757">
+    <path d="M8 0.8 9.4 5 13.8 3.2 10.9 6.9 15.2 8.6 10.6 9.2 12.3 13.6 8.6 10.7 6.9 15 6.3 10.4 1.9 12.1 4.8 8.4 0.5 6.7 5.1 6.1 3.4 1.7 7.1 4.6z" />
+  </svg>
+);
+
+/** Codex tile — brand gradient, the other chroma exception. */
+export const CodexTile = ({ size = 15 }: { size?: number }) => (
+  <span
+    className="inline-block rounded-[5px]"
+    style={{ width: size, height: size, background: "linear-gradient(135deg,#6ba6ff,#2563eb)" }}
+  />
+);
