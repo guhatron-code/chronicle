@@ -56,7 +56,7 @@ export function TitleBar({
         <button aria-label="Zoom window" onClick={() => void windowControls().toggleMaximize()}
           className="size-3 rounded-full border border-border-strong bg-fill-hover" />
       </div>
-      <BrandGlyph size={15} className="shrink-0 text-text-subtle" />
+      <BrandGlyph size={17} className="shrink-0 text-text-subtle" />
 
       <div className="flex min-w-0 items-center gap-1">
         {visible.map((t) => {

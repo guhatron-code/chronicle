@@ -34,7 +34,7 @@ export function Picker({
       >
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="flex size-11 items-center justify-center rounded-xl border border-border-strong bg-surface-card-raised text-text-secondary">
-            <BrandGlyph />
+            <BrandGlyph size={26} />
           </div>
           <div className="text-[21px] font-semibold text-text-primary">Chronicle</div>
           <div className="text-[13px] text-text-muted">
