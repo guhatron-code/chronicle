@@ -80,6 +80,12 @@ function nowIndex(statuses: PhaseStatus[]): number {
 }
 
 /** Parse the last useful lines out of an init session's log tail. */
+/** Friendly names for the tools a session streams while it works. */
+const TOOL_VERB: Record<string, string> = {
+  Write: "Writing", Edit: "Editing", Read: "Reading", Bash: "Running",
+  Glob: "Scanning", Grep: "Searching",
+};
+
 export function logLinesFrom(tail: string, max = 5): string[] {
   const lines: string[] = [];
   for (const raw of tail.split("\n")) {
@@ -89,21 +95,40 @@ export function logLinesFrom(tail: string, max = 5): string[] {
       try {
         const j = JSON.parse(t) as {
           type?: string;
-          message?: { content?: { type?: string; text?: string }[] };
+          message?: {
+            content?: {
+              type?: string;
+              text?: string;
+              name?: string;
+              input?: { file_path?: string; path?: string; command?: string };
+            }[];
+          };
           item?: { text?: string; command?: string };
         };
         if (j.type === "assistant") {
           for (const c of j.message?.content ?? []) {
             if (c.type === "text" && c.text) lines.push(c.text.split("\n")[0].slice(0, 90));
+            else if (c.type === "tool_use") {
+              // a tool call IS the progress — say it plainly
+              const file = c.input?.file_path ?? c.input?.path;
+              if (c.input?.command) lines.push("$ " + c.input.command.split("\n")[0].slice(0, 88));
+              else if (file) lines.push(`${TOOL_VERB[c.name ?? ""] ?? "Working on"} ${file.split("/").pop()!.slice(0, 70)}`);
+              else if (c.name) lines.push(`${TOOL_VERB[c.name] ?? c.name}…`);
+            }
           }
         } else if (j.item?.text) lines.push(j.item.text.split("\n")[0].slice(0, 90));
         else if (j.item?.command) lines.push("$ " + j.item.command.slice(0, 88));
         continue;
-      } catch { /* not json — fall through */ }
+      } catch { /* an oversized stream-json line, truncated by the tail window */ }
     }
+    // fragments of truncated JSON lines read as garbage — never show them
+    if (/\\"|\\n|\\\\/.test(t) || /^["}\],]/.test(t)) continue;
     lines.push(t.slice(0, 90));
   }
-  return lines.slice(-max);
+  // collapse consecutive repeats (a retried write logs the same line twice)
+  const out: string[] = [];
+  for (const l of lines) if (out[out.length - 1] !== l) out.push(l);
+  return out.slice(-max);
 }
 
 /** Deterministic stage progress from what the session has visibly done. */

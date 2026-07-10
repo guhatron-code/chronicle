@@ -40,12 +40,14 @@ export function Roadmap(p: RoadmapProps) {
           p.className,
         )}
       >
+        {/* the building card sits in the warning banner's slot — clicking Rebuild
+            swaps banner → card in place instead of shifting the page */}
+        {p.building && <BuildingCard {...p.building} />}
         {p.warning && <WarningBanner {...p.warning} />}
         {p.banner && <CurrentStateBanner {...p.banner} />}
         {p.stale && <StaleAlert {...p.stale} />}
         {p.problem && <ProblemCard {...p.problem} />}
         {p.consent && <ConsentCard {...p.consent} />}
-        {p.building && <BuildingCard {...p.building} />}
         {p.history && <HistoryPanel {...p.history} />}
         {p.needsYou && <NeedsYou {...p.needsYou} />}
         {p.documents && <DocumentsPanel {...p.documents} />}

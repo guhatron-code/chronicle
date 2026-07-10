@@ -96,7 +96,8 @@ export function RoadmapPane({
         setInitRun({
           running: st.running ?? false,
           startedAt,
-          logLines: lines,
+          // the last line renders as activeLine — don't repeat it in the scrollback
+          logLines: lines.slice(0, -1),
           activeLine: lines[lines.length - 1] ?? "Starting the session…",
           progress: initProgress(tail),
           code: st.code ?? null,
