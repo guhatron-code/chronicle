@@ -31,7 +31,7 @@ export function ConfirmDialog({
   return (
     <AlertDialog open={spec !== null} onOpenChange={(o) => !o && onClose()}>
       {spec && (
-        <AlertDialogContent className="max-w-[400px] gap-0 rounded-xl border-border-strong bg-surface-overlay p-5 shadow-(--shadow-overlay)">
+        <AlertDialogContent className="max-w-[400px] gap-0 rounded-xl border-border-strong bg-surface-overlay p-5 [box-shadow:var(--shadow-overlay)] sm:max-w-[400px]">
           <AlertDialogTitle className="text-[15px] font-semibold text-text-primary">
             {spec.title}
           </AlertDialogTitle>

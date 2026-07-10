@@ -32,7 +32,7 @@ export function NewProjectDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex max-w-[420px] flex-col gap-3 rounded-xl border-border-strong bg-surface-overlay p-5 shadow-(--shadow-overlay)"
+        className="flex max-w-[420px] flex-col gap-3 rounded-xl border-border-strong bg-surface-overlay p-5 [box-shadow:var(--shadow-overlay)] sm:max-w-[420px]"
       >
         <div className="flex items-center gap-3">
           <span className="flex size-9 items-center justify-center rounded-lg border border-border-strong bg-surface-card-raised text-text-secondary">
@@ -62,9 +62,9 @@ export function NewProjectDialog({
             }}
             aria-invalid={invalid}
             className={cn(
-              "h-9 rounded-md border-border-field bg-surface-input text-[13px] text-text-primary shadow-none",
-              "focus-visible:border-border-field-focus focus-visible:shadow-(--focus-ring) focus-visible:ring-0",
-              invalid && "border-state-error focus-visible:border-state-error focus-visible:shadow-none",
+              "h-9 rounded-md border-border-field bg-surface-input text-[13px] text-text-primary shadow-none dark:bg-surface-input md:text-[13px]",
+              "focus-visible:border-border-field-focus focus-visible:[box-shadow:var(--focus-ring)]! focus-visible:ring-0",
+              invalid && "border-state-error focus-visible:border-state-error focus-visible:[box-shadow:none]",
             )}
           />
           {invalid ? (

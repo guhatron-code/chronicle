@@ -294,6 +294,21 @@ body {
   overflow: hidden;
 }
 
+/* The DS focus law: every plain interactive element gets the double ring. shadcn-based
+   controls carry it via utilities; this covers raw <button>/<a> (window controls, rows). */
+button:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* Overlay scrim — the deck's rgba(0,0,0,.45) (shadcn defaults to /50). */
+[data-slot='dialog-overlay'],
+[data-slot='alert-dialog-overlay'] {
+  background: rgba(0, 0, 0, 0.45);
+}
+
 /* Indeterminate progress — a running task whose real % the backend does not emit per tick. */
 @keyframes ch-indeterminate {
   0% { transform: translateX(-100%); }

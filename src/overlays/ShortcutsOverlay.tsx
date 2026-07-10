@@ -4,8 +4,9 @@
  */
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Eyebrow, Kbd } from "@/components/chrome/atoms";
+import { cn } from "@/lib/utils";
 
-const GROUPS: { title: string; col: 0 | 1; rows: [string, string][] }[] = [
+const GROUPS: { title: string; col: 0 | 1; pt?: string; rows: [string, string][] }[] = [
   {
     title: "Projects",
     col: 0,
@@ -27,6 +28,7 @@ const GROUPS: { title: string; col: 0 | 1; rows: [string, string][] }[] = [
   {
     title: "Terminal",
     col: 1,
+    pt: "pt-3",
     rows: [
       ["New terminal", "⌘T"],
       ["Focus the terminal", "⌘L"],
@@ -45,7 +47,7 @@ export function ShortcutsOverlay({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="max-w-[560px] gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 shadow-(--shadow-overlay)"
+        className="max-w-[560px] gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 [box-shadow:var(--shadow-overlay)] sm:max-w-[560px]"
       >
         <div className="flex items-center justify-between border-b border-divider px-4 py-3.5">
           <DialogTitle className="text-[15px] font-semibold text-text-primary">
@@ -58,7 +60,7 @@ export function ShortcutsOverlay({
             <div key={col}>
               {GROUPS.filter((g) => g.col === col).map((g) => (
                 <div key={g.title}>
-                  <div className="pb-1.5 pt-2.5">
+                  <div className={cn("pb-1.5 pt-2.5", g.pt)}>
                     <Eyebrow>{g.title}</Eyebrow>
                   </div>
                   {g.rows.map(([label, key]) => (

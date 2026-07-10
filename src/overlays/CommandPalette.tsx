@@ -51,7 +51,7 @@ export function CommandPalette({
       <span className="text-[13px] font-medium text-text-primary">{p.name}</span>
       <span className="font-mono text-[11px] text-text-dim">{p.tildePath}</span>
       <span className="flex-1" />
-      <StateWord kind={p.statusKind} dotSize={5} className="text-[11.5px]">
+      <StateWord kind={p.statusKind} dotSize={5} glyphSize={10} className="text-[11.5px]">
         {p.statusWord}
       </StateWord>
       {kbd && <Kbd>{kbd}</Kbd>}
@@ -62,16 +62,16 @@ export function CommandPalette({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="top-14 max-w-[560px] translate-y-0 gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 shadow-(--shadow-overlay)"
+        className="top-14 max-w-[560px] translate-y-0 gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 [box-shadow:var(--shadow-overlay)] sm:max-w-[560px]"
       >
         <DialogTitle className="sr-only">Project switcher</DialogTitle>
-        <Command className="bg-transparent **:data-[slot=command-input-wrapper]:h-auto **:data-[slot=command-input-wrapper]:border-divider **:data-[slot=command-input-wrapper]:px-3.5 **:data-[slot=command-input-wrapper]:py-1">
+        <Command className="bg-transparent **:data-[slot=command-input-wrapper]:h-auto **:data-[slot=command-input-wrapper]:gap-[9px] **:data-[slot=command-input-wrapper]:border-divider **:data-[slot=command-input-wrapper]:px-3.5 **:data-[slot=command-input-wrapper]:py-0 **:data-[slot=command-input-wrapper]:text-text-dim [&_[data-slot=command-input-wrapper]_svg]:size-3.5 [&_[data-slot=command-input-wrapper]_svg]:stroke-[1.5] [&_[data-slot=command-input-wrapper]_svg]:opacity-100">
           <CommandInput
             placeholder="Search projects…"
-            className="h-10 text-[13px] text-text-primary placeholder:text-text-dim"
+            className="h-11 text-[13px] text-text-primary placeholder:text-text-dim"
           />
           <CommandList className="p-2">
-            <CommandEmpty className="px-3.5 py-[26px] text-center text-[12.5px] text-text-subtle">
+            <CommandEmpty className="px-3.5 py-[18px] text-center text-[12.5px] text-text-subtle">
               No matches. Try a project name or a folder.
             </CommandEmpty>
 
@@ -137,10 +137,10 @@ export function CommandPalette({
 
           <div className="flex items-center gap-3 border-t border-divider px-3.5 py-[9px] text-[11.5px] text-text-dim">
             <span className="inline-flex items-center gap-[5px]">
-              <Kbd>↵</Kbd>open
+              <Kbd className="text-text-dim">↵</Kbd>open
             </span>
             <span className="inline-flex items-center gap-[5px]">
-              <Kbd>esc</Kbd>close
+              <Kbd className="text-text-dim">esc</Kbd>close
             </span>
           </div>
         </Command>

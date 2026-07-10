@@ -16,6 +16,7 @@ export const BtnPrimary = ({ className, ...p }: ComponentProps<typeof Button>) =
     className={cn(
       "h-9 rounded-md px-4 text-[13px] font-medium",
       "bg-primary text-primary-foreground hover:bg-(--primary-hover)",
+      "focus-visible:border-transparent focus-visible:ring-0 focus-visible:[box-shadow:var(--focus-ring)]!",
       "disabled:opacity-40",
       className,
     )}
@@ -29,7 +30,9 @@ export const BtnSecondary = ({ className, ...p }: ComponentProps<typeof Button>)
     {...p}
     className={cn(
       "h-[34px] rounded-md border border-border-strong bg-transparent px-3.5 text-[13px] font-medium text-text-primary shadow-none",
+      "dark:border-border-strong", // shadcn outline's dark:border-input bleeds past the unprefixed class (twMerge modifier variance)
       "hover:bg-fill-hover hover:text-text-primary dark:bg-transparent dark:hover:bg-fill-hover",
+      "focus-visible:ring-0 focus-visible:[box-shadow:var(--focus-ring)]!",
       "disabled:opacity-40",
       className,
     )}
@@ -85,17 +88,19 @@ export function StateWord({
   kind,
   children,
   dotSize = 6,
+  glyphSize = 12,
   className,
 }: {
   kind: StateKind;
   children: ReactNode;
   dotSize?: number;
+  glyphSize?: number;
   className?: string;
 }) {
   if (kind === "success") {
     return (
       <span className={cn("inline-flex items-center gap-1.5 text-state-success", className)}>
-        <CheckGlyph size={12} />
+        <CheckGlyph size={glyphSize} />
         {children}
       </span>
     );
@@ -103,7 +108,7 @@ export function StateWord({
   if (kind === "error") {
     return (
       <span className={cn("inline-flex items-center gap-1.5 text-state-error", className)}>
-        <ErrorGlyph size={12} />
+        <ErrorGlyph size={glyphSize} />
         {children}
       </span>
     );

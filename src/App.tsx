@@ -80,8 +80,15 @@ const SPECIMEN_PALETTE_RECENTS: PaletteProject[] = [
   { path: "/dev/tidepool", name: "tidepool", tildePath: "~/dev/tidepool", mark: 4, markLabel: "tp", statusWord: "done", statusKind: "success" },
 ];
 
+const PRESET_EXTRA: Record<string, RecentProject[]> = {
+  default: SPECIMEN_RECENTS,
+  empty: [],
+  missing: [{ ...SPECIMEN_RECENTS[0], variant: { kind: "missing" } }],
+  writing: [{ ...SPECIMEN_RECENTS[3], variant: { kind: "writing" } }],
+};
+
 export default function App() {
-  const [recents] = useState<RecentProject[]>(SPECIMEN_RECENTS);
+  const [recents, setRecents] = useState<RecentProject[]>(SPECIMEN_RECENTS);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [newProjOpen, setNewProjOpen] = useState(false);
@@ -108,6 +115,7 @@ export default function App() {
   useEffect(() => {
     if (!import.meta.env.DEV) return;
     (window as never as Record<string, unknown>).__c1 = {
+      recentsPreset: (name: keyof typeof PRESET_EXTRA) => setRecents(PRESET_EXTRA[name] ?? SPECIMEN_RECENTS),
       palette: setPaletteOpen,
       shortcuts: setShortcutsOpen,
       newProject: (err: string | null) => { setNewProjError(err); setNewProjOpen(true); },

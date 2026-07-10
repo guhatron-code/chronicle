@@ -115,7 +115,7 @@ export function RecentCard({
       className={cn(
         "group relative rounded-lg border border-border-hairline bg-surface-card text-left font-sans",
         "hover:border-border-strong hover:bg-surface-card-raised",
-        trashHover && "border-border-strong",
+        trashHover && "border-border-strong bg-surface-card hover:bg-surface-card", // delete-hover: the card recedes to the flat surface
       )}
     >
       {/* delete affordance appears on card hover; delete-hover recedes the content */}
@@ -154,7 +154,9 @@ export function RecentCard({
             <div className="flex items-center gap-2 text-[12.5px]">
               <IdChip>{v.phaseId}</IdChip>
               <span className="text-text-secondary">{v.phaseName}</span>
-              <StateWord kind={v.running ? "running" : "neutral"}>{v.statusWord}</StateWord>
+              {!trashHover && (
+                <StateWord kind={v.running ? "running" : "neutral"}>{v.statusWord}</StateWord>
+              )}
             </div>
           )}
           {v.kind === "all-done" && (

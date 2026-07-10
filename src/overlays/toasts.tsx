@@ -2,15 +2,16 @@
  * F8 — toasts (sonner, bottom-center pills on --surface-overlay).
  * Success: glyph + name + mono count. Error: glyph + what happened + how to fix.
  */
+import type React from "react";
 import { Toaster, toast } from "sonner";
 import { CheckGlyph, ErrorGlyph } from "@/components/chrome/icons";
 
 export function ChronicleToaster() {
-  return <Toaster position="bottom-center" gap={8} visibleToasts={3} />;
+  return <Toaster position="bottom-center" gap={8} visibleToasts={3} style={{ "--width": "max-content" } as React.CSSProperties} />;
 }
 
 const pill =
-  "inline-flex items-center gap-[9px] rounded-full border border-border-strong bg-surface-overlay px-4 py-[9px] shadow-(--shadow-overlay) font-sans";
+  "inline-flex w-max items-center gap-[9px] whitespace-nowrap rounded-full border border-border-strong bg-surface-overlay px-4 py-[9px] [box-shadow:var(--shadow-overlay)] font-sans";
 
 export function toastSuccess(message: string, monoDetail?: string) {
   toast.custom(() => (
