@@ -238,7 +238,13 @@ export function RoadmapPane({
           .catch((e) => toastError("Couldn't copy it", String(e).slice(0, 90)));
       },
       onCopyDoc: doCopyDoc,
-      onTogglePhase: (id) => setExpandedId((cur) => (cur === id ? null : id)),
+      onTogglePhase: (id) => {
+        const nowId = state.statuses.find((x) => x.state === "now")?.id ?? null;
+        setExpandedId((cur) => {
+          const effectiveOpen = cur === null ? nowId : cur === "__none__" ? null : cur;
+          return effectiveOpen === id ? "__none__" : id;
+        });
+      },
       onViewDetails: setDetailId,
       onHistoryDetails: onGoRepo,
       onStartHistory: () => {

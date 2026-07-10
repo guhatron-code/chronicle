@@ -18,7 +18,7 @@ import {
 } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 import { MiniMd } from "@/lib/mini-md";
-import { PasteChip } from "./bits";
+import { AccBody, PasteChip } from "./bits";
 import type { RailChip } from "./PhaseRail";
 
 export type DetailStep = {
@@ -30,7 +30,7 @@ export type DetailStep = {
 
 export type DetailDoc = { title: string; path: string } & (
   | { state: "open"; heading?: string; body: string; onCopy?: () => void }
-  | { state: "closed"; onOpen?: () => void }
+  | { state: "closed"; onOpen?: () => void; cachedBody?: string }
   | { state: "loading" }
   | { state: "error"; errorWord?: string; onRetry?: () => void }
 );
@@ -110,17 +110,38 @@ function DocRow({ doc, last }: { doc: DetailDoc; last: boolean }) {
     </>
   );
 
-  if (doc.state === "closed") {
+  if (doc.state === "closed" || doc.state === "open") {
+    const body = doc.state === "open" ? doc.body : doc.cachedBody;
+    const heading = doc.state === "open" ? doc.heading : undefined;
     return (
-      <button
-        onClick={doc.onOpen}
-        className={cn(
-          "flex w-full items-center gap-[9px] px-3 py-[9px] text-left",
-          !last && "border-b border-divider-faint",
-        )}
-      >
-        {header}
-      </button>
+      <div className={cn(!last && "border-b border-divider-faint")}>
+        <div className="flex items-center gap-[9px] px-3 py-[9px]">
+          {doc.state === "closed" ? (
+            <button onClick={doc.onOpen} className="flex min-w-0 flex-1 items-center gap-[9px] text-left">
+              {header}
+            </button>
+          ) : (
+            <>
+              {header}
+              <button
+                aria-label={`Copy ${doc.path}`}
+                onClick={doc.onCopy}
+                className="flex size-6 shrink-0 items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+              >
+                <CopyGlyph size={12} />
+              </button>
+            </>
+          )}
+        </div>
+        <AccBody open={doc.state === "open"}>
+          {body !== undefined && (
+            <div className="pb-3.5 pl-[31px] pr-3.5 pt-1 text-[12.5px] leading-[1.6] text-text-secondary">
+              {heading && <div className="pb-1 font-semibold text-text-primary">{heading}</div>}
+              <MiniMd source={body} />
+            </div>
+          )}
+        </AccBody>
+      </div>
     );
   }
 
@@ -128,15 +149,6 @@ function DocRow({ doc, last }: { doc: DetailDoc; last: boolean }) {
     <div className={cn(!last && "border-b border-divider-faint")}>
       <div className="flex items-center gap-[9px] px-3 py-[9px]">
         {header}
-        {doc.state === "open" && (
-          <button
-            aria-label={`Copy ${doc.path}`}
-            onClick={doc.onCopy}
-            className="flex size-6 shrink-0 items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover hover:text-text-secondary"
-          >
-            <CopyGlyph size={12} />
-          </button>
-        )}
         {doc.state === "loading" && <Spinner size={11} className="shrink-0" />}
         {doc.state === "error" && (
           <>
@@ -153,14 +165,7 @@ function DocRow({ doc, last }: { doc: DetailDoc; last: boolean }) {
           </>
         )}
       </div>
-      {doc.state === "open" && (
-        <div className="pb-3.5 pl-[31px] pr-3.5 pt-1 text-[12.5px] leading-[1.6] text-text-secondary">
-          {doc.heading && (
-            <div className="pb-1 font-semibold text-text-primary">{doc.heading}</div>
-          )}
-          <MiniMd source={doc.body} />
-        </div>
-      )}
+
     </div>
   );
 }
@@ -256,16 +261,18 @@ export function PhaseDetail(p: PhaseDetailProps) {
 
           <div className="flex flex-col gap-2">
             <Eyebrow>You paste</Eyebrow>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-col gap-1.5">
               {p.paste.map((chip) => (
-                <PasteChip
-                  key={chip.name}
-                  name={chip.name}
-                  hint={chip.hint}
-                  height={28}
-                  raised
-                  onClick={() => p.onChip?.(chip.name)}
-                />
+                <div key={chip.name} className="flex flex-wrap items-center gap-2.5">
+                  <PasteChip
+                    name={chip.name}
+                    hint={chip.into ? `→ ${chip.into}` : undefined}
+                    height={28}
+                    raised
+                    onClick={() => p.onChip?.(chip.name)}
+                  />
+                  {chip.note && <span className="text-[11.5px] text-text-subtle">{chip.note}</span>}
+                </div>
               ))}
             </div>
           </div>

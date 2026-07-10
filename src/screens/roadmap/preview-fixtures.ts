@@ -202,9 +202,11 @@ export const phaseRail: PhaseRailProps = {
       name: "Design",
       sub: "screens exist and look right before any wiring",
       phases: [
-        { kind: "collapsed", id: "R-0", name: "Skeleton pages exist", status: "done" },
+        { kind: "phase", id: "R-0", name: "Skeleton pages exist", open: false, status: "done", statusWord: "done", description: "", steps: [], paste: [] },
         {
-          kind: "expanded",
+          kind: "phase",
+          open: true,
+          status: "now",
           id: "R-1",
           name: "Missing screens get drawn",
           statusWord: "in design",
@@ -215,10 +217,10 @@ export const phaseRail: PhaseRailProps = {
             { label: "Changelog layout" },
             { label: "Empty states — search, 404" },
           ],
-          paste: [{ name: "phase_r1_prompt.md", hint: "→ Claude Code" }],
+          paste: [{ name: "phase_r1_prompt.md", into: "Claude Code", note: "when R-1 starts" }],
           reference: [{ name: "docs/SCREENS.md" }],
         },
-        { kind: "collapsed", id: "R-2", name: "Navigation holds together", status: "just-done" },
+        { kind: "phase", id: "R-2", name: "Navigation holds together", open: false, status: "just-done", statusWord: "done", description: "", steps: [], paste: [] },
         {
           kind: "window",
           id: "W-1",
@@ -234,7 +236,7 @@ export const phaseRail: PhaseRailProps = {
           statusWord: "queued",
           chips: ["phase_2_fixes_prompt.md", "phase_2_fixes_plan.md"],
         },
-        { kind: "collapsed", id: "EL-1", name: "The beauty pass", status: "later" },
+        { kind: "phase", id: "EL-1", name: "The beauty pass", open: false, status: "later", statusWord: "later", description: "", steps: [], paste: [] },
       ],
     },
   ],
@@ -258,7 +260,7 @@ export const phaseDetail: PhaseDetailProps = {
     { label: "Empty state — search", state: "todo" },
     { label: "Empty state — 404", state: "todo" },
   ],
-  paste: [{ name: "phase_r1_prompt.md", hint: "→ Claude Code" }],
+  paste: [{ name: "phase_r1_prompt.md", into: "Claude Code" }],
   docs: [
     {
       title: "The screen spec",

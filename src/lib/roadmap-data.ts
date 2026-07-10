@@ -34,7 +34,8 @@ export interface RoadmapCtx {
   /** the persisted per-project consent — null means never asked */
   consent: "auto" | "manual" | "basic" | null;
   copiedPath: string | null;
-  expandedId: string | null; // null → the now phase
+  /** null → the now phase is open · "__none__" → all collapsed · id → that phase open */
+  expandedId: string | null;
   justSwitched: boolean;
   publishing: boolean; // a publish/pull one-click is in flight
   handlers: {
@@ -386,35 +387,30 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
           railPhases.push({ kind: "window", id, name: ph.name ?? "", eyebrow: `WINDOW · RUNS ALONGSIDE`, note: status.label });
           continue;
         }
-        const expanded = ctx.expandedId ? ctx.expandedId === id : status.state === "now";
-        if (expanded) {
-          const paste: RailChip[] = (ph.paste ?? []).map((c) => ({
-            name: c.path ? (c.path.split("/").pop() ?? "") : (c.label ?? ""),
-            hint: c.into ? `→ ${c.into}${c.when ? `, ${c.when}` : ""}` : c.when,
-          }));
-          const reference: RailChip[] = (ph.docs ?? []).map((c) => ({ name: c.path.split("/").pop() ?? "" }));
-          railPhases.push({
-            kind: "expanded", id, name: ph.name ?? "",
-            statusWord: status.state === "done" ? "done" : status.label,
-            description: (ph.desc ?? "").replace(/<[^>]+>/g, ""),
-            steps: (ph.items ?? []).map((t) => ({ label: t.replace(/<[^>]+>/g, ""), done: status.state === "done" })),
-            paste,
-            reference: reference.length > 0 ? reference : undefined,
-            onToggle: () => H.onTogglePhase(id),
-            onViewDetails: () => H.onViewDetails(id),
-            onChip: (n) => {
-              const all = [...(ph.paste ?? []), ...(ph.docs ?? [])];
-              const hit = all.find((c) => (c.path ?? "").endsWith(n));
-              if (hit?.path) H.onCopyDoc(hit.path);
-            },
-          });
-        } else {
-          railPhases.push({
-            kind: "collapsed", id, name: ph.name ?? "",
-            status: status.state === "done" ? "done" : "later",
-            onToggle: () => H.onTogglePhase(id),
-          });
-        }
+        const open =
+          ctx.expandedId === null ? status.state === "now" : ctx.expandedId === id;
+        const paste: RailChip[] = (ph.paste ?? []).map((c) => ({
+          name: c.path ? (c.path.split("/").pop() ?? "") : (c.label ?? ""),
+          into: c.into,
+          note: c.when, // sits OUTSIDE the chip
+        }));
+        const reference: RailChip[] = (ph.docs ?? []).map((c) => ({ name: c.path.split("/").pop() ?? "" }));
+        railPhases.push({
+          kind: "phase", id, name: ph.name ?? "", open,
+          status: status.state === "done" ? "done" : status.state === "now" ? "now" : "later",
+          statusWord: status.state === "done" ? "done" : status.label,
+          description: (ph.desc ?? "").replace(/<[^>]+>/g, ""),
+          steps: (ph.items ?? []).map((t) => ({ label: t.replace(/<[^>]+>/g, ""), done: status.state === "done" })),
+          paste,
+          reference: reference.length > 0 ? reference : undefined,
+          onToggle: () => H.onTogglePhase(id),
+          onViewDetails: () => H.onViewDetails(id),
+          onChip: (n) => {
+            const all = [...(ph.paste ?? []), ...(ph.docs ?? [])];
+            const hit = all.find((c) => (c.path ?? "").endsWith(n));
+            if (hit?.path) H.onCopyDoc(hit.path);
+          },
+        });
       }
       if (railPhases.length > 0) {
         stages.push({ name: st.title ?? "", sub: st.note ?? "", phases: railPhases });

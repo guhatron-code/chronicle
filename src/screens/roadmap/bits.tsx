@@ -78,3 +78,26 @@ export const Twisty = ({
     {open ? <ChevronUpGlyph size={11} /> : <ChevronDownGlyph size={11} />}
   </button>
 );
+
+/** The accordion body wrapper — grid-rows 0fr↔1fr so open AND close both animate.
+ *  Content stays mounted; reduced motion freezes the transition globally. */
+export function AccBody({
+  open,
+  children,
+  className,
+}: {
+  open: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className="grid transition-[grid-template-rows] duration-200 ease-out"
+      style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+      aria-hidden={!open}
+      inert={!open} // a closed body must not catch focus or clicks
+    >
+      <div className={cn("min-h-0 overflow-hidden", className)}>{children}</div>
+    </div>
+  );
+}

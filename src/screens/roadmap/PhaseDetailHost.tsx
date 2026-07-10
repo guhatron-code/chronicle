@@ -72,7 +72,7 @@ export function PhaseDetailHost({
       const title = name.replace(/[-_]/g, " ").replace(/\.md$/i, "");
       const state = docContent[path];
       if (openDoc !== path) {
-        return { title, path, state: "closed" as const, onOpen: () => { setOpenDoc(path); if (!docContent[path]) fetchDoc(path); } };
+        return { title, path, state: "closed" as const, cachedBody: state?.content, onOpen: () => { setOpenDoc(path); if (!docContent[path]) fetchDoc(path); } };
       }
       if (state?.error) return { title, path, state: "error" as const, onRetry: () => fetchDoc(path) };
       if (state?.content === undefined) return { title, path, state: "loading" as const };
@@ -98,7 +98,8 @@ export function PhaseDetailHost({
       }))}
       paste={(phase.paste ?? []).map((c) => ({
         name: c.path ? (c.path.split("/").pop() ?? "") : (c.label ?? ""),
-        hint: c.into ? `→ ${c.into}${c.when ? `, ${c.when}` : ""}` : c.when,
+        into: c.into,
+        note: c.when,
       }))}
       docs={docs}
       saves={saves}
