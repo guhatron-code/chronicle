@@ -68,6 +68,8 @@ export function RoadmapPane({
   const [consentLocal, setConsentLocal] = useState<"auto" | "manual" | "basic" | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirRef = useRef(dir);
+  const stateRef = useRef(state);
+  stateRef.current = state;
 
   /* per-project state resets when the project changes */
   useEffect(() => {
@@ -104,6 +106,11 @@ export function RoadmapPane({
           if ((st.code ?? 1) === 0) {
             setInitRun(null); // the roadmap appears on the next poll
             toastSuccess("The roadmap is written");
+          } else if (stateRef.current?.manifest_present) {
+            // a failed REBUILD has no problem-card home (the old roadmap still shows) —
+            // say so instead of vanishing silently
+            setInitRun(null);
+            toastError("The rebuild didn't finish", `Session exited with code ${st.code ?? "?"} — the existing roadmap is untouched`);
           }
           onPollNow();
         }

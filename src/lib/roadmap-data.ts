@@ -13,7 +13,6 @@ import type { DocChipProps } from "@/screens/roadmap/DocumentsPanel";
 import type { CurrentStateBannerProps } from "@/screens/roadmap/CurrentStateBanner";
 import type { HistoryPanelProps, PipelineNode } from "@/screens/roadmap/HistoryPanel";
 import type { ProblemCardProps } from "@/screens/roadmap/ProblemCard";
-import type { BuildingCardProps } from "@/screens/roadmap/BuildingCard";
 import { CodeGlyph, FolderSimpleGlyph, UploadGlyph } from "@/components/chrome/icons";
 
 /* ---------- the app-local slice the mapper needs ---------- */
@@ -225,7 +224,6 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
   /* -- problem / consent / building precedence (no manifest present) -- */
   if (!s.manifest_present) {
     let problem: ProblemCardProps | null = null;
-    let building: BuildingCardProps | null = null;
     let consent = false;
     if (ctx.partOf) {
       problem = { kind: "part-of", projectName: ctx.partOf.name, path: ctx.partOf.path, onOpen: () => H.onOpenPartOf(ctx.partOf?.path ?? "") };
@@ -234,10 +232,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     } else if (s.misplaced) {
       problem = { kind: "misplaced", foundIn: `${s.misplaced}/`, onMove: () => H.onMoveManifest(s.misplaced ?? ""), onLeave: H.onBasicView };
     } else if (ctx.initRun?.running) {
-      const r = ctx.initRun;
-      building = r.elapsedS > 300
-        ? { kind: "still-running", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit, onViewFullLog: H.onViewFullLog }
-        : { kind: "running", elapsed: fmtElapsed(r.elapsedS), progress: r.progress, logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit };
+      /* rendered below — the building card is shared with the rebuild flow */
     } else if (ctx.initRun && !ctx.initRun.running && ctx.initRun.code !== 0) {
       problem = { kind: "scan-failed", detail: `session exited with code ${ctx.initRun.code ?? "?"} after ${fmtElapsed(ctx.initRun.elapsedS)}`, onRetry: H.onBuild, onBasicView: H.onBasicView };
     } else if (s.blank) {
@@ -248,14 +243,21 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
       consent = true;
     }
     if (problem) props.problem = problem;
-    if (building) props.building = building;
     if (consent) {
       props.consent = { agent: ctx.agent, onAgentChange: H.onAgentChange, onBuild: H.onBuild, onRunMyself: H.onRunMyself, onBasicView: H.onBasicView };
     }
   }
 
-  /* -- warning banner -- */
-  if (s.manifest_present && s.manifest_warnings.length > 0 && !ctx.warningDismissed) {
+  /* -- the building card: any running session (first build OR rebuild) shows F13 -- */
+  if (ctx.initRun?.running) {
+    const r = ctx.initRun;
+    props.building = r.elapsedS > 300
+      ? { kind: "still-running", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit, onViewFullLog: H.onViewFullLog }
+      : { kind: "running", elapsed: fmtElapsed(r.elapsedS), progress: r.progress, logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit };
+  }
+
+  /* -- warning banner (yields to the building card while a rebuild runs) -- */
+  if (s.manifest_present && s.manifest_warnings.length > 0 && !ctx.warningDismissed && !ctx.initRun?.running) {
     props.warning = { count: s.manifest_warnings.length, onRebuild: H.onRebuild, onDismiss: H.onDismissWarning };
   }
 
