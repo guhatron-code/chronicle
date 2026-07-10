@@ -233,6 +233,25 @@
   --color-state-error: var(--state-error);
   --color-state-neutral: var(--state-neutral);
 
+  /* Borders/fills/dividers/marks as utilities (all DESIGN §1 tokens — the comps consume
+     these directly: border-border-strong, bg-fill-hover, bg-mark-3, …). */
+  --color-border-hairline: var(--border-hairline);
+  --color-border-strong: var(--border-strong);
+  --color-border-field: var(--border-field);
+  --color-border-field-focus: var(--border-field-focus);
+  --color-divider: var(--divider);
+  --color-divider-faint: var(--divider-faint);
+  --color-fill-hover: var(--fill-hover);
+  --color-fill-subtle: var(--fill-subtle);
+  --color-mark-1: var(--mark-1);
+  --color-mark-2: var(--mark-2);
+  --color-mark-3: var(--mark-3);
+  --color-mark-4: var(--mark-4);
+  --color-mark-5: var(--mark-5);
+  --color-mark-6: var(--mark-6);
+  --color-selected-bg: var(--selected-bg);
+  --color-selected-fg: var(--selected-fg);
+
   /* §1.7 Radius scale → rounded-* utilities. */
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -279,6 +298,18 @@ body {
 @keyframes ch-indeterminate {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(250%); }
+}
+
+/* The two motion primitives the comps use. Motion only confirms state — under
+   prefers-reduced-motion everything freezes (the status word carries the meaning). */
+@keyframes wv-spin { to { transform: rotate(360deg); } }
+@keyframes wv-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001s !important;
+  }
 }
 /* NOTE: `shadcn add sidebar` appended a default `.dark { --sidebar: hsl(240 5.9% 10%); … }` block of
    shadcn-default greys + a blue accent. It is DELETED on purpose — the DESIGN bridge above owns the
