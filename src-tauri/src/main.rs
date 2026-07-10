@@ -1175,7 +1175,7 @@ fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
             if n > 1 { format!("{cap} · round {n}") } else { cap }
         };
         phases.push(json!({
-            "id": format!("FIX-{n}"),
+            "id": format!("FX-{n}"),
             "name": title,
             "desc": format!("{} tasks from the kanban, frozen into an executable plan.", ids.len()),
             "paste": [ { "path": format!("fixes/phase_{n}_fixes_prompt.md"), "into": "Claude Code", "when": "run the whole round in one session" } ],
@@ -1962,7 +1962,7 @@ mod r4_tests {
         let stages = merged["stages"].as_array().unwrap();
         assert_eq!(stages.len(), 2, "a synthetic stage is appended");
         let fix = &stages[1]["phases"][0];
-        assert_eq!(fix["id"], "FIX-1");
+        assert_eq!(fix["id"], "FX-1");
         assert_eq!(fix["name"], "Bug fixes");
         assert_eq!(fix["paste"][0]["path"], "fixes/phase_1_fixes_prompt.md");
 
@@ -1971,13 +1971,13 @@ mod r4_tests {
         let m: std::collections::HashMap<&str, (&str, &str)> = sts.iter()
             .map(|s| (s.id.as_str(), (s.state.as_str(), s.label.as_str()))).collect();
         assert_eq!(m["P1"].0, "done");
-        assert_eq!(m["FIX-1"], ("now", "being fixed"), "an in-progress round is the current work");
+        assert_eq!(m["FX-1"], ("now", "being fixed"), "an in-progress round is the current work");
 
         // all tasks completed → the round phase derives done
         store_with_round(&d, &["completed", "completed"], "ready");
         let merged = inject_rounds(&d, &manifest);
         let sts = derive_statuses(&ctx, &merged);
-        let fx = sts.iter().find(|s| s.id == "FIX-1").unwrap();
+        let fx = sts.iter().find(|s| s.id == "FX-1").unwrap();
         assert_eq!(fx.state, "done");
     }
 
@@ -2001,7 +2001,7 @@ mod r4_tests {
         assert_eq!(phases.len(), 2);
         assert_eq!(phases[0]["name"], "Bug fixes");
         assert_eq!(phases[1]["name"], "Bug fixes · round 2");
-        assert_eq!(phases[1]["id"], "FIX-2");
+        assert_eq!(phases[1]["id"], "FX-2");
     }
 
     #[test]
