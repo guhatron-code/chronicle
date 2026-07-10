@@ -108,6 +108,45 @@ export const copyFile = (dir: string, path: string) =>
   invoke<number>("copy_file", { dir, path }); // returns copied char count
 export const copyText = (text: string) => invoke<void>("copy_text", { text });
 
+/* ---------- kanban (R4) ---------- */
+export type KanbanColumn = "queued" | "in_progress" | "blocked" | "completed";
+export interface KanbanTask {
+  id: string; // T-001, sequential per project
+  title: string;
+  content?: string;
+  column: KanbanColumn;
+  images?: string[]; // repo-relative (.chronicle/attachments/…)
+  links?: string[];
+  round?: number | null; // set when frozen into a round
+  created_at?: number;
+  updated_at?: number;
+}
+export interface KanbanRound {
+  n: number;
+  state: "generating" | "ready" | "failed" | "done";
+  kind: "bug fixes" | "feature additions" | null;
+  task_ids: string[];
+  plan_path: string; // fixes/phase_N_fixes_plan.md
+  prompt_path: string; // fixes/phase_N_fixes_prompt.md
+}
+export interface KanbanStore {
+  version: number;
+  next_id: number;
+  tasks: KanbanTask[];
+  rounds: KanbanRound[];
+}
+export const kanbanGet = (dir: string) => invoke<KanbanStore>("kanban_get", { dir });
+export const kanbanSave = (dir: string, data: KanbanStore) =>
+  invoke<void>("kanban_save", { dir, data });
+/** Save an image attachment; returns the repo-relative path to reference in the task. */
+export const kanbanAttach = (dir: string, taskId: string, name: string, b64: string) =>
+  invoke<string>("kanban_attach", { dir, taskId, name, b64 });
+/** "Ready to execute": freeze the queued tasks into a round; returns the round number. */
+export const fixesGenerate = (dir: string, agent: string | null) =>
+  invoke<number>("fixes_generate", { dir, agent });
+export const fixesStatus = (dir: string) => invoke<InitStatusData>("fixes_status", { dir });
+export const fixesCancel = (dir: string) => invoke<void>("fixes_cancel", { dir });
+
 /* ---------- PTY ---------- */
 export const ptySpawn = (dir: string, cols: number, rows: number) =>
   invoke<number>("pty_spawn", { dir, cols, rows });
