@@ -31,7 +31,7 @@ export function BuildingCard(p: BuildingCardProps) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-3.5 rounded-lg border border-border-hairline bg-surface-card p-[22px]",
+        "flex flex-col gap-3 rounded-lg border border-border-hairline bg-surface-card p-4",
         p.className,
       )}
     >
@@ -58,7 +58,7 @@ export function BuildingCard(p: BuildingCardProps) {
       )}
 
       {/* streamed log — surface-input, radius 8, no border (log-pane law) */}
-      <div className="flex flex-col gap-[5px] rounded-md bg-surface-input px-3.5 py-3 font-mono text-[11.5px] text-text-dim">
+      <div className="flex flex-col gap-[5px] rounded-md bg-surface-input px-3 py-2.5 font-mono text-[11.5px] text-text-dim">
         {p.logLines.map((line) => (
           <div key={line}>{line}</div>
         ))}
