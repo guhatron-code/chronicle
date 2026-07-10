@@ -11,6 +11,8 @@ import { DashedBadge, TinyBadge } from "./bits";
 
 export type NeedsYouRow = {
   id: string;
+  /** Manifest-authored provenance — renders the dashed badge on any kind. */
+  fromRoadmap?: boolean;
   /** 14px glyph for the 30px tile (UploadGlyph / FolderSimpleGlyph / CodeGlyph, …). */
   icon: ReactNode;
   title: string;
@@ -54,7 +56,7 @@ function Row({ row, last }: { row: NeedsYouRow; last: boolean }) {
         <div className="flex items-center gap-2">
           <span className="text-[13.5px] font-medium text-text-primary">{row.title}</span>
           {hi && <TinyBadge>Next up</TinyBadge>}
-          {row.kind === "copy-only" && (
+          {(row.fromRoadmap || row.kind === "copy-only") && (
             <DashedBadge>From the roadmap · review before running</DashedBadge>
           )}
         </div>

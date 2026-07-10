@@ -54,6 +54,7 @@ export interface RoadmapCtx {
     onMoveManifest: (sub: string) => void;
     onAction: (id: string, cmd: string) => void;
     onCopyCommand: (cmd: string) => void;
+    onRunCustom: (cmd: string) => void;
     onCopyDoc: (path: string) => void;
     onTogglePhase: (id: string) => void;
     onViewDetails: (id: string) => void;
@@ -195,13 +196,19 @@ export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
     const sep = text.match(/ — | · /);
     const title = sep ? text.slice(0, sep.index) : text;
     const sub = sep ? text.slice((sep.index ?? 0) + sep[0].length) : "";
+    const cmd = a.cmd ?? "";
+    // Operator override of the F19 copy-only contract: roadmap-authored commands RUN
+    // in the background — behind the F6 confirm showing the full command (that confirm
+    // IS the badge's "review before running").
     rows.push({
       id: `custom-${title.slice(0, 24)}`,
+      fromRoadmap: true,
       icon: createElement(CodeGlyph, { size: 14 }),
       title, sub,
-      command: a.cmd ?? "",
-      kind: "copy-only",
-      onCopy: a.cmd ? () => H.onCopyCommand(a.cmd ?? "") : undefined,
+      command: cmd,
+      ...(cmd
+        ? { kind: "one-click" as const, actionLabel: "Run the command…", onAction: () => H.onRunCustom(cmd) }
+        : { kind: "copy-only" as const }),
     });
   }
   return rows;
