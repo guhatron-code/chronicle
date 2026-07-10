@@ -161,7 +161,7 @@ export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
         id: "publish", icon: createElement(UploadGlyph, { size: 14 }),
         title: `Publish ${s.ahead} save${s.ahead > 1 ? "s" : ""}`,
         sub: "Saved to history, not online yet.",
-        command: "git push",
+        command: `git push origin ${s.branch}`,
         kind: "one-click", hi: rows.length === 0, primary: true, actionLabel: "Publish now",
         onAction: () => H.onAction("push", ""),
       });
@@ -180,10 +180,10 @@ export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
     if (prunable.length > 0) {
       rows.push({
         id: "prune", icon: createElement(FolderSimpleGlyph, { size: 14 }),
-        title: `Clean up ${prunable.length} stale workspace${prunable.length > 1 ? "s" : ""}`,
-        sub: "Leftovers from parallel sessions.",
+        title: `Clean up ${prunable.length} leftover workspace${prunable.length > 1 ? "s" : ""}`,
+        sub: "A finished agent session left a working copy behind. Your project isn't touched.",
         command: "git worktree prune",
-        kind: "one-click", actionLabel: "Clean up",
+        kind: "one-click", actionLabel: "Remove it",
         onAction: () => H.onAction("prune", ""),
       });
     }
@@ -221,7 +221,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     if (ctx.partOf) {
       problem = { kind: "part-of", projectName: ctx.partOf.name, path: ctx.partOf.path, onOpen: () => H.onOpenPartOf(ctx.partOf?.path ?? "") };
     } else if (s.manifest_error) {
-      problem = { kind: "cant-read", detail: `chronicle.json — ${s.manifest_error}`, onOpenFile: () => H.onOpenFile("chronicle.json"), onRescan: H.onScan };
+      problem = { kind: "cant-read", detail: s.manifest_error, onOpenFile: () => H.onOpenFile("chronicle.json"), onRescan: H.onScan };
     } else if (s.misplaced) {
       problem = { kind: "misplaced", foundIn: `${s.misplaced}/`, onMove: () => H.onMoveManifest(s.misplaced ?? ""), onLeave: H.onBasicView };
     } else if (ctx.initRun?.running) {
@@ -257,7 +257,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     if (ni === -1 && real.length > 0 && real.every((x) => x.state === "done")) {
       props.banner = {
         kind: "all-done",
-        body: `${real.length} of ${real.length} phases signed off. Nothing needs a session right now.`,
+        body: `All ${real.length} phases finished and published. The roadmap has nothing left to track.`,
         onAddNext: H.onAddNext, onRebuild: H.onRebuild,
       } satisfies CurrentStateBannerProps;
     } else if (ni >= 0) {
@@ -294,8 +294,13 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
   } else {
     const published = Math.max(0, s.commits - s.ahead);
     const nodes: [PipelineNode, PipelineNode, PipelineNode] = [
+      // deck F18: neutral dot = content waiting at this stage · green check = stage satisfied · hollow = pending
       { label: "Edits on disk", count: `${s.dirty.length} file${s.dirty.length === 1 ? "" : "s"}`, marker: s.dirty.length > 0 ? "dot" : "done" },
-      { label: "Saved to history", count: `${s.commits} save${s.commits === 1 ? "" : "s"}`, marker: s.ahead > 0 ? "dot" : "done" },
+      {
+        label: "Saved to history",
+        count: s.ahead > 0 ? `${s.ahead} waiting` : `${s.commits} save${s.commits === 1 ? "" : "s"}`,
+        marker: s.commits > 0 ? "done" : "pending",
+      },
       !s.upstream
         ? { label: "Published online", count: s.remote_url ? "never published" : "not on GitHub", marker: "pending" }
         : s.behind > 0
@@ -328,16 +333,29 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     props.needsYou = rows.length > 0 ? { kind: "list", rows } : { kind: "empty" };
   }
 
-  /* -- always-on documents -- */
+  /* -- always-on documents (+ the CURRENT phase's paste files, per F20/L1) -- */
   const spine = s.manifest?.spine ?? [];
-  if (spine.length > 0) {
+  {
     const chips: DocChipProps[] = spine.map((d) => {
       const name = d.path.split("/").pop() ?? d.path;
       if (!s.docs[d.path]) return { kind: "missing", name, note: "not written yet" };
       if (ctx.copiedPath === d.path) return { kind: "copied", name };
       return { kind: "default", name, onCopy: () => H.onCopyDoc(d.path) };
     });
-    props.documents = { chips };
+    const ni2 = nowIndex(statuses);
+    const nowPhase = ni2 >= 0 ? phases[ni2] : undefined;
+    for (const c of nowPhase?.paste ?? []) {
+      const name = c.path ? (c.path.split("/").pop() ?? "") : (c.label ?? "");
+      const hint = `→ ${c.into ?? ""}${c.when ? `, ${c.when}` : ""}`;
+      if (c.path && s.docs[c.path]) {
+        const path = c.path;
+        if (ctx.copiedPath === path) chips.push({ kind: "copied", name });
+        else chips.push({ kind: "paste", name, hint, onCopy: () => H.onCopyDoc(path) });
+      } else {
+        chips.push({ kind: "ghost", name, note: c.when ?? "not written yet" });
+      }
+    }
+    if (chips.length > 0) props.documents = { chips };
   }
 
   /* -- the phase rail -- */

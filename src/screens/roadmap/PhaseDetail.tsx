@@ -17,6 +17,7 @@ import {
   XGlyph,
 } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
+import { MiniMd } from "@/lib/mini-md";
 import { PasteChip } from "./bits";
 import type { RailChip } from "./PhaseRail";
 
@@ -157,7 +158,7 @@ function DocRow({ doc, last }: { doc: DetailDoc; last: boolean }) {
           {doc.heading && (
             <div className="pb-1 font-semibold text-text-primary">{doc.heading}</div>
           )}
-          {doc.body}
+          <MiniMd source={doc.body} />
         </div>
       )}
     </div>
@@ -203,7 +204,7 @@ export function PhaseDetail(p: PhaseDetailProps) {
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-[11px] border border-border-hairline bg-surface-panel",
+        "flex h-full flex-col overflow-hidden rounded-[11px] border border-border-hairline bg-surface-panel", // L2: full-height pane
         p.className,
       )}
     >

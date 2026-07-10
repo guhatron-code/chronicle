@@ -23,7 +23,7 @@ export function WarningBanner({ count, onRebuild, onDismiss, className }: Warnin
     >
       <WarnGlyph size={14} className="shrink-0 text-text-subtle" />
       <span className="text-[12.5px] text-text-secondary">
-        {count} rules in this roadmap can't be checked — statuses may be incomplete.
+        {count} rule{count === 1 ? "" : "s"} in this roadmap can't be checked — statuses may be incomplete.
       </span>
       <span className="flex-1" />
       <button
