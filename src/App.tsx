@@ -28,7 +28,7 @@ import {
 } from "@/lib/ipc";
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
 import { RoadmapPane } from "@/screens/roadmap/RoadmapPane";
-import { RepoPane } from "@/screens/repo/RepoPane";
+import { RepoPane, openHistoryView } from "@/screens/repo/RepoPane";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -373,6 +373,10 @@ export default function App() {
             onAgentChange={setAgent}
             onOpenProject={doOpenProject}
             onGoRepo={() => setPane("repo")}
+            onGoHistory={() => {
+              openHistoryView(active.dir);
+              setPane("repo");
+            }}
             onGoKanban={() => setPane("kanban")}
             onConfirm={setConfirm}
             onPollNow={() => void pollOne(active.dir)}

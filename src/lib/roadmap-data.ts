@@ -343,6 +343,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
           ? { label: "Published online", count: `behind by ${s.behind}`, marker: "pending" }
           : { label: "Published online", count: `${published} up`, marker: s.ahead > 0 ? "pending" : "done" },
     ];
+    for (const n of nodes) n.onClick = H.onHistoryDetails;
     const status =
       !s.upstream ? ({ kind: "untracked" } as const)
       : s.ahead > 0 ? ({ kind: "waiting", label: `${s.ahead} save${s.ahead > 1 ? "s" : ""} waiting to publish` } as const)

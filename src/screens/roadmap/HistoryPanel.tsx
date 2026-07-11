@@ -17,6 +17,8 @@ export type PipelineNode = {
   label: string;
   count: string; // mono line under the label, e.g. "4 files" · "2 waiting" · "behind by 2"
   marker: "dot" | "done" | "pending";
+  /** Clicking a stage opens the project-history pane. */
+  onClick?: () => void;
 };
 
 export type ChangedFile = { path: string; badge: string };
@@ -122,12 +124,15 @@ export function HistoryPanel(p: HistoryPanelProps) {
           {p.nodes.map((node, i) => (
             <div key={node.label} className="contents">
               {i > 0 && <PipelineArrow active={p.arrowsActive[(i - 1) as 0 | 1]} />}
-              <div className="flex w-[170px] flex-col items-center gap-1.5">
+              <button
+                onClick={node.onClick}
+                className="group flex w-[170px] flex-col items-center gap-1.5 rounded-md py-1 hover:bg-fill-subtle"
+              >
                 <div className="flex items-center gap-[7px]">
                   <NodeMarker marker={node.marker} />
                   <span
                     className={cn(
-                      "text-[13px]",
+                      "text-[13px] group-hover:text-text-primary",
                       node.marker === "pending" ? "text-text-secondary" : "text-text-primary",
                     )}
                   >
@@ -137,7 +142,7 @@ export function HistoryPanel(p: HistoryPanelProps) {
                 <span className="font-mono text-[11.5px] text-text-dim tabular-nums">
                   {node.count}
                 </span>
-              </div>
+              </button>
             </div>
           ))}
         </div>

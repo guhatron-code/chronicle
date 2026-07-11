@@ -91,6 +91,12 @@ function stateFor(dir: string): RepoState {
   return s;
 }
 
+/** Open the project-history view next time the repo pane mounts for `dir` —
+ * lets the roadmap's history panel land directly on the L4 pane. */
+export function openHistoryView(dir: string) {
+  stateFor(dir).historyView = true;
+}
+
 const HUGE_WARN = 300_000; // "Reading it may be slow."
 const HUGE_CAP = 1_500_000; // the backend refuses text reads past this
 

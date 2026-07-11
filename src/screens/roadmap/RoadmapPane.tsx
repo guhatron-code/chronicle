@@ -43,6 +43,7 @@ export function RoadmapPane({
   onAgentChange,
   onOpenProject,
   onGoRepo,
+  onGoHistory,
   onGoKanban,
   onConfirm,
   onPollNow,
@@ -55,6 +56,7 @@ export function RoadmapPane({
   onAgentChange: (a: "claude" | "codex") => void;
   onOpenProject: (path: string) => void;
   onGoRepo: () => void;
+  onGoHistory: () => void;
   onGoKanban: () => void;
   onConfirm: (spec: ConfirmSpec) => void;
   onPollNow: () => void;
@@ -273,7 +275,7 @@ export function RoadmapPane({
         });
       },
       onViewDetails: setDetailId,
-      onHistoryDetails: onGoRepo,
+      onHistoryDetails: onGoHistory,
       onStartHistory: () => {
         gitInitHere(dir)
           .then(() => { toastSuccess("History started"); onPollNow(); })
