@@ -64,17 +64,21 @@ function NodeMarker({ marker }: { marker: PipelineNode["marker"] }) {
 
 function PipelineArrow({ active }: { active: boolean }) {
   const stroke = active ? "var(--state-neutral)" : "var(--border-strong)";
+  // stretches to fill the space between nodes — the dash is a repeating
+  // gradient so it tiles at any width (an svg line would distort)
   return (
-    <svg width="70" height="14" viewBox="0 0 70 14" className="shrink-0" aria-hidden>
-      <path
-        d="M2 7h58"
-        stroke={stroke}
-        strokeWidth="1.4"
-        strokeDasharray="5 7"
-        style={active ? { animation: "wv-dash 1s linear infinite" } : undefined}
+    <div className="flex min-w-[28px] flex-1 items-center px-1" aria-hidden>
+      <span
+        className="h-[1.4px] min-w-0 flex-1"
+        style={{
+          background: `repeating-linear-gradient(90deg, ${stroke} 0 5px, transparent 5px 12px)`,
+          animation: active ? "wv-arrow 0.5s linear infinite" : undefined,
+        }}
       />
-      <path d="m60 3.4 6 3.6-6 3.6" fill="none" stroke={stroke} strokeWidth="1.4" />
-    </svg>
+      <svg width="9" height="14" viewBox="0 0 9 14" className="-ml-px shrink-0">
+        <path d="m1.5 3.4 6 3.6-6 3.6" fill="none" stroke={stroke} strokeWidth="1.4" />
+      </svg>
+    </div>
   );
 }
 
@@ -126,7 +130,7 @@ export function HistoryPanel(p: HistoryPanelProps) {
               {i > 0 && <PipelineArrow active={p.arrowsActive[(i - 1) as 0 | 1]} />}
               <button
                 onClick={node.onClick}
-                className="group flex w-[170px] flex-col items-center gap-1.5 rounded-md py-1 hover:bg-fill-subtle"
+                className="group flex min-w-0 flex-1 basis-0 flex-col items-center gap-1.5 rounded-md py-1 hover:bg-fill-subtle"
               >
                 <div className="flex items-center gap-[7px]">
                   <NodeMarker marker={node.marker} />

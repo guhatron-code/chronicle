@@ -20,7 +20,7 @@ export function TerminalColumn({
 }) {
   return (
     <div className="flex min-w-[240px] flex-1 flex-col overflow-hidden border-l border-divider">
-      <div className="flex items-center gap-0.5 border-b border-divider px-3 py-2">
+      <div className="flex h-10 shrink-0 items-center gap-0.5 border-b border-divider px-3">
         {tabs.map((t) => (
           <div
             key={t.id}

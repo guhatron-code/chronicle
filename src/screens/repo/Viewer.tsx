@@ -159,7 +159,7 @@ export function Viewer(p: ViewerProps) {
   return (
     <div className={cn("flex h-full min-w-0 flex-col", p.className)}>
       {/* open-file tabs */}
-      <div className="flex items-center gap-0.5 border-b border-divider px-2.5 pt-2">
+      <div className="flex h-10 shrink-0 items-end gap-0.5 border-b border-divider px-2.5">
         {p.tabs.map((tab) =>
           tab.id === p.activeTabId ? (
             <div
