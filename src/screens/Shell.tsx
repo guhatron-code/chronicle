@@ -28,6 +28,7 @@ export function Shell({
   onSwitch,
   onClose,
   onAdd,
+  onHome,
   onRefresh,
   onHelp,
   terminalTabs,
@@ -54,6 +55,7 @@ export function Shell({
   onSwitch: (dir: string) => void;
   onClose: (dir: string) => void;
   onAdd: () => void;
+  onHome?: () => void;
   onRefresh: () => void;
   onHelp: () => void;
   terminalTabs: TerminalTab[];
@@ -117,6 +119,7 @@ export function Shell({
         onSwitch={onSwitch}
         onClose={onClose}
         onAdd={onAdd}
+        onHome={onHome}
       />
       <div ref={rowRef} className="flex min-h-0 flex-1">
         <Rail

@@ -28,6 +28,8 @@ export type RoadmapProps = {
   needsYou?: NeedsYouProps;
   documents?: DocumentsPanelProps;
   phaseRail?: PhaseRailProps;
+  /** The always-available "read the plans again" action (bottom of the column). */
+  onRebuildRoadmap?: () => void;
   className?: string;
 };
 
@@ -52,6 +54,19 @@ export function Roadmap(p: RoadmapProps) {
         {p.needsYou && <NeedsYou {...p.needsYou} />}
         {p.documents && <DocumentsPanel {...p.documents} />}
         {p.phaseRail && <PhaseRail {...p.phaseRail} />}
+        {p.onRebuildRoadmap && (
+          <div className="flex flex-col items-center gap-2 py-5">
+            <button
+              onClick={p.onRebuildRoadmap}
+              className="h-8 rounded-md border border-border-strong px-3.5 text-[12.5px] font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"
+            >
+              Rescan and rebuild the roadmap
+            </button>
+            <span className="text-[11.5px] text-text-dim">
+              A session reads the plan documents and git history again and rewrites chronicle.json.
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

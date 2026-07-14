@@ -31,6 +31,7 @@ export function TitleBar({
   onSwitch,
   onClose,
   onAdd,
+  onHome,
 }: {
   tabs: ProjectTab[];
   activeDir: string;
@@ -39,6 +40,7 @@ export function TitleBar({
   onSwitch: (dir: string) => void;
   onClose: (dir: string) => void;
   onAdd: () => void;
+  onHome?: () => void;
 }) {
   const visible = tabs.slice(0, MAX_VISIBLE_TABS);
   const hidden = tabs.length - visible.length;
@@ -64,7 +66,14 @@ export function TitleBar({
         <button aria-label="Zoom window" onClick={() => void windowControls().toggleMaximize()}
           className="size-3 rounded-full border border-border-strong bg-fill-hover" />
       </div>
-      <BrandGlyph size={17} className="shrink-0 text-text-subtle" />
+      <button
+        aria-label="Home — all projects"
+        title="Home — all projects"
+        onClick={onHome}
+        className="flex size-7 shrink-0 items-center justify-center rounded-[7px] text-text-subtle hover:bg-fill-hover hover:text-text-secondary"
+      >
+        <BrandGlyph size={17} />
+      </button>
 
       <div className="flex min-w-0 items-center gap-1">
         {visible.map((t) => {

@@ -459,6 +459,7 @@ export default function App() {
         onSwitch={activate}
         onClose={closeProject}
         onAdd={() => setPaletteOpen(true)}
+        onHome={() => setActiveDir(null)}
         onRefresh={refreshNow}
         onHelp={() => setShortcutsOpen(true)}
         terminalTabs={termTabs}

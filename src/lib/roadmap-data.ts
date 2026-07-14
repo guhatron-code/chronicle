@@ -492,5 +492,10 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     if (stages.length > 0) props.phaseRail = { stages };
   }
 
+  /* -- the standing rebuild action (bottom of the column) -- */
+  if (s.manifest_present && !ctx.initRun?.running && !ctx.fixesRun?.running) {
+    props.onRebuildRoadmap = H.onRebuild;
+  }
+
   return props;
 }
