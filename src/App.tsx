@@ -43,6 +43,8 @@ import {
   termsFor,
 } from "@/lib/term-sessions";
 import type { TerminalTab } from "@/components/chrome/TerminalColumn";
+import { KanbanPane } from "@/screens/kanban/KanbanPane";
+import { queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -87,6 +89,7 @@ export default function App() {
 
   /* ---- the ground-truth poll: every open project, every 8s ---- */
   const pollOne = useCallback(async (dir: string) => {
+    void refreshKanban(dir); // the rail badge + round overlays stay live
     try {
       const s = await getState(dir);
       setProjects((prev) => {
@@ -173,6 +176,7 @@ export default function App() {
   /* ---- terminal sessions (C6) ---- */
   const [, termBump] = useState(0);
   useEffect(() => subscribeTerms(() => termBump((n) => n + 1)), []);
+  useEffect(() => subscribeKanban(() => termBump((n) => n + 1)), []);
   const setActiveTerm = useCallback((dir: string, id: number) => {
     setActiveTermFor(dir, id);
     requestAnimationFrame(() => {
@@ -439,7 +443,7 @@ export default function App() {
         onPane={setPane}
         checkedAt={active.state?.checked_at ?? null}
         degraded={degraded}
-        queuedCount={0 /* the kanban store wires in C7 */}
+        queuedCount={queuedCountFor(active.dir)}
         checking={checking}
         splitPct={splitPct}
         onSplitPct={(pct) => {
@@ -487,11 +491,12 @@ export default function App() {
             onGoRoadmap={() => setPane("road")}
           />
         ) : (
-          <div className="flex h-full items-center justify-center">
-            <span className="font-mono text-[11.5px] text-text-dim">
-              The kanban arrives with slice C7
-            </span>
-          </div>
+          <KanbanPane
+            dir={active.dir}
+            agent={agent}
+            onConfirm={setConfirm}
+            onGoRoadmap={() => setPane("road")}
+          />
         )}
       </Shell>
       {overlays}

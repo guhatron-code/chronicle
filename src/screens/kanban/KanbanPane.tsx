@@ -1,0 +1,338 @@
+/*
+ * The kanban pane container: board CRUD against .chronicle/kanban.json,
+ * HTML5 drag between lanes, the composer (create/edit + screenshot attach),
+ * and the Ready-to-execute flow — freeze the queued round, watch the
+ * background session write the fix plan, land on the roadmap. All state in
+ * the shared kanban-store cache so the rail badge stays live.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Board } from "./Board";
+import { Composer } from "./Composer";
+import { ExecuteFlow, type ExecuteFlowProps } from "./ExecuteFlow";
+import type { TaskColumn } from "./types";
+import {
+  executingRound,
+  kanbanFor,
+  mutateKanban,
+  newTask,
+  nextRoundN,
+  refreshKanban,
+  subscribeKanban,
+} from "@/lib/kanban-store";
+import {
+  copyFile,
+  fixesCancel,
+  fixesGenerate,
+  fixesStatus,
+  kanbanAttach,
+  type KanbanTask,
+} from "@/lib/ipc";
+import { initProgress, logLinesFrom } from "@/lib/roadmap-data";
+import { toastError, toastSuccess } from "@/overlays/toasts";
+import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
+
+function fmtAgo(ms?: number): string | undefined {
+  if (!ms) return undefined;
+  const mins = Math.max(1, Math.round((Date.now() - ms) / 60_000));
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+type Flow =
+  | { kind: "idle" }
+  | { kind: "preflight" }
+  | { kind: "generating"; startedAt: number; logLines: string[]; activeLine: string; progress: number }
+  | { kind: "done"; round: number };
+
+export function KanbanPane({
+  dir,
+  agent,
+  onConfirm,
+  onGoRoadmap,
+}: {
+  dir: string;
+  agent: "claude" | "codex";
+  onConfirm: (spec: ConfirmSpec) => void;
+  onGoRoadmap: () => void;
+}) {
+  const [, bump] = useState(0);
+  useEffect(() => subscribeKanban(() => bump((n) => n + 1)), []);
+  useEffect(() => { void refreshKanban(dir); }, [dir]);
+
+  const store = kanbanFor(dir);
+  const [draft, setDraft] = useState<{ mode: "create" | "edit"; task: KanbanTask; linkDraft: string } | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropColumn, setDropColumn] = useState<TaskColumn | null>(null);
+  const [flow, setFlow] = useState<Flow>({ kind: "idle" });
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const dirRef = useRef(dir);
+  dirRef.current = dir;
+
+  const fail = useCallback((title: string) => (e: unknown) => toastError(title, String(e).slice(0, 90)), []);
+
+  /* ---- composer ---- */
+
+  const openCreate = useCallback(() => {
+    setDraft({ mode: "create", task: newTask(kanbanFor(dirRef.current)), linkDraft: "" });
+  }, []);
+
+  const openEdit = useCallback((id: string) => {
+    const t = kanbanFor(dirRef.current).tasks.find((x) => x.id === id);
+    if (t) setDraft({ mode: "edit", task: { ...t, images: [...(t.images ?? [])], links: [...(t.links ?? [])] }, linkDraft: "" });
+  }, []);
+
+  const saveDraft = useCallback(() => {
+    if (!draft) return;
+    const t = { ...draft.task, title: draft.task.title.trim() || "Untitled", updated_at: Date.now() };
+    mutateKanban(dir, (s) => {
+      if (draft.mode === "create") {
+        s.tasks.push(t);
+        s.next_id += 1;
+      } else {
+        const i = s.tasks.findIndex((x) => x.id === t.id);
+        if (i >= 0) s.tasks[i] = t;
+      }
+    }, fail("Couldn't save the task"));
+    setDraft(null);
+  }, [dir, draft, fail]);
+
+  const attach = useCallback(() => fileInput.current?.click(), []);
+  const onFilePicked = useCallback(async (f: File | undefined) => {
+    if (!f || !draft) return;
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      let bin = "";
+      for (const byte of buf) bin += String.fromCharCode(byte);
+      const path = await kanbanAttach(dir, draft.task.id, f.name, btoa(bin));
+      setDraft((d) => d && { ...d, task: { ...d.task, images: [...(d.task.images ?? []), path] } });
+    } catch (e) {
+      fail("Couldn't attach the image")(e);
+    }
+  }, [dir, draft, fail]);
+
+  /* ---- drag between lanes ---- */
+
+  const moveTask = useCallback((id: string, column: TaskColumn) => {
+    mutateKanban(dir, (s) => {
+      const t = s.tasks.find((x) => x.id === id);
+      if (t && t.column !== "in_progress") {
+        t.column = column;
+        t.updated_at = Date.now();
+      }
+    }, fail("Couldn't move the task"));
+  }, [dir, fail]);
+
+  /* ---- ready to execute ---- */
+
+  const startGenerate = useCallback(() => {
+    const startedAt = Date.now();
+    setFlow({ kind: "generating", startedAt, logLines: [], activeLine: "Starting the session…", progress: 0.06 });
+    fixesGenerate(dir, agent).catch((e) => {
+      setFlow({ kind: "idle" });
+      fail("Couldn't start the session")(e);
+    });
+  }, [dir, agent, fail]);
+
+  useEffect(() => {
+    if (flow.kind !== "generating") return;
+    const startedAt = flow.startedAt;
+    const tick = async () => {
+      try {
+        const st = (await fixesStatus(dir)) as { running?: boolean; code?: number | null; log_tail?: string };
+        const tail = st.log_tail ?? "";
+        const lines = logLinesFrom(tail);
+        if (st.running !== false) {
+          setFlow({
+            kind: "generating", startedAt,
+            logLines: lines.slice(0, -1),
+            activeLine: lines[lines.length - 1] ?? "Starting the session…",
+            progress: initProgress(tail),
+          });
+          return;
+        }
+        if ((st.code ?? 1) === 0) {
+          await refreshKanban(dir);
+          const rounds = kanbanFor(dir).rounds;
+          const latest = rounds.reduce((m, r) => Math.max(m, r.n), 0);
+          setFlow({ kind: "done", round: latest });
+          toastSuccess("The fix plan is written", "The round is on your roadmap");
+        } else {
+          setFlow({ kind: "idle" });
+          toastError("The session didn't finish", `Exited with code ${st.code ?? "?"} — your tasks are untouched`);
+        }
+      } catch { /* keep the last shown state */ }
+    };
+    const id = setInterval(tick, 3000);
+    void tick();
+    return () => clearInterval(id);
+  }, [dir, flow.kind, flow.kind === "generating" ? flow.startedAt : 0]);
+
+  /* ---- ⌘N while the pane is up ---- */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      if ((e.metaKey || e.ctrlKey) && e.key === "n" && !typing && !draft) {
+        e.preventDefault();
+        openCreate();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [draft, openCreate]);
+
+  /* ---- view assembly ---- */
+
+  const visible = store.tasks.filter((t) => !t.archived);
+  const queued = visible.filter((t) => t.column === "queued").length;
+  const roundN = nextRoundN(store);
+
+  let flowProps: ExecuteFlowProps | null = null;
+  if (flow.kind === "preflight") {
+    flowProps = {
+      kind: "preflight",
+      queued,
+      planFile: `phase_${roundN}_fixes_plan.md`,
+      promptFile: `phase_${roundN}_fixes_prompt.md`,
+      onNotYet: () => setFlow({ kind: "idle" }),
+      onConfirm: startGenerate,
+    };
+  } else if (flow.kind === "generating") {
+    const s = Math.round((Date.now() - flow.startedAt) / 1000);
+    flowProps = {
+      kind: "generating",
+      elapsed: s >= 60 ? `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`,
+      progress: flow.progress,
+      logLines: flow.logLines,
+      activeLine: flow.activeLine,
+      onCancel: () => {
+        fixesCancel(dir)
+          .then(() => { setFlow({ kind: "idle" }); toastSuccess("Stopped the session"); })
+          .catch(fail("Couldn't stop it"));
+      },
+    };
+  } else if (flow.kind === "done") {
+    const r = store.rounds.find((x) => x.n === flow.round);
+    flowProps = {
+      kind: "done",
+      round: flow.round,
+      taskCount: r?.task_ids.length ?? 0,
+      outcome: r?.kind ?? "fixes",
+      planFile: (r?.plan_path ?? `fixes/phase_${flow.round}_fixes_plan.md`).split("/").pop()!,
+      promptFile: (r?.prompt_path ?? `fixes/phase_${flow.round}_fixes_prompt.md`).split("/").pop()!,
+      onOpenFile: (name) => {
+        const full = name.includes("plan") ? r?.plan_path : r?.prompt_path;
+        copyFile(dir, full ?? `fixes/${name}`)
+          .then((n) => toastSuccess(`Copied ${name}`, `${Number(n).toLocaleString()} characters`))
+          .catch(fail("Couldn't copy it"));
+      },
+      onViewRoadmap: () => { setFlow({ kind: "idle" }); onGoRoadmap(); },
+    };
+  }
+
+  return (
+    <div className="relative h-full min-h-0">
+      <Board
+        title="Fixes & ideas"
+        tasks={visible.map((t) => ({ ...t, round: t.round ?? undefined, images: t.images ?? [], links: t.links ?? [], content: t.content ?? "", ago: fmtAgo(t.updated_at ?? t.created_at) }))}
+        selectedId={draft?.mode === "edit" ? draft.task.id : null}
+        draggingId={draggingId}
+        dropColumn={dropColumn}
+        executingRound={executingRound(store)}
+        onNewTask={openCreate}
+        onReadyToExecute={() => queued > 0 && setFlow({ kind: "preflight" })}
+        onOpenTask={openEdit}
+        onTaskDragStart={(id, e) => {
+          e.dataTransfer.setData("text/plain", id);
+          e.dataTransfer.effectAllowed = "move";
+          setDraggingId(id);
+        }}
+        onTaskDragEnd={() => { setDraggingId(null); setDropColumn(null); }}
+        onLaneDragOver={(column, e) => {
+          if (column === "in_progress") return; // round-owned — no manual drops
+          e.preventDefault();
+          setDropColumn(column);
+        }}
+        onLaneDrop={(column, e) => {
+          e.preventDefault();
+          const id = e.dataTransfer.getData("text/plain") || draggingId;
+          if (id && column !== "in_progress") moveTask(id, column);
+          setDraggingId(null);
+          setDropColumn(null);
+        }}
+        onLaneDragLeave={(column) => setDropColumn((c) => (c === column ? null : c))}
+      />
+
+      {/* the composer overlay */}
+      {draft && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-6">
+          <Composer
+            mode={draft.mode}
+            id={draft.mode === "edit" ? draft.task.id : undefined}
+            meta={draft.mode === "edit" ? [fmtAgo(draft.task.created_at) && `created ${fmtAgo(draft.task.created_at)}`, fmtAgo(draft.task.updated_at) && `updated ${fmtAgo(draft.task.updated_at)}`].filter(Boolean).join(" · ") : undefined}
+            title={draft.task.title}
+            content={draft.task.content ?? ""}
+            images={draft.task.images ?? []}
+            links={draft.task.links ?? []}
+            column={draft.task.column}
+            linkDraft={draft.linkDraft}
+            onTitleChange={(v) => setDraft((d) => d && { ...d, task: { ...d.task, title: v } })}
+            onContentChange={(v) => setDraft((d) => d && { ...d, task: { ...d.task, content: v } })}
+            onAttach={attach}
+            onRemoveImage={(i) => setDraft((d) => d && { ...d, task: { ...d.task, images: (d.task.images ?? []).filter((_, j) => j !== i) } })}
+            onLinkDraftChange={(v) => setDraft((d) => d && { ...d, linkDraft: v })}
+            onAddLink={() => setDraft((d) => {
+              if (!d || !d.linkDraft.trim()) return d;
+              return { ...d, task: { ...d.task, links: [...(d.task.links ?? []), d.linkDraft.trim()] }, linkDraft: "" };
+            })}
+            onRemoveLink={(i) => setDraft((d) => d && { ...d, task: { ...d.task, links: (d.task.links ?? []).filter((_, j) => j !== i) } })}
+            onColumnChange={(column) => setDraft((d) => d && { ...d, task: { ...d.task, column } })}
+            onDelete={() => {
+              const id = draft.task.id;
+              onConfirm({
+                title: "Delete this task?",
+                body: `${id} and its attachments disappear from the board. This can't be undone.`,
+                cancelLabel: "Keep it",
+                confirmLabel: "Delete",
+                danger: true,
+                onConfirm: () => {
+                  mutateKanban(dir, (s) => { s.tasks = s.tasks.filter((x) => x.id !== id); }, fail("Couldn't delete it"));
+                  setDraft(null);
+                },
+              });
+            }}
+            onArchive={() => {
+              const id = draft.task.id;
+              mutateKanban(dir, (s) => {
+                const t = s.tasks.find((x) => x.id === id);
+                if (t) t.archived = true;
+              }, fail("Couldn't archive it"));
+              setDraft(null);
+            }}
+            onSave={saveDraft}
+            onClose={() => setDraft(null)}
+          />
+        </div>
+      )}
+
+      {/* the execute-flow overlay */}
+      {flowProps && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-6">
+          <ExecuteFlow {...flowProps} />
+        </div>
+      )}
+
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          void onFilePicked(e.target.files?.[0]);
+          e.target.value = "";
+        }}
+      />
+    </div>
+  );
+}

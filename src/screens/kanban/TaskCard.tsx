@@ -24,6 +24,10 @@ export type TaskCardProps = {
   /** Read-only in an executing round (F28 "In a frozen round"). */
   frozen?: boolean;
   onOpen?: () => void;
+  /** HTML5 drag seam — the wiring drives these; completed/frozen cards get none. */
+  draggable?: boolean;
+  onDragStart?: (e: React.DragEvent<HTMLDivElement | HTMLButtonElement>) => void;
+  onDragEnd?: () => void;
   className?: string;
 };
 
@@ -88,6 +92,9 @@ export function TaskCard({
   dimmed,
   frozen,
   onOpen,
+  draggable,
+  onDragStart,
+  onDragEnd,
   className,
 }: TaskCardProps) {
   /* ---- completed: struck title + check + round footnote, non-grabbable ---- */
@@ -155,6 +162,9 @@ export function TaskCard({
     <button
       type="button"
       onClick={onOpen}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       className={cn(
         "group relative flex w-full flex-col gap-[7px] rounded-lg border px-[13px] py-[11px] text-left",
         dragging

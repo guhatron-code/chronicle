@@ -218,7 +218,8 @@ export interface KanbanTask {
   images?: string[]; // repo-relative (.chronicle/attachments/…)
   links?: string[];
   round?: number | null; // set when frozen into a round
-  created_at?: number;
+  archived?: boolean; // hidden from the board; kept in the store
+  created_at?: number; // ms epoch (frontend-owned)
   updated_at?: number;
 }
 export interface KanbanRound {

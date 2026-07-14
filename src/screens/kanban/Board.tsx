@@ -30,6 +30,12 @@ export type BoardProps = {
   onNewTask?: () => void;
   onReadyToExecute?: () => void;
   onOpenTask?: (id: string) => void;
+  /** HTML5 drag seam — the wiring drives these. */
+  onTaskDragStart?: (id: string, e: React.DragEvent) => void;
+  onTaskDragEnd?: () => void;
+  onLaneDragOver?: (column: TaskColumn, e: React.DragEvent) => void;
+  onLaneDrop?: (column: TaskColumn, e: React.DragEvent) => void;
+  onLaneDragLeave?: (column: TaskColumn) => void;
   className?: string;
 };
 
@@ -45,6 +51,11 @@ function Lane({
   dropTarget,
   onNewTask,
   onOpenTask,
+  onTaskDragStart,
+  onTaskDragEnd,
+  onDragOverLane,
+  onDropLane,
+  onDragLeaveLane,
 }: {
   column: TaskColumn;
   tasks: BoardTask[];
@@ -54,9 +65,19 @@ function Lane({
   dropTarget?: boolean;
   onNewTask?: () => void;
   onOpenTask?: (id: string) => void;
+  onTaskDragStart?: (id: string, e: React.DragEvent) => void;
+  onTaskDragEnd?: () => void;
+  onDragOverLane?: (e: React.DragEvent) => void;
+  onDropLane?: (e: React.DragEvent) => void;
+  onDragLeaveLane?: () => void;
 }) {
   return (
-    <div className="flex min-h-0 flex-col gap-2.5">
+    <div
+      className="flex min-h-0 flex-col gap-2.5"
+      onDragOver={onDragOverLane}
+      onDrop={onDropLane}
+      onDragLeave={onDragLeaveLane}
+    >
       <div className="flex items-baseline gap-2">
         <span className="text-[12.5px] font-medium text-text-primary">
           {COLUMN_LABELS[column]}
@@ -73,6 +94,9 @@ function Lane({
             selected={t.id === selectedId}
             dimmed={t.id === draggingId}
             onOpen={() => onOpenTask?.(t.id)}
+            draggable={column !== "in_progress"}
+            onDragStart={(e) => onTaskDragStart?.(t.id, e)}
+            onDragEnd={onTaskDragEnd}
           />
         ))}
         {dropTarget && <div className={wellClass}>Drop a task here</div>}
@@ -105,6 +129,11 @@ export function Board({
   onNewTask,
   onReadyToExecute,
   onOpenTask,
+  onTaskDragStart,
+  onTaskDragEnd,
+  onLaneDragOver,
+  onLaneDrop,
+  onLaneDragLeave,
   className,
 }: BoardProps) {
   const queued = tasks.filter((t) => t.column === "queued").length;
@@ -150,6 +179,11 @@ export function Board({
             dropTarget={dropColumn === column}
             onNewTask={onNewTask}
             onOpenTask={onOpenTask}
+            onTaskDragStart={onTaskDragStart}
+            onTaskDragEnd={onTaskDragEnd}
+            onDragOverLane={(e) => onLaneDragOver?.(column, e)}
+            onDropLane={(e) => onLaneDrop?.(column, e)}
+            onDragLeaveLane={() => onLaneDragLeave?.(column)}
           />
         ))}
       </div>
