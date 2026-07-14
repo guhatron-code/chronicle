@@ -31,8 +31,13 @@ struct Project {
 
 /// Background /chronicle-init runs, keyed by the CANONICALIZED project path (same-named
 /// folders in different places must never share a run or a log).
+fn epoch_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
 struct InitState {
-    runs: Mutex<std::collections::HashMap<String, (std::process::Child, PathBuf)>>,
+    /// key -> (child, log path, spawn time as epoch ms)
+    runs: Mutex<std::collections::HashMap<String, (std::process::Child, PathBuf, u64)>>,
 }
 
 /// The trust anchor: the set of project roots the USER opened (open_project /
@@ -720,7 +725,7 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
     let dirp = project_for(&roots, &dir)?.dir; // only an OPENED project may run a session
     let (key, log) = canon_key(&dir)?; // canonical path key + hashed log name — no collisions
     let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
-    if let Some((child, _)) = runs.get_mut(&key) {
+    if let Some((child, _, _)) = runs.get_mut(&key) {
         if child.try_wait().map_err(|e| e.to_string())?.is_none() {
             return Ok(()); // already running
         }
@@ -756,7 +761,7 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
             .spawn()
             .map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
-    runs.insert(key, (child, log));
+    runs.insert(key, (child, log, epoch_ms()));
     Ok(())
 }
 
@@ -766,7 +771,7 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
 async fn init_cancel(init: State<'_, InitState>, dir: String) -> Result<(), String> {
     let (key, _) = canon_key(&dir)?;
     let entry = init.runs.lock().map_err(|e| e.to_string())?.remove(&key);
-    if let Some((mut child, _log)) = entry {
+    if let Some((mut child, _log, _)) = entry {
         term_then_kill(&mut child);
     }
     Ok(())
@@ -818,13 +823,14 @@ async fn init_status(init: State<'_, InitState>, dir: String) -> Result<Value, S
         let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
         match runs.get_mut(&key) {
             None => None,
-            Some((child, log)) => Some((child.try_wait().map_err(|e| e.to_string())?, log.clone())),
+            Some((child, log, started)) => Some((child.try_wait().map_err(|e| e.to_string())?, log.clone(), *started)),
         }
     };
     match probed {
         None => Ok(json!({"running": false, "started": false})),
-        Some((code, log)) => Ok(json!({
+        Some((code, log, started)) => Ok(json!({
             "running": code.is_none(), "started": true,
+            "started_at": started,
             "code": code.and_then(|c| c.code()),
             "log_tail": read_tail(&log, 30000),
         })),
@@ -1000,6 +1006,22 @@ fn fixes_run_key(dir: &str) -> Result<(String, PathBuf), String> {
 
 /// "Ready to execute": freeze the queued, un-rounded tasks into round N and start the
 /// background session that writes fixes/phase_N_fixes_plan.md + _prompt.md.
+/// Delete one attachment file — only ever inside .chronicle/attachments, so a
+/// removed thumb / deleted task / cancelled composer leaves no orphans.
+#[tauri::command]
+async fn kanban_detach(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    if !path.starts_with(".chronicle/attachments/") {
+        return Err("only attachment files can be removed".into());
+    }
+    let full = jailed(&p, &path)?;
+    match std::fs::remove_file(&full) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 #[tauri::command]
 async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>) -> Result<u64, String> {
     let p = project_for(&roots, &dir)?;
@@ -1041,7 +1063,7 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
         serde_json::to_string_pretty(&picked).unwrap_or_default());
     let (key, log) = fixes_run_key(&dir)?;
     let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
-    if let Some((child, _)) = runs.get_mut(&key) {
+    if let Some((child, _, _)) = runs.get_mut(&key) {
         if child.try_wait().map_err(|e| e.to_string())?.is_none() {
             return Err("a fix round is already generating".into());
         }
@@ -1070,7 +1092,7 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
             .stdout(logf).stderr(errf)
             .spawn().map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
-    runs.insert(key, (child, log));
+    runs.insert(key, (child, log, epoch_ms()));
     Ok(round_n)
 }
 
@@ -1082,14 +1104,15 @@ async fn fixes_status(roots: State<'_, OpenRoots>, init: State<'_, InitState>, d
         let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
         match runs.get_mut(&key) {
             None => None,
-            Some((child, log)) => Some((child.try_wait().map_err(|e| e.to_string())?, log.clone())),
+            Some((child, log, started)) => Some((child.try_wait().map_err(|e| e.to_string())?, log.clone(), *started)),
         }
     };
-    let Some((code, log)) = probed else { return Ok(json!({"running": false, "started": false})) };
+    let Some((code, log, started)) = probed else { return Ok(json!({"running": false, "started": false})) };
     // on completion, settle the newest generating round from what actually landed on disk
     if code.is_some() { settle_round(&p.dir); }
     Ok(json!({
         "running": code.is_none(), "started": true,
+        "started_at": started,
         "code": code.and_then(|c| c.code()),
         "log_tail": read_tail(&log, 30000),
     }))
@@ -1100,7 +1123,7 @@ async fn fixes_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, d
     let p = project_for(&roots, &dir)?;
     let (key, _) = fixes_run_key(&dir)?;
     let entry = init.runs.lock().map_err(|e| e.to_string())?.remove(&key);
-    if let Some((mut child, _)) = entry { term_then_kill(&mut child); }
+    if let Some((mut child, _, _)) = entry { term_then_kill(&mut child); }
     // a cancelled generating round unfreezes its tasks
     let mut store = load_kanban(&p.dir);
     let cancelled: Option<u64> = store.get_mut("rounds").and_then(|r| r.as_array_mut()).and_then(|rounds| {
@@ -1689,7 +1712,7 @@ fn main() {
                 }
                 if let Some(init) = app.try_state::<InitState>() {
                     if let Ok(mut g) = init.runs.lock() {
-                        for (_, (mut child, _)) in g.drain() { term_then_kill(&mut child); }
+                        for (_, (mut child, _, _)) in g.drain() { term_then_kill(&mut child); }
                     }
                 }
             }
@@ -1697,7 +1720,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
             init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
-            kanban_get, kanban_save, kanban_attach, fixes_generate, fixes_status, fixes_cancel,
+            kanban_get, kanban_save, kanban_attach,
+            kanban_detach, fixes_generate, fixes_status, fixes_cancel,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64,
             list_dir, read_file, copy_file, copy_text,
