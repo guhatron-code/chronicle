@@ -78,9 +78,9 @@ export function ImageThumb({
 
 /** Design-link chip (card size: h20, 10.5px). */
 const CardLinkChip = ({ label }: { label: string }) => (
-  <span className="inline-flex h-5 shrink-0 items-center gap-[5px] rounded-[5px] bg-fill-subtle px-[7px] text-[10.5px] text-text-subtle">
+  <span className="inline-flex h-5 min-w-0 shrink items-center gap-[5px] rounded-[5px] bg-fill-subtle px-[7px] text-[10.5px] text-text-subtle">
     <LinkGlyph size={9} className="shrink-0" />
-    <span className="max-w-40 truncate">{label}</span>
+    <span className="min-w-0 max-w-40 truncate">{label}</span>
   </span>
 );
 
@@ -197,15 +197,16 @@ export function TaskCard({
         </div>
       )}
       {hasFooter && (
-        <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 items-center gap-1.5">
           {thumbs.map((src, i) => (
             <ImageThumb key={i} src={src} />
           ))}
-          {extra > 0 && <span className="font-mono text-[10px] text-text-dim">+{extra}</span>}
+          {extra > 0 && <span className="shrink-0 font-mono text-[10px] text-text-dim">+{extra}</span>}
           {task.links.map((link) => (
             <CardLinkChip key={link} label={link} />
           ))}
-          <span className="min-w-0 flex-1" />
+          {/* the stamp right-aligns only behind thumbs/chips; alone it sits left (deck F28) */}
+          {(task.images.length > 0 || task.links.length > 0) && <span className="min-w-0 flex-1" />}
           {ago && (
             <span className="shrink-0 font-mono text-[10px] text-text-dimmer tabular-nums">
               {ago}
