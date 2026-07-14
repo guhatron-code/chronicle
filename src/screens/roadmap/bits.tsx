@@ -65,19 +65,27 @@ export const Twisty = ({
   open,
   label,
   onClick,
+  decorative,
 }: {
   open?: boolean;
-  label: string;
+  label?: string;
   onClick?: () => void;
-}) => (
-  <button
-    aria-label={label}
-    onClick={onClick}
-    className="flex size-6 shrink-0 items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover"
-  >
-    {open ? <ChevronUpGlyph size={11} /> : <ChevronDownGlyph size={11} />}
-  </button>
-);
+  /** Render as a plain glyph — for headers that are themselves the toggle button. */
+  decorative?: boolean;
+}) =>
+  decorative ? (
+    <span aria-hidden className="flex size-6 shrink-0 items-center justify-center text-text-dim">
+      {open ? <ChevronUpGlyph size={11} /> : <ChevronDownGlyph size={11} />}
+    </span>
+  ) : (
+    <button
+      aria-label={label}
+      onClick={onClick}
+      className="flex size-6 shrink-0 items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover"
+    >
+      {open ? <ChevronUpGlyph size={11} /> : <ChevronDownGlyph size={11} />}
+    </button>
+  );
 
 /** The accordion body wrapper — grid-rows 0fr↔1fr so open AND close both animate.
  *  Content stays mounted; reduced motion freezes the transition globally. */

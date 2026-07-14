@@ -81,12 +81,17 @@ function PhaseCard({ phase }: { phase: Extract<RailPhase, { kind: "phase" }> }) 
         "flex flex-col rounded-lg border px-[15px]",
         open
           ? "border-border-strong bg-surface-card-raised py-3.5"
-          : "border-border-hairline bg-surface-card py-3",
+          : "border-border-hairline bg-surface-card py-3 hover:border-border-strong",
         !open && phase.status === "later" && "opacity-75",
         "transition-[background,border-color,padding] duration-200",
       )}
     >
-      <div className="flex items-center gap-2.5">
+      <button
+        onClick={phase.onToggle}
+        aria-expanded={open}
+        aria-label={`${open ? "Collapse" : "Expand"} ${phase.id} · ${phase.name}`}
+        className="flex w-full items-center gap-2.5 text-left"
+      >
         <IdChip>{phase.id}</IdChip>
         <span
           className={cn(
@@ -110,8 +115,8 @@ function PhaseCard({ phase }: { phase: Extract<RailPhase, { kind: "phase" }> }) 
           </StateWord>
         )}
         <span className="flex-1" />
-        <Twisty open={open} label={`${open ? "Collapse" : "Expand"} ${phase.id}`} onClick={phase.onToggle} />
-      </div>
+        <Twisty open={open} decorative />
+      </button>
 
       {/* the body stays mounted so open AND close animate */}
       <AccBody open={open}>
@@ -196,14 +201,18 @@ function WindowCard({ phase }: { phase: Extract<RailPhase, { kind: "window" }> }
 function FxCard({ phase }: { phase: Extract<RailPhase, { kind: "fx" }> }) {
   return (
     <div className="flex flex-col gap-[9px] rounded-lg border border-border-hairline bg-surface-card px-[15px] py-3">
-      <div className="flex items-center gap-2.5">
+      <button
+        onClick={phase.onToggle}
+        aria-label={`Expand ${phase.id} · ${phase.name}`}
+        className="flex w-full items-center gap-2.5 text-left"
+      >
         <IdChip>{phase.id}</IdChip>
         <span className="text-[13.5px] font-medium text-text-primary">{phase.name}</span>
         <TinyBadge className="px-1.5 leading-4">{phase.badge}</TinyBadge>
         <span className="text-xs text-text-subtle">{phase.statusWord}</span>
         <span className="flex-1" />
-        <Twisty label={`Expand ${phase.id}`} onClick={phase.onToggle} />
-      </div>
+        <Twisty decorative />
+      </button>
       {phase.chips.length > 0 && (
       <div className="flex items-center gap-2">
         <span className="text-[11.5px] text-text-dim">You paste</span>
