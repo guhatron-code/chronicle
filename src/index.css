@@ -317,6 +317,20 @@ a:focus-visible,
 
 /* The two motion primitives the comps use. Motion only confirms state — under
    prefers-reduced-motion everything freezes (the status word carries the meaning). */
+/* Scrollbars — deck F26 spec: a 4px grey thumb on a transparent 10px gutter,
+   never the system black. background-clip keeps the visible thumb at 4px. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: var(--border-strong);
+  border-radius: 5px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--text-dimmer); }
+html { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
 @keyframes wv-spin { to { transform: rotate(360deg); } }
 @keyframes wv-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @keyframes wv-arrow { to { background-position: 12px 0; } }
