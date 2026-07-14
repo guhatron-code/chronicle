@@ -6,6 +6,7 @@
 import { createElement } from "react";
 import type { StateData, ManifestPhase, PhaseStatus } from "./ipc";
 import { sentence } from "./utils";
+import { kanbanFor } from "./kanban-store";
 import type { RoadmapProps } from "@/screens/roadmap/Roadmap";
 import type { NeedsYouRow } from "@/screens/roadmap/NeedsYou";
 import type { RailPhase, RailStage, RailChip } from "@/screens/roadmap/PhaseRail";
@@ -424,11 +425,30 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
         if (!status || status.state === "pool") continue;
         const id = ph.id ?? "?";
         if (ph.fixRound !== undefined) {
+          // a fix round is a full phase: the round's tasks are its steps
+          // (ticking live as the executor completes them), the prompt is what
+          // you paste, the plan is reference
+          const roundTasks = kanbanFor(s.dir).tasks.filter((t) => t.round === ph.fixRound);
+          const nTasks = roundTasks.length || Number(ph.desc?.match(/^(\d+)/)?.[1] ?? 0);
           railPhases.push({
-            kind: "fx", id, name: ph.name ?? "",
-            badge: `From the Kanban · ${(ph.desc?.match(/^(\d+)/)?.[1]) ?? "?"} tasks`,
+            kind: "phase", id, name: ph.name ?? "",
+            badge: `From the Kanban · ${nTasks} ${nTasks === 1 ? "task" : "tasks"}`,
+            open: ctx.expandedId === id,
+            status: status.state === "done" ? "done" : "later",
             statusWord: status.state === "done" ? "Done" : sentence(status.label),
-            chips: [...(ph.paste ?? []), ...(ph.docs ?? [])].map((c) => (c.path ?? "").split("/").pop() ?? "").filter(Boolean),
+            description: (ph.desc ?? "").replace(/<[^>]+>/g, ""),
+            steps: roundTasks.map((t) => ({
+              label: `${t.id} · ${t.title}`,
+              done: t.column === "completed",
+            })),
+            paste: (ph.paste ?? []).map((c) => ({
+              name: (c.path ?? "").split("/").pop() ?? "",
+              into: c.into,
+              note: c.when,
+            })),
+            reference: (ph.docs ?? []).map((c) => ({ name: c.path.split("/").pop() ?? "" })),
+            onToggle: () => H.onTogglePhase(id),
+            onViewDetails: () => H.onViewDetails(id),
             onChip: (n) => {
               const hit = [...(ph.paste ?? []), ...(ph.docs ?? [])].find((c) => (c.path ?? "").endsWith(n));
               if (hit?.path) H.onCopyDoc(hit.path);

@@ -1181,7 +1181,7 @@ fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
         phases.push(json!({
             "id": format!("FX-{n}"),
             "name": title,
-            "desc": format!("{} tasks from the kanban, frozen into an executable plan.", ids.len()),
+            "desc": format!("{} task{} from the kanban, frozen into an executable plan.", ids.len(), if ids.len() == 1 { "" } else { "s" }),
             "paste": [ { "path": format!("fixes/phase_{n}_fixes_prompt.md"), "into": "Claude Code", "when": "run the whole round in one session" } ],
             "docs": [ { "path": format!("fixes/phase_{n}_fixes_plan.md") } ],
             "fixRound": n,

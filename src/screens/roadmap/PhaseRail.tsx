@@ -17,6 +17,8 @@ export type RailPhase =
       kind: "phase";
       id: string;
       name: string;
+      /** e.g. "From the Kanban · 6 tasks" — fix-round phases carry one. */
+      badge?: string;
       /** body visibility — open/close animate via AccBody */
       open: boolean;
       status: "done" | "just-done" | "later" | "now";
@@ -103,6 +105,7 @@ function PhaseCard({ phase }: { phase: Extract<RailPhase, { kind: "phase" }> }) 
         >
           {phase.name}
         </span>
+        {phase.badge && <TinyBadge className="px-1.5 leading-4">{phase.badge}</TinyBadge>}
         {phase.status === "done" || phase.status === "just-done" ? (
           <StateWord kind="success" glyphSize={11} className="gap-[5px] text-xs">
             {phase.status === "just-done" ? "Done · just now" : "Done"}
