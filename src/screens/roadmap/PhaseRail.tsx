@@ -32,16 +32,7 @@ export type RailPhase =
       onChip?: (name: string) => void;
     }
   | { kind: "window"; id: string; name: string; eyebrow: string; note: string }
-  | {
-      kind: "fx";
-      id: string;
-      name: string;
-      badge: string; // "from the Kanban · 6 tasks"
-      statusWord: string; // "queued"
-      chips: string[];
-      onToggle?: () => void;
-      onChip?: (name: string) => void;
-    };
+;
 
 export type RailStage = { name: string; sub: string; phases: RailPhase[] };
 
@@ -201,39 +192,6 @@ function WindowCard({ phase }: { phase: Extract<RailPhase, { kind: "window" }> }
   );
 }
 
-function FxCard({ phase }: { phase: Extract<RailPhase, { kind: "fx" }> }) {
-  return (
-    <div className="flex flex-col gap-[9px] rounded-lg border border-border-hairline bg-surface-card px-[15px] py-3">
-      <button
-        onClick={phase.onToggle}
-        aria-label={`Expand ${phase.id} · ${phase.name}`}
-        className="flex w-full items-center gap-2.5 text-left"
-      >
-        <IdChip>{phase.id}</IdChip>
-        <span className="text-[13.5px] font-medium text-text-primary">{phase.name}</span>
-        <TinyBadge className="px-1.5 leading-4">{phase.badge}</TinyBadge>
-        <span className="text-xs text-text-subtle">{phase.statusWord}</span>
-        <span className="flex-1" />
-        <Twisty decorative />
-      </button>
-      {phase.chips.length > 0 && (
-      <div className="flex items-center gap-2">
-        <span className="text-[11.5px] text-text-dim">You paste</span>
-        {phase.chips.map((name) => (
-          <PasteChip
-            key={name}
-            name={name}
-            height={26}
-            raised
-            onClick={() => phase.onChip?.(name)}
-          />
-        ))}
-      </div>
-      )}
-    </div>
-  );
-}
-
 export function PhaseRail({ stages, className }: PhaseRailProps) {
   return (
     <div
@@ -264,7 +222,6 @@ export function PhaseRail({ stages, className }: PhaseRailProps) {
                 <div className={cn("min-w-0 flex-1", !lastInStage && "pb-2.5")}>
                   {phase.kind === "phase" && <PhaseCard phase={phase} />}
                   {phase.kind === "window" && <WindowCard phase={phase} />}
-                  {phase.kind === "fx" && <FxCard phase={phase} />}
                 </div>
               </div>
             );

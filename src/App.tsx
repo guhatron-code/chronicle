@@ -45,6 +45,7 @@ import {
 import type { TerminalTab } from "@/components/chrome/TerminalColumn";
 import { KanbanPane } from "@/screens/kanban/KanbanPane";
 import { kanbanFor, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
+import { isInitRunning, subscribeRunFlags } from "@/lib/run-flags";
 import { fixesStatus } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
 
@@ -154,6 +155,12 @@ export default function App() {
   }, []);
 
   const doOpenProject = useCallback((path: string) => {
+    if (projectsRef.current.has(path)) {
+      // already open — just foreground it, keep whatever pane the user was on
+      activate(path);
+      setPaletteOpen(false);
+      return;
+    }
     openProject(path)
       .then((p) => {
         const dir = (p as { dir?: string } | null)?.dir ?? path;
@@ -162,6 +169,7 @@ export default function App() {
         const partOf = info?.part_of?.path
           ? { name: String(info.part_of.name ?? ""), path: String(info.part_of.path) }
           : null;
+        void windowControls().setTitle(`${name} — Chronicle`).catch?.(() => {});
         setProjects((prev) => {
           if (prev.has(dir)) return prev;
           const next = new Map(prev);
@@ -183,6 +191,7 @@ export default function App() {
   const [, termBump] = useState(0);
   useEffect(() => subscribeTerms(() => termBump((n) => n + 1)), []);
   useEffect(() => subscribeKanban(() => termBump((n) => n + 1)), []);
+  useEffect(() => subscribeRunFlags(() => termBump((n) => n + 1)), []);
   const setActiveTerm = useCallback((dir: string, id: number) => {
     setActiveTermFor(dir, id);
     requestAnimationFrame(() => {
@@ -245,7 +254,8 @@ export default function App() {
         next.delete(dir);
         if (activeRef.current === dir) {
           const first = next.keys().next();
-          setActiveDir(first.done ? null : first.value);
+          if (first.done) setActiveDir(null);
+          else activate(first.value); // clears Updated + sets the title like any foregrounding
         }
         return next;
       });
@@ -318,6 +328,11 @@ export default function App() {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "k") { e.preventDefault(); setPaletteOpen((o) => !o); }
       else if (mod && e.key === "t" && activeRef.current) { e.preventDefault(); newTerminal(); }
+      else if (mod && e.key === "l" && activeRef.current) {
+        e.preventDefault();
+        const id = activeTermFor(activeRef.current);
+        if (id != null) { fitTerm(id); getTerm(id)?.term.focus(); }
+      }
       else if (mod && e.key === "o") { e.preventDefault(); openDialog(); }
       else if (mod && e.key === "/") { e.preventDefault(); setShortcutsOpen(true); }
       else if (mod && e.key === "j" && activeRef.current) {
@@ -332,7 +347,7 @@ export default function App() {
       } else if (mod && /^[1-9]$/.test(e.key)) {
         const dirs = [...projectsRef.current.keys()];
         const dir = dirs[Number(e.key) - 1];
-        if (dir) { e.preventDefault(); activate(dir); }
+        if (dir) { e.preventDefault(); activate(dir); setPaletteOpen(false); }
       }
     };
     window.addEventListener("keydown", onKey);
@@ -360,6 +375,15 @@ export default function App() {
   }, []);
 
   const active = activeDir ? projects.get(activeDir) : null;
+  // the 2s "changed just now" emphasis needs a re-render AT the boundary
+  useEffect(() => {
+    const at = active?.justSwitchedAt;
+    if (!at) return;
+    const left = at + 2000 - Date.now();
+    if (left <= 0) return;
+    const id = setTimeout(() => termBump((n) => n + 1), left + 50);
+    return () => clearTimeout(id);
+  }, [active?.justSwitchedAt]);
   const termSessions = active ? termsFor(active.dir) : [];
   const termTabs: TerminalTab[] = termSessions.map((t) => ({
     id: t.id,
@@ -376,7 +400,14 @@ export default function App() {
     updatedHint: p.updatedHint,
   }));
   const recents: RecentProject[] =
-    devPreset.current ?? rows.map((r) => toRecentProject(r, { agent: agent === "codex" ? "Codex" : "Claude" }));
+    devPreset.current ??
+    rows.map((r) =>
+      toRecentProject(r, {
+        agent: agent === "codex" ? "Codex" : "Claude",
+        writing: isInitRunning(r.path), // a build running while you're on Home
+        openNow: projects.has(r.path),
+      }),
+    );
   const openPalette: PaletteProject[] = tabs.map((t) => {
     const row = rows.find((r) => r.path === t.dir);
     const base = row ? toPaletteProject(row) : null;
@@ -469,7 +500,10 @@ export default function App() {
         onSwitch={activate}
         onClose={closeProject}
         onAdd={() => setPaletteOpen(true)}
-        onHome={() => setActiveDir(null)}
+        onHome={() => {
+          setActiveDir(null);
+          void windowControls().setTitle("Chronicle").catch?.(() => {});
+        }}
         onRefresh={refreshNow}
         onHelp={() => setShortcutsOpen(true)}
         terminalTabs={termTabs}

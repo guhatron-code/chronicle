@@ -39,6 +39,8 @@ export interface RoadmapCtx {
   copiedPath: string | null;
   /** null → the now phase is open · "__none__" → all collapsed · id → that phase open */
   expandedId: string | null;
+  /** A phase that flipped to done during this session — the quiet ring moment. */
+  justDoneId?: string | null;
   justSwitched: boolean;
   publishing: boolean; // a publish/pull one-click is in flight
   handlers: {
@@ -57,7 +59,7 @@ export interface RoadmapCtx {
     onMoveManifest: (sub: string) => void;
     onAction: (id: string, cmd: string) => void;
     onCopyCommand: (cmd: string) => void;
-    onRunCustom: (cmd: string) => void;
+    onRunCustom: (cmd: string, level?: string) => void;
     onCopyDoc: (path: string) => void;
     onTogglePhase: (id: string) => void;
     onViewDetails: (id: string) => void;
@@ -249,7 +251,7 @@ export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
       title, sub,
       command: cmd,
       ...(cmd
-        ? { kind: "one-click" as const, actionLabel: "Execute…", onAction: () => H.onRunCustom(cmd) }
+        ? { kind: "one-click" as const, actionLabel: "Execute…", onAction: () => H.onRunCustom(cmd, a.level) }
         : { kind: "copy-only" as const }),
     });
   }
@@ -454,7 +456,10 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
             kind: "phase", id, name: ph.name ?? "",
             badge: `From the Kanban · ${nTasks} ${nTasks === 1 ? "task" : "tasks"}`,
             open: ctx.expandedId === null ? status.state === "now" : ctx.expandedId === id,
-            status: status.state === "done" ? "done" : status.state === "now" ? "now" : "later",
+            status:
+            status.state === "done"
+              ? (ctx.justDoneId === id ? "just-done" : "done")
+              : status.state === "now" ? "now" : "later",
             statusWord: status.state === "done" ? "Done" : sentence(status.label),
             description: (ph.desc ?? "").replace(/<[^>]+>/g, ""),
             steps: roundTasks.map((t) => ({
@@ -490,7 +495,10 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
         const reference: RailChip[] = (ph.docs ?? []).map((c) => ({ name: c.path.split("/").pop() ?? "" }));
         railPhases.push({
           kind: "phase", id, name: ph.name ?? "", open,
-          status: status.state === "done" ? "done" : status.state === "now" ? "now" : "later",
+          status:
+            status.state === "done"
+              ? (ctx.justDoneId === id ? "just-done" : "done")
+              : status.state === "now" ? "now" : "later",
           statusWord: status.state === "done" ? "Done" : sentence(status.label),
           description: (ph.desc ?? "").replace(/<[^>]+>/g, ""),
           steps: (ph.items ?? []).map((t) => ({ label: t.replace(/<[^>]+>/g, ""), done: status.state === "done" })),

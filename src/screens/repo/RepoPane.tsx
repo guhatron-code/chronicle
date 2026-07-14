@@ -95,6 +95,16 @@ function stateFor(dir: string): RepoState {
   return s;
 }
 
+/** Open a specific file in the viewer next time the repo pane mounts for
+ * `dir` — the roadmap's problem cards land on the actual file. */
+export function openFileInRepo(dir: string, path: string) {
+  const s = stateFor(dir);
+  s.historyView = false;
+  if (!s.tabs.find((t) => t.path === path)) s.tabs.push({ path, mode: "contents", body: null });
+  s.activeTab = path;
+  s.selectedId = path;
+}
+
 /** Open the project-history view next time the repo pane mounts for `dir` —
  * lets the roadmap's history panel land directly on the L4 pane. Back/Close
  * return to the caller's surface. */
@@ -219,6 +229,8 @@ export function RepoPane({
     if (!rs.loads.has("")) loadDir("");
     setHistoryLoading(true);
     refreshGit();
+    // tabs opened from outside the pane (openFileInRepo) arrive body-less
+    for (const t of rs.tabs) if (t.body === null) loadContents(t.path);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dir]);
 

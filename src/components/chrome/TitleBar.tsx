@@ -114,9 +114,18 @@ export function TitleBar({
                     {t.name}
                   </span>
                   {t.updated ? (
-                    <span className="rounded-[5px] bg-fill-subtle px-[5px] text-[10.5px] leading-[15px] text-text-subtle">
-                      Updated
-                    </span>
+                    <>
+                      <span className="rounded-[5px] bg-fill-subtle px-[5px] text-[10.5px] leading-[15px] text-text-subtle group-hover/tab:hidden">
+                        Updated
+                      </span>
+                      <button
+                        aria-label={`Close ${t.name}`}
+                        onClick={(e) => { e.stopPropagation(); onClose(t.dir); }}
+                        className="hidden size-[18px] items-center justify-center rounded-[5px] text-text-dim hover:bg-fill-hover hover:text-text-secondary group-hover/tab:flex"
+                      >
+                        <XGlyph size={8} />
+                      </button>
+                    </>
                   ) : (
                     <button
                       aria-label={`Close ${t.name}`}

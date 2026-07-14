@@ -37,7 +37,6 @@ export function Shell({
   onStartAgent,
   onTerminalSelect,
   onTerminalClose,
-  onTerminalRenameStart,
   onTerminalRenameCommit,
   terminalHostFor,
   children,
@@ -65,7 +64,6 @@ export function Shell({
   onStartAgent: (agent: TerminalAgent) => void;
   onTerminalSelect?: (id: number) => void;
   onTerminalClose?: (id: number) => void;
-  onTerminalRenameStart?: (id: number) => void;
   onTerminalRenameCommit?: (id: number, name: string) => void;
   /** The xterm host-mount seam — see TerminalColumn's header comment. */
   terminalHostFor?: (id: number) => (el: HTMLDivElement | null) => void;
@@ -164,7 +162,6 @@ export function Shell({
               onStartAgent={onStartAgent}
               onSelect={onTerminalSelect}
               onClose={onTerminalClose}
-              onRenameStart={onTerminalRenameStart}
               onRenameCommit={onTerminalRenameCommit}
               hostFor={terminalHostFor}
             />

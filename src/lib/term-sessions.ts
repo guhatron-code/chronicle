@@ -204,6 +204,14 @@ export function closeTerm(id: number) {
   notify();
 }
 
+/* live terminals follow theme switches — xterm accepts a theme swap at runtime */
+if (typeof MutationObserver !== "undefined") {
+  new MutationObserver(() => {
+    const theme = themeFromTokens();
+    for (const s of sessions.values()) s.term.options.theme = theme;
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+}
+
 /* dev-only handle for the wiring harness */
 if (import.meta.env.DEV) {
   (window as never as Record<string, unknown>).__terms = { getTerm, termsFor, liveCount };

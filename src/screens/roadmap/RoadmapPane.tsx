@@ -31,9 +31,11 @@ import {
   type InitRun,
   type RoadmapCtx,
 } from "@/lib/roadmap-data";
-import { spawnTerm } from "@/lib/term-sessions";
+import { setActiveTermFor, spawnTerm, termsFor } from "@/lib/term-sessions";
+import { openFileInRepo } from "@/screens/repo/RepoPane";
 import { fixesCancel, fixesStatus, initLogPath } from "@/lib/ipc";
 import { kanbanFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
+import { setInitRunning } from "@/lib/run-flags";
 import { toastError, toastSuccess } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
@@ -64,13 +66,35 @@ export function RoadmapPane({
   onConfirm: (spec: ConfirmSpec) => void;
   onPollNow: () => void;
 }) {
-  const [initRun, setInitRun] = useState<InitRun | null>(null);
+  const [initRun, setInitRunRaw] = useState<InitRun | null>(null);
+  const setInitRun = useCallback((v: InitRun | null | ((prev: InitRun | null) => InitRun | null)) => {
+    setInitRunRaw((prev) => {
+      const next = typeof v === "function" ? v(prev) : v;
+      setInitRunning(dirRef.current, !!next?.running);
+      return next;
+    });
+  }, []);
   const [fixesRun, setFixesRun] = useState<InitRun | null>(null);
   const [, kbBump] = useState(0);
   useEffect(() => subscribeKanban(() => kbBump((n) => n + 1)), []);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  const [justDoneId, setJustDoneId] = useState<string | null>(null);
+  const prevDone = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const done = new Set((state?.statuses ?? []).filter((x) => x.state === "done").map((x) => x.id));
+    if (prevDone.current) {
+      const fresh = [...done].find((id) => !prevDone.current!.has(id));
+      if (fresh) {
+        setJustDoneId(fresh);
+        const t = setTimeout(() => setJustDoneId(null), 4000);
+        prevDone.current = done;
+        return () => clearTimeout(t);
+      }
+    }
+    prevDone.current = done;
+  }, [state?.statuses]);
   const [publishing, setPublishing] = useState(false);
   const [warningDismissed, setWarningDismissed] = useState(false);
   const [consentLocal, setConsentLocal] = useState<"auto" | "manual" | "basic" | null>(null);
@@ -274,6 +298,7 @@ export function RoadmapPane({
     consent: consentLocal ?? state.init_consent,
     copiedPath,
     expandedId,
+    justDoneId,
     justSwitched,
     publishing,
     warningDismissed,
@@ -309,13 +334,25 @@ export function RoadmapPane({
           .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)));
       },
       onViewFullLog: () => {
+        const existing = termsFor(dir).find((t) => t.title === "Roadmap log" && !t.dead);
+        if (existing) {
+          setActiveTermFor(dir, existing.id);
+          return;
+        }
         initLogPath(dir)
           .then((path) =>
             spawnTerm(dir, { title: "Roadmap log", autoType: `tail -n 200 -f '${path.replace(/'/g, "'\\''")}'` }),
           )
           .catch((e) => toastError("Couldn't open the log", String(e).slice(0, 90)));
       },
-      onScan: startInit,
+      onScan: () =>
+        onConfirm({
+          title: "Rebuild the roadmap?",
+          body: `${agent === "codex" ? "A Codex" : "A Claude"} session will read the plan documents again and rewrite the roadmap. Your files aren't changed.`,
+          cancelLabel: "Not yet",
+          confirmLabel: "Rebuild",
+          onConfirm: startInit,
+        }),
       onRebuild: () =>
         onConfirm({
           title: "Rebuild the roadmap?",
@@ -326,13 +363,17 @@ export function RoadmapPane({
         }),
       onDismissWarning: () => setWarningDismissed(true),
       onOpenPartOf: onOpenProject,
-      onOpenFile: () => onGoRepo(),
+      onOpenFile: (path) => {
+        openFileInRepo(dir, path || "chronicle.json");
+        onGoRepo();
+      },
       onMoveManifest: (sub) => {
         adoptManifest(dir, sub)
           .then(() => { toastSuccess("Moved the roadmap here"); onPollNow(); })
           .catch((e) => toastError("Couldn't move it", String(e).slice(0, 90)));
       },
       onAction: (id, arg) => {
+        if (publishing) return; // single-flight: no double-fire while one runs
         const run = async () => {
           setPublishing(true);
           try {
@@ -349,8 +390,10 @@ export function RoadmapPane({
         };
         void run();
       },
-      onRunCustom: (cmd) => {
-        const risky = /gh repo create|worktree remove|--force|--hard|\brm\s|\bdelete\b|reset --hard/i.test(cmd);
+      onRunCustom: (cmd, level) => {
+        const risky =
+          level === "danger" || level === "warn" ||
+          /gh repo create|worktree remove|--force|--hard|\brm\s|\bdelete\b|reset --hard/i.test(cmd);
         onConfirm({
           title: "Execute this command?",
           body: cmd,

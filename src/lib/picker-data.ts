@@ -40,7 +40,7 @@ export function agoFrom(openedAtEpoch: string, nowMs = Date.now()): string {
 /** A running init for this path (app state) forces the "writing" card. */
 export function toRecentProject(
   r: PickerRecent,
-  opts: { home?: string; agent?: string; writing?: boolean } = {},
+  opts: { home?: string; agent?: string; writing?: boolean; openNow?: boolean } = {},
 ): RecentProject {
   const base = {
     path: r.path,
@@ -50,6 +50,7 @@ export function toRecentProject(
     mark: markFor(r.path),
     markLabel: markLabel(r.name),
     ago: agoFrom(r.opened_at),
+    openNow: opts.openNow,
   };
   if (r.missing) return { ...base, variant: { kind: "missing" } };
   if (opts.writing) return { ...base, variant: { kind: "writing" } };

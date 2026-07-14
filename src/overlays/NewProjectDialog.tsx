@@ -63,7 +63,7 @@ export function NewProjectDialog({
               if (error) onClearError?.(); // a stale error must not outlive the edit
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && name.trim()) onCreate(name.trim());
+              if (e.key === "Enter" && name.trim() && !invalid) onCreate(name.trim());
             }}
             aria-invalid={invalid}
             className={cn(

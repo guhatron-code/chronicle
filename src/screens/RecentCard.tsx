@@ -24,6 +24,8 @@ export type RecentProject = {
   mark: MarkIndex;
   markLabel: string;
   ago: string;
+  /** Already open in a tab — the card says so instead of looking identical. */
+  openNow?: boolean;
   variant:
     | {
         kind: "phase";
@@ -97,6 +99,11 @@ export function RecentCard({
         <div className="flex items-center gap-2.5">
           <MarkTile mark={project.mark} label={project.markLabel} />
           <span className="text-sm font-medium text-text-primary">{project.name}</span>
+          {project.openNow && (
+            <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-text-subtle">
+              Open
+            </span>
+          )}
           <span className="font-mono text-[11.5px] text-text-dim">{project.tildePath}</span>
         </div>
         <div className="flex items-center gap-[9px] text-[12.5px] text-state-neutral">
@@ -144,6 +151,11 @@ export function RecentCard({
           <div className="flex items-center gap-2.5">
             <MarkTile mark={project.mark} label={project.markLabel} />
             <span className="text-sm font-medium text-text-primary">{project.name}</span>
+          {project.openNow && (
+            <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-text-subtle">
+              Open
+            </span>
+          )}
             <span className="font-mono text-[11.5px] text-text-dim">{project.tildePath}</span>
           </div>
           {project.description && (
