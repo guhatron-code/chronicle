@@ -225,11 +225,41 @@ export const HistoryClockGlyph = ({ size = 13, ...p }: P) => (
   </svg>
 );
 
-/** Picture-in-frame (F24 image-preview thumb). */
-export const ImageGlyph = ({ size = 22, ...p }: P) => (
+/** Picture-in-frame (F24 image-preview thumb). `dot` draws the sun circle —
+ *  the Deck-5 kanban thumb tiles omit it (F27/F29 tile glyph has no circle). */
+export const ImageGlyph = ({ size = 22, dot = true, ...p }: P & { dot?: boolean }) => (
   <svg width={size} height={size} viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" {...p}>
     <rect x="2.5" y="3.5" width="15" height="13" rx="1.5" />
-    <circle cx="7" cy="8" r="1.5" />
+    {dot && <circle cx="7" cy="8" r="1.5" />}
     <path d="m3.5 14.5 4-4 3 3 2.5-2.5 3.5 3.5" />
+  </svg>
+);
+
+/* ---- Deck-5 glyphs (kanban F27–F30) — paths transcribed from the comps ---- */
+
+/** Chain link (F27/F29 design-link chips). */
+export const LinkGlyph = ({ size = 9, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" {...p}>
+    <path d="M5 7a2.4 2.4 0 0 0 3.4 0l1.8-1.8a2.4 2.4 0 0 0-3.4-3.4l-1 1M7 5a2.4 2.4 0 0 0-3.4 0L1.8 6.8a2.4 2.4 0 0 0 3.4 3.4l1-1" />
+  </svg>
+);
+
+/** Padlock (F28 frozen-round cards). */
+export const LockGlyph = ({ size = 10, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3" {...p}>
+    <rect x="2.5" y="5" width="7" height="5.5" rx="1" />
+    <path d="M4 5V3.6a2 2 0 0 1 4 0V5" />
+  </svg>
+);
+
+/** Six-dot drag grip (F28 hover affordance) — 10×14, fill. */
+export const GripGlyph = ({ size = 10, ...p }: P) => (
+  <svg width={size} height={size * 1.4} viewBox="0 0 10 14" fill="currentColor" {...p}>
+    <circle cx="3" cy="2.5" r="1.1" />
+    <circle cx="7" cy="2.5" r="1.1" />
+    <circle cx="3" cy="7" r="1.1" />
+    <circle cx="7" cy="7" r="1.1" />
+    <circle cx="3" cy="11.5" r="1.1" />
+    <circle cx="7" cy="11.5" r="1.1" />
   </svg>
 );
