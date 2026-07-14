@@ -299,6 +299,7 @@ export function RepoPane({
         const { rows, added, removed } = parseDiff(raw);
         t.body = { kind: "diff", rows };
         t.diffStat = { added, removed };
+        t.changedOnDisk = false;
         rerender();
       })
       .catch((e) => {
@@ -511,7 +512,12 @@ export function RepoPane({
                 .catch((e) => toastError("Couldn't copy", String(e).slice(0, 90)));
             }
           },
-          onReload: () => { active.body = null; rerender(); loadContents(active.path); },
+          onReload: () => {
+            active.body = null;
+            rerender();
+            if (active.mode === "diff") loadDiff(active.path);
+            else loadContents(active.path);
+          },
           onRetry: () => {
             active.body = null;
             rerender();

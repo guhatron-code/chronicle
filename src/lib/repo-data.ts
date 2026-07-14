@@ -199,6 +199,9 @@ export function publishStateFrom(s: {
       label: `${ahead} save${ahead === 1 ? "" : "s"} waiting`,
       behindLabel: behind > 0 ? `Bring down ${behind} newer` : undefined,
     };
+  if (behind > 0)
+    // nothing to publish, but the remote is ahead — never claim "published" (T-011)
+    return { kind: "behind", label: `The online copy is ${behind} save${behind === 1 ? "" : "s"} ahead`, behindLabel: `Bring down ${behind} newer` };
   return { kind: "published" };
 }
 

@@ -311,6 +311,10 @@ export default function App() {
   /* ---- the keyboard map (§5 of the handoff) ---- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // in a text field, ctrl-only chords are native editing keys (^W delete-word,
+      // ^K kill-line) — never app shortcuts. Meta chords stay global. (T-012)
+      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      if (typing && !e.metaKey) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "k") { e.preventDefault(); setPaletteOpen((o) => !o); }
       else if (mod && e.key === "t" && activeRef.current) { e.preventDefault(); newTerminal(); }

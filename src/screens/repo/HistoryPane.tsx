@@ -28,6 +28,7 @@ export type ChangeGroup = { dir: string; open: boolean; files: ChangeFile[] };
 
 export type PublishState =
   | { kind: "waiting"; label: string; behindLabel?: string } // "2 saves waiting to publish" · "Bring down 3 newer"
+  | { kind: "behind"; label: string; behindLabel: string } // up to date locally, remote ahead — pull only
   | { kind: "published" } // "Everything is published"
   | { kind: "no-remote" } // "Not on GitHub yet" → copy the setup command
   | { kind: "never-published"; label: string }; // "Never published · 12 saves waiting"
@@ -241,6 +242,19 @@ function PublishFooter({
           Copies a command — paste it in the terminal. Chronicle doesn't create the online copy
           itself.
         </div>
+      </div>
+    );
+  }
+  if (publish.kind === "behind") {
+    return (
+      <div className="flex items-center gap-2 border-t border-divider px-[18px] py-3.5">
+        <span className="min-w-0 flex-1 text-[12px] text-text-secondary">{sentence(publish.label)}</span>
+        <button
+          onClick={onPull}
+          className="h-[29px] shrink-0 rounded-md border border-border-strong px-[10px] text-[11.5px] font-medium text-text-primary hover:bg-fill-hover"
+        >
+          {sentence(publish.behindLabel)}
+        </button>
       </div>
     );
   }

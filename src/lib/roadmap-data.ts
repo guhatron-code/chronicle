@@ -272,6 +272,10 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
       problem = { kind: "part-of", projectName: ctx.partOf.name, path: ctx.partOf.path, onOpen: () => H.onOpenPartOf(ctx.partOf?.path ?? "") };
     } else if (s.manifest_error) {
       problem = { kind: "cant-read", detail: s.manifest_error, onOpenFile: () => H.onOpenFile("chronicle.json"), onRescan: H.onScan };
+    } else if (ctx.consent === "basic" && !ctx.initRun?.running) {
+      // "Leave it" / "Use the basic view" must actually win (audit T-009) —
+      // an explicit choice beats the misplaced and scan-failed cards
+      problem = { kind: "basic-view", onBuild: H.onBuild };
     } else if (s.misplaced) {
       problem = { kind: "misplaced", foundIn: `${s.misplaced}/`, onMove: () => H.onMoveManifest(s.misplaced ?? ""), onLeave: H.onBasicView };
     } else if (ctx.initRun?.running) {

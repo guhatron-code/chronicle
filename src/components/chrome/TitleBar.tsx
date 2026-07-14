@@ -42,7 +42,11 @@ export function TitleBar({
   onAdd: () => void;
   onHome?: () => void;
 }) {
+  // the active tab must always be visible — swap it over the last slot when it
+  // falls outside the window (T-013)
   const visible = tabs.slice(0, MAX_VISIBLE_TABS);
+  const activeIdx = tabs.findIndex((t) => t.dir === activeDir);
+  if (activeIdx >= MAX_VISIBLE_TABS) visible[MAX_VISIBLE_TABS - 1] = tabs[activeIdx];
   const hidden = tabs.length - visible.length;
 
   return (

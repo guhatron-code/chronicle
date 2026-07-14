@@ -211,7 +211,7 @@ export function PhaseDetail(p: PhaseDetailProps) {
   return (
     <div
       className={cn(
-        "flex h-full flex-col overflow-hidden", // flat, flush with the pane (operator-directed)
+        "flex h-full flex-col overflow-y-auto", // flat, flush with the pane (operator-directed)
         p.className,
       )}
     >
