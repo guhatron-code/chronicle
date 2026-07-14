@@ -187,7 +187,7 @@ export function KanbanPane({
   /* ---- view assembly ---- */
 
   const visible = store.tasks.filter((t) => !t.archived);
-  const queued = visible.filter((t) => t.column === "queued").length;
+  const queued = visible.filter((t) => t.column === "queued" && t.round == null).length;
   const roundN = nextRoundN(store);
 
   let flowProps: ExecuteFlowProps | null = null;

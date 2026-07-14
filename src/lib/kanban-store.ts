@@ -32,7 +32,7 @@ export function kanbanFor(dir: string): KanbanStore {
 }
 
 export function queuedCountFor(dir: string): number {
-  return kanbanFor(dir).tasks.filter((t) => t.column === "queued" && !t.archived).length;
+  return kanbanFor(dir).tasks.filter((t) => t.column === "queued" && !t.archived && t.round == null).length;
 }
 
 /** Reload from disk (project open, poll, after a generate settles). */
@@ -94,10 +94,18 @@ export function nextRoundN(store: KanbanStore): number {
   return store.rounds.reduce((m, r) => Math.max(m, r.n), 0) + 1;
 }
 
-/** A round the roadmap is still executing — new tasks join the NEXT round. */
+/** An OPEN round — generating, or settled with unfinished tasks. New tasks
+ * join the next round while one is open; the strip hides once every task in
+ * the round is completed. */
 export function executingRound(store: KanbanStore): number | null {
-  const r = store.rounds.find((x) => x.state === "generating" || x.state === "ready");
-  return r ? r.n : null;
+  for (const r of store.rounds) {
+    if (r.state === "generating") return r.n;
+    if (r.state === "ready") {
+      const mine = store.tasks.filter((t) => t.round === r.n);
+      if (mine.length === 0 || mine.some((t) => t.column !== "completed")) return r.n;
+    }
+  }
+  return null;
 }
 
 const IMG_MIME: Record<string, string> = {

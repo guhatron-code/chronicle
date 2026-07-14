@@ -1182,7 +1182,7 @@ fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
             "id": format!("FX-{n}"),
             "name": title,
             "desc": format!("{} task{} from the kanban, frozen into an executable plan.", ids.len(), if ids.len() == 1 { "" } else { "s" }),
-            "paste": [ { "path": format!("fixes/phase_{n}_fixes_prompt.md"), "into": "Claude Code", "when": "run the whole round in one session" } ],
+            "paste": [ { "path": format!("fixes/phase_{n}_fixes_prompt.md"), "into": "Claude Code" } ],
             "docs": [ { "path": format!("fixes/phase_{n}_fixes_plan.md") } ],
             "fixRound": n,
             "fixRoundState": { "done": done, "label": if done { "done" } else if in_progress { "being fixed" } else { "ready to run" } }

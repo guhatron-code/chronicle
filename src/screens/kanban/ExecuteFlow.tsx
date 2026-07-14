@@ -58,7 +58,7 @@ export function RoundExecutingNote({ round, className }: { round: number; classN
       )}
     >
       <StateWord kind="running" className="gap-1.5 text-xs">
-        Round {round} is executing
+        Round {round} is underway
       </StateWord>
       <span className="text-[12.5px] text-text-muted">
         — new tasks start round {round + 1}.
