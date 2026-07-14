@@ -988,7 +988,7 @@ async fn kanban_attach(roots: State<'_, OpenRoots>, dir: String, task_id: String
     Ok(rel)
 }
 
-const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written tasks (bugs, issues, ideas — with optional screenshots and design links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every task below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its task id. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the tasks' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly.\n\nDo not change any other file. The tasks (JSON):\n\n";
+const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written tasks (bugs, issues, ideas — with optional screenshots and design links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every task below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its task id. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the tasks' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly. The prompt MUST also instruct the executor: after each item is completed AND verified, edit .chronicle/kanban.json and set that task's \"column\" to \"completed\" (match by task id; touch \"updated_at\" with epoch ms; change nothing else in the file) — this is how the board and the roadmap track the round live.\n\nDo not change any other file. The tasks (JSON):\n\n";
 
 fn fixes_run_key(dir: &str) -> Result<(String, PathBuf), String> {
     let (key, log) = canon_key(dir)?;
@@ -1012,7 +1012,11 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
             let queued = t.get("column").and_then(|c| c.as_str()) == Some("queued");
             let unrounded = t.get("round").is_none() || t.get("round") == Some(&Value::Null);
             if queued && unrounded {
-                if let Some(obj) = t.as_object_mut() { obj.insert("round".into(), json!(round_n)); }
+                if let Some(obj) = t.as_object_mut() {
+                    obj.insert("round".into(), json!(round_n));
+                    // frozen tasks move to the round's lane so the board shows it
+                    obj.insert("column".into(), json!("in_progress"));
+                }
                 picked.push(t.clone());
             }
         }

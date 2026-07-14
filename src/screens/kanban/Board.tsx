@@ -94,7 +94,7 @@ function Lane({
             selected={t.id === selectedId}
             dimmed={t.id === draggingId}
             onOpen={() => onOpenTask?.(t.id)}
-            draggable={column !== "in_progress"}
+            draggable
             onDragStart={(e) => onTaskDragStart?.(t.id, e)}
             onDragEnd={onTaskDragEnd}
           />

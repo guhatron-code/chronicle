@@ -32,7 +32,8 @@ import {
   type RoadmapCtx,
 } from "@/lib/roadmap-data";
 import { spawnTerm } from "@/lib/term-sessions";
-import { initLogPath } from "@/lib/ipc";
+import { fixesCancel, fixesStatus, initLogPath } from "@/lib/ipc";
+import { kanbanFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { toastError, toastSuccess } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
@@ -64,6 +65,9 @@ export function RoadmapPane({
   onPollNow: () => void;
 }) {
   const [initRun, setInitRun] = useState<InitRun | null>(null);
+  const [fixesRun, setFixesRun] = useState<InitRun | null>(null);
+  const [, kbBump] = useState(0);
+  useEffect(() => subscribeKanban(() => kbBump((n) => n + 1)), []);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -126,6 +130,40 @@ export function RoadmapPane({
     return () => clearInterval(id);
   }, [dir, initRun?.running, initRun?.startedAt, onPollNow]);
 
+  /* a kanban round is generating → mirror its session on the roadmap (3s poll) */
+  const generating = kanbanFor(dir).rounds.some((r) => r.state === "generating");
+  useEffect(() => {
+    if (!generating) { setFixesRun(null); return; }
+    const startedAt = Date.now();
+    const tick = async () => {
+      try {
+        const st = (await fixesStatus(dir)) as { running?: boolean; code?: number | null; log_tail?: string };
+        const tail = st.log_tail ?? "";
+        const lines = logLinesFrom(tail);
+        if (st.running !== false) {
+          setFixesRun((prev) => ({
+            running: true,
+            startedAt: prev?.startedAt ?? startedAt,
+            logLines: lines.slice(0, -1),
+            activeLine: lines[lines.length - 1] ?? "Starting the session…",
+            progress: initProgress(tail),
+            code: null,
+            elapsedS: Math.round((Date.now() - (prev?.startedAt ?? startedAt)) / 1000),
+          }));
+        } else {
+          setFixesRun(null);
+          await refreshKanban(dir);
+          if ((st.code ?? 1) === 0) toastSuccess("The fix plan is written", "The round is on your roadmap");
+          onPollNow();
+        }
+      } catch { /* keep the last shown state */ }
+    };
+    const id = setInterval(tick, 3000);
+    void tick();
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dir, generating]);
+
   const startInit = useCallback(() => {
     const startedAt = Date.now();
     setInitRun({ running: true, startedAt, logLines: [], activeLine: "Starting the session…", progress: 0.06, code: null, elapsedS: 0 });
@@ -181,6 +219,7 @@ export function RoadmapPane({
     agent,
     partOf,
     initRun,
+    fixesRun,
     consent: consentLocal ?? state.init_consent,
     copiedPath,
     expandedId,
@@ -207,6 +246,11 @@ export function RoadmapPane({
       onBasicView: () => {
         setConsentLocal("basic");
         setInitConsent(dir, "basic").catch(() => {});
+      },
+      onCancelFixes: () => {
+        fixesCancel(dir)
+          .then(() => { setFixesRun(null); void refreshKanban(dir); toastSuccess("Stopped the session"); })
+          .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)));
       },
       onCancelInit: () => {
         initCancel(dir)

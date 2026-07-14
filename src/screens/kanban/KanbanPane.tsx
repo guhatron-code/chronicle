@@ -117,7 +117,9 @@ export function KanbanPane({
   const moveTask = useCallback((id: string, column: TaskColumn) => {
     mutateKanban(dir, (s) => {
       const t = s.tasks.find((x) => x.id === id);
-      if (t && t.column !== "in_progress") {
+      // out of the round is always allowed (the human overrides the agent);
+      // INTO in_progress stays blocked at the drop site — the round owns it
+      if (t) {
         t.column = column;
         t.updated_at = Date.now();
       }

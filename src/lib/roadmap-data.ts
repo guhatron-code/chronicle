@@ -31,6 +31,8 @@ export interface RoadmapCtx {
   agent: "claude" | "codex";
   partOf: { name: string; path: string } | null;
   initRun: InitRun | null;
+  /** A kanban fixes session writing the plan — same card, different title. */
+  fixesRun: InitRun | null;
   /** the persisted per-project consent — null means never asked */
   consent: "auto" | "manual" | "basic" | null;
   copiedPath: string | null;
@@ -44,6 +46,7 @@ export interface RoadmapCtx {
     onRunMyself: () => void;
     onBasicView: () => void;
     onCancelInit: () => void;
+    onCancelFixes: () => void;
     onViewFullLog: () => void;
     onScan: () => void;
     onRebuild: () => void;
@@ -275,12 +278,24 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     }
   }
 
-  /* -- the building card: any running session (first build OR rebuild) shows F13 -- */
+  /* -- the building card: any running session (first build, rebuild, OR the
+        kanban's fix-plan writer) shows F13 in the top slot -- */
   if (ctx.initRun?.running) {
     const r = ctx.initRun;
     props.building = r.elapsedS > 300
       ? { kind: "still-running", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit, onViewFullLog: H.onViewFullLog }
       : { kind: "running", elapsed: fmtElapsed(r.elapsedS), progress: r.progress, logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit };
+  } else if (ctx.fixesRun?.running) {
+    const r = ctx.fixesRun;
+    props.building = {
+      kind: "running",
+      title: "Writing the fix plan…",
+      elapsed: fmtElapsed(r.elapsedS),
+      progress: r.progress,
+      logLines: r.logLines,
+      activeLine: r.activeLine,
+      onCancel: H.onCancelFixes,
+    };
   }
 
   /* -- warning banner (yields to the building card while a rebuild runs) -- */

@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 export type BuildingCardProps =
   | {
       kind: "running";
+      /** Defaults to "Writing your roadmap…" — the fixes flow retitles it. */
+      title?: string;
       elapsed: string;
       /** 0..1 */
       progress: number;
@@ -38,7 +40,7 @@ export function BuildingCard(p: BuildingCardProps) {
       <div className="flex items-center gap-2.5">
         <Spinner size={15} />
         <span className="text-[14.5px] font-medium text-text-primary">
-          {p.kind === "running" ? "Writing your roadmap…" : "Still running"}
+          {p.kind === "running" ? (p.title ?? "Writing your roadmap…") : "Still running"}
         </span>
         <span className="flex-1" />
         <MonoMeta className="text-[11.5px] text-text-dim">{p.elapsed}</MonoMeta>
