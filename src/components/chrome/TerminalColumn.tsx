@@ -23,7 +23,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ClaudeStar, CodexTile, PlusGlyph, XGlyph } from "./icons";
-import { Eyebrow } from "./atoms";
+import { Eyebrow, Kbd } from "./atoms";
 
 export type TerminalAgent = "claude" | "codex";
 
@@ -227,7 +227,7 @@ export function TerminalColumn({
             onClick={onNewTerminal}
             className="text-xs text-text-dim hover:text-text-secondary"
           >
-            New terminal — <span className="font-mono text-[10.5px]">⌘T</span>
+            New terminal — <Kbd>⌘T</Kbd>
           </button>
         </div>
       ) : (
