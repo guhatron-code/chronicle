@@ -33,7 +33,7 @@ export function BuildingCard(p: BuildingCardProps) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-3 rounded-lg border border-border-hairline bg-surface-card p-4",
+        "flex flex-col gap-3 py-[18px]",
         p.className,
       )}
     >

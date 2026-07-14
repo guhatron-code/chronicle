@@ -67,7 +67,7 @@ export function ProblemCard(p: ProblemCardProps) {
   return (
     <div
       className={cn(
-        "flex flex-1 flex-col gap-2.5 rounded-lg border border-border-hairline bg-surface-card p-[18px]",
+        "flex flex-1 flex-col gap-2.5 py-[18px]",
         p.className,
       )}
     >

@@ -66,7 +66,7 @@ export function ConsentCard({
   return (
     <div
       className={cn(
-        "flex flex-col gap-3.5 rounded-lg border border-border-hairline bg-surface-card p-[22px]",
+        "flex flex-col gap-3.5 py-[18px]",
         className,
       )}
     >
