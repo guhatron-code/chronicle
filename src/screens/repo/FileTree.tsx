@@ -91,7 +91,7 @@ function Row({
     return (
       <div className="flex h-7 items-center gap-1.5 px-1.5 text-text-dim">
         <Spinner size={10} className="shrink-0 border-[1.3px]" />
-        <span className="text-xs text-state-neutral">{sentence(node.label)}</span>
+        <span className="min-w-0 truncate text-xs text-state-neutral">{sentence(node.label)}</span>
       </div>
     );
   }
@@ -100,7 +100,7 @@ function Row({
     return (
       <div className={cn("flex h-7 items-center gap-1.5 px-1.5", depth === 0 && "ml-[13px]")}>
         <ErrorGlyph size={11} strokeWidth={1.4} className="shrink-0 text-state-error" />
-        <span className="text-[11.5px] text-state-error">{sentence(node.message)}</span>
+        <span className="min-w-0 flex-1 truncate text-[11.5px] text-state-error">{sentence(node.message)}</span>
         <button
           onClick={() => onRetry?.(node.id)}
           className="h-5 shrink-0 rounded-[5px] border border-border-strong px-[7px] text-[10.5px] text-text-secondary hover:bg-fill-hover"
@@ -131,7 +131,10 @@ function Row({
           strokeWidth={1.2}
           className={cn("shrink-0", deleted && !selected ? "text-current" : "text-text-subtle")}
         />
-        <span className={cn(selected && "font-medium", deleted && "line-through")}>
+        <span
+          className={cn("min-w-0 truncate", selected && "font-medium", deleted && "line-through")}
+          title={node.name}
+        >
           {node.name}
         </span>
         <span className="flex-1" />
@@ -170,12 +173,15 @@ function Row({
           strokeWidth={1.3}
           className={cn("shrink-0", node.empty ? "text-current" : "text-text-subtle")}
         />
-        <span className={cn(root && !node.empty && !node.workspace && "font-medium")}>
+        <span
+          className={cn("min-w-0 truncate", root && !node.empty && !node.workspace && "font-medium")}
+          title={node.name}
+        >
           {node.name}
-          {node.workspace && (
-            <span className="pl-1 text-[10.5px] text-text-dimmer">workspace</span>
-          )}
         </span>
+        {node.workspace && (
+          <span className="shrink-0 text-[10.5px] text-text-dimmer">workspace</span>
+        )}
         {node.empty && <span className="ml-1 text-[11px] italic text-text-dimmer">Empty</span>}
         <span className="flex-1" />
         {node.hasChanges && (
