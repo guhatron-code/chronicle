@@ -129,6 +129,7 @@ export function Composer(p: ComposerProps) {
           </label>
           <Input
             id="task-title"
+            autoFocus
             value={p.title}
             onChange={(e) => p.onTitleChange?.(e.target.value)}
             className={cn("h-9 px-3 text-[13px] md:text-[13px]", fieldClass)}

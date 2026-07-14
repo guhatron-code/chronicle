@@ -103,8 +103,9 @@ export function executingRound(store: KanbanStore): number | null {
   for (const r of [...store.rounds].reverse()) {
     if (r.state === "generating") return r.n;
     if (r.state === "ready") {
-      const mine = store.tasks.filter((t) => t.round === r.n);
-      if (mine.length === 0 || mine.some((t) => t.column !== "completed")) return r.n;
+      const mine = store.tasks.filter((t) => t.round === r.n && !t.archived);
+      // a settled round with no (visible) members is closed, not stuck open
+      if (mine.length > 0 && mine.some((t) => t.column !== "completed")) return r.n;
     }
   }
   return null;

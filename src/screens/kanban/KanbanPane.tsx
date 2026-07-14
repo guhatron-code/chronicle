@@ -64,7 +64,14 @@ export function KanbanPane({
   useEffect(() => { void refreshKanban(dir); }, [dir]);
 
   const store = kanbanFor(dir);
-  const [draft, setDraft] = useState<{ mode: "create" | "edit"; task: KanbanTask; linkDraft: string } | null>(null);
+  const [draft, setDraft] = useState<{
+    mode: "create" | "edit";
+    task: KanbanTask;
+    linkDraft: string;
+    /** attachments added / marked-removed this session — settled on save/cancel */
+    added?: string[];
+    removed?: string[];
+  } | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropColumn, setDropColumn] = useState<TaskColumn | null>(null);
   const [flow, setFlow] = useState<Flow>({ kind: "idle" });
@@ -87,6 +94,7 @@ export function KanbanPane({
 
   const saveDraft = useCallback(() => {
     if (!draft) return;
+    for (const img of draft.removed ?? []) void kanbanDetach(dir, img).catch(() => {}); // save commits the removals
     const t = { ...draft.task, title: draft.task.title.trim() || "Untitled", updated_at: Date.now() };
     mutateKanban(dir, (s) => {
       if (draft.mode === "create") {
@@ -104,9 +112,9 @@ export function KanbanPane({
      remove them (T-040) */
   const closeDraft = useCallback(() => {
     setDraft((d) => {
-      if (d?.mode === "create") {
-        for (const img of d.task.images ?? []) void kanbanDetach(dir, img).catch(() => {});
-      }
+      // cancel: newly-added files are orphans either mode; marked-removed
+      // files were NOT deleted yet, so the task keeps its images intact
+      for (const img of d?.added ?? []) void kanbanDetach(dir, img).catch(() => {});
       return null;
     });
   }, [dir]);
@@ -119,7 +127,11 @@ export function KanbanPane({
       let bin = "";
       for (const byte of buf) bin += String.fromCharCode(byte);
       const path = await kanbanAttach(dir, draft.task.id, f.name, btoa(bin));
-      setDraft((d) => d && { ...d, task: { ...d.task, images: [...(d.task.images ?? []), path] } });
+      setDraft((d) => d && {
+        ...d,
+        added: [...(d.added ?? []), path],
+        task: { ...d.task, images: [...(d.task.images ?? []), path] },
+      });
     } catch (e) {
       fail("Couldn't attach the image")(e);
     }
@@ -159,12 +171,13 @@ export function KanbanPane({
     const startedAt = flow.startedAt;
     const tick = async () => {
       try {
-        const st = (await fixesStatus(dir)) as { running?: boolean; code?: number | null; log_tail?: string };
+        const st = (await fixesStatus(dir)) as { running?: boolean; code?: number | null; log_tail?: string; started_at?: number };
         const tail = st.log_tail ?? "";
         const lines = logLinesFrom(tail);
         if (st.running !== false) {
           setFlow({
-            kind: "generating", startedAt,
+            kind: "generating",
+            startedAt: st.started_at || startedAt,
             logLines: lines.slice(0, -1),
             activeLine: lines[lines.length - 1] ?? "Starting the session…",
             progress: initProgress(tail),
@@ -178,6 +191,10 @@ export function KanbanPane({
           setFlow({ kind: "done", round: latest });
           toastSuccess("The fix plan is written", "The round is on your roadmap");
         } else {
+          // refresh FIRST: the resume effect must not see a stale generating
+          // round and re-open the flow (that looped a toast per tick)
+          await refreshKanban(dir);
+          failedRound.current = [...kanbanFor(dir).rounds].reverse().find((r) => r.state === "generating")?.n ?? null;
           setFlow({ kind: "idle" });
           toastError("The session didn't finish", `Exited with code ${st.code ?? "?"} — your tasks are untouched`);
         }
@@ -191,10 +208,27 @@ export function KanbanPane({
   /* resume: a round generating in the store while the flow is idle means we
      lost the overlay (pane switch, reload) — pick it back up (T-006) */
   const genRoundOpen = store.rounds.some((r) => r.state === "generating");
+  const prevGenOpen = useRef(false);
+  /** a round that just failed client-side — never auto-resume it, even if the
+   *  backend's settle is delayed (defense against a toast storm) */
+  const failedRound = useRef<number | null>(null);
   useEffect(() => {
-    if (genRoundOpen && flow.kind === "idle") {
-      setFlow({ kind: "generating", startedAt: Date.now(), logLines: [], activeLine: "Starting the session…", progress: 0.06 });
+    const openGen = [...store.rounds].reverse().find((r) => r.state === "generating")?.n ?? null;
+    if (openGen === null || openGen !== failedRound.current) {
+      if (openGen === null) failedRound.current = null;
     }
+    if (genRoundOpen && flow.kind === "idle" && openGen !== failedRound.current) {
+      setFlow({ kind: "generating", startedAt: Date.now(), logLines: [], activeLine: "Starting the session…", progress: 0.06 });
+    } else if (!genRoundOpen && prevGenOpen.current && flow.kind === "idle") {
+      // it settled while nobody watched — still land on the done card
+      const latest = [...store.rounds].reverse().find((r) => r.state === "ready");
+      if (latest) {
+        setFlow({ kind: "done", round: latest.n });
+        toastSuccess("The fix plan is written", "The round is on your roadmap");
+      }
+    }
+    prevGenOpen.current = genRoundOpen;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [genRoundOpen, flow.kind]);
 
   /* ---- ⌘N while the pane is up ---- */
@@ -309,7 +343,9 @@ export function KanbanPane({
           role="dialog"
           aria-modal="true"
           aria-label={draft.mode === "create" ? "New task" : `Edit ${draft.task.id}`}
-          className="absolute inset-0 z-40 flex items-center justify-center bg-black/45 p-6"
+          tabIndex={-1}
+          ref={(el) => { if (el && !el.contains(document.activeElement)) el.focus(); }}
+          className="absolute inset-0 z-40 flex items-center justify-center bg-black/45 p-6 outline-none"
           onMouseDown={(e) => { if (e.target === e.currentTarget) closeDraft(); }}
           onKeyDown={(e) => { if (e.key === "Escape") closeDraft(); }}
         >
@@ -329,9 +365,13 @@ export function KanbanPane({
             onAttach={attach}
             onRemoveImage={(i) => setDraft((d) => {
               if (!d) return d;
-              const removed = (d.task.images ?? [])[i];
-              if (removed) void kanbanDetach(dir, removed).catch(() => {});
-              return { ...d, task: { ...d.task, images: (d.task.images ?? []).filter((_, j) => j !== i) } };
+              const target = (d.task.images ?? [])[i];
+              // deletion happens on SAVE — cancel must be able to restore
+              return {
+                ...d,
+                removed: target ? [...(d.removed ?? []), target] : d.removed,
+                task: { ...d.task, images: (d.task.images ?? []).filter((_, j) => j !== i) },
+              };
             })}
             onLinkDraftChange={(v) => setDraft((d) => d && { ...d, linkDraft: v })}
             onAddLink={() => setDraft((d) => {
@@ -376,7 +416,9 @@ export function KanbanPane({
           role="dialog"
           aria-modal="true"
           aria-label="Ready to execute"
-          className="absolute inset-0 z-40 flex items-center justify-center bg-black/45 p-6"
+          tabIndex={-1}
+          ref={(el) => { if (el && !el.contains(document.activeElement)) el.focus(); }}
+          className="absolute inset-0 z-40 flex items-center justify-center bg-black/45 p-6 outline-none"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget && flow.kind !== "generating") setFlow({ kind: "idle" });
           }}

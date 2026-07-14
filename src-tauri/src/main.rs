@@ -1033,7 +1033,8 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
         for t in tasks.iter_mut() {
             let queued = t.get("column").and_then(|c| c.as_str()) == Some("queued");
             let unrounded = t.get("round").is_none() || t.get("round") == Some(&Value::Null);
-            if queued && unrounded {
+            let archived = t.get("archived").and_then(|a| a.as_bool()).unwrap_or(false);
+            if queued && unrounded && !archived {
                 if let Some(obj) = t.as_object_mut() {
                     obj.insert("round".into(), json!(round_n));
                     // frozen tasks move to the round's lane so the board shows it
@@ -1210,6 +1211,7 @@ fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
             .unwrap_or_default();
         let mine: Vec<&Value> = tasks.iter()
             .filter(|t| t.get("id").and_then(|i| i.as_str()).map(|i| ids.contains(&i.to_string())).unwrap_or(false))
+            .filter(|t| !t.get("archived").and_then(|a| a.as_bool()).unwrap_or(false))
             .collect();
         let done = !mine.is_empty()
             && mine.iter().all(|t| t.get("column").and_then(|c| c.as_str()) == Some("completed"));

@@ -168,7 +168,7 @@ export function Board({
         </div>
       )}
 
-      {/* four open lanes — a drop well appears only while dragging */}
+      {/* five open lanes — a drop well appears only while dragging */}
       <div className="grid min-h-0 min-w-[960px] flex-1 grid-cols-5 gap-[22px] overflow-x-auto px-6 py-4">
         {COLUMN_ORDER.map((column) => (
           <Lane

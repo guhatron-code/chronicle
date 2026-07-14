@@ -307,7 +307,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
   } else if (ctx.fixesRun?.running) {
     const r = ctx.fixesRun;
     props.building = r.elapsedS > 300
-      ? { kind: "still-running", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelFixes }
+      ? { kind: "still-running", note: "Big rounds can take a while. The session is alive and still writing.", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelFixes }
       : {
           kind: "running",
           title: "Writing the fix plan…",

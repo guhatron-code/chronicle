@@ -21,6 +21,8 @@ export type BuildingCardProps =
     }
   | {
       kind: "still-running";
+      /** Defaults to the roadmap line — the fixes mirror passes its own. */
+      note?: string;
       elapsed: string;
       logLines: string[];
       activeLine: string;
@@ -55,7 +57,7 @@ export function BuildingCard(p: BuildingCardProps) {
         </div>
       ) : (
         <div className="text-[12.5px] leading-[1.55] text-text-muted">
-          Long roadmaps can take a while on big folders. The session is alive and still writing.
+          {p.note ?? "Long roadmaps can take a while on big folders. The session is alive and still writing."}
         </div>
       )}
 
