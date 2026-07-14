@@ -71,8 +71,8 @@ export function DocumentsPanel({ chips, className }: DocumentsPanelProps) {
         <span className="text-[11.5px] text-text-dim">click a file to copy it</span>
       </div>
       <div className="flex flex-wrap gap-2">
-        {chips.map((chip) => (
-          <DocChip key={chip.name} {...chip} />
+        {chips.map((chip, i) => (
+          <DocChip key={`${chip.name}-${i}`} {...chip} />
         ))}
       </div>
     </div>

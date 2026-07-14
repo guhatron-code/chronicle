@@ -51,6 +51,7 @@ export interface RoadmapCtx {
     onCancelInit: () => void;
     onCancelFixes: () => void;
     onViewFullLog: () => void;
+    onViewFixesLog: () => void;
     onScan: () => void;
     onRebuild: () => void;
     onDismissWarning: () => void;
@@ -307,7 +308,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
   } else if (ctx.fixesRun?.running) {
     const r = ctx.fixesRun;
     props.building = r.elapsedS > 300
-      ? { kind: "still-running", note: "Big rounds can take a while. The session is alive and still writing.", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelFixes }
+      ? { kind: "still-running", note: "Big rounds can take a while. The session is alive and still writing.", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelFixes, onViewFullLog: H.onViewFixesLog }
       : {
           kind: "running",
           title: "Writing the fix plan…",
@@ -320,7 +321,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
   }
 
   /* -- warning banner (yields to the building card while a rebuild runs) -- */
-  if (s.manifest_present && s.manifest_warnings.length > 0 && !ctx.warningDismissed && !ctx.initRun?.running) {
+  if (s.manifest_present && s.manifest_warnings.length > 0 && !ctx.warningDismissed && !ctx.initRun?.running && !ctx.fixesRun?.running) {
     props.warning = { count: s.manifest_warnings.length, onRebuild: H.onRebuild, onDismiss: H.onDismissWarning };
   }
 

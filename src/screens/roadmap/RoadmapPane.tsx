@@ -33,7 +33,7 @@ import {
 } from "@/lib/roadmap-data";
 import { setActiveTermFor, spawnTerm, termsFor } from "@/lib/term-sessions";
 import { openFileInRepo } from "@/screens/repo/RepoPane";
-import { fixesCancel, fixesStatus, initLogPath } from "@/lib/ipc";
+import { fixesCancel, fixesLogPath, fixesStatus, initLogPath } from "@/lib/ipc";
 import { kanbanFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { setInitRunning } from "@/lib/run-flags";
 import { toastError, toastSuccess } from "@/overlays/toasts";
@@ -83,7 +83,8 @@ export function RoadmapPane({
   const [justDoneId, setJustDoneId] = useState<string | null>(null);
   const prevDone = useRef<Set<string> | null>(null);
   useEffect(() => {
-    const done = new Set((state?.statuses ?? []).filter((x) => x.state === "done").map((x) => x.id));
+    if (!state) return; // no baseline until real statuses exist (else first paint fakes a flip)
+    const done = new Set(state.statuses.filter((x) => x.state === "done").map((x) => x.id));
     if (prevDone.current) {
       const fresh = [...done].find((id) => !prevDone.current!.has(id));
       if (fresh) {
@@ -115,6 +116,8 @@ export function RoadmapPane({
       setDetailId(null);
       setWarningDismissed(false);
       setConsentLocal(null);
+      setJustDoneId(null);
+      prevDone.current = null; // a different project needs a fresh baseline
     }
     const d = dir;
     initStatus(d)
@@ -332,6 +335,18 @@ export function RoadmapPane({
         initCancel(dir)
           .then(() => { setInitRun(null); toastSuccess("Stopped the session"); })
           .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)));
+      },
+      onViewFixesLog: () => {
+        const existing = termsFor(dir).find((t) => t.title === "Fix plan log" && !t.dead);
+        if (existing) {
+          setActiveTermFor(dir, existing.id);
+          return;
+        }
+        fixesLogPath(dir)
+          .then((path) =>
+            spawnTerm(dir, { title: "Fix plan log", autoType: `tail -n 200 -f '${path.replace(/'/g, "'\\''")}'` }),
+          )
+          .catch((e) => toastError("Couldn't open the log", String(e).slice(0, 90)));
       },
       onViewFullLog: () => {
         const existing = termsFor(dir).find((t) => t.title === "Roadmap log" && !t.dead);

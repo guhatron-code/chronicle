@@ -225,9 +225,11 @@ export function PhaseDetail(p: PhaseDetailProps) {
           Roadmap
         </button>
         <span className="text-text-dimmer">/</span>
-        <IdChip className="text-[11px]">{p.phaseId}</IdChip>
-        <span className="text-[15px] font-semibold text-text-primary">{p.phaseName}</span>
-        <StateWord kind="neutral" dotSize={5} className="text-xs">
+        <IdChip className="shrink-0 whitespace-nowrap text-[11px]">{p.phaseId}</IdChip>
+        <span className="min-w-0 truncate text-[15px] font-semibold text-text-primary" title={p.phaseName}>
+          {p.phaseName}
+        </span>
+        <StateWord kind="neutral" dotSize={5} className="shrink-0 whitespace-nowrap text-xs">
           {p.statusWord}
         </StateWord>
         <span className="flex-1" />

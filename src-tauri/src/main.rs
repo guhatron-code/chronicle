@@ -1006,6 +1006,14 @@ fn fixes_run_key(dir: &str) -> Result<(String, PathBuf), String> {
 
 /// "Ready to execute": freeze the queued, un-rounded tasks into round N and start the
 /// background session that writes fixes/phase_N_fixes_plan.md + _prompt.md.
+/// Where the fixes session writes its log — the >5min card's "View full log".
+#[tauri::command]
+fn fixes_log_path(roots: State<OpenRoots>, dir: String) -> Result<String, String> {
+    let _ = project_for(&roots, &dir)?;
+    let (_, log) = fixes_run_key(&dir)?;
+    Ok(log.to_string_lossy().to_string())
+}
+
 /// Delete one attachment file — only ever inside .chronicle/attachments, so a
 /// removed thumb / deleted task / cancelled composer leaves no orphans.
 #[tauri::command]
@@ -1723,7 +1731,8 @@ fn main() {
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
             init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
             kanban_get, kanban_save, kanban_attach,
-            kanban_detach, fixes_generate, fixes_status, fixes_cancel,
+            kanban_detach,
+            fixes_log_path, fixes_generate, fixes_status, fixes_cancel,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64,
             list_dir, read_file, copy_file, copy_text,

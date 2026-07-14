@@ -250,6 +250,9 @@ export const fixesGenerate = (dir: string, agent: string | null) =>
   invoke<number>("fixes_generate", { dir, agent });
 export const fixesStatus = (dir: string) => invoke<InitStatusData>("fixes_status", { dir });
 export const fixesCancel = (dir: string) => invoke<void>("fixes_cancel", { dir });
+/** The fixes session's log file — for the View-full-log terminal tab. */
+export const fixesLogPath = (dir: string) =>
+  invoke<string>("fixes_log_path", { dir });
 
 /* ---------- PTY ---------- */
 export const ptySpawn = (dir: string, cols: number, rows: number) =>
