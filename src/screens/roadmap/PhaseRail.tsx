@@ -50,7 +50,7 @@ function Dot({ phase }: { phase: RailPhase }) {
     // the now dot: 12px neutral, pulsing, 3px fill-hover ring (frozen under reduced motion)
     return (
       <span
-        className="mt-4 size-3 rounded-full bg-state-neutral"
+        className="size-3 rounded-full bg-state-neutral"
         style={{
           animation: "wv-pulse 1.6s ease-in-out infinite",
           boxShadow: "0 0 0 3px var(--fill-hover)",
@@ -59,18 +59,18 @@ function Dot({ phase }: { phase: RailPhase }) {
     );
   }
   if (phase.kind === "phase" && phase.status === "done") {
-    return <span className="mt-4 size-2.5 rounded-full bg-state-success" />;
+    return <span className="size-2.5 rounded-full bg-state-success" />;
   }
   if (phase.kind === "phase" && phase.status === "just-done") {
     // the one quiet celebrate moment — ring fades over 3s, frozen under reduced motion
     return (
       <span
-        className="mt-4 size-2.5 rounded-full bg-state-success"
+        className="size-2.5 rounded-full bg-state-success"
         style={{ boxShadow: "0 0 0 3px var(--fill-hover)" }}
       />
     );
   }
-  return <span className="mt-4 size-2.5 rounded-full border-[1.4px] border-border-strong" />;
+  return <span className="size-2.5 rounded-full border-[1.4px] border-border-strong" />;
 }
 
 function PhaseCard({ phase }: { phase: Extract<RailPhase, { kind: "phase" }> }) {
@@ -232,8 +232,6 @@ function FxCard({ phase }: { phase: Extract<RailPhase, { kind: "fx" }> }) {
 }
 
 export function PhaseRail({ stages, className }: PhaseRailProps) {
-  const totalPhases = stages.reduce((n, s) => n + s.phases.length, 0);
-  let seen = 0;
   return (
     <div
       className={cn(
@@ -250,16 +248,17 @@ export function PhaseRail({ stages, className }: PhaseRailProps) {
             </div>
             <span className="text-xs text-text-dim">{stage.sub}</span>
           </div>
-          {stage.phases.map((phase) => {
-            seen += 1;
-            const last = seen === totalPhases;
+          {stage.phases.map((phase, pi) => {
+            const lastInStage = pi === stage.phases.length - 1;
             return (
               <div key={phase.id} className="flex gap-3.5">
+                {/* the gutter — a continuous line dot-to-dot within the stage */}
                 <div className="flex w-4 shrink-0 flex-col items-center">
+                  <span className={cn("h-4 w-px shrink-0", pi > 0 && "bg-divider")} />
                   <Dot phase={phase} />
-                  {!last && <span className="w-px flex-1 bg-divider" />}
+                  {!lastInStage && <span className="w-px flex-1 bg-divider" />}
                 </div>
-                <div className={cn("min-w-0 flex-1", !last && "pb-2.5")}>
+                <div className={cn("min-w-0 flex-1", !lastInStage && "pb-2.5")}>
                   {phase.kind === "phase" && <PhaseCard phase={phase} />}
                   {phase.kind === "window" && <WindowCard phase={phase} />}
                   {phase.kind === "fx" && <FxCard phase={phase} />}
