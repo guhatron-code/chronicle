@@ -223,9 +223,21 @@ export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
   }
   for (const a of s.custom_actions) {
     const text = (a.text ?? "").replace(/<[^>]+>/g, "");
+    // the row wants a short title + body: split on an explicit separator, else
+    // on the first sentence when the text runs long (manifest text is arbitrary)
     const sep = text.match(/ — | · /);
-    const title = sep ? text.slice(0, sep.index) : text;
-    const sub = sep ? text.slice((sep.index ?? 0) + sep[0].length) : "";
+    let title = sep ? text.slice(0, sep.index) : text;
+    let sub = sep ? text.slice((sep.index ?? 0) + sep[0].length) : "";
+    if (!sep && text.length > 70) {
+      const dot = text.indexOf(". ");
+      if (dot > 0 && dot < 90) {
+        title = text.slice(0, dot);
+        sub = text.slice(dot + 2);
+      } else {
+        title = `${text.slice(0, 70).trimEnd()}…`;
+        sub = text;
+      }
+    }
     const cmd = a.cmd ?? "";
     // Operator override of the F19 copy-only contract: roadmap-authored commands RUN
     // in the background — behind the F6 confirm showing the full command (that confirm

@@ -21,7 +21,7 @@ export const TinyBadge = ({ className, children }: { className?: string; childre
 
 /** Dashed provenance badge (F19 "from the roadmap · review before running"). */
 export const DashedBadge = ({ children }: { children: ReactNode }) => (
-  <span className="rounded-[5px] border border-dashed border-border-strong px-1.5 text-[10.5px] leading-4 text-text-subtle">
+  <span className="shrink-0 whitespace-nowrap rounded-[5px] border border-dashed border-border-strong px-1.5 text-[10.5px] leading-4 text-text-subtle">
     {children}
   </span>
 );

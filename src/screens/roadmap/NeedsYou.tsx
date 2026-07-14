@@ -53,17 +53,19 @@ function Row({ row, last }: { row: NeedsYouRow; last: boolean }) {
         {row.icon}
       </span>
       <div className="flex flex-1 flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <span className="text-[13.5px] font-medium text-text-primary">{row.title}</span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="min-w-0 text-[13.5px] font-medium text-text-primary">{row.title}</span>
           {hi && <TinyBadge>Next up</TinyBadge>}
           {(row.fromRoadmap || row.kind === "copy-only") && (
             <DashedBadge>From the roadmap · review before running</DashedBadge>
           )}
         </div>
-        <div className="text-[12.5px] text-text-muted">{row.sub}</div>
-        <div className="font-mono text-[11.5px] text-text-dim [overflow-wrap:anywhere]">
-          {row.command}
-        </div>
+        {row.sub !== "" && <div className="text-[12.5px] text-text-muted">{row.sub}</div>}
+        {row.command !== "" && (
+          <div className="font-mono text-[11.5px] text-text-dim [overflow-wrap:anywhere]">
+            {row.command}
+          </div>
+        )}
       </div>
       {row.kind === "one-click" ? (
         row.primary ? (
@@ -81,7 +83,7 @@ function Row({ row, last }: { row: NeedsYouRow; last: boolean }) {
             {row.actionLabel}
           </BtnSecondary>
         )
-      ) : (
+      ) : row.command !== "" ? (
         <BtnSecondary
           className="h-[31px] shrink-0 gap-1.5 self-center px-3 text-[12.5px]"
           onClick={row.onCopy}
@@ -89,7 +91,7 @@ function Row({ row, last }: { row: NeedsYouRow; last: boolean }) {
           <CopyGlyph size={12} />
           Copy the command
         </BtnSecondary>
-      )}
+      ) : null}
     </div>
   );
 }
