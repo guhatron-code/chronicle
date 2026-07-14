@@ -123,8 +123,8 @@ export function HistoryPanel(p: HistoryPanelProps) {
       </div>
 
       <div className="flex flex-col gap-3 pt-3">
-        {/* pipeline */}
-        <div className="flex items-center">
+        {/* pipeline — a quiet filled container, no outline */}
+        <div className="flex items-center rounded-lg bg-surface-card px-3 py-3">
           {p.nodes.map((node, i) => (
             <div key={node.label} className="contents">
               {i > 0 && <PipelineArrow active={p.arrowsActive[(i - 1) as 0 | 1]} />}

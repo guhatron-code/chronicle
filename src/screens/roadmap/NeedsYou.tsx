@@ -119,9 +119,11 @@ export function NeedsYou(p: NeedsYouProps) {
       <div className="pb-[9px] text-[15px] font-semibold text-text-primary">
         What needs you
       </div>
-      {p.rows.map((row, i) => (
-        <Row key={row.id} row={row} last={i === p.rows.length - 1} />
-      ))}
+      <div className="overflow-hidden rounded-lg">
+        {p.rows.map((row, i) => (
+          <Row key={row.id} row={row} last={i === p.rows.length - 1} />
+        ))}
+      </div>
     </div>
   );
 }
