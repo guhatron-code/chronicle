@@ -162,10 +162,13 @@ export function saveFiles(status: GitStatus): SaveFile[] {
 export function changeGroups(status: GitStatus, closed: Set<string>): ChangeGroup[] {
   const byDir = new Map<string, ChangeGroup["files"]>();
   for (const f of status.unstaged) {
-    const { name, dir } = splitName(f.path);
+    // git reports an untracked DIRECTORY as "dir/" — show it as one folder row
+    // (name keeps the trailing slash), grouped under its parent
+    const isDir = f.path.endsWith("/");
+    const { name, dir } = splitName(f.path.replace(/\/+$/, ""));
     const key = dir || "."; // repo-root files group under "."
     if (!byDir.has(key)) byDir.set(key, []);
-    byDir.get(key)!.push({ name, git: letterFor(f.code), path: f.path });
+    byDir.get(key)!.push({ name: isDir ? `${name}/` : name, git: letterFor(f.code), path: f.path });
   }
   return [...byDir.entries()]
     .sort((a, b) => a[0].localeCompare(b[0]))

@@ -361,32 +361,6 @@ export function HistoryPane(p: HistoryPaneProps) {
             </div>
           )}
 
-          {/* save box */}
-          <div className="flex flex-col gap-[9px] border-b border-divider px-[18px] py-3.5">
-            <Input
-              value={s.message}
-              placeholder="What changed?"
-              aria-label="Save message"
-              onChange={(e) => p.onMessageChange?.(e.target.value)}
-              className={cn(
-                "h-9 rounded-md border-border-field bg-surface-input px-3 text-[12.5px] text-text-primary shadow-none placeholder:text-text-dimmer dark:bg-surface-input md:text-[12.5px]",
-                "focus-visible:border-border-field-focus focus-visible:ring-0 focus-visible:[box-shadow:var(--focus-ring)]!",
-              )}
-            />
-            <BtnPrimary
-              onClick={p.onSave}
-              disabled={s.message.trim() === "" || nothingToSave}
-              className="h-[34px] w-full text-[12.5px]"
-            >
-              Save to history
-            </BtnPrimary>
-            {nothingToSave && (
-              <div className="text-center text-[11.5px] text-text-subtle">
-                Nothing to save · everything is recorded.
-              </div>
-            )}
-          </div>
-
           {/* ready to save */}
           {s.readyToSave.length > 0 && (
             <div className="flex flex-col gap-1.5 border-b border-divider px-[18px] py-3">
@@ -477,6 +451,32 @@ export function HistoryPane(p: HistoryPaneProps) {
               ))}
             </div>
           )}
+
+          {/* save box */}
+          <div className="flex flex-col gap-[9px] border-b border-divider px-[18px] py-3.5">
+            <Input
+              value={s.message}
+              placeholder="What changed?"
+              aria-label="Save message"
+              onChange={(e) => p.onMessageChange?.(e.target.value)}
+              className={cn(
+                "h-9 rounded-md border-border-field bg-surface-input px-3 text-[12.5px] text-text-primary shadow-none placeholder:text-text-dimmer dark:bg-surface-input md:text-[12.5px]",
+                "focus-visible:border-border-field-focus focus-visible:ring-0 focus-visible:[box-shadow:var(--focus-ring)]!",
+              )}
+            />
+            <BtnPrimary
+              onClick={p.onSave}
+              disabled={s.message.trim() === "" || nothingToSave}
+              className="h-[34px] w-full text-[12.5px]"
+            >
+              Save to history
+            </BtnPrimary>
+            {nothingToSave && (
+              <div className="text-center text-[11.5px] text-text-subtle">
+                Nothing to save · everything is recorded.
+              </div>
+            )}
+          </div>
 
           <span className="flex-1" />
           <PublishFooter
