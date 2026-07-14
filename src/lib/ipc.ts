@@ -149,6 +149,9 @@ export const initStatus = (dir: string) =>
   invoke<InitStatusData>("init_status", { dir });
 /** Stop a running roadmap session (SIGTERM → grace → SIGKILL, always reaped). */
 export const initCancel = (dir: string) => invoke<void>("init_cancel", { dir });
+/** The init/rebuild session's log file — for the View-full-log terminal tab. */
+export const initLogPath = (dir: string) =>
+  invoke<string>("init_log_path", { dir });
 /** Persist the per-project consent choice; surfaces as `init_consent` in get_state. */
 export const setInitConsent = (dir: string, choice: "auto" | "manual" | "basic") =>
   invoke<void>("set_init_consent", { dir, choice });

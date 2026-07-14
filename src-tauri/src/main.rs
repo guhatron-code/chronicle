@@ -1562,6 +1562,15 @@ fn pty_spawn(app: tauri::AppHandle, roots: State<OpenRoots>, pty: State<PtyState
     Ok(id)
 }
 
+/// Where the init/rebuild session writes its log — lets the UI open it as a
+/// live terminal tab ("View full log"). Jailed to opened projects.
+#[tauri::command]
+fn init_log_path(roots: State<OpenRoots>, dir: String) -> Result<String, String> {
+    let _ = project_for(&roots, &dir)?;
+    let (_, log) = canon_key(&dir)?;
+    Ok(log.to_string_lossy().to_string())
+}
+
 #[tauri::command]
 fn pty_write(pty: State<PtyState>, id: u32, data: String) -> Result<(), String> {
     // clone the writer handle under the map lock, WRITE outside it (lock hygiene:
@@ -1667,7 +1676,8 @@ fn main() {
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64,
             list_dir, read_file, copy_file, copy_text,
-            pty_spawn, pty_write, pty_resize, pty_kill
+            pty_spawn, init_log_path,
+            pty_write, pty_resize, pty_kill
         ])
         .run(tauri::generate_context!())
         .expect("error while running Chronicle");
