@@ -209,7 +209,7 @@ export const copyFile = (dir: string, path: string) =>
 export const copyText = (text: string) => invoke<void>("copy_text", { text });
 
 /* ---------- kanban (R4) ---------- */
-export type KanbanColumn = "queued" | "in_progress" | "blocked" | "completed";
+export type KanbanColumn = "later" | "queued" | "in_progress" | "blocked" | "completed";
 export interface KanbanTask {
   id: string; // T-001, sequential per project
   title: string;

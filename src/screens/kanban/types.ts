@@ -4,7 +4,7 @@
  * in_progress and freezes them (read-only until the round lands).
  */
 
-export type TaskColumn = "queued" | "in_progress" | "blocked" | "completed";
+export type TaskColumn = "later" | "queued" | "in_progress" | "blocked" | "completed";
 
 /** The R4 task shape — `images`/`links` are plain strings (paths / URLs / labels). */
 export type Task = {
@@ -23,6 +23,7 @@ export type BoardTask = Task & { ago?: string };
 
 /** Lane order and header labels (F27). */
 export const COLUMN_ORDER: readonly TaskColumn[] = [
+  "later",
   "queued",
   "in_progress",
   "blocked",
@@ -30,6 +31,7 @@ export const COLUMN_ORDER: readonly TaskColumn[] = [
 ] as const;
 
 export const COLUMN_LABELS: Record<TaskColumn, string> = {
+  later: "Later",
   queued: "Queued",
   in_progress: "In progress",
   blocked: "Blocked",

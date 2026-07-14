@@ -74,8 +74,9 @@ function ToolBtn({
   );
 }
 
-const SEGMENTS: readonly TaskColumn[] = ["queued", "in_progress", "blocked"] as const;
+const SEGMENTS: readonly TaskColumn[] = ["later", "queued", "in_progress", "blocked"] as const;
 const SEGMENT_LABELS: Record<string, string> = {
+  later: "Later",
   queued: "Queued",
   in_progress: "In progress",
   blocked: "Blocked",
