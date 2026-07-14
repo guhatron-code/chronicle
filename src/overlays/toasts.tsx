@@ -24,7 +24,7 @@ export function toastSuccess(message: string, monoDetail?: string) {
         <span className="font-mono text-[11.5px] text-text-dim tabular-nums">{monoDetail}</span>
       )}
     </div>
-  ));
+  ), { duration: 2100 });
 }
 
 export function toastError(message: string, detail?: string) {
@@ -36,5 +36,5 @@ export function toastError(message: string, detail?: string) {
       <span className="text-[12.5px] text-text-primary">{message}</span>
       {detail && <span className="text-xs text-text-muted">{detail}</span>}
     </div>
-  ));
+  ), { duration: 2100 });
 }
