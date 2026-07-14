@@ -136,7 +136,8 @@ export function Board({
   onLaneDragLeave,
   className,
 }: BoardProps) {
-  const queued = tasks.filter((t) => t.column === "queued").length;
+  // the SAME eligibility rule execution uses: queued AND unclaimed (T-007)
+  const queued = tasks.filter((t) => t.column === "queued" && t.round == null).length;
   return (
     <div className={cn("flex h-full min-h-0 flex-col", className)}>
       {/* header row — L5 measures */}

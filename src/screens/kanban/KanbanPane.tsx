@@ -18,6 +18,7 @@ import {
   nextRoundN,
   refreshKanban,
   subscribeKanban,
+  thumbFor,
 } from "@/lib/kanban-store";
 import {
   copyFile,
@@ -171,6 +172,15 @@ export function KanbanPane({
     return () => clearInterval(id);
   }, [dir, flow.kind, flow.kind === "generating" ? flow.startedAt : 0]);
 
+  /* resume: a round generating in the store while the flow is idle means we
+     lost the overlay (pane switch, reload) — pick it back up (T-006) */
+  const genRoundOpen = store.rounds.some((r) => r.state === "generating");
+  useEffect(() => {
+    if (genRoundOpen && flow.kind === "idle") {
+      setFlow({ kind: "generating", startedAt: Date.now(), logLines: [], activeLine: "Starting the session…", progress: 0.06 });
+    }
+  }, [genRoundOpen, flow.kind]);
+
   /* ---- ⌘N while the pane is up ---- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -237,7 +247,15 @@ export function KanbanPane({
     <div className="relative h-full min-h-0">
       <Board
         title="Fixes & ideas"
-        tasks={visible.map((t) => ({ ...t, round: t.round ?? undefined, images: t.images ?? [], links: t.links ?? [], content: t.content ?? "", ago: fmtAgo(t.updated_at ?? t.created_at) }))}
+        tasks={visible.map((t) => ({
+          ...t,
+          round: t.round ?? undefined,
+          // repo-relative attachment paths render via the data-URI cache (T-003)
+          images: (t.images ?? []).map((img) => thumbFor(dir, img) ?? img),
+          links: t.links ?? [],
+          content: t.content ?? "",
+          ago: fmtAgo(t.updated_at ?? t.created_at),
+        }))}
         selectedId={draft?.mode === "edit" ? draft.task.id : null}
         draggingId={draggingId}
         dropColumn={dropColumn}
@@ -275,7 +293,7 @@ export function KanbanPane({
             meta={draft.mode === "edit" ? [fmtAgo(draft.task.created_at) && `created ${fmtAgo(draft.task.created_at)}`, fmtAgo(draft.task.updated_at) && `updated ${fmtAgo(draft.task.updated_at)}`].filter(Boolean).join(" · ") : undefined}
             title={draft.task.title}
             content={draft.task.content ?? ""}
-            images={draft.task.images ?? []}
+            images={(draft.task.images ?? []).map((img) => thumbFor(dir, img) ?? img)}
             links={draft.task.links ?? []}
             column={draft.task.column}
             linkDraft={draft.linkDraft}

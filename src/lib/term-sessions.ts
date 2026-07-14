@@ -172,6 +172,9 @@ export async function spawnTerm(dir: string, opts: SpawnOpts = {}): Promise<Term
 export function fitTerm(id: number) {
   const s = sessions.get(id);
   if (!s || s.dead || !s.host.isConnected) return;
+  // a hidden tab's host is zero-sized — fitting would resize the pty to ~10x6,
+  // rewrap a live agent's output, and truncate scrollback (audit T-002)
+  if (s.host.clientWidth === 0 || s.host.clientHeight === 0) return;
   try {
     s.fit.fit();
     void ptyResize(id, s.term.cols, s.term.rows).catch(() => {});

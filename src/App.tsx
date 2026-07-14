@@ -44,7 +44,8 @@ import {
 } from "@/lib/term-sessions";
 import type { TerminalTab } from "@/components/chrome/TerminalColumn";
 import { KanbanPane } from "@/screens/kanban/KanbanPane";
-import { queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
+import { kanbanFor, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
+import { fixesStatus } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -90,6 +91,11 @@ export default function App() {
   /* ---- the ground-truth poll: every open project, every 8s ---- */
   const pollOne = useCallback(async (dir: string) => {
     void refreshKanban(dir); // the rail badge + round overlays stay live
+    // a generating round settles server-side inside fixes_status — poll it even
+    // when no pane is watching, so rounds can't stay "generating" forever (T-006)
+    if (kanbanFor(dir).rounds.some((r) => r.state === "generating")) {
+      void fixesStatus(dir).catch(() => {});
+    }
     try {
       const s = await getState(dir);
       setProjects((prev) => {
