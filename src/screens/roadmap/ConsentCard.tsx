@@ -74,7 +74,8 @@ export function ConsentCard({
         This folder has no roadmap yet.
       </div>
       <div className="text-[13px] leading-[1.55] text-text-muted">
-        A Claude session will read this folder and write the roadmap — nothing else is changed.
+        {agent === "codex" ? "A Codex" : "A Claude"} session will read this folder and write the
+        roadmap — nothing else is changed.
       </div>
       <div className="flex items-center gap-2.5">
         <span className="text-[11.5px] text-text-dim">runs with</span>

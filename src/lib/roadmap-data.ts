@@ -304,15 +304,17 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
       : { kind: "running", elapsed: fmtElapsed(r.elapsedS), progress: r.progress, logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit };
   } else if (ctx.fixesRun?.running) {
     const r = ctx.fixesRun;
-    props.building = {
-      kind: "running",
-      title: "Writing the fix plan…",
-      elapsed: fmtElapsed(r.elapsedS),
-      progress: r.progress,
-      logLines: r.logLines,
-      activeLine: r.activeLine,
-      onCancel: H.onCancelFixes,
-    };
+    props.building = r.elapsedS > 300
+      ? { kind: "still-running", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelFixes }
+      : {
+          kind: "running",
+          title: "Writing the fix plan…",
+          elapsed: fmtElapsed(r.elapsedS),
+          progress: r.progress,
+          logLines: r.logLines,
+          activeLine: r.activeLine,
+          onCancel: H.onCancelFixes,
+        };
   }
 
   /* -- warning banner (yields to the building card while a rebuild runs) -- */
@@ -327,7 +329,9 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     if (ni === -1 && real.length > 0 && real.every((x) => x.state === "done")) {
       props.banner = {
         kind: "all-done",
-        body: `All ${real.length} phases finished and published. The roadmap has nothing left to track.`,
+        body: s.ahead > 0
+          ? `All ${real.length} phases finished — ${s.ahead} save${s.ahead === 1 ? "" : "s"} not yet published.`
+          : `All ${real.length} phases finished and published. The roadmap has nothing left to track.`,
         onAddNext: H.onAddNext, onRebuild: H.onRebuild,
       } satisfies CurrentStateBannerProps;
     } else if (ni >= 0) {
@@ -449,8 +453,8 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
           railPhases.push({
             kind: "phase", id, name: ph.name ?? "",
             badge: `From the Kanban · ${nTasks} ${nTasks === 1 ? "task" : "tasks"}`,
-            open: ctx.expandedId === id,
-            status: status.state === "done" ? "done" : "later",
+            open: ctx.expandedId === null ? status.state === "now" : ctx.expandedId === id,
+            status: status.state === "done" ? "done" : status.state === "now" ? "now" : "later",
             statusWord: status.state === "done" ? "Done" : sentence(status.label),
             description: (ph.desc ?? "").replace(/<[^>]+>/g, ""),
             steps: roundTasks.map((t) => ({

@@ -87,15 +87,19 @@ export function PhaseDetailHost({
       phaseId={id}
       phaseName={phase.name ?? ""}
       statusWord={status?.state === "done" ? "Done" : sentence(label)}
-      startHelper={`Opens a terminal, starts the agent, and copies ${
-        (phase.paste ?? []).find((x) => x.path)?.path?.split("/").pop() ?? "the paste file"
-      } — you paste it as the first message.`}
+      startHelper={(() => {
+        const pf = (phase.paste ?? []).find((x) => x.path)?.path?.split("/").pop();
+        return pf
+          ? `Opens a terminal, starts the agent, and copies ${pf} — you paste it as the first message.`
+          : "Opens a terminal and starts the agent in this project.";
+      })()}
       description={(phase.desc ?? "").replace(/<[^>]+>/g, "")}
-      stepsLabel={`${(phase.items ?? []).length} steps`}
-      steps={(phase.items ?? []).map((t, i) => ({
+      stepsLabel={`${(phase.items ?? []).length} ${(phase.items ?? []).length === 1 ? "step" : "steps"}`}
+      steps={(phase.items ?? []).map((t) => ({
         label: t.replace(/<[^>]+>/g, ""),
-        state: status?.state === "done" ? ("done" as const) : i === 0 ? ("active" as const) : ("todo" as const),
-        note: status?.state !== "done" && i === 0 ? "· Being worked on" : undefined,
+        // no fabricated activity: steps are done when the phase is, todo otherwise —
+        // Chronicle has no per-step evidence to claim more
+        state: status?.state === "done" ? ("done" as const) : ("todo" as const),
       }))}
       paste={(phase.paste ?? []).map((c) => ({
         name: c.path ? (c.path.split("/").pop() ?? "") : (c.label ?? ""),

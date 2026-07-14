@@ -95,18 +95,19 @@ export function RoadmapPane({
     const d = dir;
     initStatus(d)
       .then((raw) => {
-        const st = raw as { running?: boolean; log_tail?: string };
+        const st = raw as { running?: boolean; log_tail?: string; started_at?: number };
         if (dirRef.current !== d || !st?.running) return;
         const tail = st.log_tail ?? "";
         const lines = logLinesFrom(tail);
+        const began = st.started_at || Date.now();
         setInitRun((prev) => prev ?? {
           running: true,
-          startedAt: Date.now(), // the true start is the backend's; elapsed re-counts from here
+          startedAt: began,
           logLines: lines.slice(0, -1),
           activeLine: lines[lines.length - 1] ?? "Starting the session…",
           progress: initProgress(tail),
           code: null,
-          elapsedS: 0,
+          elapsedS: Math.round((Date.now() - began) / 1000),
         });
       })
       .catch(() => {});
@@ -121,18 +122,19 @@ export function RoadmapPane({
     const d = dir;
     initStatus(d)
       .then((raw) => {
-        const st = raw as { running?: boolean; log_tail?: string };
+        const st = raw as { running?: boolean; log_tail?: string; started_at?: number };
         if (dirRef.current !== d || !st?.running) return;
         const tail = st.log_tail ?? "";
         const lines = logLinesFrom(tail);
+        const began = st.started_at || Date.now();
         setInitRun((prev) => prev ?? {
           running: true,
-          startedAt: Date.now(),
+          startedAt: began,
           logLines: lines.slice(0, -1),
           activeLine: lines[lines.length - 1] ?? "Starting the session…",
           progress: initProgress(tail),
           code: null,
-          elapsedS: 0,
+          elapsedS: Math.round((Date.now() - began) / 1000),
         });
       })
       .catch(() => {});
@@ -145,18 +147,19 @@ export function RoadmapPane({
     const startedAt = initRun.startedAt;
     const tick = async () => {
       try {
-        const st = (await initStatus(dir)) as { running?: boolean; started?: boolean; code?: number | null; log_tail?: string };
+        const st = (await initStatus(dir)) as { running?: boolean; started?: boolean; code?: number | null; log_tail?: string; started_at?: number };
         const tail = st.log_tail ?? "";
         const lines = logLinesFrom(tail);
+        const began = st.started_at || startedAt;
         setInitRun({
           running: st.running ?? false,
-          startedAt,
+          startedAt: began,
           // the last line renders as activeLine — don't repeat it in the scrollback
           logLines: lines.slice(0, -1),
           activeLine: lines[lines.length - 1] ?? "Starting the session…",
           progress: initProgress(tail),
           code: st.code ?? null,
-          elapsedS: Math.round((Date.now() - startedAt) / 1000),
+          elapsedS: Math.round((Date.now() - began) / 1000),
         });
         if (st.running === false) {
           if ((st.code ?? 1) === 0) {
@@ -184,18 +187,19 @@ export function RoadmapPane({
     const startedAt = Date.now();
     const tick = async () => {
       try {
-        const st = (await fixesStatus(dir)) as { running?: boolean; code?: number | null; log_tail?: string };
+        const st = (await fixesStatus(dir)) as { running?: boolean; code?: number | null; log_tail?: string; started_at?: number };
         const tail = st.log_tail ?? "";
         const lines = logLinesFrom(tail);
         if (st.running !== false) {
-          setFixesRun((prev) => ({
+          const began = st.started_at || startedAt;
+          setFixesRun(() => ({
             running: true,
-            startedAt: prev?.startedAt ?? startedAt,
+            startedAt: began,
             logLines: lines.slice(0, -1),
             activeLine: lines[lines.length - 1] ?? "Starting the session…",
             progress: initProgress(tail),
             code: null,
-            elapsedS: Math.round((Date.now() - (prev?.startedAt ?? startedAt)) / 1000),
+            elapsedS: Math.round((Date.now() - began) / 1000),
           }));
         } else {
           setFixesRun(null);
@@ -315,7 +319,7 @@ export function RoadmapPane({
       onRebuild: () =>
         onConfirm({
           title: "Rebuild the roadmap?",
-          body: "A Claude session will read the plan documents again and rewrite the roadmap. Your files aren't changed.",
+          body: `${agent === "codex" ? "A Codex" : "A Claude"} session will read the plan documents again and rewrite the roadmap. Your files aren't changed.`,
           cancelLabel: "Cancel",
           confirmLabel: "Rebuild",
           onConfirm: startInit,

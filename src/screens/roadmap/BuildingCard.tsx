@@ -61,8 +61,8 @@ export function BuildingCard(p: BuildingCardProps) {
 
       {/* streamed log — surface-input, radius 8, no border (log-pane law) */}
       <div className="flex min-w-0 flex-col gap-[5px] overflow-hidden rounded-md bg-surface-input px-3 py-2.5 font-mono text-[11.5px] text-text-dim">
-        {p.logLines.map((line) => (
-          <div key={line} className="truncate">{line}</div>
+        {p.logLines.map((line, i) => (
+          <div key={i} className="truncate">{line}</div>
         ))}
         <div className="truncate text-text-subtle">
           {p.activeLine}
@@ -76,7 +76,7 @@ export function BuildingCard(p: BuildingCardProps) {
           p.kind === "still-running" ? "justify-between" : "justify-end",
         )}
       >
-        {p.kind === "still-running" && (
+        {p.kind === "still-running" && p.onViewFullLog && (
           <button
             onClick={p.onViewFullLog}
             className="text-[12.5px] text-text-secondary underline underline-offset-2 hover:text-text-primary"

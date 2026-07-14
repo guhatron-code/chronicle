@@ -92,7 +92,7 @@ export function Rail({
       </RailButton>
       <div className="relative">
         <RailButton
-          label={queuedCount > 0 ? `Kanban — ${queuedCount} tasks queued` : "Kanban"}
+          label={queuedCount > 0 ? `Kanban — ${queuedCount} ${queuedCount === 1 ? "task" : "tasks"} queued` : "Kanban"}
           tooltip="Kanban" mono="⌘J to cycle"
           selected={pane === "kanban"} onClick={() => onPane("kanban")}
         >

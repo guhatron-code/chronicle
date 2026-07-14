@@ -256,7 +256,7 @@ export default function App() {
         title: "Close this project?",
         body: `${live === 1 ? "A session is" : `${live} sessions are`} still running in its terminal. Closing the project stops ${live === 1 ? "it" : "them"}.`,
         cancelLabel: "Keep it running",
-        confirmLabel: "Close and stop the session",
+        confirmLabel: live === 1 ? "Close and stop the session" : "Close and stop the sessions",
         danger: true,
         onConfirm: doClose,
       });

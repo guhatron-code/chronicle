@@ -231,10 +231,12 @@ export function PhaseDetail(p: PhaseDetailProps) {
           {p.statusWord}
         </StateWord>
         <span className="flex-1" />
-        <BtnPrimary className="h-[33px] gap-[7px] px-3.5 text-[12.5px]" onClick={p.onStart}>
-          <PlayGlyph size={11} />
-          Start this phase
-        </BtnPrimary>
+        {p.statusWord !== "Done" && (
+          <BtnPrimary className="h-[33px] gap-[7px] px-3.5 text-[12.5px]" onClick={p.onStart}>
+            <PlayGlyph size={11} />
+            Start this phase
+          </BtnPrimary>
+        )}
         <button
           aria-label="Close"
           onClick={p.onClose}
@@ -243,7 +245,9 @@ export function PhaseDetail(p: PhaseDetailProps) {
           <XGlyph size={11} />
         </button>
       </div>
-      <div className="px-5 pt-1.5 text-[11.5px] text-text-dim">{p.startHelper}</div>
+      {p.statusWord !== "Done" && (
+        <div className="px-5 pt-1.5 text-[11.5px] text-text-dim">{p.startHelper}</div>
+      )}
 
       <div className="grid grid-cols-[1.4fr_1fr]">
         {/* left column */}
@@ -252,14 +256,16 @@ export function PhaseDetail(p: PhaseDetailProps) {
             {p.description}
           </div>
 
-          <div className="flex flex-col gap-2">
-            <Eyebrow>{p.stepsLabel}</Eyebrow>
-            <div className="flex flex-col">
-              {p.steps.map((step) => (
-                <StepRow key={step.label} step={step} />
-              ))}
+          {p.steps.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <Eyebrow>{p.stepsLabel}</Eyebrow>
+              <div className="flex flex-col">
+                {p.steps.map((step) => (
+                  <StepRow key={step.label} step={step} />
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {p.paste.length > 0 && (
           <div className="flex flex-col gap-2">

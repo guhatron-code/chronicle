@@ -98,7 +98,9 @@ export function nextRoundN(store: KanbanStore): number {
  * join the next round while one is open; the strip hides once every task in
  * the round is completed. */
 export function executingRound(store: KanbanStore): number | null {
-  for (const r of store.rounds) {
+  // newest open round wins — the strip's "new tasks start round N+1" must
+  // name the round tasks would actually join
+  for (const r of [...store.rounds].reverse()) {
     if (r.state === "generating") return r.n;
     if (r.state === "ready") {
       const mine = store.tasks.filter((t) => t.round === r.n);

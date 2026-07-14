@@ -16,6 +16,8 @@ export type ExecuteFlowProps =
   | {
       /** A — the pre-flight summary dialog. */
       kind: "preflight";
+      /** Which agent runs the round — the copy names it. */
+      agent?: "claude" | "codex";
       queued: number;
       planFile: string; // "phase_2_fixes_plan.md"
       promptFile: string; // "phase_2_fixes_prompt.md"
@@ -37,6 +39,7 @@ export type ExecuteFlowProps =
   | {
       /** C — done; the round is frozen and the docs exist. */
       kind: "done";
+      agent?: "claude" | "codex";
       round: number;
       taskCount: number;
       /** What the round turns into — "bug fixes". */
@@ -67,6 +70,8 @@ export function RoundExecutingNote({ round, className }: { round: number; classN
   );
 }
 
+const AGENT_NAME = { claude: "Claude Code", codex: "Codex" } as const;
+
 export function ExecuteFlow(p: ExecuteFlowProps) {
   if (p.kind === "preflight") {
     const one = p.queued === 1;
@@ -81,7 +86,7 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
           Turn {p.queued} queued {one ? "task" : "tasks"} into a fix plan?
         </div>
         <div className="text-[13px] leading-[1.55] text-text-muted">
-          {p.queued} queued {one ? "task becomes" : "tasks become"} a fix plan for Claude Code —
+          {p.queued} queued {one ? "task becomes" : "tasks become"} a fix plan for {AGENT_NAME[p.agent ?? "claude"]} —
           two files are written into the project:
         </div>
         <div className="flex flex-col gap-[5px] font-mono text-[11.5px] text-text-subtle">
@@ -126,8 +131,8 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
         </div>
         {/* streamed log — surface-input, radius 8, no border (log-pane law) */}
         <div className="flex min-w-0 flex-col gap-[5px] overflow-hidden rounded-md bg-surface-input px-[13px] py-[11px] font-mono text-[11px] text-text-dim">
-          {p.logLines.map((line) => (
-            <div key={line} className="truncate">{line}</div>
+          {p.logLines.map((line, i) => (
+            <div key={i} className="truncate">{line}</div>
           ))}
           <div className="truncate text-text-subtle">
             {p.activeLine}
@@ -157,7 +162,7 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
         </span>
       </div>
       <div className="text-[12.5px] leading-[1.55] text-text-muted">
-        The plan is written. Paste the prompt into Claude Code to start the round.
+        The plan is written. Paste the prompt into {AGENT_NAME[p.agent ?? "claude"]} to start the round.
       </div>
       <div className="flex flex-wrap gap-2">
         <PasteChip
@@ -168,7 +173,7 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
         />
         <PasteChip
           name={p.promptFile}
-          hint="→ Claude Code"
+          hint={`→ ${AGENT_NAME[p.agent ?? "claude"]}`}
           height={28}
           raised
           onClick={() => p.onOpenFile?.(p.promptFile)}

@@ -113,10 +113,6 @@ export function HistoryPanel(p: HistoryPanelProps) {
         p.className,
       )}
     >
-      {/* wv-dash lives in the deck helmet, not index.css — defined locally, frozen by the
-          global reduced-motion rule like everything else. */}
-      <style>{"@keyframes wv-dash { to { stroke-dashoffset: -12; } }"}</style>
-
       <div className="flex items-center justify-between pb-[9px]">
         <span className="text-[15px] font-semibold text-text-primary">Project history</span>
         <StatusWordmark status={p.status} />
@@ -151,7 +147,8 @@ export function HistoryPanel(p: HistoryPanelProps) {
           ))}
         </div>
 
-        {/* milestones */}
+        {/* milestones — the row only exists when there are any */}
+        {p.milestones.length > 0 && (
         <div className="flex items-center gap-2">
           <span className="text-[11.5px] text-text-dim">Milestones reached</span>
           {p.milestones.map((m) => (
@@ -163,6 +160,7 @@ export function HistoryPanel(p: HistoryPanelProps) {
             </span>
           ))}
         </div>
+        )}
 
         {/* changed files — grouped list: fill-subtle block, divider-faint rows, no outer border */}
         <div className="flex flex-col overflow-hidden rounded-md bg-fill-subtle">

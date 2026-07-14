@@ -122,6 +122,8 @@ export function KanbanPane({
       // INTO in_progress stays blocked at the drop site — the round owns it
       if (t) {
         t.column = column;
+        // back in Queued = re-eligible for the next round; the claim clears
+        if (column === "queued") t.round = null;
         t.updated_at = Date.now();
       }
     }, fail("Couldn't move the task"));
@@ -132,10 +134,12 @@ export function KanbanPane({
   const startGenerate = useCallback(() => {
     const startedAt = Date.now();
     setFlow({ kind: "generating", startedAt, logLines: [], activeLine: "Starting the session…", progress: 0.06 });
-    fixesGenerate(dir, agent).catch((e) => {
-      setFlow({ kind: "idle" });
-      fail("Couldn't start the session")(e);
-    });
+    fixesGenerate(dir, agent)
+      .then(() => refreshKanban(dir)) // the board shows the freeze immediately
+      .catch((e) => {
+        setFlow({ kind: "idle" });
+        fail("Couldn't start the session")(e);
+      });
   }, [dir, agent, fail]);
 
   useEffect(() => {
@@ -204,6 +208,7 @@ export function KanbanPane({
   if (flow.kind === "preflight") {
     flowProps = {
       kind: "preflight",
+      agent,
       queued,
       planFile: `phase_${roundN}_fixes_plan.md`,
       promptFile: `phase_${roundN}_fixes_prompt.md`,
@@ -220,7 +225,7 @@ export function KanbanPane({
       activeLine: flow.activeLine,
       onCancel: () => {
         fixesCancel(dir)
-          .then(() => { setFlow({ kind: "idle" }); toastSuccess("Stopped the session"); })
+          .then(() => { setFlow({ kind: "idle" }); void refreshKanban(dir); toastSuccess("Stopped the session"); })
           .catch(fail("Couldn't stop it"));
       },
     };
@@ -228,6 +233,7 @@ export function KanbanPane({
     const r = store.rounds.find((x) => x.n === flow.round);
     flowProps = {
       kind: "done",
+      agent,
       round: flow.round,
       taskCount: r?.task_ids.length ?? 0,
       outcome: r?.kind ?? "fixes",
