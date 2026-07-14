@@ -1,0 +1,1080 @@
+{
+  "next_id": 85,
+  "rounds": [
+    {
+      "kind": "bug fixes",
+      "n": 1,
+      "plan_path": "fixes/phase_1_fixes_plan.md",
+      "prompt_path": "fixes/phase_1_fixes_prompt.md",
+      "state": "ready",
+      "task_ids": [
+        "T-001"
+      ]
+    },
+    {
+      "n": 2,
+      "state": "ready",
+      "kind": "bug fixes",
+      "task_ids": [
+        "T-002",
+        "T-003",
+        "T-004",
+        "T-005",
+        "T-006",
+        "T-007",
+        "T-008",
+        "T-009",
+        "T-010",
+        "T-011",
+        "T-012",
+        "T-013"
+      ],
+      "plan_path": "fixes/phase_2_fixes_plan.md",
+      "prompt_path": "fixes/phase_2_fixes_prompt.md"
+    },
+    {
+      "n": 3,
+      "state": "ready",
+      "kind": "bug fixes",
+      "task_ids": [
+        "T-014",
+        "T-015",
+        "T-016",
+        "T-017",
+        "T-018",
+        "T-019",
+        "T-020",
+        "T-021",
+        "T-022",
+        "T-023",
+        "T-024",
+        "T-025",
+        "T-026",
+        "T-027",
+        "T-028",
+        "T-029",
+        "T-030",
+        "T-031",
+        "T-032",
+        "T-033",
+        "T-034",
+        "T-035",
+        "T-036",
+        "T-037",
+        "T-038",
+        "T-039",
+        "T-040",
+        "T-041",
+        "T-042",
+        "T-043",
+        "T-044",
+        "T-045",
+        "T-046",
+        "T-047",
+        "T-048",
+        "T-049",
+        "T-050",
+        "T-051",
+        "T-052",
+        "T-053",
+        "T-054",
+        "T-055",
+        "T-056",
+        "T-057",
+        "T-058",
+        "T-059",
+        "T-060",
+        "T-061",
+        "T-062",
+        "T-063",
+        "T-064"
+      ],
+      "plan_path": "fixes/phase_3_fixes_plan.md",
+      "prompt_path": "fixes/phase_3_fixes_prompt.md"
+    },
+    {
+      "n": 4,
+      "state": "ready",
+      "kind": "bug fixes",
+      "task_ids": [
+        "T-065",
+        "T-066",
+        "T-067",
+        "T-068",
+        "T-069",
+        "T-070",
+        "T-071",
+        "T-072",
+        "T-073",
+        "T-074",
+        "T-075",
+        "T-076",
+        "T-077",
+        "T-078",
+        "T-079",
+        "T-080",
+        "T-081",
+        "T-082",
+        "T-083",
+        "T-084"
+      ],
+      "plan_path": "fixes/phase_4_fixes_plan.md",
+      "prompt_path": "fixes/phase_4_fixes_prompt.md"
+    }
+  ],
+  "tasks": [
+    {
+      "column": "completed",
+      "content": "When the status bar is double clicked, the windows doesn\u2019t mazimize smoothly",
+      "created_at": 1784054216797,
+      "id": "T-001",
+      "images": [],
+      "links": [],
+      "round": 1,
+      "title": "window maximizing is not smooth.",
+      "updated_at": 1784060680884
+    },
+    {
+      "id": "T-002",
+      "title": "Hidden terminal tabs get resized to ~10x6, corrupting live sessions",
+      "content": "[P1 \u00b7 BROKEN \u00b7 terminals] Switching tabs fires the ResizeObserver fit on a display:none host; the pty is resized to ~10x6, a live agent rewraps at 11 cols and scrollback tails are lost permanently.\nExpected: skip fit + pty_resize when the host box is zero-sized/hidden.\nWhere: src/App.tsx:197-199, src/lib/term-sessions.ts:172-179\nSource: audit 4 B1",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-002-audit4-truncated.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784061141007,
+      "round": 2
+    },
+    {
+      "id": "T-003",
+      "title": "Screenshot thumbnails never render \u2014 the loader is dead code",
+      "content": "[P1 \u00b7 BROKEN \u00b7 kanban] thumbFor (readFileB64 -> data URI) is imported nowhere; cards/composer pass raw repo-relative paths which TaskCard refuses, so the placeholder glyph shows forever.\nExpected: route attachment paths through thumbFor.\nWhere: src/lib/kanban-store.ts:117-130, src/screens/kanban/KanbanPane.tsx:240,278, src/screens/kanban/TaskCard.tsx:61\nSource: audit 4 B2",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-003-audit4-composer.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784061141007,
+      "round": 2
+    },
+    {
+      "id": "T-004",
+      "title": "Cancelling a generating round strands its tasks locked in In progress",
+      "content": "[P1 \u00b7 BROKEN \u00b7 kanban] fixes_cancel pops the round and nulls task.round but never restores column: queued \u2014 tasks render 'locked while it executes' with no strip and no drag-out.\nExpected: cancel restores the tasks to Queued.\nWhere: src-tauri/src/main.rs fixes_cancel\nSource: audit 4 B3",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-004-audit4-cancel-strand.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784060973039,
+      "round": 2
+    },
+    {
+      "id": "T-005",
+      "title": "A failed generation strands tasks frozen while the toast says they're untouched",
+      "content": "[P1 \u00b7 BROKEN \u00b7 kanban] settle_round marks the round failed but leaves tasks in_progress + rounded; no strip explains it (executingRound ignores failed) and the failure toast claims 'your tasks are untouched'.\nExpected: a failed round releases its tasks back to Queued (round cleared) and the toast tells the truth.\nWhere: src-tauri/src/main.rs settle_round, src/lib/kanban-store.ts:100, src/screens/kanban/KanbanPane.tsx:165\nSource: audit 4 B4",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-005-audit4-failed-strand.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784060973039,
+      "round": 2
+    },
+    {
+      "id": "T-006",
+      "title": "Round completion is only detected while the right pane is watching",
+      "content": "[P1 \u00b7 BROKEN \u00b7 kanban] settle_round runs only inside fixes_status, which is polled only by the kanban generating overlay or the mounted RoadmapPane; switch panes mid-generation and there is no resume \u2014 the round can stay 'generating' indefinitely.\nExpected: the App-level poll (or a store-level poller) checks fixes_status whenever any round is generating, and the kanban pane resumes its overlay on return.\nWhere: src-tauri/src/main.rs:1090, src/screens/kanban/KanbanPane.tsx:140-172, src/screens/roadmap/RoadmapPane.tsx:181-212\nSource: audit 4 B5",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784061141007,
+      "round": 2
+    },
+    {
+      "id": "T-007",
+      "title": "'Ready to execute' counts one set of tasks and executes another",
+      "content": "[P1 \u00b7 BROKEN \u00b7 kanban] The button counts ALL queued tasks; eligibility and the backend exclude round!=null. A stale rounded task in Queued makes the button enabled-but-no-op, and its count disagrees with the preflight and the rail badge.\nExpected: one eligibility rule (queued AND unrounded) everywhere; disable at 0 eligible.\nWhere: src/screens/kanban/Board.tsx:139 vs src/screens/kanban/KanbanPane.tsx:190,246\nSource: audit 4 B6",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784061141007,
+      "round": 2
+    },
+    {
+      "id": "T-008",
+      "title": "Phase detail page cannot scroll \u2014 long content is unreachable",
+      "content": "[P1 \u00b7 BROKEN \u00b7 roadmap] The detail body is overflow-hidden with no scrollable ancestor; steps/docs/saves below the fold are cut off (measured 2602px content in a 700px viewport, zero scrollable ancestors).\nExpected: the detail body scrolls like the roadmap column.\nWhere: src/screens/roadmap/PhaseDetail.tsx:214\nSource: audit 2 B1",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784062741346,
+      "round": 2
+    },
+    {
+      "id": "T-009",
+      "title": "The misplaced-manifest 'Leave it' button is a permanent dead end",
+      "content": "[P1 \u00b7 BROKEN \u00b7 roadmap] Mapper precedence: the misplaced branch precedes the basic-view consent branch, so 'Leave it' sets consent but the card re-renders forever (holds across restarts while the file sits in a subfolder).\nExpected: 'Leave it' shows the basic-view card.\nWhere: src/lib/roadmap-data.ts:276 vs :283, src/screens/roadmap/RoadmapPane.tsx:293\nSource: audit 2 B2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784062741346,
+      "round": 2
+    },
+    {
+      "id": "T-010",
+      "title": "Reload after 'changed on disk' in Diff mode loads Contents under a Diff label",
+      "content": "[P1 \u00b7 BROKEN \u00b7 repo] onReload unconditionally calls loadContents (onRetry branches on mode correctly); the Diff toggle stays active with a stale +/- stat over a contents body.\nExpected: reload respects the active mode.\nWhere: src/screens/repo/RepoPane.tsx:514\nSource: audit 3 B1",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-010-audit3-reload-diff.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784062741346,
+      "round": 2
+    },
+    {
+      "id": "T-011",
+      "title": "A behind-only repo claims 'Everything is published' and hides Bring down",
+      "content": "[P1 \u00b7 WRONG-INFO \u00b7 repo] publishStateFrom ignores behind unless ahead>0: with ahead 0 / behind 3 the footer shows the success state and the app's only pull affordance disappears.\nExpected: a behind-only state (e.g. 'Up to date locally - Bring down 3 newer').\nWhere: src/lib/repo-data.ts:195-203\nSource: audit 3 W1",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-011-audit3-behind-only.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784062741346,
+      "round": 2
+    },
+    {
+      "id": "T-012",
+      "title": "Global shortcuts fire inside text fields \u2014 Ctrl+W while typing closes the project",
+      "content": "[P1 \u00b7 BROKEN \u00b7 shell] The keyboard map has no typing guard: Ctrl+W (delete word) in the palette input silently closed the project; Ctrl+K/J/O/T are swallowed in every text field. KanbanPane's cmd-N already has the right guard \u2014 the map is inconsistent.\nExpected: skip the map when the event target is an input/textarea.\nWhere: src/App.tsx:306-330 (guard pattern at src/screens/kanban/KanbanPane.tsx:177)\nSource: audit 1 B-1",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784062741346,
+      "round": 2
+    },
+    {
+      "id": "T-013",
+      "title": "With 5+ projects the active project can have no tab at all",
+      "content": "[P1 \u00b7 WRONG-INFO \u00b7 shell] The tab strip slices the first 4 regardless of which is active; the current project can be invisible with nothing marking it anywhere.\nExpected: the active tab is always visible (swap it into the window).\nWhere: src/components/chrome/TitleBar.tsx:45\nSource: audit 1 W-1",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-013-audit1-tabs5.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784062741346,
+      "round": 2
+    },
+    {
+      "id": "T-014",
+      "title": "Scan-failed card's 'Use the basic view' is an in-session no-op",
+      "content": "[P2 \u00b7 BROKEN \u00b7 roadmap] The failed-init branch precedes the consent check and initRun is only cleared on success/cancel/switch; the click persists consent but the card stays until restart.\nWhere: src/lib/roadmap-data.ts:279-280\nSource: audit 2 B3",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-015",
+      "title": "Session log lines are keyed by content \u2014 duplicate keys on repeated lines",
+      "content": "[P2 \u00b7 BROKEN \u00b7 sessions] logLinesFrom only collapses consecutive repeats; A,B,A,B tails produce duplicate React keys in BuildingCard and ExecuteFlow (React declares duplication/omission possible).\nExpected: index keys.\nWhere: src/screens/roadmap/BuildingCard.tsx:65, src/screens/kanban/ExecuteFlow.tsx:129\nSource: audit 2 B4 + audit 4 I2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-016",
+      "title": "Ready-to-save rows keyed by basename \u2014 duplicate keys across directories",
+      "content": "[P2 \u00b7 BROKEN \u00b7 repo] key={f.name} on a flat list; two staged index.ts files collide (React warning captured).\nExpected: key={f.path}.\nWhere: src/screens/repo/HistoryPane.tsx:375\nSource: audit 3 B2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-017",
+      "title": "Tree expand/collapse never animates",
+      "content": "[P2 \u00b7 BROKEN \u00b7 repo] buildTree returns children: [] when closed and the row only mounts AccBody when children exist \u2014 the 0fr/1fr transition never runs in either direction.\nWhere: src/screens/repo/FileTree.tsx:191-207, src/lib/repo-data.ts:78\nSource: audit 3 B3",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-018",
+      "title": "Frozen cards can't be dragged OUT of the round lane",
+      "content": "[P2 \u00b7 BROKEN \u00b7 kanban] The frozen TaskCard branch renders no drag props, contradicting the wiring's own policy ('out of the round is always allowed').\nWhere: src/screens/kanban/TaskCard.tsx:129-153 vs KanbanPane.tsx:120-122\nSource: audit 4 B7",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-019",
+      "title": "The composer's column control bypasses the In-progress lane block",
+      "content": "[P2 \u00b7 BROKEN \u00b7 kanban] Saving a roundless task as In progress puts it in the round-owned lane rendered 'locked while it executes' with no round.\nExpected: the composer omits In progress for roundless tasks.\nWhere: src/screens/kanban/Composer.tsx:77\nSource: audit 4 B8",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-020",
+      "title": "An executing FX round renders as 'Later' with a hollow dot",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 roadmap] FX phases map done/later only \u2014 a state:'now' round contradicts the banner (which says Executing) with a collapsed 'Later' card and no pulsing dot.\nExpected: FX phases honor now like any phase.\nWhere: src/lib/roadmap-data.ts:448-450\nSource: audit 2 W1",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-020-audit2-fx-now3.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-021",
+      "title": "Every non-done phase detail claims step 1 is 'Being worked on'",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 roadmap] i===0 is hardcoded active whenever the phase isn't done \u2014 fabricated activity on Later phases and wrong within Now phases.\nWhere: src/screens/roadmap/PhaseDetailHost.tsx:96-98\nSource: audit 2 W2",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-021-audit2-detail-later.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-022",
+      "title": "All-done banner says 'finished and published' while saves wait to publish",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 roadmap] The copy ignores ahead>0 \u2014 it can sit directly above 'N saves waiting to publish'.\nWhere: src/lib/roadmap-data.ts:326\nSource: audit 2 W3",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-023",
+      "title": "Session elapsed resets to 0s on tab switch; the >5min variant downgrades",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 sessions] Rehydration stamps startedAt at re-attach (backend exposes no start time); a 6-minute rebuild shows '3s' and loses the still-running reassurance card. The fixes mirror never reaches the >5min variant at all.\nExpected: init_status/fixes_status return the true start time.\nWhere: src/screens/roadmap/RoadmapPane.tsx:104,130,193, src/lib/roadmap-data.ts:301-312, src-tauri init_status/fixes_status\nSource: audit 2 W4 + audit 4 W4",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-024",
+      "title": "Consent card and rebuild confirm say 'A Claude session' when Codex is selected",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 roadmap] The wiring passes agent=codex correctly; only the copy is wrong.\nWhere: src/screens/roadmap/ConsentCard.tsx:76-78, src/screens/roadmap/RoadmapPane.tsx:318\nSource: audit 2 W5",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-025",
+      "title": "'Start this phase' helper promises a paste-file copy on phases that have none",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 roadmap] The helper text always claims the copy; the handler just toasts 'Session started' when there's no paste file.\nWhere: src/screens/roadmap/PhaseDetailHost.tsx:90-92, RoadmapPane.tsx:255-256\nSource: audit 2 W6 + audit 4 W6",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-026",
+      "title": "The round strip names the wrong round and can get stuck open forever",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 kanban] executingRound returns the FIRST open round: while round 2 generates it says 'new tasks start round 2' (they join 3); a task moved back to Queued keeps its round so round 1 never completes and the strip never hides.\nWhere: src/lib/kanban-store.ts:100-109\nSource: audit 4 W1",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-027",
+      "title": "The board lies for up to 8s around Execute/Cancel",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 kanban] startGenerate and generating-cancel never refreshKanban; behind the overlay the tasks still show Queued and the strip names the old round until the next poll.\nWhere: src/screens/kanban/KanbanPane.tsx:131-138,211-215\nSource: audit 4 W2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-028",
+      "title": "ExecuteFlow copy hardcodes 'Claude Code' when Codex is selected",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 kanban] The flow passes agent and the backend runs Codex; the copy doesn't.\nWhere: src/screens/kanban/ExecuteFlow.tsx:84,160\nSource: audit 4 W3",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-029",
+      "title": "Grammar: '1 tasks queued' rail aria-label; plural body with singular button on cmd-W confirm",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 shell] Rail badge label doesn't pluralize; the multi-session confirm says '3 sessions are still running' but the button says 'Close and stop the session'.\nWhere: src/components/chrome/Rail.tsx:95, src/App.tsx:251-253\nSource: audit 4 W5",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-030",
+      "title": "The macOS window title is never set on project open, only on later switches",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 shell] doOpenProject calls activate before the projects map commits, so the name lookup misses and setTitle is skipped; also never reset on Home.\nWhere: src/App.tsx:146-167\nSource: audit 1 W-2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-031",
+      "title": "Stale 'Updated' badge after close-fallback activation",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 shell] closeProject promotes the next project via bare setActiveDir which never clears updated/updatedHint.\nExpected: route every foregrounding path through activate().\nWhere: src/App.tsx:240-242\nSource: audit 1 W-3",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-031-audit1-stale-badge.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-032",
+      "title": "The 'Writing your roadmap' recents card is unreachable from real data",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 shell] picker-data supports opts.writing but App never passes it \u2014 during a live build, Home shows 'No roadmap yet' instead.\nWhere: src/lib/picker-data.ts:40-55, src/App.tsx:369\nSource: audit 1 W-4",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-033",
+      "title": "'EXPLORER - 5 ROOTS' counts every top-level folder as a root",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 repo] The tree feeds root CHILDREN as roots: wrong count, every top dir gets root styling, top-level changed dirs never get the tint, real workspace roots aren't distinct.\nWhere: src/screens/repo/FileTree.tsx:213-218, RepoPane.tsx:463-473\nSource: audit 3 W2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-034",
+      "title": "Huge-file card promises 'click-to-copy still works' but no copy control exists",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 repo] The >1.5MB note claims copyability; the huge card has no button and the bottom Copy bar is code-only.\nExpected: wire copy_file on the huge card, or drop the claim.\nWhere: src/screens/repo/RepoPane.tsx:263, src/screens/repo/Viewer.tsx:293-306\nSource: audit 3 W3",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-035",
+      "title": "Deleted files can't appear in the tree \u2014 the dashed-D state and deletion diffs are unreachable",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 repo] list_dir lists disk entries only; a deleted file vanishes from the tree and no path anywhere shows a deletion's diff.\nWhere: src-tauri/src/main.rs:1458 list_dir, src/screens/repo/FileTree.tsx:115-143\nSource: audit 3 W4\n\nRuling (round 3): by design \u2014 the tree shows disk truth and a deleted file has no disk entry (VS Code behaves the same); deletions remain visible with the dashed-D treatment in Project history's changes rows, which is where save/discard decisions happen.",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-036",
+      "title": "A git-status failure silently reads as 'Nothing to save - everything is recorded'",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 repo] A failed git_status_detail degrades to null and the history pane shows the all-clear note.\nExpected: a quiet 'Couldn't check for changes' banner.\nWhere: src/screens/repo/RepoPane.tsx:171-176, src/screens/repo/HistoryPane.tsx:477-481\nSource: audit 3 W5",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-037",
+      "title": "The generating overlay blocks the whole app by mouse",
+      "content": "[P2 \u00b7 UX \u00b7 kanban] fixed inset-0 covers the rail and title bar; panes are unreachable except by keyboard while a plan writes.\nExpected: a non-modal placement (or at least the rail stays clickable).\nWhere: src/screens/kanban/KanbanPane.tsx:323\nSource: audit 4 U1",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-038",
+      "title": "Composer and ExecuteFlow overlays aren't real dialogs",
+      "content": "[P2 \u00b7 UX \u00b7 kanban] No Escape close, no scrim click, no role=dialog/focus trap (the Radix confirms behave correctly).\nWhere: src/screens/kanban/KanbanPane.tsx:271,323\nSource: audit 4 U2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-039",
+      "title": "Enter in the design-link field does nothing",
+      "content": "[P2 \u00b7 UX \u00b7 kanban] You must click Add; closing also drops the draft silently.\nWhere: src/screens/kanban/Composer.tsx:191-201\nSource: audit 4 U3",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-040",
+      "title": "Attachment files are orphaned on cancel/remove/delete",
+      "content": "[P2 \u00b7 UX \u00b7 kanban] kanban_attach writes immediately on pick; cancelling create, removing a thumb, or deleting a task never deletes files though the delete confirm claims attachments disappear.\nWhere: src/screens/kanban/KanbanPane.tsx:102-113\nSource: audit 4 U4",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-041",
+      "title": "Can't-read card's 'Open the file' doesn't open the file",
+      "content": "[P2 \u00b7 UX \u00b7 roadmap] It lands on the Repo pane's empty viewer; the broken chronicle.json is neither opened nor selected.\nWhere: src/screens/roadmap/RoadmapPane.tsx:325\nSource: audit 2 U1",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-041-audit2-openfile.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-042",
+      "title": "One-click action buttons double-fire",
+      "content": "[P2 \u00b7 UX \u00b7 roadmap] Nothing disables Publish/Pull/Switch/Clean-up while in flight; double-click = two git_push calls.\nWhere: src/screens/roadmap/RoadmapPane.tsx:331-346, src/screens/roadmap/NeedsYou.tsx:70-85\nSource: audit 2 U2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-043",
+      "title": "Stale alert's Scan starts a rebuild session without confirmation",
+      "content": "[P2 \u00b7 UX \u00b7 roadmap] The footer and warning-banner paths confirm first; Scan doesn't. Decide and make it consistent.\nWhere: src/screens/roadmap/RoadmapPane.tsx:314\nSource: audit 2 U3",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-044",
+      "title": "The 'just-done' celebrate moment is unreachable (plus dead FxCard and dead copy-only button)",
+      "content": "[P2 \u00b7 UX \u00b7 roadmap] mapRoadmap never emits just-done; the FxCard component and NeedsYou's copy-only-with-command button are also unmapped/unreachable.\nWhere: src/lib/roadmap-data.ts (status mapping), src/screens/roadmap/PhaseRail.tsx:204-235, src/screens/roadmap/NeedsYou.tsx:86-94\nSource: audit 2 U4",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-045",
+      "title": "'Changed just now' emphasis lingers up to 8s",
+      "content": "[P2 \u00b7 UX \u00b7 shell] justSwitched is computed at render with nothing re-rendering at the 2s boundary.\nWhere: src/App.tsx:480\nSource: audit 2 U5",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-046",
+      "title": "Manifest custom_actions.level is ignored \u2014 danger detection is regex-only",
+      "content": "[P2 \u00b7 UX \u00b7 roadmap] A manifest-declared dangerous action with an innocuous command gets the plain confirm.\nWhere: src/lib/roadmap-data.ts:224-255, src/screens/roadmap/RoadmapPane.tsx:349\nSource: audit 2 U6",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-047",
+      "title": "cmd-1-9 from inside the palette switches behind the overlay and leaves it open",
+      "content": "[P2 \u00b7 UX \u00b7 shell] The palette rows advertise the hints but the handler doesn't close the palette.\nWhere: src/App.tsx:322-325\nSource: audit 1 U-1",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-048",
+      "title": "Re-opening an already-open project resets you to the Roadmap pane",
+      "content": "[P2 \u00b7 UX \u00b7 shell] doOpenProject always setPane('road') even on the short-circuit; roadmap expansion state is lost on Home round-trips (no module cache like RepoPane's).\nWhere: src/App.tsx:166\nSource: audit 1 U-2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-049",
+      "title": "A backgrounded tab with updates can't be closed by mouse",
+      "content": "[P2 \u00b7 UX \u00b7 shell] The Updated badge replaces the hover close x; you must activate first.\nWhere: src/components/chrome/TitleBar.tsx:112-124\nSource: audit 1 U-3",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-050",
+      "title": "Enter in the new-project field bypasses the disabled Create",
+      "content": "[P2 \u00b7 UX \u00b7 shell] Enter checks name.trim() but not invalid; the button is correctly disabled.\nWhere: src/overlays/NewProjectDialog.tsx:66\nSource: audit 1 U-4",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-051",
+      "title": "The home screen gives no clue which recents are already open",
+      "content": "[P2 \u00b7 UX \u00b7 shell] Open and closed projects render identically; combined with the pane reset, the Home round-trip quietly punishes.\nWhere: src/screens/Picker.tsx / picker-data\nSource: audit 1 U-5",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-052",
+      "title": "cmd-L 'Focus the terminal' is advertised but doesn't exist",
+      "content": "[P2 \u00b7 UX \u00b7 shell] The shortcuts overlay and the handoff spec both list it; no handler anywhere.\nWhere: src/overlays/ShortcutsOverlay.tsx:34\nSource: audit 1 B-2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-053",
+      "title": "Save is enabled with zero staged files and fails with raw git jargon",
+      "content": "[P2 \u00b7 UX \u00b7 repo] With unstaged-only changes, Save commits nothing and the banner shows raw git output; stage_all exists and is never used.\nExpected: auto-include on save, or require a non-empty Ready to save.\nWhere: src/screens/repo/HistoryPane.tsx:472, src/screens/repo/RepoPane.tsx:419\nSource: audit 3 U1",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-054",
+      "title": "Closing a viewer tab leaves the tree selection on the closed file",
+      "content": "[P2 \u00b7 UX \u00b7 repo] onCloseTab updates activeTab but not selectedId.\nWhere: src/screens/repo/RepoPane.tsx:494-498\nSource: audit 3 U2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-055",
+      "title": "Repo-root changes group is labeled '.'",
+      "content": "[P2 \u00b7 UX \u00b7 repo] Root-level files group under the literal key '.' \u2014 cryptic for the audience.\nExpected: 'project folder' or the repo name.\nWhere: src/lib/repo-data.ts:170\nSource: audit 3 U3",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-056",
+      "title": "Empty commit log renders a bare SAVES header plus a stray graph stub",
+      "content": "[P2 \u00b7 UX \u00b7 repo] Zero commits still draws the trunk path and shows no empty-state copy.\nExpected: suppress the SVG and say 'No saves yet'.\nWhere: src/screens/repo/HistoryPane.tsx:103-134\nSource: audit 3 U4",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-056-audit3-empty-log.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-057",
+      "title": "Live terminals don't re-theme on light/dark switch",
+      "content": "[P2 \u00b7 UI \u00b7 terminals] The xterm theme is captured once at spawn; after switching to light the terminal stays a black slab and new spawns won't match old ones.\nWhere: src/lib/term-sessions.ts:128-135\nSource: audit 4 I1",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-057-audit4-term-light.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-058",
+      "title": "Viewer tab names never truncate \u2014 long names wrap and break the strip",
+      "content": "[P2 \u00b7 UI \u00b7 repo] No max-w/truncate on the tab label; long filenames wrap to two lines and collide with the underline.\nWhere: src/screens/repo/Viewer.tsx:163-188\nSource: audit 3 I1",
+      "column": "completed",
+      "images": [
+        ".chronicle/attachments/T-058-audit3-wrap.png"
+      ],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-059",
+      "title": "Selected-row inset bar is invisible for root-level files",
+      "content": "[P2 \u00b7 UI \u00b7 repo] The bar sits at -left-11px and the scroll container clips it; only nested selections show it.\nWhere: src/screens/repo/FileTree.tsx:127,229\nSource: audit 3 I2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063626905,
+      "round": 3
+    },
+    {
+      "id": "T-060",
+      "title": "'1 STEPS' \u2014 no pluralization, and '0 STEPS' sections render",
+      "content": "[P2 \u00b7 UI \u00b7 roadmap] Where: src/screens/roadmap/PhaseDetailHost.tsx:94\nSource: audit 2 I1",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-061",
+      "title": "Orphaned 'Milestones reached' label when there are no tags (plus dead wv-dash keyframes)",
+      "content": "[P2 \u00b7 UI \u00b7 roadmap] With tags: [] the label renders alone; the local wv-dash keyframes are unused (the arrow uses wv-arrow).\nWhere: src/screens/roadmap/HistoryPanel.tsx:155-165,118\nSource: audit 2 I2",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784063349755,
+      "round": 3
+    },
+    {
+      "id": "T-062",
+      "title": "'View full log' spawns a duplicate tail tab on every click; 'Start this phase' renders on Done phases",
+      "content": "[P3 \u00b7 UX \u00b7 sessions] Where: src/screens/roadmap/RoadmapPane.tsx:307-313, src/screens/roadmap/PhaseDetail.tsx:234\nSource: audit 4 U5",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-063",
+      "title": "'N saves waiting' wraps to two lines in the publish footer",
+      "content": "[P3 \u00b7 UI \u00b7 repo] At the 340px column with both buttons even the short label wraps (deck parity: the deck wraps too).\nWhere: src/screens/repo/HistoryPane.tsx:258-271\nSource: audit 3 I3\n\nRuling (round 3): deck parity \u2014 the deck's own L4 render wraps this label identically at 340px; matching it is faithful, not broken.",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-064",
+      "title": "Tab-label grammar is inconsistent; dead props and states",
+      "content": "[P3 \u00b7 UI \u00b7 terminals] Brand starts yield 'Claude', phase starts 'claude - R-1'; onTerminalRenameStart is a dead prop; KanbanRound state 'done' is never written by the backend.\nWhere: src/App.tsx:468, src/screens/Shell.tsx:68, src/lib/ipc.ts:227\nSource: audit 4 I3",
+      "column": "completed",
+      "images": [],
+      "links": [],
+      "created_at": 1784060400479,
+      "updated_at": 1784064107291,
+      "round": 3
+    },
+    {
+      "id": "T-065",
+      "title": "Palette Enter could select the wrong project",
+      "content": "[P1 \u00b7 BROKEN \u00b7 shell] cmdk scatter-fuzz let a weak open-group match outrank an exact recent name (groups never re-sort). Fixed: substring-only filter. Verified against the auditor's stub.\nSource: re-audit 1",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-066",
+      "title": "Stale window title after closing the last project",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 shell] The last close left the project's name in the macOS title. Fixed: bare 'Chronicle' like the Home path.\nSource: re-audit 1",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-067",
+      "title": "Stale op-error banner survived later successes",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 repo] Only saves cleared it. Fixed: every successful git op clears the banner.\nSource: re-audit 3",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-068",
+      "title": "All-clear note shown while git status was unknown",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 repo] 'Everything is recorded' rendered under the failure banner. Fixed: suppressed while status is unknown.\nSource: re-audit 3",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-069",
+      "title": "Dead-end Copy past the 5MB cap",
+      "content": "[P2 \u00b7 UX \u00b7 repo] The huge card offered Copy that always failed past the backend cap. Fixed: withheld, with truthful note tiers; cap state lives on the cached tab (fixes 'Open anyway' resurfacing after pane switches too).\nSource: re-audit 3",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-070",
+      "title": "Viewer tab strip let the active tab slide out of view",
+      "content": "[P2 \u00b7 UI \u00b7 repo] No overflow handling. Fixed: the strip scrolls and the active tab keeps itself visible.\nSource: re-audit 3",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-071",
+      "title": "Commit meta wrapped into the next row",
+      "content": "[P3 \u00b7 UI \u00b7 repo] Fixed: truncates on one line.\nSource: re-audit 3",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-072",
+      "title": "Failed fix round looped a toast per tick",
+      "content": "[P1 \u00b7 BROKEN \u00b7 kanban] The failure branch never refreshed, so the resume effect re-opened the flow (74 toasts measured). Fixed: refresh-first + a failure latch; bounded to one toast even against a never-settling backend.\nSource: re-audit 4",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-073",
+      "title": "Backend swept archived tasks into rounds",
+      "content": "[P1 \u00b7 BROKEN \u00b7 kanban] fixes_generate ignored archived; invisible members held rounds open forever. Fixed: archived excluded from the pick and from round math.\nSource: re-audit 4",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-074",
+      "title": "Zero-member settled rounds claimed 'underway' forever",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 kanban] Fixed: a settled round with no visible members is closed.\nSource: re-audit 4",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-075",
+      "title": "Resumed generating overlay reset its clock",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 kanban] Fixed: adopts the backend's started_at like the roadmap mirror.\nSource: re-audit 4",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-076",
+      "title": "Kanban dialogs didn't take focus \u2014 Escape dead until a click",
+      "content": "[P2 \u00b7 UX \u00b7 kanban] Fixed: overlays focus on open; the composer autofocuses its title.\nSource: re-audit 4",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-077",
+      "title": "Edit-mode attachment changes weren't transactional",
+      "content": "[P2 \u00b7 UX \u00b7 kanban] Removing detached immediately (cancel left dangling refs); adding then cancelling orphaned files. Fixed: removals commit on Save, cancel restores; added files detach on cancel.\nSource: re-audit 4",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-078",
+      "title": "Silent settle when unwatched",
+      "content": "[P3 \u00b7 UX \u00b7 kanban] Fixed: returning to the pane after an unwatched settle lands on the done card with its toast.\nSource: re-audit 4",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-079",
+      "title": "Fixes still-running card used roadmap copy",
+      "content": "[P3 \u00b7 UI \u00b7 sessions] Fixed: its own reassurance line.\nSource: re-audit 4",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-080",
+      "title": "False 'Done \u00b7 just now' on open and tab switch",
+      "content": "[P2 \u00b7 WRONG-INFO \u00b7 roadmap] Empty-set truthiness + no per-project baseline reset. Fixed: real flips only.\nSource: re-audit 2",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-081",
+      "title": "Phase-detail breadcrumb wrapped at the 560px floor",
+      "content": "[P3 \u00b7 UI \u00b7 roadmap] Fixed: nowrap chips, truncating name.\nSource: re-audit 2",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-082",
+      "title": "Fixes >5min card had no View full log",
+      "content": "[P3 \u00b7 UX \u00b7 sessions] Fixed: fixes_log_path seam + deduped 'Fix plan log' tail tab.\nSource: re-audit 2",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-083",
+      "title": "Warning banner stacked with the fixes-mirror card",
+      "content": "[P3 \u00b7 UX \u00b7 roadmap] Fixed: yields like it does for rebuilds.\nSource: re-audit 2",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    },
+    {
+      "id": "T-084",
+      "title": "Doc chips keyed by basename could collide",
+      "content": "[P3 \u00b7 UI \u00b7 roadmap] Fixed: unique keys.\nSource: re-audit 2",
+      "column": "completed",
+      "round": 4,
+      "images": [],
+      "links": [],
+      "created_at": 1784066781667,
+      "updated_at": 1784066781667
+    }
+  ],
+  "version": 1
+}
