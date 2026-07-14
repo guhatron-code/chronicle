@@ -8,7 +8,11 @@ import { useCallback, useRef } from "react";
 import type { ReactNode } from "react";
 import { Rail, type Pane } from "@/components/chrome/Rail";
 import { TitleBar, type ProjectTab } from "@/components/chrome/TitleBar";
-import { TerminalColumn } from "@/components/chrome/TerminalColumn";
+import {
+  TerminalColumn,
+  type TerminalAgent,
+  type TerminalTab,
+} from "@/components/chrome/TerminalColumn";
 
 export function Shell({
   tabs,
@@ -27,8 +31,14 @@ export function Shell({
   onRefresh,
   onHelp,
   terminalTabs,
+  activeTerminalId,
   onNewTerminal,
   onStartAgent,
+  onTerminalSelect,
+  onTerminalClose,
+  onTerminalRenameStart,
+  onTerminalRenameCommit,
+  terminalHostFor,
   children,
 }: {
   tabs: ProjectTab[];
@@ -46,9 +56,17 @@ export function Shell({
   onAdd: () => void;
   onRefresh: () => void;
   onHelp: () => void;
-  terminalTabs: { id: number; title: string }[];
+  terminalTabs: TerminalTab[];
+  /** Defaults to the first tab — the C2 behavior — until C6 wires selection. */
+  activeTerminalId?: number | null;
   onNewTerminal: () => void;
-  onStartAgent: (agent: "claude" | "codex") => void;
+  onStartAgent: (agent: TerminalAgent) => void;
+  onTerminalSelect?: (id: number) => void;
+  onTerminalClose?: (id: number) => void;
+  onTerminalRenameStart?: (id: number) => void;
+  onTerminalRenameCommit?: (id: number, name: string) => void;
+  /** The xterm host-mount seam — see TerminalColumn's header comment. */
+  terminalHostFor?: (id: number) => (el: HTMLDivElement | null) => void;
   children: ReactNode;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
@@ -138,9 +156,14 @@ export function Shell({
             </div>
             <TerminalColumn
               tabs={terminalTabs}
-              activeId={terminalTabs[0]?.id ?? null}
+              activeId={activeTerminalId ?? terminalTabs[0]?.id ?? null}
               onNewTerminal={onNewTerminal}
               onStartAgent={onStartAgent}
+              onSelect={onTerminalSelect}
+              onClose={onTerminalClose}
+              onRenameStart={onTerminalRenameStart}
+              onRenameCommit={onTerminalRenameCommit}
+              hostFor={terminalHostFor}
             />
           </>
         )}
