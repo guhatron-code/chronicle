@@ -15,6 +15,7 @@ use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::os::unix::process::CommandExt;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
 
@@ -31,6 +32,16 @@ struct Project {
 
 /// Background /chronicle-init runs, keyed by the CANONICALIZED project path (same-named
 /// folders in different places must never share a run or a log).
+fn hhmmss_now() -> String {
+    // local wall-clock via libc (std has no local-time formatting; no chrono dep)
+    unsafe {
+        let t = libc::time(std::ptr::null_mut());
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&t, &mut tm);
+        format!("{:02}:{:02}:{:02}", tm.tm_hour, tm.tm_min, tm.tm_sec)
+    }
+}
+
 fn epoch_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
@@ -60,11 +71,17 @@ fn canon_key(dir: &str) -> Result<(String, PathBuf), String> {
 /// SIGTERM, give the child a moment to exit cleanly, then SIGKILL; always reap.
 fn term_then_kill(child: &mut std::process::Child) {
     let pid = child.id() as i32;
-    unsafe { libc::kill(pid, libc::SIGTERM) };
+    // agent sessions are spawned as their own process group (see process_group(0)
+    // at the spawn sites) — signal the group so agent-spawned grandchildren die
+    // too; fall back to the bare pid for children not leading a group
+    unsafe {
+        if libc::kill(-pid, libc::SIGTERM) != 0 { libc::kill(pid, libc::SIGTERM); }
+    }
     for _ in 0..20 {
         if let Ok(Some(_)) = child.try_wait() { return; }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+    unsafe { libc::kill(-pid, libc::SIGKILL) };
     let _ = child.kill();
     let _ = child.wait();
 }
@@ -74,6 +91,11 @@ fn term_then_kill(child: &mut std::process::Child) {
 /// Resolve agent binaries through a login shell: GUI apps have a minimal PATH,
 /// so a bare `claude`/`codex` would fail on a Finder-launched install.
 fn agent_paths() -> (Option<String>, Option<String>) {
+    static CACHE: std::sync::OnceLock<(Option<String>, Option<String>)> = std::sync::OnceLock::new();
+    CACHE.get_or_init(agent_paths_uncached).clone()
+}
+
+fn agent_paths_uncached() -> (Option<String>, Option<String>) {
     let out = Command::new("/bin/zsh")
         .args(["-lc", "command -v claude; echo ---; command -v codex"])
         .output()
@@ -248,6 +270,10 @@ impl Ctx {
 /// Unknown is unknown — it never satisfies, even under "not": true (a typo'd rule must
 /// not silently flip a phase done). Validation (validate_manifest) surfaces the typo.
 fn eval_cond(ctx: &Ctx, cond: &Value) -> Option<bool> {
+    // two rule kinds in one condition is ambiguous — unknown, not first-key-wins
+    if KNOWN_COND_KEYS.iter().filter(|k| cond.get(**k).is_some()).count() > 1 {
+        return None;
+    }
     let negate = cond.get("not").and_then(|v| v.as_bool()).unwrap_or(false);
     let result = (|| {
         if let Some(t) = cond.get("tag").and_then(|v| v.as_str()) {
@@ -262,6 +288,11 @@ fn eval_cond(ctx: &Ctx, cond: &Value) -> Option<bool> {
                 fm.get("pattern").and_then(|v| v.as_str()),
             ) {
                 let Some(full) = ctx.resolve_jailed(p) else { return Some(false) };
+                // a >5MB file is not a status marker — reading it every poll would
+                // hurt, and matching it is meaningless: unknown, surfaced by validation
+                if std::fs::metadata(&full).map(|m| m.len() > 5_000_000).unwrap_or(false) {
+                    return None;
+                }
                 let text = std::fs::read_to_string(full).unwrap_or_default();
                 return Some(Regex::new(&format!("(?m){pat}")).map(|re| re.is_match(&text)).unwrap_or(false));
             }
@@ -681,7 +712,7 @@ async fn open_project(roots: State<'_, OpenRoots>, path: String) -> Result<Value
     if part_of.is_null() {
         // a folder that's really part of another project is not itself a recent
         recents.insert(0, json!({"name": name, "path": dir.to_string_lossy(),
-            "opened_at": Command::new("date").arg("+%s").output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()}));
+            "opened_at": (epoch_ms() / 1000).to_string()}));
         recents.truncate(10);
     }
     save_recents(&recents);
@@ -748,6 +779,7 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
             .current_dir(&dirp)
             .stdin(std::process::Stdio::null())
             .stdout(logf).stderr(errf)
+            .process_group(0)
             .spawn()
             .map_err(|e| format!("couldn't start a Codex session: {e}"))?
     } else {
@@ -758,6 +790,7 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
             .current_dir(&dirp)
             .stdin(std::process::Stdio::null())
             .stdout(logf).stderr(errf)
+            .process_group(0)
             .spawn()
             .map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
@@ -768,7 +801,8 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
 /// Stop a running roadmap session: SIGTERM, a grace period, then SIGKILL — always reaped.
 /// Wired to every dismiss path and to agent-switch (cancel before respawn).
 #[tauri::command]
-async fn init_cancel(init: State<'_, InitState>, dir: String) -> Result<(), String> {
+async fn init_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String) -> Result<(), String> {
+    let _ = project_for(&roots, &dir)?;
     let (key, _) = canon_key(&dir)?;
     let entry = init.runs.lock().map_err(|e| e.to_string())?.remove(&key);
     if let Some((mut child, _log, _)) = entry {
@@ -816,7 +850,8 @@ fn read_tail(path: &Path, max: u64) -> String {
 }
 
 #[tauri::command]
-async fn init_status(init: State<'_, InitState>, dir: String) -> Result<Value, String> {
+async fn init_status(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String) -> Result<Value, String> {
+    let _ = project_for(&roots, &dir)?;
     let (key, _) = canon_key(&dir)?;
     // probe under the lock (fast), read the log AFTER releasing it
     let probed = {
@@ -937,8 +972,7 @@ fn state_for_project(p: &Project) -> Value {
         "statuses": statuses, "docs": doc_existence, "stale": stale, "custom_actions": custom_actions,
         "manifest_warnings": p.manifest.as_ref().map(validate_manifest).unwrap_or_default(),
         "work_branch": p.manifest.as_ref().and_then(|m| m.get("workBranch")).cloned().unwrap_or(Value::Null),
-        "checked_at": Command::new("date").arg("+%H:%M:%S").output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default(),
+        "checked_at": hhmmss_now(),
     })
 }
 
@@ -957,10 +991,30 @@ fn load_kanban(dir: &Path) -> Value {
         .unwrap_or_else(|| json!({ "version": 1, "next_id": 1, "tasks": [], "rounds": [] }))
 }
 
+/// Missing file => a fresh default board; a file that EXISTS but can't be parsed => None,
+/// so callers never silently overwrite a corrupt board with an empty one (audit B2).
+fn load_kanban_checked(dir: &Path) -> Option<Value> {
+    match std::fs::read_to_string(kanban_path(dir)) {
+        Ok(s) => serde_json::from_str(&s).ok(),
+        Err(_) => Some(json!({ "version": 1, "next_id": 1, "tasks": [], "rounds": [] })),
+    }
+}
+
+/// Atomic write: temp file in the same dir + rename, so a crash mid-write
+/// can never leave a truncated board (audit B2).
+fn write_kanban(dir: &Path, store: &Value) -> Result<(), String> {
+    let path = kanban_path(dir);
+    let tmp = path.with_extension("json.tmp");
+    let body = serde_json::to_string_pretty(store).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn kanban_get(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
-    Ok(load_kanban(&p.dir))
+    load_kanban_checked(&p.dir)
+        .ok_or_else(|| "the board file couldn't be read — fix .chronicle/kanban.json first".into())
 }
 
 /// Whole-store save (the board is small; last-write-wins is fine for a single user).
@@ -970,10 +1024,12 @@ async fn kanban_save(roots: State<'_, OpenRoots>, dir: String, data: Value) -> R
     if !data.is_object() || !data.get("tasks").map(|t| t.is_array()).unwrap_or(false) {
         return Err("malformed kanban data".into());
     }
+    if load_kanban_checked(&p.dir).is_none() {
+        return Err("the board file on disk couldn't be read — not overwriting it".into());
+    }
     std::fs::create_dir_all(p.dir.join(".chronicle")).map_err(|e| e.to_string())?;
-    std::fs::write(kanban_path(&p.dir),
-        serde_json::to_string_pretty(&data).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())
+    write_kanban(&p.dir, &data).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Save an image attachment; returns the repo-relative path for the task to reference.
@@ -994,7 +1050,7 @@ async fn kanban_attach(roots: State<'_, OpenRoots>, dir: String, task_id: String
     Ok(rel)
 }
 
-const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written tasks (bugs, issues, ideas — with optional screenshots and design links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every task below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its task id. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the tasks' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly. The prompt MUST also instruct the executor: after each item is completed AND verified, edit .chronicle/kanban.json and set that task's \"column\" to \"completed\" (match by task id; touch \"updated_at\" with epoch ms; change nothing else in the file) — this is how the board and the roadmap track the round live.\n\nDo not change any other file. The tasks (JSON):\n\n";
+const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written tasks (bugs, issues, ideas — with optional screenshots and design links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every task below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its task id. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the tasks' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly. The prompt MUST also instruct the executor: after each item is completed AND verified, edit .chronicle/kanban.json and set that task's \"column\" to \"completed\" (match by task id; touch \"updated_at\" with epoch ms; change nothing else in the file) — this is how the board and the roadmap track the round live.\n\nDo not change any other file except the two above (and the kanban column updates the executor makes later). The tasks are in `{TASKS}` — read that file (a JSON array) before writing anything.\n";
 
 fn fixes_run_key(dir: &str) -> Result<(String, PathBuf), String> {
     let (key, log) = canon_key(dir)?;
@@ -1019,8 +1075,15 @@ fn fixes_log_path(roots: State<OpenRoots>, dir: String) -> Result<String, String
 #[tauri::command]
 async fn kanban_detach(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<(), String> {
     let p = project_for(&roots, &dir)?;
-    if !path.starts_with(".chronicle/attachments/") {
+    if !path.starts_with(".chronicle/attachments/") || path.contains("..") {
         return Err("only attachment files can be removed".into());
+    }
+    // a symlink here would canonicalize to its target and delete THAT — refuse it
+    let raw = p.dir.join(&path);
+    if let Ok(md) = std::fs::symlink_metadata(&raw) {
+        if md.file_type().is_symlink() {
+            return Err("only attachment files can be removed".into());
+        }
     }
     let full = jailed(&p, &path)?;
     match std::fs::remove_file(&full) {
@@ -1033,7 +1096,18 @@ async fn kanban_detach(roots: State<'_, OpenRoots>, dir: String, path: String) -
 #[tauri::command]
 async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>) -> Result<u64, String> {
     let p = project_for(&roots, &dir)?;
-    let mut store = load_kanban(&p.dir);
+    let mut store = load_kanban_checked(&p.dir)
+        .ok_or("the board file couldn't be read — fix .chronicle/kanban.json first")?;
+    // the guard comes BEFORE any store mutation: a second click during a live
+    // round must not write a phantom round (audit wave-4 B1). The lock is held
+    // through the store write + spawn so nothing interleaves.
+    let (key, log) = fixes_run_key(&dir)?;
+    let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
+    if let Some((child, _, _)) = runs.get_mut(&key) {
+        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
+            return Err("a fix round is already generating".into());
+        }
+    }
     // the round takes every QUEUED task not already frozen into a round
     let mut picked: Vec<Value> = Vec::new();
     let round_n = store.get("rounds").and_then(|r| r.as_array()).map(|r| r.len() as u64).unwrap_or(0) + 1;
@@ -1063,20 +1137,18 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
         }));
     }
     std::fs::create_dir_all(p.dir.join(".chronicle")).map_err(|e| e.to_string())?;
-    std::fs::write(kanban_path(&p.dir), serde_json::to_string_pretty(&store).unwrap_or_default())
-        .map_err(|e| e.to_string())?;
+    write_kanban(&p.dir, &store).map_err(|e| e.to_string())?;
 
-    // spawn the generation session (same machinery + lifecycle as /chronicle-init)
-    let prompt = format!("{}{}",
-        FIXES_PROMPT_HEAD.replace("{N}", &round_n.to_string()),
-        serde_json::to_string_pretty(&picked).unwrap_or_default());
-    let (key, log) = fixes_run_key(&dir)?;
-    let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
-    if let Some((child, _, _)) = runs.get_mut(&key) {
-        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
-            return Err("a fix round is already generating".into());
-        }
-    }
+    // spawn the generation session (same machinery + lifecycle as /chronicle-init).
+    // The tasks go via a file — a big round would blow ARG_MAX as an argv string (H7).
+    let tasks_rel = format!(".chronicle/round_{round_n}_tasks.json");
+    std::fs::write(
+        p.dir.join(&tasks_rel),
+        serde_json::to_string_pretty(&picked).unwrap_or_default(),
+    ).map_err(|e| e.to_string())?;
+    let prompt = FIXES_PROMPT_HEAD
+        .replace("{N}", &round_n.to_string())
+        .replace("{TASKS}", &tasks_rel);
     let logf = std::fs::File::create(&log).map_err(|e| e.to_string())?;
     let errf = logf.try_clone().map_err(|e| e.to_string())?;
     let (claude_bin, codex_bin) = agent_paths();
@@ -1090,6 +1162,7 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
             .current_dir(&p.dir)
             .stdin(std::process::Stdio::null())
             .stdout(logf).stderr(errf)
+            .process_group(0)
             .spawn().map_err(|e| format!("couldn't start a Codex session: {e}"))?
     } else {
         let bin = claude_bin.ok_or("Claude Code isn't installed (couldn't find `claude`)")?;
@@ -1099,6 +1172,7 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
             .current_dir(&p.dir)
             .stdin(std::process::Stdio::null())
             .stdout(logf).stderr(errf)
+            .process_group(0)
             .spawn().map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
     runs.insert(key, (child, log, epoch_ms()));
@@ -1134,7 +1208,7 @@ async fn fixes_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, d
     let entry = init.runs.lock().map_err(|e| e.to_string())?.remove(&key);
     if let Some((mut child, _, _)) = entry { term_then_kill(&mut child); }
     // a cancelled generating round unfreezes its tasks
-    let mut store = load_kanban(&p.dir);
+    let Some(mut store) = load_kanban_checked(&p.dir) else { return Ok(()) };
     let cancelled: Option<u64> = store.get_mut("rounds").and_then(|r| r.as_array_mut()).and_then(|rounds| {
         let last = rounds.last_mut()?;
         if last.get("state").and_then(|s| s.as_str()) == Some("generating") {
@@ -1163,10 +1237,11 @@ async fn fixes_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, d
 /// After a generation session exits: read what it actually wrote and record the truth —
 /// the plan file's first line names the round kind; both files must exist or it failed.
 fn settle_round(dir: &Path) {
-    let mut store = load_kanban(dir);
+    let Some(mut store) = load_kanban_checked(dir) else { return }; // never write over corrupt
     let Some(rounds) = store.get_mut("rounds").and_then(|r| r.as_array_mut()) else { return };
-    let Some(last) = rounds.last_mut() else { return };
-    if last.get("state").and_then(|s| s.as_str()) != Some("generating") { return; }
+    // settle the newest GENERATING round — never assume it's last() (audit B1)
+    let Some(last) = rounds.iter_mut().rev()
+        .find(|r| r.get("state").and_then(|s| s.as_str()) == Some("generating")) else { return };
     let n = last.get("n").and_then(|v| v.as_u64()).unwrap_or(0);
     let plan = dir.join(format!("fixes/phase_{n}_fixes_plan.md"));
     let prompt = dir.join(format!("fixes/phase_{n}_fixes_prompt.md"));
@@ -1194,7 +1269,7 @@ fn settle_round(dir: &Path) {
             }
         }
     }
-    let _ = std::fs::write(kanban_path(dir), serde_json::to_string_pretty(&store).unwrap_or_default());
+    let _ = write_kanban(dir, &store);
 }
 
 /// The roadmap overlay: settled rounds become synthetic phases in a synthetic stage
@@ -1348,6 +1423,9 @@ async fn git_pull(roots: State<'_, OpenRoots>, dir: String) -> Result<(), String
 #[tauri::command]
 async fn git_checkout(roots: State<'_, OpenRoots>, dir: String, branch: String) -> Result<(), String> {
     let p = project_for(&roots, &dir)?;
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err("that isn't a valid branch name".into());
+    }
     git_full(&p.repo, &["checkout", &branch]).map(|_| ())
 }
 
@@ -1468,6 +1546,10 @@ fn jailed(p: &Project, path: &str) -> Result<PathBuf, String> {
                 .map(|(_, base)| base.clone())
                 .ok_or_else(|| format!("unknown root @{rest}"))?
         }
+    } else if path == ".chronicle" || path.starts_with(".chronicle/") {
+        // kanban attachments live beside the manifest (p.dir), which is not
+        // always the repo root — resolve them against the right base (audit B3)
+        p.dir.join(path)
     } else {
         p.repo.join(path)
     };
@@ -1596,6 +1678,10 @@ fn pty_spawn(app: tauri::AppHandle, roots: State<OpenRoots>, pty: State<PtyState
     let mut reader = opened.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = Arc::new(Mutex::new(opened.master.take_writer().map_err(|e| e.to_string())?));
     let sessions = pty.sessions.clone();
+    // register the session BEFORE the reader thread can observe an exit —
+    // an instantly-dying shell must find its entry to remove (audit H6)
+    pty.sessions.lock().map_err(|e| e.to_string())?
+        .insert(id, PtyHandles { master: opened.master, writer, child });
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
@@ -1615,8 +1701,6 @@ fn pty_spawn(app: tauri::AppHandle, roots: State<OpenRoots>, pty: State<PtyState
             }
         }
     });
-    pty.sessions.lock().map_err(|e| e.to_string())?
-        .insert(id, PtyHandles { master: opened.master, writer, child });
     Ok(id)
 }
 
