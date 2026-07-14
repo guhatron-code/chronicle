@@ -99,7 +99,7 @@ export function NeedsYou(p: NeedsYouProps) {
     return (
       <div
         className={cn(
-          "flex items-center gap-2.5 rounded-lg border border-border-hairline bg-surface-card px-[13px] py-[13px]",
+          "flex items-center gap-2.5 py-[18px]",
           p.className,
         )}
       >
@@ -112,11 +112,11 @@ export function NeedsYou(p: NeedsYouProps) {
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-lg border border-border-hairline bg-surface-card",
+        "py-[18px]",
         p.className,
       )}
     >
-      <div className="border-b border-divider px-[13px] py-[9px] text-[15px] font-semibold text-text-primary">
+      <div className="pb-[9px] text-[15px] font-semibold text-text-primary">
         What needs you
       </div>
       {p.rows.map((row, i) => (

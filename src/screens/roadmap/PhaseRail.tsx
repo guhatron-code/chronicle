@@ -237,7 +237,7 @@ export function PhaseRail({ stages, className }: PhaseRailProps) {
   return (
     <div
       className={cn(
-        "flex flex-col rounded-lg border border-border-hairline bg-surface-panel px-6 py-[22px]",
+        "flex flex-col py-[22px]",
         className,
       )}
     >

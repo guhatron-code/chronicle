@@ -58,11 +58,9 @@ export function CurrentStateBanner(p: CurrentStateBannerProps) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 rounded-lg border px-[13px] py-[11px]",
-        // just-switched: quiet emphasis — raised surface + strong border, settles over ~2s
-        p.kind === "just-switched"
-          ? "border-border-strong bg-surface-card-raised transition-colors duration-1000"
-          : "border-border-hairline bg-surface-card",
+        "flex flex-col gap-2 py-[18px]",
+        // just-switched: quiet emphasis — raised surface tint, settles over ~2s
+        p.kind === "just-switched" && "bg-surface-card-raised transition-colors duration-1000",
         p.className,
       )}
     >

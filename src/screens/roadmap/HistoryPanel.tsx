@@ -87,7 +87,7 @@ export function HistoryPanel(p: HistoryPanelProps) {
     return (
       <div
         className={cn(
-          "flex flex-col gap-2.5 rounded-lg border border-border-hairline bg-surface-card p-[13px]",
+          "flex flex-col gap-2.5 py-[18px]",
           p.className,
         )}
       >
@@ -109,7 +109,7 @@ export function HistoryPanel(p: HistoryPanelProps) {
   return (
     <div
       className={cn(
-        "overflow-hidden rounded-lg border border-border-hairline bg-surface-card",
+        "py-[18px]",
         p.className,
       )}
     >
@@ -117,12 +117,12 @@ export function HistoryPanel(p: HistoryPanelProps) {
           global reduced-motion rule like everything else. */}
       <style>{"@keyframes wv-dash { to { stroke-dashoffset: -12; } }"}</style>
 
-      <div className="flex items-center justify-between border-b border-divider px-[13px] py-[9px]">
+      <div className="flex items-center justify-between pb-[9px]">
         <span className="text-[15px] font-semibold text-text-primary">Project history</span>
         <StatusWordmark status={p.status} />
       </div>
 
-      <div className="flex flex-col gap-3 p-[13px]">
+      <div className="flex flex-col gap-3 pt-3">
         {/* pipeline */}
         <div className="flex items-center">
           {p.nodes.map((node, i) => (
