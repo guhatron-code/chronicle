@@ -46,6 +46,14 @@ export function TitleBar({
   return (
     <div
       data-tauri-drag-region
+      onDoubleClick={(e) => {
+        // macOS quirk: the native drag session that starts on the first press
+        // swallows Tauri's built-in detail-2 zoom — do it ourselves. Interactive
+        // children opt out.
+        if (!(e.target as HTMLElement).closest("button, input, [data-no-zoom]")) {
+          void windowControls().toggleMaximize();
+        }
+      }}
       className="flex h-11 shrink-0 items-center gap-3 border-b border-divider px-3.5"
     >
       <div className="flex gap-2">
@@ -65,6 +73,7 @@ export function TitleBar({
             <Fragment key={t.dir}>
               {active ? (
                 <div
+                  data-no-zoom
                   className="flex h-[30px] max-w-[180px] items-center gap-2 rounded-md border border-border-strong bg-fill-hover px-3"
                   title={t.dir}
                 >

@@ -405,7 +405,13 @@ export default function App() {
   if (!active) {
     return (
       <div className="flex h-full flex-col bg-surface-app font-sans text-text-primary">
-        <div data-tauri-drag-region className="flex h-11 shrink-0 items-center gap-2 px-4">
+        <div
+          data-tauri-drag-region
+          onDoubleClick={(e) => {
+            if (!(e.target as HTMLElement).closest("button, input")) void windowControls().toggleMaximize();
+          }}
+          className="flex h-11 shrink-0 items-center gap-2 px-4"
+        >
           <button aria-label="Close window" onClick={() => void windowControls().close()}
             className="size-3 rounded-full border border-border-strong bg-fill-hover" />
           <button aria-label="Minimize window" onClick={() => void windowControls().minimize()}
