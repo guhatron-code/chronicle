@@ -85,7 +85,7 @@ export function BuildingCard(p: BuildingCardProps) {
           </button>
         )}
         <BtnSecondary className="h-8 px-[13px] text-[12.5px]" onClick={p.onCancel}>
-          Cancel — stops the session
+          Cancel
         </BtnSecondary>
       </div>
     </div>

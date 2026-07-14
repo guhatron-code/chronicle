@@ -136,7 +136,7 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
         </div>
         <div className="flex justify-end">
           <BtnSecondary onClick={p.onCancel} className="h-[31px] px-3 text-xs">
-            Cancel — stops the session
+            Cancel
           </BtnSecondary>
         </div>
       </div>
