@@ -79,7 +79,9 @@ export function RoadmapPane({
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  /* per-project state resets when the project changes */
+  /* per-project state resets when the project changes — then the backend is
+     asked whether a build session is still running here, so a rebuild started
+     before a tab switch picks its progress card straight back up */
   useEffect(() => {
     if (dirRef.current !== dir) {
       dirRef.current = dir;
@@ -90,7 +92,52 @@ export function RoadmapPane({
       setWarningDismissed(false);
       setConsentLocal(null);
     }
+    const d = dir;
+    initStatus(d)
+      .then((raw) => {
+        const st = raw as { running?: boolean; log_tail?: string };
+        if (dirRef.current !== d || !st?.running) return;
+        const tail = st.log_tail ?? "";
+        const lines = logLinesFrom(tail);
+        setInitRun((prev) => prev ?? {
+          running: true,
+          startedAt: Date.now(), // the true start is the backend's; elapsed re-counts from here
+          logLines: lines.slice(0, -1),
+          activeLine: lines[lines.length - 1] ?? "Starting the session…",
+          progress: initProgress(tail),
+          code: null,
+          elapsedS: 0,
+        });
+      })
+      .catch(() => {});
   }, [dir]);
+
+  /* self-heal on every App poll: if no card is showing but the backend has a
+     live session for this project (lost track via tab switch, re-open, HMR),
+     pick it back up */
+  const checkedAt = state?.checked_at ?? null;
+  useEffect(() => {
+    if (initRun) return;
+    const d = dir;
+    initStatus(d)
+      .then((raw) => {
+        const st = raw as { running?: boolean; log_tail?: string };
+        if (dirRef.current !== d || !st?.running) return;
+        const tail = st.log_tail ?? "";
+        const lines = logLinesFrom(tail);
+        setInitRun((prev) => prev ?? {
+          running: true,
+          startedAt: Date.now(),
+          logLines: lines.slice(0, -1),
+          activeLine: lines[lines.length - 1] ?? "Starting the session…",
+          progress: initProgress(tail),
+          code: null,
+          elapsedS: 0,
+        });
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [checkedAt, dir, initRun == null]);
 
   /* the init session poll (3s while running) */
   useEffect(() => {
