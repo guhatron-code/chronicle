@@ -65,6 +65,8 @@ interface RepoState {
   tabs: TabState[];
   activeTab: string | null; // path
   historyView: boolean;
+  /** Where the history view was entered from — Back/Close return there. */
+  historyFrom: "repo" | "roadmap";
   closedGroups: Set<string>;
   message: string;
   logLimit: number;
@@ -82,6 +84,7 @@ function stateFor(dir: string): RepoState {
       tabs: [],
       activeTab: null,
       historyView: false,
+      historyFrom: "repo",
       closedGroups: new Set(),
       message: "",
       logLimit: 30,
@@ -92,9 +95,12 @@ function stateFor(dir: string): RepoState {
 }
 
 /** Open the project-history view next time the repo pane mounts for `dir` —
- * lets the roadmap's history panel land directly on the L4 pane. */
-export function openHistoryView(dir: string) {
-  stateFor(dir).historyView = true;
+ * lets the roadmap's history panel land directly on the L4 pane. Back/Close
+ * return to the caller's surface. */
+export function openHistoryView(dir: string, from: "repo" | "roadmap" = "roadmap") {
+  const s = stateFor(dir);
+  s.historyView = true;
+  s.historyFrom = from;
 }
 
 const HUGE_WARN = 300_000; // "Reading it may be slow."
@@ -111,11 +117,14 @@ export function RepoPane({
   state,
   onConfirm,
   onPollNow,
+  onGoRoadmap,
 }: {
   dir: string;
   state: StateData | null;
   onConfirm: (spec: ConfirmSpec) => void;
   onPollNow: () => void;
+  /** History entered from the roadmap returns there on Back/Close. */
+  onGoRoadmap?: () => void;
 }) {
   const rs = stateFor(dir);
   const [, bump] = useState(0);
@@ -387,13 +396,21 @@ export function RepoPane({
             branches: arcs,
             hasMore: logCount >= rs.logLimit,
           };
+    const leaveHistory = () => {
+      const from = rs.historyFrom;
+      rs.historyView = false;
+      rs.historyFrom = "repo";
+      if (from === "roadmap" && onGoRoadmap) onGoRoadmap();
+      else rerender();
+    };
     view = {
       kind: "history",
       history: {
         branch,
+        backLabel: rs.historyFrom === "roadmap" ? "Roadmap" : "Repo",
         state: ready,
-        onBack: () => { rs.historyView = false; rerender(); },
-        onCloseHistory: () => { rs.historyView = false; rerender(); },
+        onBack: leaveHistory,
+        onCloseHistory: leaveHistory,
         onMessageChange: (m) => { rs.message = m; rerender(); },
         onSave: () => {
           const msg = rs.message.trim();
@@ -457,7 +474,7 @@ export function RepoPane({
       onSelect: openFile,
       onToggleDir,
       onRetry: (id) => loadDir(id === "#root" ? "" : id),
-      onOpenHistory: () => { rs.historyView = true; rerender(); },
+      onOpenHistory: () => { rs.historyView = true; rs.historyFrom = "repo"; rerender(); },
     };
     const active = rs.tabs.find((t) => t.path === rs.activeTab);
     const viewer: ViewerProps = !active

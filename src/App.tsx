@@ -374,7 +374,7 @@ export default function App() {
             onOpenProject={doOpenProject}
             onGoRepo={() => setPane("repo")}
             onGoHistory={() => {
-              openHistoryView(active.dir);
+              openHistoryView(active.dir, "roadmap");
               setPane("repo");
             }}
             onGoKanban={() => setPane("kanban")}
@@ -387,6 +387,7 @@ export default function App() {
             state={active.state}
             onConfirm={setConfirm}
             onPollNow={() => void pollOne(active.dir)}
+            onGoRoadmap={() => setPane("road")}
           />
         ) : (
           <div className="flex h-full items-center justify-center">
