@@ -125,11 +125,11 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
           />
         </div>
         {/* streamed log — surface-input, radius 8, no border (log-pane law) */}
-        <div className="flex flex-col gap-[5px] rounded-md bg-surface-input px-[13px] py-[11px] font-mono text-[11px] text-text-dim">
+        <div className="flex min-w-0 flex-col gap-[5px] overflow-hidden rounded-md bg-surface-input px-[13px] py-[11px] font-mono text-[11px] text-text-dim">
           {p.logLines.map((line) => (
-            <div key={line}>{line}</div>
+            <div key={line} className="truncate">{line}</div>
           ))}
-          <div className="text-text-subtle">
+          <div className="truncate text-text-subtle">
             {p.activeLine}
             <span style={{ animation: "wv-pulse 1.1s step-end infinite" }}>▍</span>
           </div>

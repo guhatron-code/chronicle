@@ -123,6 +123,8 @@ export function logLinesFrom(tail: string, max = 5): string[] {
     }
     // fragments of truncated JSON lines read as garbage — never show them
     if (/\\"|\\n|\\\\/.test(t) || /^["}\],]/.test(t)) continue;
+    // an unbroken run with no spaces (base64 blobs, mid-line cuts) isn't a log line
+    if (!/\s/.test(t) && t.length > 48) continue;
     lines.push(t.slice(0, 90));
   }
   // collapse consecutive repeats (a retried write logs the same line twice)
