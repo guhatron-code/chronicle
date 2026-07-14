@@ -151,7 +151,8 @@ export function RepoPane({
     listDir(d, path)
       .then((entries) => {
         if (dirRef.current !== d) return;
-        stateFor(d).loads.set(path, { kind: "ready", entries });
+        // a malformed backend reply must degrade, not crash the pane
+        stateFor(d).loads.set(path, { kind: "ready", entries: Array.isArray(entries) ? entries : [] });
         rerender();
       })
       .catch((e) => {
@@ -167,7 +168,7 @@ export function RepoPane({
     gitStatusDetail(d)
       .then((st) => {
         if (dirRef.current !== d || seq.current !== my) return;
-        setGitStatus(st);
+        setGitStatus(st && Array.isArray(st.staged) && Array.isArray(st.unstaged) ? st : null);
       })
       .catch(() => {
         if (dirRef.current !== d) return;
@@ -177,7 +178,7 @@ export function RepoPane({
       .then((rows) => {
         if (dirRef.current !== d) return;
         const branch = state?.branch ?? null;
-        const mapped = mapCommits(rows, branch);
+        const mapped = mapCommits(Array.isArray(rows) ? rows : [], branch);
         setLog(mapped.commits);
         setArcs(mapped.branches);
         setLogCount(rows.length);

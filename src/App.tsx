@@ -29,6 +29,20 @@ import {
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
 import { RoadmapPane } from "@/screens/roadmap/RoadmapPane";
 import { RepoPane, openHistoryView } from "@/screens/repo/RepoPane";
+import {
+  activeTermFor,
+  closeTerm,
+  closeTermsFor,
+  fitTerm,
+  getTerm,
+  liveCount,
+  renameTerm,
+  setActiveTermFor,
+  spawnTerm,
+  subscribeTerms,
+  termsFor,
+} from "@/lib/term-sessions";
+import type { TerminalTab } from "@/components/chrome/TerminalColumn";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -156,18 +170,87 @@ export default function App() {
       );
   }, [activate, pollOne, refreshPicker]);
 
-  const closeProject = useCallback((dir: string) => {
-    // NOTE(C6): once live terminal sessions exist, a live session gates this behind
-    // the F6 "Close and stop the session" confirm. No sessions exist yet.
-    setProjects((prev) => {
-      const next = new Map(prev);
-      next.delete(dir);
-      if (activeRef.current === dir) {
-        const first = next.keys().next();
-        setActiveDir(first.done ? null : first.value);
-      }
-      return next;
+  /* ---- terminal sessions (C6) ---- */
+  const [, termBump] = useState(0);
+  useEffect(() => subscribeTerms(() => termBump((n) => n + 1)), []);
+  const setActiveTerm = useCallback((dir: string, id: number) => {
+    setActiveTermFor(dir, id);
+    requestAnimationFrame(() => {
+      fitTerm(id);
+      getTerm(id)?.term.focus();
     });
+  }, []);
+  const hostRefs = useRef(new Map<number, (el: HTMLDivElement | null) => void>());
+  const hostObs = useRef(new Map<number, ResizeObserver>());
+  const terminalHostFor = useCallback((id: number) => {
+    let cb = hostRefs.current.get(id);
+    if (!cb) {
+      cb = (el) => {
+        const s = getTerm(id);
+        if (el && s) {
+          if (s.host.parentElement !== el) el.appendChild(s.host);
+          requestAnimationFrame(() => fitTerm(id));
+          if (!hostObs.current.has(id)) {
+            const ro = new ResizeObserver(() => fitTerm(id));
+            ro.observe(el);
+            hostObs.current.set(id, ro);
+          }
+        } else if (!el) {
+          hostObs.current.get(id)?.disconnect();
+          hostObs.current.delete(id);
+          hostRefs.current.delete(id);
+        }
+      };
+      hostRefs.current.set(id, cb);
+    }
+    return cb;
+  }, []);
+  const newTerminal = useCallback((opts?: { agent?: "claude" | "codex"; title?: string; autoType?: string }) => {
+    const dir = activeRef.current;
+    if (!dir) return;
+    spawnTerm(dir, opts ?? {})
+      .then((sess) => setActiveTerm(dir, sess.id))
+      .catch((e) => toastError("Couldn't start a shell", String(e).slice(0, 90)));
+  }, [setActiveTerm]);
+  const closeTerminalTab = useCallback((id: number) => {
+    const s = getTerm(id);
+    if (!s) return;
+    if (!s.dead) {
+      setConfirm({
+        title: "Close this terminal?",
+        body: `"${s.title}" is still running. Closing stops the session.`,
+        cancelLabel: "Keep it running",
+        confirmLabel: "Close and stop the session",
+        danger: true,
+        onConfirm: () => closeTerm(id),
+      });
+    } else closeTerm(id);
+  }, []);
+
+  const closeProject = useCallback((dir: string) => {
+    const doClose = () => {
+      closeTermsFor(dir);
+      setProjects((prev) => {
+        const next = new Map(prev);
+        next.delete(dir);
+        if (activeRef.current === dir) {
+          const first = next.keys().next();
+          setActiveDir(first.done ? null : first.value);
+        }
+        return next;
+      });
+    };
+    const live = liveCount(dir);
+    if (live > 0) {
+      setConfirm({
+        title: "Close this project?",
+        body: `${live === 1 ? "A session is" : `${live} sessions are`} still running in its terminal. Closing the project stops ${live === 1 ? "it" : "them"}.`,
+        cancelLabel: "Keep it running",
+        confirmLabel: "Close and stop the session",
+        danger: true,
+        onConfirm: doClose,
+      });
+    } else doClose();
   }, []);
 
   const openDialog = useCallback(() => {
@@ -220,6 +303,7 @@ export default function App() {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "k") { e.preventDefault(); setPaletteOpen((o) => !o); }
+      else if (mod && e.key === "t" && activeRef.current) { e.preventDefault(); newTerminal(); }
       else if (mod && e.key === "o") { e.preventDefault(); openDialog(); }
       else if (mod && e.key === "/") { e.preventDefault(); setShortcutsOpen(true); }
       else if (mod && e.key === "j" && activeRef.current) {
@@ -239,7 +323,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openDialog, activate, closeProject]);
+  }, [openDialog, activate, closeProject, newTerminal]);
 
   /* ---- dev-only handle for the cleanroom harness ---- */
   useEffect(() => {
@@ -262,6 +346,14 @@ export default function App() {
   }, []);
 
   const active = activeDir ? projects.get(activeDir) : null;
+  const termSessions = active ? termsFor(active.dir) : [];
+  const termTabs: TerminalTab[] = termSessions.map((t) => ({
+    id: t.id,
+    title: t.title,
+    live: !t.dead,
+    agent: t.agent,
+  }));
+  const activeTermId = active ? activeTermFor(active.dir) : null;
   const tabs: ProjectTab[] = [...projects.values()].map((p) => ({
     dir: p.dir,
     name: p.name,
@@ -359,9 +451,14 @@ export default function App() {
         onAdd={() => setPaletteOpen(true)}
         onRefresh={refreshNow}
         onHelp={() => setShortcutsOpen(true)}
-        terminalTabs={[]}
-        onNewTerminal={() => {/* C6 */}}
-        onStartAgent={() => {/* C6 */}}
+        terminalTabs={termTabs}
+        activeTerminalId={activeTermId}
+        onNewTerminal={() => newTerminal()}
+        onStartAgent={(a) => newTerminal({ agent: undefined, title: a === "claude" ? "Claude" : "Codex", autoType: a })}
+        onTerminalSelect={(id) => setActiveTerm(active.dir, id)}
+        onTerminalClose={closeTerminalTab}
+        onTerminalRenameCommit={(id, name) => renameTerm(id, name)}
+        terminalHostFor={terminalHostFor}
       >
         {pane === "road" ? (
           <RoadmapPane

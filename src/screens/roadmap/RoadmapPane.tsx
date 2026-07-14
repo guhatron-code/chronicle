@@ -31,6 +31,8 @@ import {
   type InitRun,
   type RoadmapCtx,
 } from "@/lib/roadmap-data";
+import { spawnTerm } from "@/lib/term-sessions";
+import { initLogPath } from "@/lib/ipc";
 import { toastError, toastSuccess } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
@@ -162,10 +164,13 @@ export function RoadmapPane({
           onBack={() => setDetailId(null)}
           onCopyDoc={doCopyDoc}
           onStart={() => {
-            /* C6 seam: opens a terminal + starts the agent + copies the paste file.
-               Until the terminal exists, do the honest part that works today. */
             const pf = (phase.paste ?? []).find((x) => x.path);
-            if (pf?.path) doCopyDoc(pf.path);
+            spawnTerm(dir, { agent, title: phase.id })
+              .then(() => {
+                if (pf?.path) doCopyDoc(pf.path);
+                else toastSuccess("Session started", `${agent === "codex" ? "Codex" : "Claude"} is starting in the terminal`);
+              })
+              .catch((e) => toastError("Couldn't start a terminal", String(e).slice(0, 90)));
           }}
         />
       );
@@ -208,7 +213,13 @@ export function RoadmapPane({
           .then(() => { setInitRun(null); toastSuccess("Stopped the session"); })
           .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)));
       },
-      onViewFullLog: () => {/* C6: opens the session log as a terminal tab */},
+      onViewFullLog: () => {
+        initLogPath(dir)
+          .then((path) =>
+            spawnTerm(dir, { title: "Roadmap log", autoType: `tail -n 200 -f '${path.replace(/'/g, "'\\''")}'` }),
+          )
+          .catch((e) => toastError("Couldn't open the log", String(e).slice(0, 90)));
+      },
       onScan: startInit,
       onRebuild: () =>
         onConfirm({
