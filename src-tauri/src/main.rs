@@ -1460,7 +1460,11 @@ async fn list_dir(roots: State<'_, OpenRoots>, dir: String, path: String) -> Res
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
             if matches!(name.as_str(), ".git" | "node_modules" | ".DS_Store" | "target" | ".turbo" | ".chronicle-blank") { return None; }
-            let md = e.metadata().ok()?;
+            // follow symlinks so a linked directory lists as a directory (a
+            // skills/ symlink read as a file surfaces "Is a directory (os error
+            // 21)" in the viewer); a broken link falls back to the link itself.
+            // Reads stay jailed — a link escaping the root is rejected at read.
+            let md = std::fs::metadata(e.path()).or_else(|_| e.metadata()).ok()?;
             Some(Entry { is_dir: md.is_dir(), size: md.len(), name })
         }).collect();
     out.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
