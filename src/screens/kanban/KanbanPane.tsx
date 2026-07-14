@@ -23,6 +23,7 @@ import {
 import {
   copyFile,
   fixesCancel,
+  kanbanDetach,
   fixesGenerate,
   fixesStatus,
   kanbanAttach,
@@ -98,6 +99,17 @@ export function KanbanPane({
     }, fail("Couldn't save the task"));
     setDraft(null);
   }, [dir, draft, fail]);
+
+  /* closing without saving: a create-mode draft's attachments are orphans —
+     remove them (T-040) */
+  const closeDraft = useCallback(() => {
+    setDraft((d) => {
+      if (d?.mode === "create") {
+        for (const img of d.task.images ?? []) void kanbanDetach(dir, img).catch(() => {});
+      }
+      return null;
+    });
+  }, [dir]);
 
   const attach = useCallback(() => fileInput.current?.click(), []);
   const onFilePicked = useCallback(async (f: File | undefined) => {
@@ -290,12 +302,21 @@ export function KanbanPane({
         onLaneDragLeave={(column) => setDropColumn((c) => (c === column ? null : c))}
       />
 
-      {/* the composer overlay */}
+      {/* the composer overlay — a pane-scoped dialog: Escape and the scrim
+          close it; the rail stays reachable (absolute, not fixed) */}
       {draft && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-6">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={draft.mode === "create" ? "New task" : `Edit ${draft.task.id}`}
+          className="absolute inset-0 z-40 flex items-center justify-center bg-black/45 p-6"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) closeDraft(); }}
+          onKeyDown={(e) => { if (e.key === "Escape") closeDraft(); }}
+        >
           <Composer
             mode={draft.mode}
             id={draft.mode === "edit" ? draft.task.id : undefined}
+            inRound={draft.task.round != null}
             meta={draft.mode === "edit" ? [fmtAgo(draft.task.created_at) && `created ${fmtAgo(draft.task.created_at)}`, fmtAgo(draft.task.updated_at) && `updated ${fmtAgo(draft.task.updated_at)}`].filter(Boolean).join(" · ") : undefined}
             title={draft.task.title}
             content={draft.task.content ?? ""}
@@ -306,7 +327,12 @@ export function KanbanPane({
             onTitleChange={(v) => setDraft((d) => d && { ...d, task: { ...d.task, title: v } })}
             onContentChange={(v) => setDraft((d) => d && { ...d, task: { ...d.task, content: v } })}
             onAttach={attach}
-            onRemoveImage={(i) => setDraft((d) => d && { ...d, task: { ...d.task, images: (d.task.images ?? []).filter((_, j) => j !== i) } })}
+            onRemoveImage={(i) => setDraft((d) => {
+              if (!d) return d;
+              const removed = (d.task.images ?? [])[i];
+              if (removed) void kanbanDetach(dir, removed).catch(() => {});
+              return { ...d, task: { ...d.task, images: (d.task.images ?? []).filter((_, j) => j !== i) } };
+            })}
             onLinkDraftChange={(v) => setDraft((d) => d && { ...d, linkDraft: v })}
             onAddLink={() => setDraft((d) => {
               if (!d || !d.linkDraft.trim()) return d;
@@ -323,6 +349,7 @@ export function KanbanPane({
                 confirmLabel: "Delete",
                 danger: true,
                 onConfirm: () => {
+                  for (const img of draft.task.images ?? []) void kanbanDetach(dir, img).catch(() => {});
                   mutateKanban(dir, (s) => { s.tasks = s.tasks.filter((x) => x.id !== id); }, fail("Couldn't delete it"));
                   setDraft(null);
                 },
@@ -337,14 +364,26 @@ export function KanbanPane({
               setDraft(null);
             }}
             onSave={saveDraft}
-            onClose={() => setDraft(null)}
+            onClose={closeDraft}
           />
         </div>
       )}
 
-      {/* the execute-flow overlay */}
+      {/* the execute-flow overlay — same dialog contract; the generating state
+          only closes via Cancel (Escape would abandon a live session silently) */}
       {flowProps && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-6">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Ready to execute"
+          className="absolute inset-0 z-40 flex items-center justify-center bg-black/45 p-6"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && flow.kind !== "generating") setFlow({ kind: "idle" });
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape" && flow.kind !== "generating") setFlow({ kind: "idle" });
+          }}
+        >
           <ExecuteFlow {...flowProps} />
         </div>
       )}

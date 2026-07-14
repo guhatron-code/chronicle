@@ -18,6 +18,8 @@ export type ComposerProps = {
   mode: "create" | "edit";
   /** Edit only — "T-014". */
   id?: string;
+  /** The task belongs to a round — In progress stays offered (it lives there). */
+  inRound?: boolean;
   /** Edit only — "created 40m ago · updated 5m ago". */
   meta?: string;
   title: string;
@@ -75,6 +77,9 @@ function ToolBtn({
 }
 
 const SEGMENTS: readonly TaskColumn[] = ["later", "queued", "in_progress", "blocked"] as const;
+/** Roundless tasks can't be placed into the round-owned lane by hand. */
+const segmentsFor = (inRound: boolean): readonly TaskColumn[] =>
+  inRound ? SEGMENTS : SEGMENTS.filter((c) => c !== "in_progress");
 const SEGMENT_LABELS: Record<string, string> = {
   later: "Later",
   queued: "Queued",
@@ -193,6 +198,12 @@ export function Composer(p: ComposerProps) {
             <Input
               id="task-link"
               value={p.linkDraft ?? ""}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  p.onAddLink?.();
+                }
+              }}
               placeholder="Paste a Figma or file link…"
               onChange={(e) => p.onLinkDraftChange?.(e.target.value)}
               className={cn("h-[34px] flex-1 px-3 text-xs md:text-xs", fieldClass)}
@@ -228,7 +239,7 @@ export function Composer(p: ComposerProps) {
         <div className="flex items-center gap-2.5">
           <span className="text-[12.5px] text-text-muted">Column</span>
           <div className="flex overflow-hidden rounded-md border border-border-hairline">
-            {SEGMENTS.map((c, i) => (
+            {segmentsFor(!!p.inRound).map((c, i) => (
               <button
                 key={c}
                 type="button"

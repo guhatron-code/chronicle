@@ -125,12 +125,16 @@ export function TaskCard({
     );
   }
 
-  /* ---- frozen: quietly locked, title + lock + the round line only ---- */
+  /* ---- frozen: quietly locked, title + lock + the round line only.
+          Still draggable OUT — the human overrides the agent. ---- */
   if (frozen) {
     return (
       <button
         type="button"
         onClick={onOpen}
+        draggable={draggable}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
         className={cn(
           "flex w-full flex-col gap-[7px] rounded-lg border border-divider bg-surface-card px-[13px] py-[11px] text-left opacity-80",
           "focus-visible:outline-none focus-visible:[box-shadow:var(--focus-ring)]!",

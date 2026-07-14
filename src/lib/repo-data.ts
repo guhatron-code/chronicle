@@ -75,7 +75,9 @@ export function buildTree(
         id,
         name: e.name,
         open,
-        children: open ? buildTree(loads, expanded, changed, gitByPath, workspaces, id) : [],
+        // loaded children stay in the tree while closed so collapse/expand can
+        // animate (the closed body renders inert inside AccBody)
+        children: childLoad ? buildTree(loads, expanded, changed, gitByPath, workspaces, id) : [],
         hasChanges: changed.has(id),
         empty,
         workspace: workspaces.has(id),
@@ -166,7 +168,7 @@ export function changeGroups(status: GitStatus, closed: Set<string>): ChangeGrou
     // (name keeps the trailing slash), grouped under its parent
     const isDir = f.path.endsWith("/");
     const { name, dir } = splitName(f.path.replace(/\/+$/, ""));
-    const key = dir || "."; // repo-root files group under "."
+    const key = dir || "project folder"; // repo-root files group under a human label
     if (!byDir.has(key)) byDir.set(key, []);
     byDir.get(key)!.push({ name: isDir ? `${name}/` : name, git: letterFor(f.code), path: f.path });
   }
@@ -177,7 +179,7 @@ export function changeGroups(status: GitStatus, closed: Set<string>): ChangeGrou
 
 /** Find the full repo path for a change-row name inside its group. */
 export function pathInGroup(dir: string, name: string): string {
-  return dir === "." ? name : `${dir}/${name}`;
+  return dir === "project folder" ? name : `${dir}/${name}`;
 }
 
 export function publishStateFrom(s: {

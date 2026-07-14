@@ -164,9 +164,9 @@ export function Viewer(p: ViewerProps) {
           tab.id === p.activeTabId ? (
             <div
               key={tab.id}
-              className="relative flex h-8 items-center gap-2 px-3 text-[12.5px] font-medium text-text-primary"
+              className="relative flex h-8 max-w-[190px] items-center gap-2 px-3 text-[12.5px] font-medium text-text-primary"
             >
-              {tab.name}
+              <span className="min-w-0 truncate" title={tab.name}>{tab.name}</span>
               <button
                 aria-label={`Close ${tab.name}`}
                 onClick={() => p.onCloseTab?.(tab.id)}
@@ -180,9 +180,9 @@ export function Viewer(p: ViewerProps) {
             <button
               key={tab.id}
               onClick={() => p.onSelectTab?.(tab.id)}
-              className="flex h-8 items-center gap-2 px-3 text-[12.5px] text-text-muted hover:text-text-secondary"
+              className="flex h-8 max-w-[170px] items-center gap-2 px-3 text-[12.5px] text-text-muted hover:text-text-secondary"
             >
-              {tab.name}
+              <span className="min-w-0 truncate" title={tab.name}>{tab.name}</span>
             </button>
           ),
         )}
@@ -294,6 +294,14 @@ export function Viewer(p: ViewerProps) {
         <Stage className="gap-[9px] p-4 text-center">
           <span className="text-[12.5px] text-text-secondary">{p.body.message}</span>
           <span className="text-[11.5px] text-text-dim">{p.body.note}</span>
+          {p.onCopy && (
+            <button
+              onClick={p.onCopy}
+              className="h-7 rounded-md border border-border-strong px-3 text-xs font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"
+            >
+              Copy the contents
+            </button>
+          )}
           {p.onOpenAnyway && (
           <button
             onClick={p.onOpenAnyway}

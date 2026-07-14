@@ -37,6 +37,9 @@ export type TreeNode =
   | { kind: "error"; id: string; message: string }; // "Couldn't read this folder" + Retry
 
 export type FileTreeProps = {
+  /** 1 + workspace roots — the Explorer head count (top-level entries are the
+   *  project root's CHILDREN, not roots). */
+  rootsCount?: number;
   roots: TreeNode[];
   selectedId?: string | null;
   onSelect?: (id: string) => void;
@@ -124,7 +127,12 @@ function Row({
         )}
       >
         {selected && (
-          <span className="absolute -left-[11px] bottom-[5px] top-[5px] w-0.5 rounded-[1px] bg-text-primary" />
+          <span
+            className={cn(
+              "absolute bottom-[5px] top-[5px] w-0.5 rounded-[1px] bg-text-primary",
+              depth === 0 ? "-left-2" : "-left-[11px]", // the px-2 container clips past -8px
+            )}
+          />
         )}
         <DocGlyph
           size={13}
@@ -144,16 +152,14 @@ function Row({
   }
 
   // dir
-  const root = depth === 0;
   return (
     <div>
       <button
         onClick={() => onToggleDir?.(node.id)}
         className={cn(
           "flex h-7 w-full items-center gap-1.5 rounded-sm px-1.5 text-left",
-          root && !node.empty && !node.workspace && "text-text-primary",
           node.empty ? "text-text-dim" : "hover:bg-fill-hover",
-          !root && node.hasChanges && "bg-fill-subtle",
+          node.hasChanges && "bg-fill-subtle",
           notFirstRoot && "mt-1",
         )}
       >
@@ -173,10 +179,7 @@ function Row({
           strokeWidth={1.3}
           className={cn("shrink-0", node.empty ? "text-current" : "text-text-subtle")}
         />
-        <span
-          className={cn("min-w-0 truncate", root && !node.empty && !node.workspace && "font-medium")}
-          title={node.name}
-        >
+        <span className="min-w-0 truncate" title={node.name}>
           {node.name}
         </span>
         {node.workspace && (
@@ -188,7 +191,7 @@ function Row({
           <span title="Contains changes" className="size-[5px] rounded-full bg-text-subtle" />
         )}
       </button>
-      {node.children.length > 0 && (
+      {(node.children.length > 0 || node.open) && (
         <AccBody open={node.open}>
           <div className="relative ml-[13px] border-l border-divider-faint pl-2.5">
             {node.children.map((child) => (
@@ -210,7 +213,7 @@ function Row({
 }
 
 export function FileTree(p: FileTreeProps) {
-  const n = p.roots.filter((r) => r.kind === "dir").length;
+  const n = p.rootsCount ?? 1;
   return (
     <div className={cn("flex h-full min-h-0 flex-col", p.className)}>
       <div className="flex items-center justify-between pb-1.5 pl-3.5 pr-2 pt-2">

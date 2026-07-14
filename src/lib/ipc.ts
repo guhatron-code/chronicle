@@ -242,6 +242,9 @@ export const kanbanSave = (dir: string, data: KanbanStore) =>
 /** Save an image attachment; returns the repo-relative path to reference in the task. */
 export const kanbanAttach = (dir: string, taskId: string, name: string, b64: string) =>
   invoke<string>("kanban_attach", { dir, taskId, name, b64 });
+/** Remove one attachment file (jailed to .chronicle/attachments). */
+export const kanbanDetach = (dir: string, path: string) =>
+  invoke<void>("kanban_detach", { dir, path });
 /** "Ready to execute": freeze the queued tasks into a round; returns the round number. */
 export const fixesGenerate = (dir: string, agent: string | null) =>
   invoke<number>("fixes_generate", { dir, agent });

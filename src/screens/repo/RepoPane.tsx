@@ -10,6 +10,7 @@ import type { FileTreeProps } from "./FileTree";
 import type { ViewerBody, ViewerProps } from "./Viewer";
 import type { HistoryPaneProps, HistoryReady } from "./HistoryPane";
 import {
+  copyFile as copyFileIpc,
   copyText,
   gitCommit,
   gitDiff,
@@ -130,6 +131,7 @@ export function RepoPane({
   const [, bump] = useState(0);
   const rerender = useCallback(() => bump((n) => n + 1), []);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
+  const [statusFailed, setStatusFailed] = useState(false);
   const [log, setLog] = useState<HistoryReady["commits"]>([]);
   const [arcs, setArcs] = useState<HistoryReady["branches"]>([]);
   const [logCount, setLogCount] = useState(0);
@@ -168,11 +170,14 @@ export function RepoPane({
     gitStatusDetail(d)
       .then((st) => {
         if (dirRef.current !== d || seq.current !== my) return;
-        setGitStatus(st && Array.isArray(st.staged) && Array.isArray(st.unstaged) ? st : null);
+        const okShape = st && Array.isArray(st.staged) && Array.isArray(st.unstaged);
+        setGitStatus(okShape ? st : null);
+        setStatusFailed(!okShape);
       })
       .catch(() => {
         if (dirRef.current !== d) return;
         setGitStatus(null);
+        setStatusFailed(true);
       });
     gitLogGraph(d, stateFor(d).logLimit)
       .then((rows) => {
@@ -260,7 +265,12 @@ export function RepoPane({
           t.body = {
             kind: "huge",
             message: `This file is ${fmtBytes(st.size)}`,
-            note: st.size > HUGE_CAP ? "Too large to preview — click-to-copy still works." : "Reading it may be slow.",
+            note:
+              st.size > 5_000_000
+                ? "Too large to preview or copy."
+                : st.size > HUGE_CAP
+                  ? "Too large to preview — copying still works."
+                  : "Reading it may be slow.",
           };
           t.meta = undefined;
           if (st.size > HUGE_CAP) hugePastCap.current.add(path);
@@ -389,7 +399,7 @@ export function RepoPane({
         ? { kind: "loading" }
         : {
             kind: "ready",
-            banner: rs.banner,
+            banner: rs.banner ?? (statusFailed ? "Couldn't check for changes — showing the last known state" : undefined),
             message: rs.message,
             readyToSave: gitStatus ? gitStatus.staged.map((f) => ({ ...splitName(f.path), path: f.path })) : [],
             changes: gitStatus ? changeGroups(gitStatus, rs.closedGroups) : [],
@@ -417,7 +427,10 @@ export function RepoPane({
         onSave: () => {
           const msg = rs.message.trim();
           if (!msg) return;
-          gitCommit(dir, msg, false)
+          // nothing marked Ready to save → include everything (vocabulary law:
+          // Save means save, never a raw 'nothing added to commit' git error)
+          const stageAll = (gitStatus?.staged.length ?? 0) === 0;
+          gitCommit(dir, msg, stageAll)
             .then(() => { stateFor(dir).message = ""; stateFor(dir).banner = undefined; afterGitOp("Saved to history"); })
             .catch(opError("Couldn't save"));
         },
@@ -460,7 +473,9 @@ export function RepoPane({
       },
     };
   } else {
+    const workspaceRoots = (state?.worktrees ?? []).filter((w) => w.path.startsWith(dir + "/")).length;
     const tree: FileTreeProps = {
+      rootsCount: 1 + workspaceRoots,
       roots: buildTree(
         rs.loads,
         rs.expanded,
@@ -496,6 +511,7 @@ export function RepoPane({
             const i = rs.tabs.findIndex((t) => t.path === id);
             if (i >= 0) rs.tabs.splice(i, 1);
             if (rs.activeTab === id) rs.activeTab = rs.tabs[Math.max(0, i - 1)]?.path ?? null;
+            rs.selectedId = rs.activeTab; // the tree follows the viewer
             rerender();
           },
           onModeChange: (mode) => {
@@ -509,6 +525,11 @@ export function RepoPane({
             if (active.body?.kind === "code") {
               copyText(active.body.lines.map((l) => l.map((s) => s.t).join("")).join("\n"))
                 .then(() => toastSuccess("Contents copied"))
+                .catch((e) => toastError("Couldn't copy", String(e).slice(0, 90)));
+            } else if (active.body?.kind === "huge") {
+              // the backend copies the full file — the 1.5MB preview cap doesn't apply
+              copyFileIpc(dir, active.path)
+                .then((n) => toastSuccess("Contents copied", `${Number(n).toLocaleString()} characters`))
                 .catch((e) => toastError("Couldn't copy", String(e).slice(0, 90)));
             }
           },

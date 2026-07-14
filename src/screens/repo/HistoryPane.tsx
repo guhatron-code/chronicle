@@ -102,6 +102,7 @@ const nodeY = (row: number) => 18 + ROW_H * row;
 /** The lane SVG — geometry transcribed from the F25 specimen (trunk ±4px overhang,
  *  arcs depart 2px above a node and land 14px before the merge node). */
 function GraphLanes({ commits, branches }: { commits: Commit[]; branches: BranchArc[] }) {
+  if (commits.length === 0) return null;
   const height = commits.length * ROW_H + 20;
   return (
     <svg width={46} height={height} viewBox={`0 0 46 ${height}`} className="shrink-0" aria-hidden>
@@ -386,7 +387,7 @@ export function HistoryPane(p: HistoryPaneProps) {
               </div>
               {s.readyToSave.map((f) => (
                 <div
-                  key={f.name}
+                  key={f.path ?? `${f.dir}/${f.name}`}
                   className="group flex h-7 items-center gap-2 rounded-sm px-2 hover:bg-fill-subtle"
                 >
                   <span className="min-w-0 truncate text-[12.5px] text-text-primary" title={f.name}>{f.name}</span>
@@ -509,6 +510,9 @@ export function HistoryPane(p: HistoryPaneProps) {
           <div className="px-[18px] pb-1.5 pt-3.5">
             <Eyebrow>Saves</Eyebrow>
           </div>
+          {s.commits.length === 0 && (
+            <div className="px-[18px] py-3 text-[12.5px] text-text-subtle">No saves yet.</div>
+          )}
           <div className="flex">
             <GraphLanes commits={s.commits} branches={s.branches ?? []} />
             <div className="flex min-w-0 flex-1 flex-col">
