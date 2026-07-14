@@ -51,6 +51,8 @@ export type BranchArc = { lane: number; fromRow: number; toRow: number };
 
 export type HistoryReady = {
   kind: "ready";
+  /** git status couldn't be read — never claim "everything is recorded". */
+  statusUnknown?: boolean;
   /** Quiet error banner, e.g. the unfinished-publish line. */
   banner?: string;
   message: string;
@@ -183,9 +185,9 @@ function CommitRow({ commit, onCommit }: { commit: Commit; onCommit?: (hash: str
           ),
         )}
       </div>
-      <div className="flex items-center gap-[7px]">
+      <div className="flex min-w-0 items-center gap-[7px]">
         <AuthorTile author={commit.author} />
-        <span className="font-mono text-[10.5px] text-text-dim tabular-nums">
+        <span className="min-w-0 truncate whitespace-nowrap font-mono text-[10.5px] text-text-dim tabular-nums">
           {commit.hash} · {commit.ago}
         </span>
       </div>
@@ -489,7 +491,7 @@ export function HistoryPane(p: HistoryPaneProps) {
             >
               Save to history
             </BtnPrimary>
-            {nothingToSave && (
+            {nothingToSave && !s.statusUnknown && (
               <div className="text-center text-[11.5px] text-text-subtle">
                 Nothing to save · everything is recorded.
               </div>

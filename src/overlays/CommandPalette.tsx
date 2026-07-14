@@ -65,7 +65,19 @@ export function CommandPalette({
         className="top-14 max-w-[560px] translate-y-0 gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 [box-shadow:var(--shadow-overlay)] sm:max-w-[560px]"
       >
         <DialogTitle className="sr-only">Project switcher</DialogTitle>
-        <Command className="bg-transparent **:data-[slot=command-input-wrapper]:h-auto **:data-[slot=command-input-wrapper]:gap-[9px] **:data-[slot=command-input-wrapper]:border-divider **:data-[slot=command-input-wrapper]:px-3.5 **:data-[slot=command-input-wrapper]:py-0 **:data-[slot=command-input-wrapper]:text-text-dim [&_[data-slot=command-input-wrapper]_svg]:size-3.5 [&_[data-slot=command-input-wrapper]_svg]:stroke-[1.5] [&_[data-slot=command-input-wrapper]_svg]:opacity-100">
+        <Command
+          filter={(value, search) => {
+            // substring matching only: cmdk's default scatter-fuzz let a weak
+            // match in the first group outrank an exact name in the second
+            // (groups never re-sort), sending Enter to the wrong project
+            const v = value.toLowerCase();
+            const q = search.toLowerCase().trim();
+            if (!q) return 1;
+            if (v.includes(q)) return 1;
+            const tokens = q.split(/\s+/);
+            return tokens.length > 1 && tokens.every((t) => v.includes(t)) ? 0.5 : 0;
+          }}
+          className="bg-transparent **:data-[slot=command-input-wrapper]:h-auto **:data-[slot=command-input-wrapper]:gap-[9px] **:data-[slot=command-input-wrapper]:border-divider **:data-[slot=command-input-wrapper]:px-3.5 **:data-[slot=command-input-wrapper]:py-0 **:data-[slot=command-input-wrapper]:text-text-dim [&_[data-slot=command-input-wrapper]_svg]:size-3.5 [&_[data-slot=command-input-wrapper]_svg]:stroke-[1.5] [&_[data-slot=command-input-wrapper]_svg]:opacity-100">
           <CommandInput
             placeholder="Search projects…"
             className="h-11 text-[13px] text-text-primary placeholder:text-text-dim"

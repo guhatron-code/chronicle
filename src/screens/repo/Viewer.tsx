@@ -159,12 +159,13 @@ export function Viewer(p: ViewerProps) {
   return (
     <div className={cn("flex h-full min-w-0 flex-col", p.className)}>
       {/* open-file tabs */}
-      <div className="flex h-10 shrink-0 items-end gap-0.5 border-b border-divider px-2.5">
+      <div className="flex h-10 min-w-0 shrink-0 items-end gap-0.5 overflow-x-auto border-b border-divider px-2.5">
         {p.tabs.map((tab) =>
           tab.id === p.activeTabId ? (
             <div
               key={tab.id}
-              className="relative flex h-8 max-w-[190px] items-center gap-2 px-3 text-[12.5px] font-medium text-text-primary"
+              ref={(el) => el?.scrollIntoView({ inline: "nearest", block: "nearest" })}
+              className="relative flex h-8 max-w-[190px] shrink-0 items-center gap-2 px-3 text-[12.5px] font-medium text-text-primary"
             >
               <span className="min-w-0 truncate" title={tab.name}>{tab.name}</span>
               <button
@@ -180,7 +181,7 @@ export function Viewer(p: ViewerProps) {
             <button
               key={tab.id}
               onClick={() => p.onSelectTab?.(tab.id)}
-              className="flex h-8 max-w-[170px] items-center gap-2 px-3 text-[12.5px] text-text-muted hover:text-text-secondary"
+              className="flex h-8 max-w-[170px] shrink-0 items-center gap-2 px-3 text-[12.5px] text-text-muted hover:text-text-secondary"
             >
               <span className="min-w-0 truncate" title={tab.name}>{tab.name}</span>
             </button>
@@ -294,7 +295,7 @@ export function Viewer(p: ViewerProps) {
         <Stage className="gap-[9px] p-4 text-center">
           <span className="text-[12.5px] text-text-secondary">{p.body.message}</span>
           <span className="text-[11.5px] text-text-dim">{p.body.note}</span>
-          {p.onCopy && (
+          {p.onCopy && !p.body.note.includes("or copy") && (
             <button
               onClick={p.onCopy}
               className="h-7 rounded-md border border-border-strong px-3 text-xs font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"

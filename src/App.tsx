@@ -254,8 +254,10 @@ export default function App() {
         next.delete(dir);
         if (activeRef.current === dir) {
           const first = next.keys().next();
-          if (first.done) setActiveDir(null);
-          else activate(first.value); // clears Updated + sets the title like any foregrounding
+          if (first.done) {
+            setActiveDir(null);
+            void windowControls().setTitle("Chronicle").catch?.(() => {});
+          } else activate(first.value); // clears Updated + sets the title like any foregrounding
         }
         return next;
       });

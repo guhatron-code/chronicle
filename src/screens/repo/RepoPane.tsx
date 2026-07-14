@@ -52,6 +52,8 @@ import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 interface TabState {
   path: string;
   mode: "contents" | "diff";
+  /** Last stat size — drives the huge-card affordances across remounts. */
+  sizeBytes?: number;
   body: ViewerBody | null; // null = loading
   meta?: string;
   diffStat?: { added: number; removed: number };
@@ -274,6 +276,7 @@ export function RepoPane({
           };
           t.meta = undefined;
         } else if (st.size > HUGE_WARN && !ignoreGuard) {
+          t.sizeBytes = st.size;
           t.body = {
             kind: "huge",
             message: `This file is ${fmtBytes(st.size)}`,
@@ -285,8 +288,6 @@ export function RepoPane({
                   : "Reading it may be slow.",
           };
           t.meta = undefined;
-          if (st.size > HUGE_CAP) hugePastCap.current.add(path);
-          else hugePastCap.current.delete(path);
         } else {
           const text = await readFile(d, path);
           if (dirRef.current !== d) return;
@@ -332,8 +333,6 @@ export function RepoPane({
         rerender();
       });
   }, [dir, gitStatus, rerender]);
-
-  const hugePastCap = useRef(new Set<string>());
 
   const openFile = useCallback((path: string) => {
     const s = stateFor(dir);
@@ -386,6 +385,7 @@ export function RepoPane({
 
   const afterGitOp = useCallback((toast?: string) => {
     if (toast) toastSuccess(toast);
+    stateFor(dirRef.current).banner = undefined; // a success clears the last op error
     refreshGit();
     onPollNow();
   }, [refreshGit, onPollNow]);
@@ -411,6 +411,7 @@ export function RepoPane({
         ? { kind: "loading" }
         : {
             kind: "ready",
+            statusUnknown: statusFailed,
             banner: rs.banner ?? (statusFailed ? "Couldn't check for changes — showing the last known state" : undefined),
             message: rs.message,
             readyToSave: gitStatus ? gitStatus.staged.map((f) => ({ ...splitName(f.path), path: f.path })) : [],
@@ -538,7 +539,7 @@ export function RepoPane({
               copyText(active.body.lines.map((l) => l.map((s) => s.t).join("")).join("\n"))
                 .then(() => toastSuccess("Contents copied"))
                 .catch((e) => toastError("Couldn't copy", String(e).slice(0, 90)));
-            } else if (active.body?.kind === "huge") {
+            } else if (active.body?.kind === "huge" && (active.sizeBytes ?? 0) <= 5_000_000) {
               // the backend copies the full file — the 1.5MB preview cap doesn't apply
               copyFileIpc(dir, active.path)
                 .then((n) => toastSuccess("Contents copied", `${Number(n).toLocaleString()} characters`))
@@ -557,9 +558,10 @@ export function RepoPane({
             if (active.mode === "diff") loadDiff(active.path);
             else loadContents(active.path);
           },
-          onOpenAnyway: hugePastCap.current.has(active.path)
-            ? undefined
-            : () => { active.body = null; rerender(); loadContents(active.path, true); },
+          onOpenAnyway:
+            (active.sizeBytes ?? 0) > HUGE_CAP
+              ? undefined
+              : () => { active.body = null; rerender(); loadContents(active.path, true); },
         };
     view = { kind: "files", tree, viewer };
   }
