@@ -1115,7 +1115,11 @@ async fn fixes_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, d
         if let Some(tasks) = store.get_mut("tasks").and_then(|t| t.as_array_mut()) {
             for t in tasks.iter_mut() {
                 if t.get("round").and_then(|v| v.as_u64()) == Some(n) {
-                    if let Some(obj) = t.as_object_mut() { obj.insert("round".into(), Value::Null); }
+                    if let Some(obj) = t.as_object_mut() {
+                        obj.insert("round".into(), Value::Null);
+                        // back to the lane they came from — never stranded frozen
+                        obj.insert("column".into(), json!("queued"));
+                    }
                 }
             }
         }
@@ -1144,6 +1148,19 @@ fn settle_round(dir: &Path) {
         }
     } else if let Some(obj) = last.as_object_mut() {
         obj.insert("state".into(), json!("failed"));
+        // the failure toast promises "your tasks are untouched" — make it true:
+        // release the round's tasks back to Queued (the record keeps the failure)
+        let failed_n = n;
+        if let Some(tasks) = store.get_mut("tasks").and_then(|t| t.as_array_mut()) {
+            for t in tasks.iter_mut() {
+                if t.get("round").and_then(|v| v.as_u64()) == Some(failed_n) {
+                    if let Some(o) = t.as_object_mut() {
+                        o.insert("round".into(), Value::Null);
+                        o.insert("column".into(), json!("queued"));
+                    }
+                }
+            }
+        }
     }
     let _ = std::fs::write(kanban_path(dir), serde_json::to_string_pretty(&store).unwrap_or_default());
 }
@@ -1951,10 +1968,14 @@ mod r4_tests {
     #[test]
     fn settle_round_reads_the_truth_from_disk() {
         let d = tmp("settle");
-        store_with_round(&d, &["queued"], "generating");
+        store_with_round(&d, &["in_progress"], "generating");
         // no files written → failed
         settle_round(&d);
-        assert_eq!(load_kanban(&d)["rounds"][0]["state"], "failed");
+        let failed = load_kanban(&d);
+        assert_eq!(failed["rounds"][0]["state"], "failed");
+        // a failed round RELEASES its tasks — back to queued, round cleared
+        assert_eq!(failed["tasks"][0]["column"], "queued");
+        assert!(failed["tasks"][0]["round"].is_null());
         // files present + kind line → ready + kind
         store_with_round(&d, &["queued"], "generating");
         std::fs::create_dir_all(d.join("fixes")).unwrap();
