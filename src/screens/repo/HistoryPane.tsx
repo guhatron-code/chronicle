@@ -401,9 +401,9 @@ export function HistoryPane(p: HistoryPaneProps) {
                   key={f.name}
                   className="group flex h-7 items-center gap-2 rounded-sm px-2 hover:bg-fill-subtle"
                 >
-                  <span className="text-[12.5px] text-text-primary">{f.name}</span>
-                  <span className="font-mono text-[10.5px] text-text-dim">{f.dir}</span>
-                  <span className="flex-1" />
+                  <span className="min-w-0 truncate text-[12.5px] text-text-primary" title={f.name}>{f.name}</span>
+                  <span className="min-w-0 truncate font-mono text-[10.5px] text-text-dim">{f.dir}</span>
+                  <span className="min-w-0 flex-1" />
                   <RowAction label="Skip" onClick={() => p.onSkip?.(f.path ?? f.name)} />
                 </div>
               ))}
@@ -449,16 +449,17 @@ export function HistoryPane(p: HistoryPaneProps) {
                         >
                           <span
                             className={cn(
-                              "text-[12.5px]",
+                              "min-w-0 truncate text-[12.5px]",
                               deleted
                                 ? "text-text-dim line-through"
                                 : "text-text-secondary group-hover:text-text-primary",
                             )}
+                            title={f.name}
                           >
                             {f.name}
                           </span>
                           {f.git && <GitBadge letter={f.git} />}
-                          <span className="flex-1" />
+                          <span className="min-w-0 flex-1" />
                           <RowAction label="Include" onClick={() => p.onInclude?.(f.path ?? f.name)} />
                           <button
                             aria-label={`Discard changes to ${f.name}`}
