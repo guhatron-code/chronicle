@@ -175,11 +175,15 @@ export function RecentCard({
           )}
 
           {v.kind === "phase" && (
-            <div className="flex items-center gap-2 text-[12.5px]">
+            <div className="flex min-w-0 items-center gap-2 text-[12.5px]">
               <IdChip>{v.phaseId}</IdChip>
-              <span className="text-text-secondary">{v.phaseName}</span>
+              <span className="min-w-0 shrink-[3] truncate text-text-secondary" title={v.phaseName}>
+                {v.phaseName}
+              </span>
               {!trashHover && (
-                <StateWord kind={v.running ? "running" : "neutral"}>{v.statusWord}</StateWord>
+                <StateWord kind={v.running ? "running" : "neutral"} className="min-w-0">
+                  {v.statusWord}
+                </StateWord>
               )}
             </div>
           )}

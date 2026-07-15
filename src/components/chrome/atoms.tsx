@@ -111,31 +111,31 @@ export function StateWord({
 }) {
   if (kind === "success") {
     return (
-      <span className={cn("inline-flex items-center gap-1.5 text-state-success", className)}>
-        <CheckGlyph size={glyphSize} />
-        {children}
+      <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-state-success", className)}>
+        <CheckGlyph size={glyphSize} className="shrink-0" />
+        <span className="min-w-0 truncate">{children}</span>
       </span>
     );
   }
   if (kind === "error") {
     return (
-      <span className={cn("inline-flex items-center gap-1.5 text-state-error", className)}>
-        <ErrorGlyph size={glyphSize} />
-        {children}
+      <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-state-error", className)}>
+        <ErrorGlyph size={glyphSize} className="shrink-0" />
+        <span className="min-w-0 truncate">{children}</span>
       </span>
     );
   }
   return (
-    <span className={cn("inline-flex items-center gap-[5px] text-state-neutral", className)}>
+    <span className={cn("inline-flex min-w-0 items-center gap-[5px] text-state-neutral", className)}>
       <span
-        className="rounded-full bg-state-neutral"
+        className="shrink-0 rounded-full bg-state-neutral"
         style={{
           width: dotSize,
           height: dotSize,
           animation: kind === "running" ? "wv-pulse 1.6s ease-in-out infinite" : undefined,
         }}
       />
-      {children}
+      <span className="min-w-0 truncate">{children}</span>
     </span>
   );
 }
