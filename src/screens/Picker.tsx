@@ -66,7 +66,7 @@ export function Picker({
             Open a folder and see where its build stands.
           </div>
           <div className="mt-2.5 flex gap-2.5">
-            <BtnPrimary onClick={onOpenDialog}>
+            <BtnPrimary size="lg" onClick={onOpenDialog}>
               Open a project…
               <span className="font-mono text-[11px] opacity-55">⌘O</span>
             </BtnPrimary>

@@ -19,7 +19,7 @@ const BTN_SIZE = {
 } as const;
 type BtnSize = keyof typeof BTN_SIZE;
 
-export const BtnPrimary = ({ className, size = "lg", ...p }: Omit<ComponentProps<typeof Button>, "size"> & { size?: BtnSize }) => (
+export const BtnPrimary = ({ className, size = "md", ...p }: Omit<ComponentProps<typeof Button>, "size"> & { size?: BtnSize }) => (
   <Button
     {...p}
     className={cn(

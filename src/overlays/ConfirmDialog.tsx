@@ -42,7 +42,6 @@ export function ConfirmDialog({
             <BtnSecondary onClick={onClose}>{spec.cancelLabel}</BtnSecondary>
             <BtnPrimary
               className={cn(
-                "h-[34px] px-3.5",
                 spec.danger && "bg-state-error text-primary-foreground hover:bg-state-error hover:opacity-90",
               )}
               onClick={() => {

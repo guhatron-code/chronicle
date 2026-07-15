@@ -96,12 +96,12 @@ export function ConsentCard({
           <CodexTile size={13} />
         </AgentButton>
       </div>
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2.5 pt-1">
         <BtnPrimary onClick={onBuild}>Build it for me</BtnPrimary>
         <BtnSecondary onClick={onRunMyself}>I'll run it myself</BtnSecondary>
         <button
           onClick={onBasicView}
-          className="h-[34px] rounded-md px-2.5 text-[13px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+          className="h-[33px] rounded-md px-2.5 text-[12.5px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
         >
           Use the basic view
         </button>
