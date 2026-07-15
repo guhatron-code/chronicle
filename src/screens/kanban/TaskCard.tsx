@@ -150,8 +150,8 @@ export function TaskCard({
         </div>
         <div className="text-[11px] text-text-dim">
           {task.round != null
-            ? `in round ${task.round} · locked while it executes`
-            : "locked while it executes"}
+            ? `in round ${task.round} · locked until the round finishes`
+            : "locked until the round finishes"}
         </div>
       </button>
     );

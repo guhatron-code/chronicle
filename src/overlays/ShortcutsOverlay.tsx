@@ -21,8 +21,7 @@ const GROUPS: { title: string; col: 0 | 1; pt?: string; rows: [string, string][]
     title: "Panes",
     col: 1,
     rows: [
-      ["Cycle Roadmap · Repo · Kanban", "⌘J"],
-      ["Jump between panes", "ctrl-tab"],
+      ["Cycle Roadmap · Repo · Kanban", "⌘J or ⌃tab"],
     ],
   },
   {
@@ -32,6 +31,7 @@ const GROUPS: { title: string; col: 0 | 1; pt?: string; rows: [string, string][]
     rows: [
       ["New terminal", "⌘T"],
       ["Focus the terminal", "⌘L"],
+      ["Rename a terminal tab", "double-click"],
     ],
   },
 ];

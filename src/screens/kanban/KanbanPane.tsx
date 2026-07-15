@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Board } from "./Board";
 import { Composer } from "./Composer";
 import { ExecuteFlow, type ExecuteFlowProps } from "./ExecuteFlow";
+import { setActiveTermFor, spawnTerm, termsFor } from "@/lib/term-sessions";
 import type { TaskColumn } from "./types";
 import {
   executingRound,
@@ -294,6 +295,24 @@ export function KanbanPane({
           .then((n) => toastSuccess(`Copied ${name}`, `${Number(n).toLocaleString()} characters`))
           .catch(fail("Couldn't copy it"));
       },
+      onStartRound: () => {
+        const agentName = agent === "codex" ? "Codex" : "Claude";
+        const promptPath = r?.prompt_path ?? `fixes/phase_${flow.round}_fixes_prompt.md`;
+        const title = `Round ${flow.round}`;
+        const copyPrompt = () =>
+          copyFile(dir, promptPath)
+            .then(() => toastSuccess("Prompt copied", `When ${agentName} is ready, paste it (⌘V) as the first message`))
+            .catch(fail("Couldn't copy the prompt"));
+        const existing = termsFor(dir).find((t) => t.title === title && !t.dead);
+        if (existing) {
+          setActiveTermFor(dir, existing.id);
+          void copyPrompt();
+          return;
+        }
+        spawnTerm(dir, { agent, title })
+          .then(() => void copyPrompt())
+          .catch(fail("Couldn't start a terminal"));
+      },
       onViewRoadmap: () => { setFlow({ kind: "idle" }); onGoRoadmap(); },
     };
   }
@@ -315,6 +334,11 @@ export function KanbanPane({
         draggingId={draggingId}
         dropColumn={dropColumn}
         executingRound={executingRound(store)}
+        executingRoundState={
+          store.rounds.find((x) => x.n === executingRound(store))?.state === "generating"
+            ? "generating"
+            : "ready"
+        }
         onNewTask={openCreate}
         onReadyToExecute={() => queued > 0 && setFlow({ kind: "preflight" })}
         onOpenTask={openEdit}

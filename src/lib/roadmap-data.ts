@@ -302,9 +302,11 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
         kanban's fix-plan writer) shows F13 in the top slot -- */
   if (ctx.initRun?.running) {
     const r = ctx.initRun;
+    // with a roadmap already on screen this is a REBUILD — one name everywhere
+    const title = s.manifest_present ? "Rebuilding your roadmap…" : undefined;
     props.building = r.elapsedS > 300
       ? { kind: "still-running", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit, onViewFullLog: H.onViewFullLog }
-      : { kind: "running", elapsed: fmtElapsed(r.elapsedS), progress: r.progress, logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit };
+      : { kind: "running", title, elapsed: fmtElapsed(r.elapsedS), progress: r.progress, logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit };
   } else if (ctx.fixesRun?.running) {
     const r = ctx.fixesRun;
     props.building = r.elapsedS > 300
@@ -355,6 +357,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
           statusWord: sentence(st.label),
           body: (ph?.desc ?? "").replace(/<[^>]+>/g, ""),
           upNext,
+          onOpen: () => H.onViewDetails(st.id),
         };
         props.banner = ctx.justSwitched
           ? ({ kind: "just-switched", ...common } satisfies CurrentStateBannerProps)

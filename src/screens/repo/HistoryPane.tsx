@@ -288,8 +288,8 @@ function PublishFooter({
         </BtnPrimary>
       </div>
       <div className="text-[11px] text-text-dim">
-        Publish runs <span className="font-mono">gh</span> for you and shows its progress here — it
-        doesn't just copy a command.
+        Chronicle publishes for you and shows its progress here — it doesn't just copy a
+        command.
       </div>
     </div>
   );

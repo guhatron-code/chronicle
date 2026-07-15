@@ -41,6 +41,8 @@ export type ViewerProps =
       mode: "contents" | "diff";
       /** Contents-mode meta, e.g. "tsx · 96 lines". */
       meta?: string;
+      /** These changes are already included for the next save. */
+      readyToSave?: boolean;
       /** Diff-mode stat, e.g. +12 −4. */
       diffStat?: { added: number; removed: number };
       /** "File changed on disk — Reload" bar. */
@@ -226,7 +228,7 @@ export function Viewer(p: ViewerProps) {
                   : "text-text-muted hover:text-text-primary",
               )}
             >
-              Diff
+              Changes
             </button>
           </div>
           {p.mode === "contents" && p.meta && (
@@ -236,6 +238,7 @@ export function Viewer(p: ViewerProps) {
           )}
           {p.mode === "diff" && p.diffStat && (
             <span className="shrink-0 font-mono text-[11px] tabular-nums">
+              {p.readyToSave && <span className="pr-2 font-sans text-text-dim">Ready to save ·</span>}
               <span className="text-state-success">+{p.diffStat.added}</span>{" "}
               <span className="text-state-error">{"−"}{p.diffStat.removed}</span>
             </span>

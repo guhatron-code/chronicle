@@ -47,12 +47,29 @@ export type ExecuteFlowProps =
       planFile: string;
       promptFile: string;
       onOpenFile?: (name: string) => void;
+      /** Opens a terminal with the agent and copies the prompt — one click to begin. */
+      onStartRound?: () => void;
       onViewRoadmap?: () => void;
       className?: string;
     };
 
 /** The while-a-round-is-executing explainer (F30) — the Board embeds it too. */
-export function RoundExecutingNote({ round, className }: { round: number; className?: string }) {
+export function RoundExecutingNote({
+  round,
+  state,
+  className,
+}: {
+  round: number;
+  /** What the round is actually doing — the strip must not say more than it knows. */
+  state?: "generating" | "ready";
+  className?: string;
+}) {
+  const word =
+    state === "generating"
+      ? `Round ${round} is being planned`
+      : state === "ready"
+        ? `Round ${round} is waiting to run`
+        : `Round ${round} is underway`;
   return (
     <div
       className={cn(
@@ -61,7 +78,7 @@ export function RoundExecutingNote({ round, className }: { round: number; classN
       )}
     >
       <StateWord kind="running" className="gap-1.5 text-xs">
-        Round {round} is underway
+        {word}
       </StateWord>
       <span className="text-[12.5px] text-text-muted">
         — new tasks start round {round + 1}.
@@ -162,7 +179,13 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
         </span>
       </div>
       <div className="text-[12.5px] leading-[1.55] text-text-muted">
-        The plan is written. Paste the prompt into {AGENT_NAME[p.agent ?? "claude"]} to start the round.
+        The plan is written. Start the round to open a terminal with{" "}
+        {AGENT_NAME[p.agent ?? "claude"]} and the prompt on your clipboard.
+      </div>
+      <div>
+        <BtnPrimary onClick={p.onStartRound} className="h-[31px] gap-[7px] px-3 text-xs">
+          Start the round
+        </BtnPrimary>
       </div>
       <div className="flex flex-wrap gap-2">
         <PasteChip

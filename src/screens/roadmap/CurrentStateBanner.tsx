@@ -21,6 +21,8 @@ export type CurrentStateBannerProps =
       running?: boolean;
       body: ReactNode;
       upNext?: UpNext;
+      /** Opens the phase detail — the banner names the phase, this acts on it. */
+      onOpen?: () => void;
       className?: string;
     }
   | {
@@ -30,6 +32,7 @@ export type CurrentStateBannerProps =
       statusWord: string;
       body: ReactNode;
       upNext?: UpNext;
+      onOpen?: () => void;
       className?: string;
     }
   | {
@@ -108,6 +111,16 @@ export function CurrentStateBanner(p: CurrentStateBannerProps) {
           <span className="font-mono text-[11px] text-text-subtle">{p.upNext.id}</span> ·{" "}
           {p.upNext.name}
         </div>
+      )}
+
+      {(p.kind === "normal" || p.kind === "just-switched") && p.onOpen && (
+        <button
+          type="button"
+          onClick={p.onOpen}
+          className="self-start text-[12.5px] text-text-secondary underline underline-offset-2 hover:text-text-primary focus-visible:outline-none focus-visible:[box-shadow:var(--focus-ring)]!"
+        >
+          Open the phase ›
+        </button>
       )}
 
       {p.kind === "waiting" && (

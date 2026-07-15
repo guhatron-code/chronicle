@@ -46,6 +46,7 @@ import {
   type GitStatus,
 } from "@/lib/repo-data";
 import { toastError, toastSuccess } from "@/overlays/toasts";
+import { humanError, humanGitError } from "@/lib/utils";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
 /* ---- per-project state, surviving pane switches and project tabs ---- */
@@ -311,7 +312,7 @@ export function RepoPane({
         if (dirRef.current !== d) return;
         const t = tab();
         if (!t) return;
-        t.body = { kind: "read-error", message: "This file couldn't be read", detail: String(e).slice(0, 120) };
+        t.body = { kind: "read-error", message: "This file couldn't be read", detail: humanError(e) };
         t.meta = undefined;
         rerender();
       });
@@ -404,8 +405,9 @@ export function RepoPane({
 
   const opError = useCallback((title: string) => (e: unknown) => {
     const s = stateFor(dirRef.current);
-    s.banner = `${title} — ${String(e).slice(0, 110)}`;
-    toastError(title, String(e).slice(0, 90));
+    const msg = /publish|bring/i.test(title) ? humanGitError(e) : String(e).slice(0, 110);
+    s.banner = `${title} — ${msg}`;
+    toastError(title, msg.slice(0, 90));
     rerender();
   }, [rerender]);
 
@@ -530,6 +532,10 @@ export function RepoPane({
           mode: active.mode,
           meta: active.mode === "contents" ? active.meta : undefined,
           diffStat: active.mode === "diff" ? active.diffStat : undefined,
+          readyToSave:
+            active.mode === "diff" &&
+            !!gitStatus?.staged.some((f) => f.path === active.path) &&
+            !gitStatus?.unstaged.some((f) => f.path === active.path),
           changedOnDisk: active.changedOnDisk,
           body: active.body ?? { kind: "code", lines: [] },
           onSelectTab: (id) => { rs.activeTab = id; rs.selectedId = id; rerender(); },

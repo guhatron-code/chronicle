@@ -37,6 +37,7 @@ import { fixesCancel, fixesLogPath, fixesStatus, initLogPath } from "@/lib/ipc";
 import { kanbanFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { setInitRunning } from "@/lib/run-flags";
 import { toastError, toastSuccess } from "@/overlays/toasts";
+import { humanError, humanGitError } from "@/lib/utils";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
 export function RoadmapPane({
@@ -255,15 +256,18 @@ export function RoadmapPane({
     });
   }, [dir, agent]);
 
-  const doCopyDoc = useCallback((path: string) => {
+  const doCopyDoc = useCallback((path: string, pasteHint?: string) => {
     copyFile(dir, path)
       .then((n) => {
         setCopiedPath(path);
         if (copyTimer.current) clearTimeout(copyTimer.current);
         copyTimer.current = setTimeout(() => setCopiedPath(null), 1800);
-        toastSuccess(`Copied ${path.split("/").pop()}`, `${Number(n).toLocaleString()} characters`);
+        toastSuccess(
+          `Copied ${path.split("/").pop()}`,
+          pasteHint ?? `${Number(n).toLocaleString()} characters`,
+        );
       })
-      .catch((e) => toastError("Couldn't copy it", String(e).slice(0, 90)));
+      .catch((e) => toastError("Couldn't copy it", humanError(e)));
   }, [dir]);
 
   if (!state) {
@@ -284,11 +288,21 @@ export function RoadmapPane({
           onBack={() => setDetailId(null)}
           onCopyDoc={doCopyDoc}
           onStart={() => {
+            const agentName = agent === "codex" ? "Codex" : "Claude";
             const pf = (phase.paste ?? []).find((x) => x.path);
+            const pasteHint = `When ${agentName} is ready, paste it (⌘V) as the first message`;
+            // already started once — foreground that session instead of stacking a twin
+            const existing = termsFor(dir).find((t) => t.title === phase.id && !t.dead);
+            if (existing) {
+              setActiveTermFor(dir, existing.id);
+              if (pf?.path) doCopyDoc(pf.path, pasteHint);
+              else toastSuccess("Already running", `The ${phase.id} session is in the terminal`);
+              return;
+            }
             spawnTerm(dir, { agent, title: phase.id })
               .then(() => {
-                if (pf?.path) doCopyDoc(pf.path);
-                else toastSuccess("Session started", `${agent === "codex" ? "Codex" : "Claude"} is starting in the terminal`);
+                if (pf?.path) doCopyDoc(pf.path, pasteHint);
+                else toastSuccess("Session started", `${agentName} is starting in the terminal`);
               })
               .catch((e) => toastError("Couldn't start a terminal", String(e).slice(0, 90)));
           }}
@@ -376,7 +390,7 @@ export function RoadmapPane({
         onConfirm({
           title: "Rebuild the roadmap?",
           body: `${agent === "codex" ? "A Codex" : "A Claude"} session will read the plan documents again and rewrite the roadmap. Your files aren't changed.`,
-          cancelLabel: "Cancel",
+          cancelLabel: "Not yet",
           confirmLabel: "Rebuild",
           onConfirm: startInit,
         }),
@@ -402,7 +416,8 @@ export function RoadmapPane({
             else if (id === "prune") { await gitWorktreePrune(dir); toastSuccess("Cleaned up"); }
             onPollNow();
           } catch (e) {
-            toastError("That didn't finish", String(e).split("\n")[0].slice(0, 110));
+            const gitMove = id === "push" || id === "publish-first" || id === "pull";
+            toastError("That didn't finish", gitMove ? humanGitError(e) : String(e).split("\n")[0].slice(0, 110));
           } finally {
             setPublishing(false);
           }

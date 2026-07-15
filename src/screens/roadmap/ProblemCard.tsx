@@ -138,8 +138,8 @@ export function ProblemCard(p: ProblemCardProps) {
         <>
           <Eyebrow>Basic view · files and history only</Eyebrow>
           <Body>
-            No roadmap is being tracked. The Repo and Terminal work as usual; build a roadmap any
-            time.
+            You chose the basic view, so no roadmap is being tracked — the Repo and Terminal
+            work as usual. Build a roadmap any time to get phases and next steps.
           </Body>
           <div>
             <Secondary label="Build roadmap" onClick={p.onBuild} />

@@ -427,6 +427,7 @@ export default function App() {
         agent: agent === "codex" ? "Codex" : "Claude",
         writing: isInitRunning(r.path), // a build running while you're on Home
         openNow: projects.has(r.path),
+        liveSessions: liveCount(r.path),
       }),
     );
   const openPalette: PaletteProject[] = tabs.map((t) => {

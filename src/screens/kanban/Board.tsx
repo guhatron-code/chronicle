@@ -27,6 +27,7 @@ export type BoardProps = {
   dropColumn?: TaskColumn | null;
   /** A round is executing — renders the F30 explainer strip under the header. */
   executingRound?: number | null;
+  executingRoundState?: "generating" | "ready";
   onNewTask?: () => void;
   onReadyToExecute?: () => void;
   onOpenTask?: (id: string) => void;
@@ -126,6 +127,7 @@ export function Board({
   draggingId,
   dropColumn,
   executingRound,
+  executingRoundState,
   onNewTask,
   onReadyToExecute,
   onOpenTask,
@@ -164,7 +166,7 @@ export function Board({
       {/* the round-running explainer (F30) — new tasks start the next round */}
       {executingRound != null && (
         <div className="px-6 pt-4">
-          <RoundExecutingNote round={executingRound} />
+          <RoundExecutingNote round={executingRound} state={executingRoundState} />
         </div>
       )}
 

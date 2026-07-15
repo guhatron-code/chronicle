@@ -26,6 +26,8 @@ export type RecentProject = {
   ago: string;
   /** Already open in a tab — the card says so instead of looking identical. */
   openNow?: boolean;
+  /** Live terminal sessions running in the open project. */
+  liveSessions?: number;
   variant:
     | {
         kind: "phase";
@@ -104,6 +106,11 @@ export function RecentCard({
               Open
             </span>
           )}
+          {(project.liveSessions ?? 0) > 0 && (
+            <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-state-neutral">
+              Session running
+            </span>
+          )}
           <span className="font-mono text-[11.5px] text-text-dim">{project.tildePath}</span>
         </div>
         <div className="flex items-center gap-[9px] text-[12.5px] text-state-neutral">
@@ -154,6 +161,11 @@ export function RecentCard({
           {project.openNow && (
             <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-text-subtle">
               Open
+            </span>
+          )}
+          {(project.liveSessions ?? 0) > 0 && (
+            <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-state-neutral">
+              Session running
             </span>
           )}
             <span className="font-mono text-[11.5px] text-text-dim">{project.tildePath}</span>

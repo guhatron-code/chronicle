@@ -35,11 +35,11 @@ export function StaleAlert({ scanning = false, onScan, className }: StaleAlertPr
             className="inline-block size-[11px] rounded-full border-[1.5px] border-(--primary-fg)"
             style={{ borderTopColor: "transparent", animation: "wv-spin 0.7s linear infinite" }}
           />
-          Scanning…
+          Rebuilding…
         </BtnPrimary>
       ) : (
         <BtnPrimary className="h-[30px] px-[13px] text-[12.5px]" onClick={onScan}>
-          Scan
+          Rebuild
         </BtnPrimary>
       )}
     </div>
