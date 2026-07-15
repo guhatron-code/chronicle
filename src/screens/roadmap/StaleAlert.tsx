@@ -16,7 +16,7 @@ export function StaleAlert({ scanning = false, onScan, className }: StaleAlertPr
   return (
     <div
       className={cn(
-        "flex items-center gap-[11px] py-[14px]",
+        "flex items-center gap-[11px] py-[18px]",
         className,
       )}
     >

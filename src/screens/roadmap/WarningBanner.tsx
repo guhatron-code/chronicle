@@ -17,7 +17,7 @@ export function WarningBanner({ count, onRebuild, onDismiss, className }: Warnin
   return (
     <div
       className={cn(
-        "flex items-center gap-[11px] py-[14px]",
+        "flex items-center gap-[11px] py-[18px]",
         className,
       )}
     >

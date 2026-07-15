@@ -87,7 +87,7 @@ export function HistoryPanel(p: HistoryPanelProps) {
     return (
       <div
         className={cn(
-          "flex flex-col gap-2.5 py-[18px]",
+          "flex flex-col gap-2.5 py-[26px]",
           p.className,
         )}
       >
@@ -109,7 +109,7 @@ export function HistoryPanel(p: HistoryPanelProps) {
   return (
     <div
       className={cn(
-        "py-[18px]",
+        "py-[26px]",
         p.className,
       )}
     >

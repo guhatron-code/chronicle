@@ -152,9 +152,45 @@ export function thumbFor(dir: string, path: string): string | null {
   readFileB64(dir, path)
     .then((b64) => {
       const ext = path.split(".").pop()?.toLowerCase() ?? "png";
-      thumbs.set(key, `data:${IMG_MIME[ext] ?? "image/png"};base64,${b64}`);
-      notify();
+      const src = `data:${IMG_MIME[ext] ?? "image/png"};base64,${b64}`;
+      // downscale before caching — a full 5MB screenshot as the data URI for a
+      // 44px thumb would sit in memory for the whole session
+      downscale(src).then((small) => {
+        thumbs.set(key, small);
+        notify();
+      });
     })
     .catch(() => thumbs.set(key, `FAIL:${Date.now()}`));
   return null;
+}
+
+/** Longest edge a cached thumbnail keeps — 2× the largest render (44px tiles). */
+const THUMB_MAX = 320;
+
+/** Downscale a data URI via canvas; falls back to the original when the image
+ *  can't be rasterized (e.g. an odd SVG) — showing big beats showing nothing. */
+function downscale(src: string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      if (Math.max(img.width, img.height) <= THUMB_MAX || !img.width || !img.height) {
+        resolve(src);
+        return;
+      }
+      try {
+        const scale = THUMB_MAX / Math.max(img.width, img.height);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { resolve(src); return; }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/webp", 0.8));
+      } catch {
+        resolve(src);
+      }
+    };
+    img.onerror = () => resolve(src);
+    img.src = src;
+  });
 }

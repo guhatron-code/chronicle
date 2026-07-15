@@ -55,7 +55,7 @@ export function Roadmap(p: RoadmapProps) {
         {p.documents && <DocumentsPanel {...p.documents} />}
         {p.phaseRail && <PhaseRail {...p.phaseRail} />}
         {p.onRebuildRoadmap && (
-          <div className="flex flex-col items-center gap-2 py-5">
+          <div className="flex flex-col items-center gap-2 py-7">
             <button
               onClick={p.onRebuildRoadmap}
               className="h-8 rounded-md border border-border-strong px-3.5 text-[12.5px] font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"

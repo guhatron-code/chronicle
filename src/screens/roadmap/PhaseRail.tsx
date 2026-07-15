@@ -196,7 +196,7 @@ export function PhaseRail({ stages, className }: PhaseRailProps) {
   return (
     <div
       className={cn(
-        "flex flex-col py-[22px]",
+        "flex flex-col py-[28px]",
         className,
       )}
     >

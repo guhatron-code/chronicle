@@ -35,7 +35,7 @@ export function BuildingCard(p: BuildingCardProps) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-3 py-[18px]",
+        "flex flex-col gap-3 py-[26px]",
         p.className,
       )}
     >

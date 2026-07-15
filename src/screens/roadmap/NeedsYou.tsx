@@ -98,7 +98,7 @@ export function NeedsYou(p: NeedsYouProps) {
     return (
       <div
         className={cn(
-          "flex items-center gap-2.5 py-[18px]",
+          "flex items-center gap-2.5 py-[26px]",
           p.className,
         )}
       >
@@ -111,7 +111,7 @@ export function NeedsYou(p: NeedsYouProps) {
   return (
     <div
       className={cn(
-        "py-[18px]",
+        "py-[26px]",
         p.className,
       )}
     >

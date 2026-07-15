@@ -61,7 +61,7 @@ export function CurrentStateBanner(p: CurrentStateBannerProps) {
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 py-[18px]",
+        "flex flex-col gap-2 py-[26px]",
         // just-switched: quiet emphasis — raised surface tint, settles over ~2s
         p.kind === "just-switched" && "bg-surface-card-raised transition-colors duration-1000",
         p.className,
