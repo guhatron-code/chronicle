@@ -26,24 +26,43 @@ export type PaletteProject = {
   statusKind: StateKind;
 };
 
+export type PaletteRepo = {
+  nameWithOwner: string;
+  description: string | null;
+  isPrivate: boolean;
+};
+
 export function CommandPalette({
   open,
   onOpenChange,
   openProjects,
   recents,
+  githubRepos,
+  githubError,
+  cloningRepo,
   onSwitch,
   onOpenRecent,
   onOpenDialog,
   onNewProject,
+  onCloneRepo,
+  onGithubSetup,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   openProjects: PaletteProject[];
   recents: PaletteProject[];
+  /** null = still loading; [] = none */
+  githubRepos?: PaletteRepo[] | null;
+  /** gh missing / signed out — one honest row instead of the list */
+  githubError?: string | null;
+  /** the repo currently cloning — its row shows progress, others stay usable */
+  cloningRepo?: string | null;
   onSwitch: (path: string) => void;
   onOpenRecent: (path: string) => void;
   onOpenDialog: () => void;
   onNewProject: () => void;
+  onCloneRepo?: (nameWithOwner: string) => void;
+  onGithubSetup?: () => void;
 }) {
   const row = (p: PaletteProject, kbd?: string) => (
     <>
@@ -120,6 +139,49 @@ export function CommandPalette({
                     {row(p)}
                   </CommandItem>
                 ))}
+              </CommandGroup>
+            )}
+
+            {(githubRepos?.length || githubError) && (
+              <CommandGroup
+                heading="GitHub — clone and open"
+                className="**:[[cmdk-group-heading]]:px-2.5 **:[[cmdk-group-heading]]:pb-[5px] **:[[cmdk-group-heading]]:pt-2.5 **:[[cmdk-group-heading]]:text-[10px] **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.09em] **:[[cmdk-group-heading]]:text-text-dimmer"
+              >
+                {githubError ? (
+                  <CommandItem
+                    value="github setup"
+                    onSelect={onGithubSetup}
+                    className="gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-fill-hover"
+                  >
+                    <span className="text-[12.5px] text-text-muted">{githubError}</span>
+                  </CommandItem>
+                ) : (
+                  (githubRepos ?? []).map((r) => (
+                    <CommandItem
+                      key={r.nameWithOwner}
+                      value={`gh ${r.nameWithOwner} ${r.description ?? ""}`}
+                      disabled={cloningRepo != null}
+                      onSelect={() => onCloneRepo?.(r.nameWithOwner)}
+                      className="gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-fill-hover"
+                    >
+                      <span className="min-w-0 truncate text-[13px] font-medium text-text-primary">
+                        {r.nameWithOwner}
+                      </span>
+                      {r.isPrivate && (
+                        <span className="shrink-0 rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-text-subtle">
+                          Private
+                        </span>
+                      )}
+                      {r.description && (
+                        <span className="min-w-0 truncate text-[11.5px] text-text-dim">{r.description}</span>
+                      )}
+                      <span className="flex-1" />
+                      {cloningRepo === r.nameWithOwner && (
+                        <span className="shrink-0 text-[11.5px] text-state-neutral">Cloning…</span>
+                      )}
+                    </CommandItem>
+                  ))
+                )}
               </CommandGroup>
             )}
 

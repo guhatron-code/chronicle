@@ -1448,6 +1448,82 @@ fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
     m
 }
 
+/* ================= GitHub (via the user's own gh CLI — Chronicle holds no credentials) ================= */
+
+/// Resolve a tool the way the terminal would — well-known dirs, then shells.
+fn find_tool(name: &str) -> Option<String> {
+    use std::os::unix::fs::PermissionsExt;
+    let home = std::env::var("HOME").unwrap_or_default();
+    let is_exec = |p: &str| std::fs::metadata(p)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false);
+    let known = [
+        format!("/opt/homebrew/bin/{name}"),
+        format!("/usr/local/bin/{name}"),
+        format!("{home}/.local/bin/{name}"),
+        format!("{home}/bin/{name}"),
+    ];
+    if let Some(hit) = known.iter().find(|p| is_exec(p)) { return Some(hit.clone()); }
+    let (a, _) = {
+        let out = Command::new("/bin/zsh")
+            .args(["-lc", &format!("command -v {name}; echo '---'")])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        (last_path_line(&out), ())
+    };
+    a
+}
+
+/// The user's repos, newest first — straight from `gh repo list` (their auth,
+/// their session; Chronicle never sees a token).
+#[tauri::command]
+async fn github_repos() -> Result<Value, String> {
+    let gh = find_tool("gh").ok_or("GitHub's tool isn't set up — install `gh` and run `gh auth login` in the terminal")?;
+    let out = Command::new(&gh)
+        .args(["repo", "list", "--limit", "100",
+               "--json", "nameWithOwner,description,updatedAt,isPrivate"])
+        .stdin(std::process::Stdio::null())
+        .output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        if err.contains("auth") || err.contains("logged") {
+            return Err("GitHub isn't signed in — run `gh auth login` in the terminal".into());
+        }
+        return Err(err.lines().next().unwrap_or("gh failed").to_string());
+    }
+    serde_json::from_slice::<Value>(&out.stdout).map_err(|e| e.to_string())
+}
+
+/// Clone into the clone home (~/Documents/GitHub, created on demand) and hand
+/// back the destination; an existing clone is simply reused.
+#[tauri::command]
+async fn github_clone(repo: String) -> Result<String, String> {
+    // owner/name only — never a flag, never a URL with tricks
+    if !regex::Regex::new(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$").unwrap().is_match(&repo) {
+        return Err("that doesn't look like owner/repo".into());
+    }
+    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
+    let parent = PathBuf::from(&home).join("Documents/GitHub");
+    std::fs::create_dir_all(&parent).map_err(|e| e.to_string())?;
+    let name = repo.split('/').next_back().unwrap_or(&repo);
+    let dest = parent.join(name);
+    if dest.exists() {
+        return Ok(dest.to_string_lossy().to_string()); // already here — just open it
+    }
+    let gh = find_tool("gh").ok_or("GitHub's tool isn't set up — install `gh` and run `gh auth login` in the terminal")?;
+    let out = Command::new(&gh)
+        .args(["repo", "clone", &repo, dest.to_str().ok_or("bad destination")?])
+        .stdin(std::process::Stdio::null())
+        .output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        return Err(err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("clone failed").to_string());
+    }
+    Ok(dest.to_string_lossy().to_string())
+}
+
 /* ================= headless round execution (F1) ================= */
 
 fn exec_run_key(dir: &str) -> Result<(String, PathBuf), String> {
@@ -2251,7 +2327,8 @@ fn main() {
             pty_write, pty_resize, pty_kill,
             round_execute, round_exec_status, round_exec_cancel, round_retro, exec_log_path,
             journal_append, journal_read, notify, draft_save_message,
-            global_search, status_report
+            global_search, status_report,
+            github_repos, github_clone
         ])
         .run(tauri::generate_context!())
         .expect("error while running Chronicle");

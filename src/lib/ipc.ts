@@ -299,6 +299,17 @@ export interface SearchResults {
 }
 export const globalSearch = (dir: string, q: string) => invoke<SearchResults>("global_search", { dir, q });
 
+/* ---------- GitHub via the user's gh CLI (no tokens in Chronicle) ---------- */
+export interface GithubRepo {
+  nameWithOwner: string;
+  description: string | null;
+  updatedAt: string;
+  isPrivate: boolean;
+}
+export const githubRepos = () => invoke<GithubRepo[]>("github_repos");
+/** Clone into ~/Documents/GitHub (reused if already there); returns the path. */
+export const githubClone = (repo: string) => invoke<string>("github_clone", { repo });
+
 /** The roadmap state as sendable markdown (F7). */
 export const statusReport = (dir: string) => invoke<string>("status_report", { dir });
 export const fixesCancel = (dir: string) => invoke<void>("fixes_cancel", { dir });

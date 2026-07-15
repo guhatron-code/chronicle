@@ -50,7 +50,7 @@ import { evictKanban, kanbanFor, openTaskInKanban, queuedCountFor, refreshKanban
 import { announce } from "@/lib/journal";
 import { checkForUpdate, dismissUpdate, installUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
-import { fixesStatus, initStatus } from "@/lib/ipc";
+import { copyText, fixesStatus, githubClone, githubRepos, initStatus, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -76,6 +76,9 @@ export default function App() {
   const [checking, setChecking] = useState(false);
   const [splitPct, setSplitPct] = useState(55.5);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [ghRepos, setGhRepos] = useState<GithubRepo[] | null>(null);
+  const [ghError, setGhError] = useState<string | null>(null);
+  const [cloningRepo, setCloningRepo] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [newProjOpen, setNewProjOpen] = useState(false);
@@ -336,6 +339,30 @@ export default function App() {
     } else doClose();
   }, []);
 
+  /* the palette's GitHub group — fetched once per session, on first open */
+  const ghFetched = useRef(false);
+  useEffect(() => {
+    // refetch after an error — the user may have just run `gh auth login`
+    if (!paletteOpen || (ghFetched.current && !ghError)) return;
+    ghFetched.current = true;
+    githubRepos()
+      .then((rs) => { setGhRepos(Array.isArray(rs) ? rs : []); setGhError(null); })
+      .catch((e) => setGhError(String(e).slice(0, 90)));
+  }, [paletteOpen]);
+
+  const cloneRepo = useCallback((nameWithOwner: string) => {
+    if (cloningRepo) return;
+    setCloningRepo(nameWithOwner);
+    toastSuccess(`Cloning ${nameWithOwner}…`, "It opens as a project when it's here");
+    githubClone(nameWithOwner)
+      .then((dest) => {
+        setPaletteOpen(false);
+        doOpenProject(dest);
+      })
+      .catch((e) => toastError("Couldn't clone it", String(e).slice(0, 110)))
+      .finally(() => setCloningRepo(null));
+  }, [cloningRepo, doOpenProject]);
+
   const openDialog = useCallback(() => {
     setPaletteOpen(false);
     pickFolder()
@@ -496,6 +523,15 @@ export default function App() {
         onOpenRecent={doOpenProject}
         onOpenDialog={openDialog}
         onNewProject={() => { setPaletteOpen(false); setNewProjError(null); setNewProjOpen(true); }}
+        githubRepos={ghRepos}
+        githubError={ghError}
+        cloningRepo={cloningRepo}
+        onCloneRepo={cloneRepo}
+        onGithubSetup={() => {
+          void copyText("gh auth login")
+            .then(() => toastSuccess("Copied the command", "Paste `gh auth login` in the terminal, then reopen the palette"))
+            .catch(() => {});
+        }}
       />
       <ConfirmDialog spec={confirm} onClose={() => setConfirm(null)} />
       <NewProjectDialog
