@@ -29,6 +29,8 @@
     "@tanstack/react-table": "8.21.3",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-dialog": "2.7.1",
+    "@tauri-apps/plugin-process": "2.3.1",
+    "@tauri-apps/plugin-updater": "2.9.0",
     "@tiptap/core": "3.27.3",
     "@tiptap/extension-code-block-lowlight": "3.27.3",
     "@tiptap/extension-list": "3.27.3",

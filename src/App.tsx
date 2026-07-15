@@ -48,6 +48,7 @@ import type { TerminalTab } from "@/components/chrome/TerminalColumn";
 import { KanbanPane } from "@/screens/kanban/KanbanPane";
 import { evictKanban, kanbanFor, openTaskInKanban, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { announce } from "@/lib/journal";
+import { checkForUpdate, dismissUpdate, installUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
 import { fixesStatus, initStatus } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
@@ -165,6 +166,14 @@ export default function App() {
     const id = setInterval(tick, 8000);
     return () => clearInterval(id);
   }, [projects.size, pollOne]);
+
+  /* OTA: one quiet daily check; nothing installs without a click */
+  const [, updBump] = useState(0);
+  useEffect(() => {
+    const un = subscribeUpdates(() => updBump((n) => n + 1));
+    void checkForUpdate();
+    return un;
+  }, []);
 
   useEffect(() => {
     refreshPicker();
@@ -541,6 +550,19 @@ export default function App() {
         <div className="min-h-0 flex-1">
           <Picker
             recents={recents}
+            update={
+              updateAvailable()
+                ? {
+                    version: updateAvailable()!.version,
+                    busy: updateAvailable()!.busy,
+                    onInstall: () =>
+                      void installUpdate().catch((e) =>
+                        toastError("The update didn't finish", String(e).slice(0, 90)),
+                      ),
+                    onDismiss: dismissUpdate,
+                  }
+                : null
+            }
             onOpenDialog={openDialog}
             onNewProject={() => { setNewProjError(null); setNewProjOpen(true); }}
             onOpenProject={doOpenProject}

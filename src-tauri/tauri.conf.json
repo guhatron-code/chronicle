@@ -39,6 +39,15 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns"
-    ]
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlCMTc3NUJCM0I2OTY3RkUKUldUK1oyazd1M1VYbXkvNmlESTFBcXplVkNYK3VTaWJaMHhzRnVIOGhjRXpQRTNzQStnQVN6RVIK",
+      "endpoints": [
+        "https://github.com/guhatron-code/chronicle/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

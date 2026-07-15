@@ -14,6 +14,7 @@ export function Picker({
   onOpenProject,
   onRemoveRecent,
   onLocate,
+  update,
 }: {
   recents: RecentProject[];
   onOpenDialog: () => void;
@@ -21,9 +22,33 @@ export function Picker({
   onOpenProject: (path: string) => void;
   onRemoveRecent: (path: string) => void;
   onLocate?: (path: string) => void;
+  /** A newer Chronicle is ready — one dismissable line, never a modal. */
+  update?: { version: string; busy: boolean; onInstall: () => void; onDismiss: () => void } | null;
 }) {
   return (
     <div className="relative h-full overflow-y-auto">
+      {update && (
+        <div className="flex items-center justify-center gap-3 border-b border-divider px-6 py-2">
+          <span className="text-[12px] text-text-secondary">
+            Chronicle {update.version} is ready
+          </span>
+          <button
+            disabled={update.busy}
+            onClick={update.onInstall}
+            className="text-[12px] font-medium text-text-primary underline underline-offset-2 hover:text-text-secondary disabled:opacity-55"
+          >
+            {update.busy ? "Updating…" : "Update and restart"}
+          </button>
+          {!update.busy && (
+            <button
+              onClick={update.onDismiss}
+              className="text-[12px] text-text-dim hover:text-text-secondary"
+            >
+              Not now
+            </button>
+          )}
+        </div>
+      )}
       {/* L6: hero padding 84/64/72; the vignette sits behind it */}
       <div
         className="relative px-16 pb-[72px] pt-[84px]"

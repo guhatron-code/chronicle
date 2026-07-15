@@ -2212,6 +2212,8 @@ fn main() {
         .filter_map(|p| PathBuf::from(p).canonicalize().ok())
         .collect();
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(OpenRoots(Mutex::new(seeded)))
         .manage(InitState { runs: Mutex::new(std::collections::HashMap::new()) })
