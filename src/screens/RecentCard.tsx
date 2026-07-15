@@ -127,7 +127,7 @@ export function RecentCard({
   return (
     <div
       className={cn(
-        "group relative rounded-lg border border-border-hairline bg-surface-card text-left font-sans",
+        "group relative h-full rounded-lg border border-border-hairline bg-surface-card text-left font-sans",
         "hover:border-border-strong hover:bg-surface-card-raised",
         trashHover && "border-border-strong bg-surface-card hover:bg-surface-card", // delete-hover: the card recedes to the flat surface
       )}
@@ -152,7 +152,7 @@ export function RecentCard({
 
       <button
         onClick={() => onOpen(project.path)}
-        className="flex w-full flex-col gap-[9px] p-[15px] px-[18px] text-left"
+        className="flex h-full w-full flex-col gap-[9px] p-[15px] px-[18px] text-left"
       >
         <div className={cn("flex flex-col gap-[9px]", trashHover && "opacity-55")}>
           <div className="flex items-center gap-2.5">
@@ -205,12 +205,12 @@ export function RecentCard({
         </div>
 
         {trashHover ? (
-          <div className="text-[11.5px] text-text-subtle">
+          <div className="mt-auto text-[11.5px] text-text-subtle">
             Removes it from this list — the folder itself isn't touched.
           </div>
         ) : (
           (v.kind === "phase" || v.kind === "all-done") && (
-            <div className="flex items-center gap-2.5">
+            <div className="mt-auto flex items-center gap-2.5">
               <span className="block h-[3px] flex-1 overflow-hidden rounded-[2px] bg-fill-hover">
                 <span
                   className={cn(
