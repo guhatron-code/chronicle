@@ -165,6 +165,55 @@ fn agent_paths_uncached() -> (Option<String>, Option<String>) {
     (claude.or(c3), codex.or(x3))
 }
 
+/* ================= the chronicle-init skill ships with the app =================
+   Claude's scan runs `/chronicle-init`, which only resolves if the skill exists
+   at ~/.claude/skills/chronicle-init on THIS machine. The app embeds the skill
+   and self-installs it — but never clobbers a hand-managed copy: a marker file
+   records the hash of what Chronicle installed, and only a copy that still
+   matches its marker (unmodified by a human) is upgraded. */
+
+const SKILL_FILES: [(&str, &str); 4] = [
+    ("SKILL.md", include_str!("../../skill/chronicle-init/SKILL.md")),
+    ("SCHEMA.md", include_str!("../../skill/chronicle-init/SCHEMA.md")),
+    ("examples/weave.chronicle.json", include_str!("../../skill/chronicle-init/examples/weave.chronicle.json")),
+    ("examples/loupe.chronicle.json", include_str!("../../skill/chronicle-init/examples/loupe.chronicle.json")),
+];
+
+fn skill_set_hash(bodies: &[String]) -> String {
+    let mut h = Sha256::new();
+    for b in bodies { h.update(b.as_bytes()); }
+    format!("{:x}", h.finalize())
+}
+
+fn install_init_skill(base: &Path) -> Result<&'static str, String> {
+    let dir = base.join(".claude/skills/chronicle-init");
+    let marker = dir.join(".chronicle-managed");
+    let on_disk: Vec<String> = SKILL_FILES.iter()
+        .map(|(n, _)| std::fs::read_to_string(dir.join(n)).unwrap_or_default())
+        .collect();
+    let have_any = on_disk.iter().any(|b| !b.is_empty());
+    let managed = std::fs::read_to_string(&marker).map(|m| m.trim() == skill_set_hash(&on_disk)).unwrap_or(false);
+    if have_any && !managed {
+        return Ok("hand-managed — left alone"); // a human owns this copy
+    }
+    let embedded: Vec<String> = SKILL_FILES.iter().map(|(_, b)| b.to_string()).collect();
+    if have_any && on_disk == embedded {
+        return Ok("already current");
+    }
+    std::fs::create_dir_all(dir.join("examples")).map_err(|e| e.to_string())?;
+    for (name, body) in SKILL_FILES {
+        std::fs::write(dir.join(name), body).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&marker, skill_set_hash(&embedded)).map_err(|e| e.to_string())?;
+    Ok(if have_any { "upgraded" } else { "installed" })
+}
+
+fn ensure_init_skill() {
+    if let Ok(home) = std::env::var("HOME") {
+        let _ = install_init_skill(&PathBuf::from(home));
+    }
+}
+
 fn load_config() -> Value {
     std::fs::read_to_string(config_dir().join("config.json"))
         .ok().and_then(|s| serde_json::from_str(&s).ok())
@@ -848,6 +897,7 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
             .map_err(|e| format!("couldn't start a Codex session: {e}"))?
     } else {
         let bin = claude_bin.ok_or("couldn't find `claude` — if it's installed, make sure `command -v claude` works in a terminal, then reopen Chronicle")?;
+        ensure_init_skill(); // /chronicle-init must resolve on THIS machine
         let slash = if fresh == Some(true) {
             format!("/chronicle-init {FRESH_REBUILD_NOTE}")
         } else {
@@ -888,6 +938,8 @@ fn set_init_consent(roots: State<OpenRoots>, dir: String, choice: String) -> Res
     if !matches!(choice.as_str(), "auto" | "manual" | "basic") {
         return Err("unknown choice".into());
     }
+    // "I'll run it myself" hands the user /chronicle-init to paste — it has to exist
+    if choice == "manual" { ensure_init_skill(); }
     let d = project_for(&roots, &dir)?.dir;
     let mut cfg = load_config();
     let obj = cfg.as_object_mut().ok_or("bad config")?;
@@ -2218,6 +2270,28 @@ mod r1_tests {
 
     fn ctx_for(repo: &Path) -> Ctx {
         Ctx { repo: repo.to_path_buf(), extras: vec![], tags: HashSet::new(), subjects: vec![] }
+    }
+
+    #[test]
+    fn skill_self_install_is_clobber_safe() {
+        let base = tmp("skill-install");
+        // fresh machine: installs + marker
+        assert_eq!(install_init_skill(&base).unwrap(), "installed");
+        let skill = base.join(".claude/skills/chronicle-init/SKILL.md");
+        assert!(skill.exists(), "skill written");
+        // unchanged: no-op
+        assert_eq!(install_init_skill(&base).unwrap(), "already current");
+        // a MANAGED copy that drifted from the embedded set is upgraded
+        std::fs::write(&skill, "old managed content").unwrap();
+        let bodies: Vec<String> = SKILL_FILES.iter()
+            .map(|(n, _)| std::fs::read_to_string(base.join(".claude/skills/chronicle-init").join(n)).unwrap_or_default())
+            .collect();
+        std::fs::write(base.join(".claude/skills/chronicle-init/.chronicle-managed"), skill_set_hash(&bodies)).unwrap();
+        assert_eq!(install_init_skill(&base).unwrap(), "upgraded");
+        // a HAND-EDITED copy (marker no longer matches) is never touched
+        std::fs::write(&skill, "the human's own edits").unwrap();
+        assert_eq!(install_init_skill(&base).unwrap(), "hand-managed — left alone");
+        assert_eq!(std::fs::read_to_string(&skill).unwrap(), "the human's own edits");
     }
 
     #[test]
