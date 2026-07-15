@@ -336,6 +336,22 @@ a:focus-visible,
 }
 html { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
+/* Toast pills vs sonner's fixed 356px rows: a wider pill overflowed rightward
+   and read as off-center. The stack hugs its widest pill and centers by
+   transform (immune to width keywords); every row spans the stack and centers
+   its pill. */
+[data-sonner-toaster][data-x-position='center'] {
+  width: max-content !important;
+  left: 50% !important;
+  margin-left: 0 !important;
+  transform: translateX(-50%);
+}
+[data-sonner-toast] {
+  width: 100% !important;
+  display: flex;
+  justify-content: center;
+}
+
 @keyframes wv-spin { to { transform: rotate(360deg); } }
 @keyframes wv-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @keyframes wv-arrow { to { background-position: 12px 0; } }
