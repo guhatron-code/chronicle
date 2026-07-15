@@ -91,20 +91,78 @@ fn term_then_kill(child: &mut std::process::Child) {
 /// Resolve agent binaries through a login shell: GUI apps have a minimal PATH,
 /// so a bare `claude`/`codex` would fail on a Finder-launched install.
 fn agent_paths() -> (Option<String>, Option<String>) {
-    static CACHE: std::sync::OnceLock<(Option<String>, Option<String>)> = std::sync::OnceLock::new();
-    CACHE.get_or_init(agent_paths_uncached).clone()
+    // cached — but a total miss is retried, so installing an agent (or a slow
+    // first probe) doesn't wedge "not installed" until the app restarts
+    static CACHE: Mutex<Option<(Option<String>, Option<String>)>> = Mutex::new(None);
+    let mut guard = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(hit) = guard.as_ref() {
+        if hit.0.is_some() || hit.1.is_some() { return hit.clone(); }
+    }
+    let fresh = agent_paths_uncached();
+    *guard = Some(fresh.clone());
+    fresh
 }
 
-fn agent_paths_uncached() -> (Option<String>, Option<String>) {
+/// Take the last absolute path a shell printed — interactive rc files
+/// (starship, instant prompts) can emit noise around the answer.
+fn last_path_line(chunk: &str) -> Option<String> {
+    chunk.lines().rev()
+        .map(str::trim)
+        .find(|l| l.starts_with('/') && !l.contains(' '))
+        .map(String::from)
+}
+
+fn shell_probe(shell_args: &[&str]) -> (Option<String>, Option<String>) {
     let out = Command::new("/bin/zsh")
-        .args(["-lc", "command -v claude; echo ---; command -v codex"])
+        .args(shell_args)
+        .stdin(std::process::Stdio::null())
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
         .unwrap_or_default();
-    let mut parts = out.split("---");
-    let claude = parts.next().map(|x| x.trim().to_string()).filter(|x| !x.is_empty());
-    let codex = parts.next().map(|x| x.trim().to_string()).filter(|x| !x.is_empty());
-    (claude, codex)
+    // line-wise split on the marker — an absent first answer must not let the
+    // second one slide into its slot
+    let mut before = String::new();
+    let mut after = String::new();
+    let mut seen = false;
+    for l in out.lines() {
+        if l.trim() == "---" { seen = true; continue; }
+        if seen { after.push_str(l); after.push('\n'); }
+        else { before.push_str(l); before.push('\n'); }
+    }
+    (last_path_line(&before), last_path_line(&after))
+}
+
+fn agent_paths_uncached() -> (Option<String>, Option<String>) {
+    use std::os::unix::fs::PermissionsExt;
+    let home = std::env::var("HOME").unwrap_or_default();
+    let is_exec = |p: &str| std::fs::metadata(p)
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false);
+    // 1 · the well-known install locations — no shell needed, works even when
+    //     the PATH line lives in .zshrc (a GUI app's login shell never reads it)
+    let find_known = |name: &str| -> Option<String> {
+        [
+            format!("{home}/.local/bin/{name}"),
+            format!("{home}/.claude/local/{name}"),
+            format!("/opt/homebrew/bin/{name}"),
+            format!("/usr/local/bin/{name}"),
+            format!("{home}/.npm-global/bin/{name}"),
+            format!("{home}/bin/{name}"),
+        ].into_iter().find(|p| is_exec(p))
+    };
+    let mut claude = find_known("claude");
+    let mut codex = find_known("codex");
+    if claude.is_some() && codex.is_some() { return (claude, codex); }
+    // 2 · a login shell (sources .zprofile/.zshenv)
+    const PROBE: &str = "command -v claude; echo '---'; command -v codex";
+    let (c2, x2) = shell_probe(&["-lc", PROBE]);
+    claude = claude.or(c2);
+    codex = codex.or(x2);
+    if claude.is_some() && codex.is_some() { return (claude, codex); }
+    // 3 · an interactive login shell (sources .zshrc — where installers
+    //     usually put the PATH line); output is noise-tolerant
+    let (c3, x3) = shell_probe(&["-lic", PROBE]);
+    (claude.or(c3), codex.or(x3))
 }
 
 fn load_config() -> Value {
@@ -789,7 +847,7 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
             .spawn()
             .map_err(|e| format!("couldn't start a Codex session: {e}"))?
     } else {
-        let bin = claude_bin.ok_or("Claude Code isn't installed (couldn't find `claude`)")?;
+        let bin = claude_bin.ok_or("couldn't find `claude` — if it's installed, make sure `command -v claude` works in a terminal, then reopen Chronicle")?;
         let slash = if fresh == Some(true) {
             format!("/chronicle-init {FRESH_REBUILD_NOTE}")
         } else {
@@ -1177,7 +1235,7 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
             .process_group(0)
             .spawn().map_err(|e| format!("couldn't start a Codex session: {e}"))?
     } else {
-        let bin = claude_bin.ok_or("Claude Code isn't installed (couldn't find `claude`)")?;
+        let bin = claude_bin.ok_or("couldn't find `claude` — if it's installed, make sure `command -v claude` works in a terminal, then reopen Chronicle")?;
         std::process::Command::new(bin)
             .args(["-p", &prompt, "--permission-mode", "bypassPermissions",
                    "--verbose", "--output-format", "stream-json"])
@@ -1385,7 +1443,7 @@ async fn round_execute(roots: State<'_, OpenRoots>, init: State<'_, InitState>, 
             .process_group(0)
             .spawn().map_err(|e| format!("couldn't start a Codex session: {e}"))?
     } else {
-        let bin = claude_bin.ok_or("Claude Code isn't installed (couldn't find `claude`)")?;
+        let bin = claude_bin.ok_or("couldn't find `claude` — if it's installed, make sure `command -v claude` works in a terminal, then reopen Chronicle")?;
         std::process::Command::new(bin)
             .args(["-p", &prompt, "--permission-mode", "bypassPermissions",
                    "--verbose", "--output-format", "stream-json"])
