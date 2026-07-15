@@ -124,11 +124,13 @@ export default function App() {
       const before = projectsRef.current.get(dir);
       if (before?.state) {
         const name = before.name;
-        const prevDone = new Set(
-          (before.state.statuses ?? []).filter((x) => x.state === "done").map((x) => x.id),
-        );
+        const prevStatuses = before.state.statuses ?? [];
+        const prevDone = new Set(prevStatuses.filter((x) => x.state === "done").map((x) => x.id));
+        // only a REAL flip announces — the previous poll must have known this
+        // phase and seen it not-done (a fresh open must not replay history)
+        const prevKnown = new Set(prevStatuses.map((x) => x.id));
         for (const st of s.statuses ?? []) {
-          if (st.state === "done" && !prevDone.has(st.id) && prevDone.size > 0) {
+          if (st.state === "done" && prevKnown.has(st.id) && !prevDone.has(st.id)) {
             announce(dir, "phase-done", `${st.id} is done`, name);
           }
         }
