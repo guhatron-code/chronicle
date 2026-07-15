@@ -299,6 +299,10 @@ export interface SearchResults {
 }
 export const globalSearch = (dir: string, q: string) => invoke<SearchResults>("global_search", { dir, q });
 
+/* ---------- the project watcher: file changes poll NOW, not in ≤8s ---------- */
+export const watchProject = (dir: string) => invoke<void>("watch_project", { dir });
+export const unwatchProject = (dir: string) => invoke<void>("unwatch_project", { dir });
+
 /* ---------- GitHub via the user's gh CLI (no tokens in Chronicle) ---------- */
 export interface GithubRepo {
   nameWithOwner: string;

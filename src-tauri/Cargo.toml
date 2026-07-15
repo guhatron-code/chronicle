@@ -19,6 +19,7 @@ sha2 = "0.10"
 libc = "0.2" # SIGTERM for init_cancel (graceful stop before SIGKILL)
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+notify = "6"
 
 [profile.release]
 strip = true

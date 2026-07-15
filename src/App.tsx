@@ -49,9 +49,10 @@ import { TrafficLights } from "@/components/chrome/TitleBar";
 import { KanbanPane } from "@/screens/kanban/KanbanPane";
 import { evictKanban, kanbanFor, openTaskInKanban, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { announce } from "@/lib/journal";
+import { listen } from "@tauri-apps/api/event";
 import { checkForUpdate, dismissUpdate, installUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
-import { copyText, fixesStatus, githubClone, githubRepos, initStatus, type GithubRepo } from "@/lib/ipc";
+import { copyText, fixesStatus, githubClone, githubRepos, initStatus, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -171,6 +172,27 @@ export default function App() {
     return () => clearInterval(id);
   }, [projects.size, pollOne]);
 
+  /* fs events → an immediate ground-truth poll (debounced per project: agent
+     sessions write in bursts, and pollOne is single-flight anyway) */
+  const fsTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void listen<string>("project-fs-changed", (ev) => {
+      const dir = ev.payload;
+      if (!projectsRef.current.has(dir)) return;
+      const prev = fsTimers.current.get(dir);
+      if (prev) clearTimeout(prev);
+      fsTimers.current.set(
+        dir,
+        setTimeout(() => {
+          fsTimers.current.delete(dir);
+          void pollOne(dir);
+        }, 450),
+      );
+    }).then((u) => { un = u; });
+    return () => un?.();
+  }, [pollOne]);
+
   /* OTA: one quiet daily check; nothing installs without a click */
   const [, updBump] = useState(0);
   useEffect(() => {
@@ -232,6 +254,7 @@ export default function App() {
         setPane("road");
         activate(dir);
         void pollOne(dir);
+        void watchProject(dir).catch(() => {}); // freshness: fs events poll immediately
         refreshPicker();
       })
       .catch((e) =>
@@ -314,6 +337,7 @@ export default function App() {
       closeTermsFor(dir);
       evictRepo(dir);
       evictKanban(dir);
+      void unwatchProject(dir).catch(() => {});
       setProjects((prev) => {
         const next = new Map(prev);
         next.delete(dir);

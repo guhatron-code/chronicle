@@ -1448,6 +1448,60 @@ fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
     m
 }
 
+/* ================= the project watcher (roadmap freshness without waiting) =================
+   The 8s poll is the floor; a filesystem watcher makes changes land NOW: any
+   relevant write in an opened project emits `project-fs-changed`, and the
+   frontend debounces that into an immediate ground-truth poll. */
+
+struct WatchState {
+    watchers: Mutex<std::collections::HashMap<String, notify::RecommendedWatcher>>,
+}
+
+fn fs_event_matters(path: &std::path::Path) -> bool {
+    let s = path.to_string_lossy();
+    if s.contains("/node_modules/") || s.contains("/target/") || s.contains("/dist/")
+        || s.ends_with(".DS_Store") || s.contains("/.chronicle/journal.jsonl")
+        || s.ends_with(".tmp") {
+        return false;
+    }
+    if let Some(idx) = s.find("/.git/") {
+        // inside .git only the state that changes the roadmap matters
+        let tail = &s[idx + 6..];
+        return tail == "HEAD" || tail == "index" || tail.starts_with("refs/");
+    }
+    true
+}
+
+#[tauri::command]
+fn watch_project(app: tauri::AppHandle, roots: State<OpenRoots>, watch: State<WatchState>, dir: String) -> Result<(), String> {
+    use notify::Watcher;
+    let p = project_for(&roots, &dir)?;
+    let (key, _) = canon_key(&dir)?;
+    let mut map = watch.watchers.lock().map_err(|e| e.to_string())?;
+    if map.contains_key(&key) { return Ok(()); }
+    let emit_dir = dir.clone();
+    let mut w = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+        if let Ok(ev) = res {
+            if ev.paths.iter().any(|pa| fs_event_matters(pa)) {
+                let _ = app.emit("project-fs-changed", emit_dir.clone());
+            }
+        }
+    }).map_err(|e| e.to_string())?;
+    w.watch(&p.dir, notify::RecursiveMode::Recursive).map_err(|e| e.to_string())?;
+    if p.repo != p.dir {
+        let _ = w.watch(&p.repo, notify::RecursiveMode::Recursive);
+    }
+    map.insert(key, w);
+    Ok(())
+}
+
+#[tauri::command]
+fn unwatch_project(watch: State<WatchState>, dir: String) -> Result<(), String> {
+    let (key, _) = canon_key(&dir)?;
+    watch.watchers.lock().map_err(|e| e.to_string())?.remove(&key); // drop stops it
+    Ok(())
+}
+
 /* ================= GitHub (via the user's own gh CLI — Chronicle holds no credentials) ================= */
 
 /// Resolve a tool the way the terminal would — well-known dirs, then shells.
@@ -1522,6 +1576,35 @@ async fn github_clone(repo: String) -> Result<String, String> {
         return Err(err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("clone failed").to_string());
     }
     Ok(dest.to_string_lossy().to_string())
+}
+
+/// Create the private online copy and publish — the whole "Put this project
+/// on GitHub" journey as one verified action (the copy-a-command era predates
+/// Chronicle knowing gh at all).
+#[tauri::command]
+async fn github_create(roots: State<'_, OpenRoots>, dir: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    let name: String = p.repo.file_name()
+        .map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "project".into())
+        .chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '-' })
+        .collect();
+    if name.is_empty() || name.starts_with('-') { return Err("this folder's name can't become a repo name".into()); }
+    let gh = find_tool("gh").ok_or("GitHub's tool isn't set up — install `gh` and run `gh auth login` in the terminal")?;
+    let out = Command::new(&gh)
+        .args(["repo", "create", &name, "--private", "--source", p.repo.to_str().ok_or("bad path")?, "--push"])
+        .stdin(std::process::Stdio::null())
+        .output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        let err = String::from_utf8_lossy(&out.stderr);
+        if err.contains("auth") || err.contains("logged") {
+            return Err("GitHub isn't signed in — run `gh auth login` in the terminal".into());
+        }
+        if err.contains("already exists") {
+            return Err(format!("a repo called \"{name}\" already exists under your account"));
+        }
+        return Err(err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("gh failed").to_string());
+    }
+    Ok(name)
 }
 
 /* ================= headless round execution (F1) ================= */
@@ -2293,6 +2376,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .manage(OpenRoots(Mutex::new(seeded)))
         .manage(InitState { runs: Mutex::new(std::collections::HashMap::new()) })
+        .manage(WatchState { watchers: Mutex::new(std::collections::HashMap::new()) })
         .manage(PtyState {
             sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             next_id: std::sync::atomic::AtomicU32::new(1),
@@ -2328,7 +2412,8 @@ fn main() {
             round_execute, round_exec_status, round_exec_cancel, round_retro, exec_log_path,
             journal_append, journal_read, notify, draft_save_message,
             global_search, status_report,
-            github_repos, github_clone
+            github_repos, github_clone, github_create,
+            watch_project, unwatch_project
         ])
         .run(tauri::generate_context!())
         .expect("error while running Chronicle");
