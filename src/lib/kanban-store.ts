@@ -5,6 +5,7 @@
  * mutations apply optimistically here and persist in the background.
  */
 import {
+  IMG_MIME,
   kanbanGet,
   kanbanSave,
   readFileB64,
@@ -64,11 +65,35 @@ export function mutateKanban(
   fn(next);
   stores.set(dir, next);
   notify();
-  kanbanSave(dir, next).catch((e) => {
-    // disk truth wins on failure
-    void refreshKanban(dir);
-    onError?.(e);
-  });
+  // persist against DISK truth, not the cache — the round executor edits the
+  // board concurrently (column moves), and saving a stale cache would undo them
+  kanbanGet(dir)
+    .then((raw) => {
+      const fresh: KanbanStore = {
+        version: raw?.version ?? 1,
+        next_id: raw?.next_id ?? 1,
+        tasks: Array.isArray(raw?.tasks) ? raw.tasks : [],
+        rounds: Array.isArray(raw?.rounds) ? raw.rounds : [],
+      };
+      fn(fresh);
+      stores.set(dir, fresh);
+      notify();
+      return kanbanSave(dir, fresh);
+    })
+    .catch((e) => {
+      // disk truth wins on failure
+      void refreshKanban(dir);
+      onError?.(e);
+    });
+}
+
+/** Drop a closed project's cached board + thumbnails (memory hygiene). */
+export function evictKanban(dir: string): void {
+  stores.delete(dir);
+  const prefix = `${dir}::`;
+  for (const key of [...thumbs.keys()]) {
+    if (key.startsWith(prefix)) thumbs.delete(key);
+  }
 }
 
 export function taskId(n: number): string {
@@ -111,16 +136,18 @@ export function executingRound(store: KanbanStore): number | null {
   return null;
 }
 
-const IMG_MIME: Record<string, string> = {
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
-  webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp", heic: "image/heic", avif: "image/avif",
-};
-
-/** Attachment thumbnail as a data URI — cached; loads lazily and notifies. */
+/** Attachment thumbnail as a data URI — cached; loads lazily and notifies.
+ * A failed load is remembered (not left looking in-flight) and retried
+ * after 30s, so a file that appears later still gets its thumbnail. */
 export function thumbFor(dir: string, path: string): string | null {
   const key = `${dir}::${path}`;
   const hit = thumbs.get(key);
-  if (hit !== undefined) return hit || null;
+  if (hit !== undefined) {
+    if (hit.startsWith("data:")) return hit;
+    if (hit === "") return null; // in flight
+    if (Date.now() - Number(hit.slice(5)) < 30_000) return null; // failed recently
+    // fall through: stale failure — retry
+  }
   thumbs.set(key, ""); // in flight
   readFileB64(dir, path)
     .then((b64) => {
@@ -128,6 +155,6 @@ export function thumbFor(dir: string, path: string): string | null {
       thumbs.set(key, `data:${IMG_MIME[ext] ?? "image/png"};base64,${b64}`);
       notify();
     })
-    .catch(() => thumbs.set(key, ""));
+    .catch(() => thumbs.set(key, `FAIL:${Date.now()}`));
   return null;
 }

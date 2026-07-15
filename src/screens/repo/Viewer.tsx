@@ -1,3 +1,4 @@
+import * as React from "react";
 /*
  * F24 (Deck 4) — the code/diff viewer: open-file tabs (2px underline bar), the
  * actions bar (mono path · Contents/Diff toggle · meta or ±stat · Copy contents),
@@ -146,6 +147,9 @@ function Stage({ children, className }: { children: React.ReactNode; className?:
 }
 
 export function Viewer(p: ViewerProps) {
+  // scroll the active tab into view only when it CHANGES — a ref callback runs
+  // every render, and scrollIntoView on each one hijacks the tab strip's scroll
+  const lastScrolled = React.useRef<string | null>(null);
   if (p.kind === "empty") {
     return (
       <Stage className={p.className}>
@@ -164,7 +168,12 @@ export function Viewer(p: ViewerProps) {
           tab.id === p.activeTabId ? (
             <div
               key={tab.id}
-              ref={(el) => el?.scrollIntoView({ inline: "nearest", block: "nearest" })}
+              ref={(el) => {
+                if (el && lastScrolled.current !== tab.id) {
+                  lastScrolled.current = tab.id;
+                  el.scrollIntoView({ inline: "nearest", block: "nearest" });
+                }
+              }}
               className="relative flex h-8 max-w-[190px] shrink-0 items-center gap-2 px-3 text-[12.5px] font-medium text-text-primary"
             >
               <span className="min-w-0 truncate" title={tab.name}>{tab.name}</span>

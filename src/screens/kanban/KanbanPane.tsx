@@ -15,6 +15,7 @@ import {
   kanbanFor,
   mutateKanban,
   newTask,
+  taskId,
   nextRoundN,
   refreshKanban,
   subscribeKanban,
@@ -98,7 +99,9 @@ export function KanbanPane({
     const t = { ...draft.task, title: draft.task.title.trim() || "Untitled", updated_at: Date.now() };
     mutateKanban(dir, (s) => {
       if (draft.mode === "create") {
-        s.tasks.push(t);
+        // id from THIS store — the mutation re-applies on fresh disk truth,
+        // where next_id may have moved past the composer's snapshot
+        s.tasks.push({ ...t, id: taskId(s.next_id) });
         s.next_id += 1;
       } else {
         const i = s.tasks.findIndex((x) => x.id === t.id);

@@ -350,14 +350,15 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
           actionLabel: "Read the decision", onAction: () => H.onReadDecision(st.id),
         };
       } else {
-        props.banner = {
-          kind: ctx.justSwitched ? "just-switched" : "normal",
+        const common = {
           phaseId: st.id, phaseName: ph?.name ?? "",
           statusWord: sentence(st.label),
-          running: /running|scanning|building/i.test(st.label),
           body: (ph?.desc ?? "").replace(/<[^>]+>/g, ""),
           upNext,
-        } as CurrentStateBannerProps;
+        };
+        props.banner = ctx.justSwitched
+          ? ({ kind: "just-switched", ...common } satisfies CurrentStateBannerProps)
+          : ({ kind: "normal", running: /running|scanning|building/i.test(st.label), ...common } satisfies CurrentStateBannerProps);
       }
     }
     if (s.stale.length > 0) {

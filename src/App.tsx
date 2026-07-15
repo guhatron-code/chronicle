@@ -28,7 +28,7 @@ import {
 } from "@/lib/ipc";
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
 import { RoadmapPane } from "@/screens/roadmap/RoadmapPane";
-import { RepoPane, openHistoryView } from "@/screens/repo/RepoPane";
+import { RepoPane, evictRepo, openHistoryView } from "@/screens/repo/RepoPane";
 import {
   activeTermFor,
   closeTerm,
@@ -44,9 +44,9 @@ import {
 } from "@/lib/term-sessions";
 import type { TerminalTab } from "@/components/chrome/TerminalColumn";
 import { KanbanPane } from "@/screens/kanban/KanbanPane";
-import { kanbanFor, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
-import { isInitRunning, subscribeRunFlags } from "@/lib/run-flags";
-import { fixesStatus } from "@/lib/ipc";
+import { evictKanban, kanbanFor, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
+import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
+import { fixesStatus, initStatus } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -90,12 +90,29 @@ export default function App() {
   }, []);
 
   /* ---- the ground-truth poll: every open project, every 8s ---- */
+  const pollInFlight = useRef(new Set<string>());
   const pollOne = useCallback(async (dir: string) => {
+    if (pollInFlight.current.has(dir)) return; // a slow getState must not stack
+    pollInFlight.current.add(dir);
+    try {
+      await pollOneInner(dir);
+    } finally {
+      pollInFlight.current.delete(dir);
+    }
+  }, []);
+  const pollOneInner = useCallback(async (dir: string) => {
     void refreshKanban(dir); // the rail badge + round overlays stay live
     // a generating round settles server-side inside fixes_status — poll it even
     // when no pane is watching, so rounds can't stay "generating" forever (T-006)
     if (kanbanFor(dir).rounds.some((r) => r.state === "generating")) {
       void fixesStatus(dir).catch(() => {});
+    }
+    // a "Writing your roadmap…" flag with no RoadmapPane mounted to clear it
+    // (user on Home) is verified against the backend and released when stale
+    if (isInitRunning(dir)) {
+      void initStatus(dir)
+        .then((st) => { if ((st as { running?: boolean } | null)?.running !== true) setInitRunning(dir, false); })
+        .catch(() => {});
     }
     try {
       const s = await getState(dir);
@@ -249,6 +266,8 @@ export default function App() {
   const closeProject = useCallback((dir: string) => {
     const doClose = () => {
       closeTermsFor(dir);
+      evictRepo(dir);
+      evictKanban(dir);
       setProjects((prev) => {
         const next = new Map(prev);
         next.delete(dir);
@@ -519,6 +538,7 @@ export default function App() {
       >
         {pane === "road" ? (
           <RoadmapPane
+            key={active.dir}
             dir={active.dir}
             state={active.state}
             agent={agent}
@@ -537,6 +557,7 @@ export default function App() {
           />
         ) : pane === "repo" ? (
           <RepoPane
+            key={active.dir}
             dir={active.dir}
             state={active.state}
             onConfirm={setConfirm}
@@ -545,6 +566,7 @@ export default function App() {
           />
         ) : (
           <KanbanPane
+            key={active.dir}
             dir={active.dir}
             agent={agent}
             onConfirm={setConfirm}

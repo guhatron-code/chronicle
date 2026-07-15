@@ -103,6 +103,8 @@ export function RoadmapPane({
   const dirRef = useRef(dir);
   const stateRef = useRef(state);
   stateRef.current = state;
+  const onPollNowRef = useRef(onPollNow);
+  onPollNowRef.current = onPollNow;
 
   /* per-project state resets when the project changes — then the backend is
      asked whether a build session is still running here, so a rebuild started
@@ -175,6 +177,7 @@ export function RoadmapPane({
     const tick = async () => {
       try {
         const st = (await initStatus(dir)) as { running?: boolean; started?: boolean; code?: number | null; log_tail?: string; started_at?: number };
+        if (dirRef.current !== dir) return; // a late reply must not cross projects
         const tail = st.log_tail ?? "";
         const lines = logLinesFrom(tail);
         const began = st.started_at || startedAt;
@@ -198,14 +201,14 @@ export function RoadmapPane({
             setInitRun(null);
             toastError("The rebuild didn't finish", `Session exited with code ${st.code ?? "?"} — the existing roadmap is untouched`);
           }
-          onPollNow();
+          onPollNowRef.current();
         }
       } catch { /* keep the last shown state */ }
     };
     const id = setInterval(tick, 3000);
     void tick();
     return () => clearInterval(id);
-  }, [dir, initRun?.running, initRun?.startedAt, onPollNow]);
+  }, [dir, initRun?.running, initRun?.startedAt]);
 
   /* a kanban round is generating → mirror its session on the roadmap (3s poll) */
   const generating = kanbanFor(dir).rounds.some((r) => r.state === "generating");
@@ -215,9 +218,10 @@ export function RoadmapPane({
     const tick = async () => {
       try {
         const st = (await fixesStatus(dir)) as { running?: boolean; code?: number | null; log_tail?: string; started_at?: number };
+        if (dirRef.current !== dir) return; // a late reply must not cross projects
         const tail = st.log_tail ?? "";
         const lines = logLinesFrom(tail);
-        if (st.running !== false) {
+        if (st.running === true) {
           const began = st.started_at || startedAt;
           setFixesRun(() => ({
             running: true,
@@ -232,7 +236,7 @@ export function RoadmapPane({
           setFixesRun(null);
           await refreshKanban(dir);
           if ((st.code ?? 1) === 0) toastSuccess("The fix plan is written", "The round is on your roadmap");
-          onPollNow();
+          onPollNowRef.current();
         }
       } catch { /* keep the last shown state */ }
     };

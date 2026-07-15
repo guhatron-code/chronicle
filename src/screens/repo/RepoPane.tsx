@@ -10,6 +10,7 @@ import type { FileTreeProps } from "./FileTree";
 import type { ViewerBody, ViewerProps } from "./Viewer";
 import type { HistoryPaneProps, HistoryReady } from "./HistoryPane";
 import {
+  IMG_MIME,
   copyFile as copyFileIpc,
   copyText,
   gitCommit,
@@ -97,6 +98,11 @@ function stateFor(dir: string): RepoState {
   return s;
 }
 
+/** Drop a closed project's cached tree/tab state (memory hygiene). */
+export function evictRepo(dir: string): void {
+  CACHE.delete(dir);
+}
+
 /** Open a specific file in the viewer next time the repo pane mounts for
  * `dir` — the roadmap's problem cards land on the actual file. */
 export function openFileInRepo(dir: string, path: string) {
@@ -116,14 +122,10 @@ export function openHistoryView(dir: string, from: "repo" | "roadmap" = "roadmap
   s.historyFrom = from;
 }
 
+const CODE_ROW_CAP = 5_000; // rendered rows — a giant file must not freeze the pane
+const DIFF_ROW_CAP = 2_000;
 const HUGE_WARN = 300_000; // "Reading it may be slow."
 const HUGE_CAP = 1_500_000; // the backend refuses text reads past this
-
-const IMG_MIME: Record<string, string> = {
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
-  webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp", ico: "image/x-icon",
-  heic: "image/heic", avif: "image/avif",
-};
 
 export function RepoPane({
   dir,
@@ -193,12 +195,13 @@ export function RepoPane({
       });
     gitLogGraph(d, stateFor(d).logLimit)
       .then((rows) => {
-        if (dirRef.current !== d) return;
+        if (dirRef.current !== d || seq.current !== my) return;
+        const arr = Array.isArray(rows) ? rows : [];
         const branch = state?.branch ?? null;
-        const mapped = mapCommits(Array.isArray(rows) ? rows : [], branch);
+        const mapped = mapCommits(arr, branch);
         setLog(mapped.commits);
         setArcs(mapped.branches);
-        setLogCount(rows.length);
+        setLogCount(arr.length);
         setHistoryLoading(false);
       })
       .catch(() => {
@@ -291,9 +294,14 @@ export function RepoPane({
         } else {
           const text = await readFile(d, path);
           if (dirRef.current !== d) return;
+          const cur = tab();
+          if (!cur || cur.mode !== "contents") return; // switched to diff mid-load
           const lines = codeLines(text);
-          t.body = { kind: "code", lines };
-          t.meta = `${extOf(path) || "file"} · ${lines.length} line${lines.length === 1 ? "" : "s"}`;
+          const capped = lines.length > CODE_ROW_CAP;
+          t.body = { kind: "code", lines: capped ? lines.slice(0, CODE_ROW_CAP) : lines };
+          t.meta = capped
+            ? `${extOf(path) || "file"} · showing the first ${CODE_ROW_CAP.toLocaleString()} of ${lines.length.toLocaleString()} lines`
+            : `${extOf(path) || "file"} · ${lines.length} line${lines.length === 1 ? "" : "s"}`;
         }
         t.mtime = st.mtime;
         t.changedOnDisk = false;
@@ -318,9 +326,13 @@ export function RepoPane({
       .then((raw) => {
         if (dirRef.current !== d) return;
         const t = stateFor(d).tabs.find((x) => x.path === path);
-        if (!t) return;
+        if (!t || t.mode !== "diff") return; // switched to contents mid-load
         const { rows, added, removed } = parseDiff(raw);
-        t.body = { kind: "diff", rows };
+        const shown = rows.length > DIFF_ROW_CAP
+          ? [...rows.slice(0, DIFF_ROW_CAP),
+             { kind: "hunk" as const, header: "@@ truncated @@", context: `showing the first ${DIFF_ROW_CAP.toLocaleString()} of ${rows.length.toLocaleString()} rows` }]
+          : rows;
+        t.body = { kind: "diff", rows: shown };
         t.diffStat = { added, removed };
         t.changedOnDisk = false;
         rerender();
@@ -419,7 +431,8 @@ export function RepoPane({
             publish: publishStateFrom(state ?? {}),
             commits: log,
             branches: arcs,
-            hasMore: logCount >= rs.logLimit,
+            // the backend caps git_log_graph at 200 — past that, "Show more" would lie
+            hasMore: logCount >= rs.logLimit && rs.logLimit < 200,
           };
     const leaveHistory = () => {
       const from = rs.historyFrom;

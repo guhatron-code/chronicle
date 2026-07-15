@@ -262,8 +262,8 @@ export function PhaseDetail(p: PhaseDetailProps) {
             <div className="flex flex-col gap-2">
               <Eyebrow>{p.stepsLabel}</Eyebrow>
               <div className="flex flex-col">
-                {p.steps.map((step) => (
-                  <StepRow key={step.label} step={step} />
+                {p.steps.map((step, i) => (
+                  <StepRow key={`${i}-${step.label}`} step={step} />
                 ))}
               </div>
             </div>

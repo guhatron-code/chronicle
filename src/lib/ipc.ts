@@ -102,7 +102,13 @@ export interface StateData {
   misplaced?: string | null;
   checked_at: string;
 }
-export type InitStatusData = unknown; // init_status → { phase, code, log_tail, ... }
+export interface InitStatusData {
+  running?: boolean;
+  started?: boolean;
+  started_at?: number; // epoch ms
+  code?: number | null;
+  log_tail?: string;
+}
 export type AgentsData = unknown; // agents_available → { claude, codex, default }
 export interface GitStatusFile {
   path: string;
@@ -205,8 +211,16 @@ export const listDir = (dir: string, path: string) =>
 export const readFile = (dir: string, path: string) =>
   invoke<string>("read_file", { dir, path });
 export const copyFile = (dir: string, path: string) =>
-  invoke<number>("copy_file", { dir, path }); // returns copied char count
+  invoke<string>("copy_file", { dir, path }); // returns copied char count (as a string)
 export const copyText = (text: string) => invoke<void>("copy_text", { text });
+
+
+/** Attachment/viewer image MIME by extension (one copy — UI-wide). */
+export const IMG_MIME: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+  webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp", ico: "image/x-icon",
+  heic: "image/heic", avif: "image/avif",
+};
 
 /* ---------- kanban (R4) ---------- */
 export type KanbanColumn = "later" | "queued" | "in_progress" | "blocked" | "completed";
