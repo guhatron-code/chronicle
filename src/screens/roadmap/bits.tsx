@@ -47,7 +47,7 @@ export function PasteChip({
     <button
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-md border border-border-hairline px-2.5 font-mono text-[11.5px] text-text-secondary",
+        "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border-hairline px-2.5 font-mono text-[11.5px] text-text-secondary",
         "hover:border-border-strong hover:text-text-primary",
         raised ? "bg-surface-card-raised" : "bg-surface-card",
         className,

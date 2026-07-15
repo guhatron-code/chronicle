@@ -11,12 +11,12 @@ export type DocChipProps =
   | { kind: "copied"; name: string }
   | { kind: "missing"; name: string; note: string } // e.g. "not written yet"
   | { kind: "paste"; name: string; hint: string; note?: string; onCopy?: () => void } // chip: "→ Claude Code" · note renders OUTSIDE
-  | { kind: "ghost"; name: string; note: string }; // e.g. "written when EL-1 begins"
+  | { kind: "ghost"; name: string; note?: string }; // chip: the name · note renders OUTSIDE
 
 export function DocChip(p: DocChipProps) {
   if (p.kind === "missing") {
     return (
-      <span className="inline-flex h-[30px] items-center gap-[7px] rounded-md border border-dashed border-border-strong px-[11px] font-mono text-xs text-text-dim">
+      <span className="inline-flex h-[30px] shrink-0 items-center gap-[7px] whitespace-nowrap rounded-md border border-dashed border-border-strong px-[11px] font-mono text-xs text-text-dim">
         <DocGlyph size={12} fold={false} />
         {p.name}
         <span className="font-sans text-[11px] text-text-dimmer">{p.note}</span>
@@ -25,15 +25,14 @@ export function DocChip(p: DocChipProps) {
   }
   if (p.kind === "ghost") {
     return (
-      <span className="inline-flex h-[30px] items-center gap-[7px] rounded-md border border-dashed border-border-hairline px-[11px] font-mono text-xs text-text-dimmer">
+      <span className="inline-flex h-[30px] shrink-0 items-center gap-[7px] whitespace-nowrap rounded-md border border-dashed border-border-hairline px-[11px] font-mono text-xs text-text-dimmer">
         {p.name}
-        <span className="font-sans text-[11px]">{p.note}</span>
       </span>
     );
   }
   if (p.kind === "copied") {
     return (
-      <button className="inline-flex h-[30px] items-center gap-[7px] rounded-md border border-border-field-focus bg-fill-hover px-[11px] font-mono text-xs text-text-primary">
+      <button className="inline-flex h-[30px] shrink-0 items-center gap-[7px] whitespace-nowrap rounded-md border border-border-field-focus bg-fill-hover px-[11px] font-mono text-xs text-text-primary">
         <CheckGlyph size={12} className="text-state-success" />
         {p.name} · copied
       </button>
@@ -71,16 +70,16 @@ export function DocumentsPanel({ chips, className }: DocumentsPanelProps) {
         <span className="text-[11.5px] text-text-dim">click a file to copy it</span>
       </div>
       <div className="flex flex-wrap gap-2">
-        {chips.filter((c) => c.kind !== "paste").map((chip, i) => (
+        {chips.filter((c) => c.kind !== "paste" && c.kind !== "ghost").map((chip, i) => (
           <DocChip key={`${chip.name}-${i}`} {...chip} />
         ))}
       </div>
-      {chips.filter((c) => c.kind === "paste").map((chip, i) => (
-        // a paste target is a row: the chip stays one line; the when-note is
-        // plain prose OUTSIDE it (C4 law: into IN the chip, note OUTSIDE)
+      {chips.filter((c) => c.kind === "paste" || c.kind === "ghost").map((chip, i) => (
+        // a paste/ghost target is a row: the chip stays one line; the when-note
+        // is plain prose OUTSIDE it (C4 law: into IN the chip, note OUTSIDE)
         <div key={`p-${chip.name}-${i}`} className="flex flex-wrap items-center gap-2.5">
           <DocChip {...chip} />
-          {chip.kind === "paste" && chip.note && (
+          {(chip.kind === "paste" || chip.kind === "ghost") && chip.note && (
             <span className="text-[11.5px] leading-[1.5] text-text-subtle">{chip.note}</span>
           )}
         </div>
