@@ -34,6 +34,12 @@ export interface RoadmapCtx {
   initRun: InitRun | null;
   /** A kanban fixes session writing the plan — same card, different title. */
   fixesRun: InitRun | null;
+  /** A headless round EXECUTION session (F1) — same card again. */
+  execRun: InitRun | null;
+  /** Which round the exec session is running — names the card. */
+  execRoundN?: number | null;
+  /** "While you were away" — journal entries since the user last looked (F2). */
+  digest?: { ts: number; text: string }[] | null;
   /** the persisted per-project consent — null means never asked */
   consent: "auto" | "manual" | "basic" | null;
   copiedPath: string | null;
@@ -50,6 +56,10 @@ export interface RoadmapCtx {
     onBasicView: () => void;
     onCancelInit: () => void;
     onCancelFixes: () => void;
+    onCancelExec: () => void;
+    onDismissDigest: () => void;
+    onCopyStatus: () => void;
+    onViewExecLog: () => void;
     onViewFullLog: () => void;
     onViewFixesLog: () => void;
     onScan: () => void;
@@ -298,6 +308,10 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     }
   }
 
+  if (ctx.digest && ctx.digest.length > 0) {
+    props.digest = { entries: ctx.digest, onDismiss: H.onDismissDigest };
+  }
+
   /* -- the building card: any running session (first build, rebuild, OR the
         kanban's fix-plan writer) shows F13 in the top slot -- */
   if (ctx.initRun?.running) {
@@ -320,10 +334,24 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
           activeLine: r.activeLine,
           onCancel: H.onCancelFixes,
         };
+  } else if (ctx.execRun?.running) {
+    const r = ctx.execRun;
+    const title = ctx.execRoundN != null ? `Running round ${ctx.execRoundN}…` : "Running the round…";
+    props.building = r.elapsedS > 300
+      ? { kind: "still-running", note: "Rounds can take a while. Tasks tick done on the board as they're verified.", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelExec, onViewFullLog: H.onViewExecLog }
+      : {
+          kind: "running",
+          title,
+          elapsed: fmtElapsed(r.elapsedS),
+          progress: r.progress,
+          logLines: r.logLines,
+          activeLine: r.activeLine,
+          onCancel: H.onCancelExec,
+        };
   }
 
   /* -- warning banner (yields to the building card while a rebuild runs) -- */
-  if (s.manifest_present && s.manifest_warnings.length > 0 && !ctx.warningDismissed && !ctx.initRun?.running && !ctx.fixesRun?.running) {
+  if (s.manifest_present && s.manifest_warnings.length > 0 && !ctx.warningDismissed && !ctx.initRun?.running && !ctx.fixesRun?.running && !ctx.execRun?.running) {
     props.warning = { count: s.manifest_warnings.length, onRebuild: H.onRebuild, onDismiss: H.onDismissWarning };
   }
 
@@ -528,6 +556,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
   /* -- the standing rebuild action (bottom of the column) -- */
   if (s.manifest_present && !ctx.initRun?.running && !ctx.fixesRun?.running) {
     props.onRebuildRoadmap = H.onRebuild;
+  props.onCopyStatus = H.onCopyStatus;
   }
 
   return props;

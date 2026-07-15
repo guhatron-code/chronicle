@@ -13,6 +13,7 @@ const GROUPS: { title: string; col: 0 | 1; pt?: string; rows: [string, string][]
     rows: [
       ["Switch to project 1–9", "⌘1–9"],
       ["Palette / switcher", "⌘K"],
+      ["Search the project", "⌘⇧F"],
       ["Open a project", "⌘O"],
       ["Close project", "⌘W"],
     ],

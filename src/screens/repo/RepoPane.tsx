@@ -29,6 +29,7 @@ import {
   statFile,
   type FileStat,
   type StateData,
+  draftSaveMessage,
 } from "@/lib/ipc";
 import {
   buildTree,
@@ -151,6 +152,7 @@ export function RepoPane({
   const [arcs, setArcs] = useState<HistoryReady["branches"]>([]);
   const [logCount, setLogCount] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [drafting, setDrafting] = useState(false);
   const [treeWidth, setTreeWidth] = useState(() => {
     const v = Number(localStorage.getItem("chronicle.treew"));
     return Number.isFinite(v) && v >= 170 && v <= 480 ? v : 230;
@@ -452,6 +454,26 @@ export function RepoPane({
         onBack: leaveHistory,
         onCloseHistory: leaveHistory,
         onMessageChange: (m) => { rs.message = m; rerender(); },
+        drafting,
+        onDraftMessage: () => {
+          if (drafting) return;
+          setDrafting(true);
+          const d = dir;
+          // nothing marked ready → the backend diffs the staged set, so include
+          // everything first exactly like Save does
+          const stageAllFirst = (gitStatus?.staged.length ?? 0) === 0
+            ? gitStage(d, ".")
+            : Promise.resolve();
+          stageAllFirst
+            .then(() => draftSaveMessage(d))
+            .then((msg) => {
+              if (dirRef.current !== d) return;
+              stateFor(d).message = msg;
+              rerender();
+            })
+            .catch((e) => toastError("Couldn't draft it", humanError(e)))
+            .finally(() => setDrafting(false));
+        },
         onSave: () => {
           const msg = rs.message.trim();
           if (!msg) return;

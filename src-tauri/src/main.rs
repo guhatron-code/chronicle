@@ -1142,6 +1142,7 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
     if let Some(rounds) = store.get_mut("rounds").and_then(|r| r.as_array_mut()) {
         rounds.push(json!({
             "n": round_n, "state": "generating", "kind": Value::Null,
+            "created_at": epoch_ms(),
             "task_ids": task_ids,
             "plan_path": format!("fixes/phase_{round_n}_fixes_plan.md"),
             "prompt_path": format!("fixes/phase_{round_n}_fixes_prompt.md"),
@@ -1335,6 +1336,309 @@ fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
     let synth = json!({ "title": "Fixes & ideas", "note": "from the kanban", "synthetic": true, "phases": phases });
     stages.push(synth);
     m
+}
+
+/* ================= headless round execution (F1) ================= */
+
+fn exec_run_key(dir: &str) -> Result<(String, PathBuf), String> {
+    let (key, _) = canon_key(dir)?;
+    let mut h = Sha256::new();
+    h.update(format!("exec::{key}").as_bytes());
+    let hex = format!("{:x}", h.finalize());
+    Ok((format!("exec::{key}"), std::env::temp_dir().join(format!("chronicle-exec-{}.log", &hex[..16]))))
+}
+
+/// Run a settled round's prompt headlessly — the same machinery, consent, and
+/// lifecycle as the generation session. The executor updates task columns in
+/// .chronicle/kanban.json itself (the prompt file carries that contract), so
+/// the board and roadmap tick live off the ordinary poll.
+#[tauri::command]
+async fn round_execute(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, n: u64, agent: Option<String>) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    let prompt_rel = format!("fixes/phase_{n}_fixes_prompt.md");
+    if !p.dir.join(&prompt_rel).exists() {
+        return Err("that round's prompt file isn't there anymore".into());
+    }
+    let (key, log) = exec_run_key(&dir)?;
+    let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
+    if let Some((child, _, _)) = runs.get_mut(&key) {
+        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
+            return Err("a round is already running".into());
+        }
+    }
+    let prompt = format!(
+        "Read {prompt_rel} and fixes/phase_{n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: every item, verified honestly, and after each item completes update that task's \"column\" to \"completed\" in .chronicle/kanban.json (match by task id, touch updated_at, change nothing else in that file)."
+    );
+    let logf = std::fs::File::create(&log).map_err(|e| e.to_string())?;
+    let errf = logf.try_clone().map_err(|e| e.to_string())?;
+    let (claude_bin, codex_bin) = agent_paths();
+    let use_codex = agent.as_deref() == Some("codex")
+        || (agent.is_none() && claude_bin.is_none() && codex_bin.is_some());
+    let child = if use_codex {
+        let bin = codex_bin.ok_or("Codex isn't installed (couldn't find `codex`)")?;
+        std::process::Command::new(bin)
+            .args(["exec", "--json", "--skip-git-repo-check",
+                   "--dangerously-bypass-approvals-and-sandbox", &prompt])
+            .current_dir(&p.dir)
+            .stdin(std::process::Stdio::null())
+            .stdout(logf).stderr(errf)
+            .process_group(0)
+            .spawn().map_err(|e| format!("couldn't start a Codex session: {e}"))?
+    } else {
+        let bin = claude_bin.ok_or("Claude Code isn't installed (couldn't find `claude`)")?;
+        std::process::Command::new(bin)
+            .args(["-p", &prompt, "--permission-mode", "bypassPermissions",
+                   "--verbose", "--output-format", "stream-json"])
+            .current_dir(&p.dir)
+            .stdin(std::process::Stdio::null())
+            .stdout(logf).stderr(errf)
+            .process_group(0)
+            .spawn().map_err(|e| format!("couldn't start a Claude session: {e}"))?
+    };
+    runs.insert(key, (child, log, epoch_ms()));
+    Ok(())
+}
+
+#[tauri::command]
+async fn round_exec_status(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String) -> Result<Value, String> {
+    let _ = project_for(&roots, &dir)?;
+    let (key, _) = exec_run_key(&dir)?;
+    let probed = {
+        let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
+        match runs.get_mut(&key) {
+            None => None,
+            Some((child, log, started)) => Some((child.try_wait().map_err(|e| e.to_string())?, log.clone(), *started)),
+        }
+    };
+    let Some((code, log, started)) = probed else { return Ok(json!({"running": false, "started": false})) };
+    Ok(json!({
+        "running": code.is_none(), "started": true,
+        "started_at": started,
+        "code": code.and_then(|c| c.code()),
+        "log_tail": read_tail(&log, 30000),
+    }))
+}
+
+/// Where the headless round session writes its log — for a "View full log" tab.
+#[tauri::command]
+fn exec_log_path(roots: State<OpenRoots>, dir: String) -> Result<String, String> {
+    let _ = project_for(&roots, &dir)?;
+    let (_, log) = exec_run_key(&dir)?;
+    Ok(log.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn round_exec_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String) -> Result<(), String> {
+    let _ = project_for(&roots, &dir)?;
+    let (key, _) = exec_run_key(&dir)?;
+    let entry = init.runs.lock().map_err(|e| e.to_string())?.remove(&key);
+    if let Some((mut child, _, _)) = entry { term_then_kill(&mut child); }
+    Ok(())
+}
+
+/* ================= round retrospective (F5 — deterministic, from git) ================= */
+
+#[tauri::command]
+async fn round_retro(roots: State<'_, OpenRoots>, dir: String, n: u64) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let store = load_kanban(&p.dir);
+    let created = store.get("rounds").and_then(|r| r.as_array())
+        .and_then(|rs| rs.iter().find(|r| r.get("n").and_then(|v| v.as_u64()) == Some(n)))
+        .and_then(|r| r.get("created_at")).and_then(|v| v.as_u64())
+        .ok_or("that round isn't on the board")?;
+    let since = format!("--since={}", created / 1000); // git accepts epoch seconds
+    let subjects = git_in(&p.repo, &["log", &since, "--format=%h\x1f%s"]);
+    let saves: Vec<Value> = subjects.lines().filter(|l| !l.is_empty()).take(50).map(|l| {
+        let mut it = l.split('\x1f');
+        json!({ "hash": it.next().unwrap_or(""), "subject": it.next().unwrap_or("") })
+    }).collect();
+    let named = git_in(&p.repo, &["log", &since, "--name-only", "--format="]);
+    let files: std::collections::HashSet<&str> = named.lines().filter(|l| !l.is_empty()).collect();
+    Ok(json!({ "saves": saves, "save_count": saves.len(), "file_count": files.len() }))
+}
+
+/* ================= the journal (F2 — what happened while you were away) ================= */
+
+fn journal_path(dir: &Path) -> PathBuf { dir.join(".chronicle/journal.jsonl") }
+
+#[tauri::command]
+async fn journal_append(roots: State<'_, OpenRoots>, dir: String, entry: Value) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    if !entry.is_object() { return Err("malformed journal entry".into()); }
+    let mut e = entry;
+    if let Some(obj) = e.as_object_mut() { obj.insert("ts".into(), json!(epoch_ms())); }
+    std::fs::create_dir_all(p.dir.join(".chronicle")).map_err(|x| x.to_string())?;
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().create(true).append(true)
+        .open(journal_path(&p.dir)).map_err(|x| x.to_string())?;
+    writeln!(f, "{}", serde_json::to_string(&e).map_err(|x| x.to_string())?).map_err(|x| x.to_string())
+}
+
+#[tauri::command]
+async fn journal_read(roots: State<'_, OpenRoots>, dir: String, since: u64) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let body = std::fs::read_to_string(journal_path(&p.dir)).unwrap_or_default();
+    let entries: Vec<Value> = body.lines().rev().take(500)
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|e| e.get("ts").and_then(|t| t.as_u64()).unwrap_or(0) >= since)
+        .collect();
+    Ok(json!(entries.into_iter().rev().collect::<Vec<_>>()))
+}
+
+/// A native macOS notification — no plugin, no network: osascript.
+#[tauri::command]
+async fn notify(title: String, body: String) -> Result<(), String> {
+    let esc = |s: &str| s.replace('\\', "").replace('"', "'").chars().take(140).collect::<String>();
+    let script = format!("display notification \"{}\" with title \"{}\"", esc(&body), esc(&title));
+    Command::new("osascript").args(["-e", &script]).output().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/* ================= drafted save messages (F4 — model drafts, human gates) ================= */
+
+#[tauri::command]
+async fn draft_save_message(roots: State<'_, OpenRoots>, dir: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    let mut diff = git_full(&p.repo, &["diff", "--staged"])?;
+    if diff.trim().is_empty() { return Err("nothing is marked ready to save yet".into()); }
+    if diff.len() > 60_000 { diff.truncate(60_000); diff.push_str("\n… (truncated)"); }
+    let (claude_bin, _) = agent_paths();
+    let bin = claude_bin.ok_or("drafting needs Claude Code installed")?;
+    let prompt = format!(
+        "You are drafting a one-line save message for a non-developer's project history. Reply with ONLY the message: plain language, present tense, what changed and why it matters, no jargon, no quotes, at most 72 characters.\n\nThe changes being saved:\n\n{diff}");
+    let mut child = std::process::Command::new(bin)
+        .args(["-p", &prompt])
+        .current_dir(&p.dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .process_group(0)
+        .spawn().map_err(|e| format!("couldn't start the drafting session: {e}"))?;
+    // bounded wait — a hung session must not hold the button forever
+    for _ in 0..600 {
+        if child.try_wait().map_err(|e| e.to_string())?.is_some() { break; }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    if child.try_wait().map_err(|e| e.to_string())?.is_none() {
+        term_then_kill(&mut child);
+        return Err("the draft took too long — write it by hand or try again".into());
+    }
+    let out = child.wait_with_output().map_err(|e| e.to_string())?;
+    let msg = String::from_utf8_lossy(&out.stdout).trim().lines().last().unwrap_or("").trim().to_string();
+    if msg.is_empty() { return Err("the session returned nothing — write it by hand".into()); }
+    Ok(msg.chars().take(100).collect())
+}
+
+/* ================= global search (F6) ================= */
+
+#[tauri::command]
+async fn global_search(roots: State<'_, OpenRoots>, dir: String, q: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let needle = q.trim().to_lowercase();
+    if needle.len() < 2 { return Ok(json!({ "files": [], "commits": [], "docs": [] })); }
+
+    // file names — a bounded, jailed walk
+    let skip = ["node_modules", "target", "dist", ".git", ".chronicle"];
+    let mut files: Vec<String> = Vec::new();
+    let mut stack = vec![(p.repo.clone(), 0usize)];
+    let mut visited = 0usize;
+    while let Some((d, depth)) = stack.pop() {
+        if depth > 8 || files.len() >= 20 || visited > 20_000 { break; }
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            visited += 1;
+            let name = e.file_name().to_string_lossy().to_string();
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                if !skip.contains(&name.as_str()) && !name.starts_with('.') { stack.push((e.path(), depth + 1)); }
+            } else if name.to_lowercase().contains(&needle) {
+                if let Ok(rel) = e.path().strip_prefix(&p.repo) {
+                    files.push(rel.to_string_lossy().to_string());
+                    if files.len() >= 20 { break; }
+                }
+            }
+        }
+    }
+    files.sort();
+
+    // commit subjects
+    let grep = format!("--grep={needle}");
+    let commits: Vec<Value> = git_in(&p.repo, &["log", "-i", &grep, "-n", "15", "--format=%h\x1f%s\x1f%ar"])
+        .lines().filter(|l| !l.is_empty()).map(|l| {
+            let mut it = l.split('\x1f');
+            json!({ "hash": it.next().unwrap_or(""), "subject": it.next().unwrap_or(""), "ago": it.next().unwrap_or("") })
+        }).collect();
+
+    // doc contents — only the manifest's own documents (small, meaningful set)
+    let mut docs: Vec<Value> = Vec::new();
+    if let Some(m) = &p.manifest {
+        let mut paths: Vec<String> = Vec::new();
+        if let Some(arr) = m.get("docs").and_then(|d| d.as_array()) {
+            paths.extend(arr.iter().filter_map(|d| d.get("path").and_then(|x| x.as_str()).map(String::from)));
+        }
+        for st in m.get("stages").and_then(|x| x.as_array()).into_iter().flatten() {
+            for ph in st.get("phases").and_then(|x| x.as_array()).into_iter().flatten() {
+                for doc in ph.get("docs").and_then(|x| x.as_array()).into_iter().flatten() {
+                    if let Some(pa) = doc.get("path").and_then(|x| x.as_str()) { paths.push(pa.to_string()); }
+                }
+            }
+        }
+        paths.dedup();
+        for rel in paths.into_iter().take(40) {
+            let Ok(full) = jailed(&p, &rel) else { continue };
+            if std::fs::metadata(&full).map(|m| m.len() > 300_000).unwrap_or(true) { continue; }
+            let Ok(body) = std::fs::read_to_string(&full) else { continue };
+            if let Some(line) = body.lines().find(|l| l.to_lowercase().contains(&needle)) {
+                docs.push(json!({ "path": rel, "line": line.trim().chars().take(120).collect::<String>() }));
+                if docs.len() >= 10 { break; }
+            }
+        }
+    }
+
+    Ok(json!({ "files": files, "commits": commits, "docs": docs }))
+}
+
+/* ================= status export (F7 — the roadmap as a sendable page) ================= */
+
+#[tauri::command]
+async fn status_report(roots: State<'_, OpenRoots>, dir: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    let s = state_for_project(&p);
+    let name = p.manifest.as_ref().and_then(|m| m.get("name")).and_then(|v| v.as_str())
+        .unwrap_or_else(|| p.dir.file_name().map(|x| x.to_str().unwrap_or("project")).unwrap_or("project"));
+    let mut md = format!("# {name} — status\n\n");
+    let statuses = s.get("statuses").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+    if let Some(now) = statuses.iter().find(|x| x.get("state").and_then(|v| v.as_str()) == Some("now")) {
+        md.push_str(&format!("**Now:** {} — {}\n\n",
+            now.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+            now.get("label").and_then(|v| v.as_str()).unwrap_or("in progress")));
+    } else if !statuses.is_empty() {
+        md.push_str("**Now:** everything on the plan is done\n\n");
+    }
+    let done = statuses.iter().filter(|x| x.get("state").and_then(|v| v.as_str()) == Some("done")).count();
+    if !statuses.is_empty() {
+        md.push_str(&format!("{done} of {} phases done\n\n## Phases\n\n", statuses.len()));
+        for st in &statuses {
+            let mark = match st.get("state").and_then(|v| v.as_str()) {
+                Some("done") => "x", _ => " ",
+            };
+            md.push_str(&format!("- [{}] {} — {}\n", mark,
+                st.get("id").and_then(|v| v.as_str()).unwrap_or("?"),
+                st.get("label").and_then(|v| v.as_str()).unwrap_or("")));
+        }
+        md.push('\n');
+    }
+    let ahead = s.get("ahead").and_then(|v| v.as_u64()).unwrap_or(0);
+    let behind = s.get("behind").and_then(|v| v.as_u64()).unwrap_or(0);
+    if ahead > 0 { md.push_str(&format!("**Publishing:** {ahead} save{} not online yet\n", if ahead == 1 { "" } else { "s" })); }
+    else if behind > 0 { md.push_str(&format!("**Publishing:** the online copy is {behind} save{} ahead\n", if behind == 1 { "" } else { "s" })); }
+    else if s.get("upstream").and_then(|v| v.as_str()).is_some() { md.push_str("**Publishing:** everything is published\n"); }
+    if let Some(last) = s.get("last_commit").and_then(|v| v.as_str()) {
+        if !last.is_empty() { md.push_str(&format!("**Last save:** {last}\n")); }
+    }
+    md.push_str(&format!("\n_{}_\n", Command::new("date").arg("+%Y-%m-%d %H:%M").output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default()));
+    Ok(md)
 }
 
 /* ================= the git pane (M1/M2) ================= */
@@ -1832,7 +2136,10 @@ fn main() {
             git_checkout, git_worktree_prune, stat_file, read_file_b64,
             list_dir, read_file, copy_file, copy_text,
             pty_spawn, init_log_path,
-            pty_write, pty_resize, pty_kill
+            pty_write, pty_resize, pty_kill,
+            round_execute, round_exec_status, round_exec_cancel, round_retro, exec_log_path,
+            journal_append, journal_read, notify, draft_save_message,
+            global_search, status_report
         ])
         .run(tauri::generate_context!())
         .expect("error while running Chronicle");

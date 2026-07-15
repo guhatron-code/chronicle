@@ -27,7 +27,7 @@ export type BoardProps = {
   dropColumn?: TaskColumn | null;
   /** A round is executing — renders the F30 explainer strip under the header. */
   executingRound?: number | null;
-  executingRoundState?: "generating" | "ready";
+  executingRoundState?: "generating" | "ready" | "running";
   onNewTask?: () => void;
   onReadyToExecute?: () => void;
   onOpenTask?: (id: string) => void;

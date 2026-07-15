@@ -263,6 +263,44 @@ export const kanbanDetach = (dir: string, path: string) =>
 export const fixesGenerate = (dir: string, agent: string | null) =>
   invoke<number>("fixes_generate", { dir, agent });
 export const fixesStatus = (dir: string) => invoke<InitStatusData>("fixes_status", { dir });
+
+/* ---------- feature batch: rounds run headless · journal · search · export ---------- */
+
+/** Run a settled round's prompt in a background session (F1). */
+export const roundExecute = (dir: string, n: number, agent: string | null) =>
+  invoke<void>("round_execute", { dir, n, agent });
+export const roundExecStatus = (dir: string) => invoke<InitStatusData>("round_exec_status", { dir });
+export const roundExecCancel = (dir: string) => invoke<void>("round_exec_cancel", { dir });
+export const execLogPath = (dir: string) => invoke<string>("exec_log_path", { dir });
+
+/** What a finished round actually did — saves + files, straight from git (F5). */
+export interface RoundRetro { saves: { hash: string; subject: string }[]; save_count: number; file_count: number }
+export const roundRetro = (dir: string, n: number) => invoke<RoundRetro>("round_retro", { dir, n });
+
+/** The project journal — transitions recorded as they're observed (F2). */
+export interface JournalEntry { ts: number; kind: string; text: string }
+export const journalAppend = (dir: string, entry: { kind: string; text: string }) =>
+  invoke<void>("journal_append", { dir, entry });
+export const journalRead = (dir: string, since: number) =>
+  invoke<JournalEntry[]>("journal_read", { dir, since });
+
+/** A native macOS notification (osascript — local only). */
+export const notifyNative = (title: string, body: string) =>
+  invoke<void>("notify", { title, body });
+
+/** Draft a one-line save message from the staged diff (F4 — you gate it). */
+export const draftSaveMessage = (dir: string) => invoke<string>("draft_save_message", { dir });
+
+/** One ranked sweep across file names, commit subjects, and plan docs (F6). */
+export interface SearchResults {
+  files: string[];
+  commits: { hash: string; subject: string; ago: string }[];
+  docs: { path: string; line: string }[];
+}
+export const globalSearch = (dir: string, q: string) => invoke<SearchResults>("global_search", { dir, q });
+
+/** The roadmap state as sendable markdown (F7). */
+export const statusReport = (dir: string) => invoke<string>("status_report", { dir });
 export const fixesCancel = (dir: string) => invoke<void>("fixes_cancel", { dir });
 /** The fixes session's log file — for the View-full-log terminal tab. */
 export const fixesLogPath = (dir: string) =>

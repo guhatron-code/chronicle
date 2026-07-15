@@ -48,6 +48,8 @@ export type PhaseDetailProps = {
   statusWord: string;
   /** Helper line under the bar, e.g. "Start this phase opens a terminal, …". */
   startHelper: string;
+  /** Readiness checks (F3) — three green dots or one honest red one. */
+  preflight?: { label: string; ok: boolean }[];
   description: string;
   stepsLabel: string; // "5 steps"
   steps: DetailStep[];
@@ -248,7 +250,25 @@ export function PhaseDetail(p: PhaseDetailProps) {
         </button>
       </div>
       {p.statusWord !== "Done" && (
-        <div className="px-5 pt-1.5 text-[11.5px] text-text-dim">{p.startHelper}</div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 pt-1.5">
+          <span className="text-[11.5px] text-text-dim">{p.startHelper}</span>
+          {(p.preflight ?? []).map((c) => (
+            <span
+              key={c.label}
+              className={cn(
+                "inline-flex items-center gap-1.5 text-[11.5px]",
+                c.ok ? "text-text-dim" : "text-state-error",
+              )}
+            >
+              {c.ok ? (
+                <CheckGlyph size={10} className="shrink-0 text-state-success" />
+              ) : (
+                <ErrorGlyph size={10} className="shrink-0" />
+              )}
+              {c.label}
+            </span>
+          ))}
+        </div>
       )}
 
       <div className="grid grid-cols-[1.4fr_1fr]">

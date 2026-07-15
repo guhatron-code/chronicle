@@ -96,6 +96,18 @@ export function evictKanban(dir: string): void {
   }
 }
 
+/** Open a task's composer next time the kanban pane looks (global search lands here). */
+let pendingOpenTask: string | null = null;
+export function openTaskInKanban(id: string): void {
+  pendingOpenTask = id;
+  notify();
+}
+export function takePendingOpenTask(): string | null {
+  const id = pendingOpenTask;
+  pendingOpenTask = null;
+  return id;
+}
+
 export function taskId(n: number): string {
   return `T-${String(n).padStart(3, "0")}`;
 }

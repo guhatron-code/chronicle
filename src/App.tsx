@@ -29,6 +29,8 @@ import {
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
 import { RoadmapPane } from "@/screens/roadmap/RoadmapPane";
 import { RepoPane, evictRepo, openHistoryView } from "@/screens/repo/RepoPane";
+import { openFileInRepo } from "@/screens/repo/RepoPane";
+import { SearchOverlay } from "@/overlays/SearchOverlay";
 import {
   activeTermFor,
   closeTerm,
@@ -44,7 +46,8 @@ import {
 } from "@/lib/term-sessions";
 import type { TerminalTab } from "@/components/chrome/TerminalColumn";
 import { KanbanPane } from "@/screens/kanban/KanbanPane";
-import { evictKanban, kanbanFor, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
+import { evictKanban, kanbanFor, openTaskInKanban, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
+import { announce } from "@/lib/journal";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
 import { fixesStatus, initStatus } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
@@ -73,6 +76,7 @@ export default function App() {
   const [splitPct, setSplitPct] = useState(55.5);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [newProjOpen, setNewProjOpen] = useState(false);
   const [newProjError, setNewProjError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null);
@@ -116,6 +120,22 @@ export default function App() {
     }
     try {
       const s = await getState(dir);
+      // transitions observed against the previous ground truth → journal + notify
+      const before = projectsRef.current.get(dir);
+      if (before?.state) {
+        const name = before.name;
+        const prevDone = new Set(
+          (before.state.statuses ?? []).filter((x) => x.state === "done").map((x) => x.id),
+        );
+        for (const st of s.statuses ?? []) {
+          if (st.state === "done" && !prevDone.has(st.id) && prevDone.size > 0) {
+            announce(dir, "phase-done", `${st.id} is done`, name);
+          }
+        }
+        if ((before.state.ahead ?? 0) > 0 && (s.ahead ?? 0) === 0 && s.upstream) {
+          announce(dir, "published", "Everything is published", name);
+        }
+      }
       setProjects((prev) => {
         const next = new Map(prev);
         const e = next.get(dir);
@@ -365,6 +385,10 @@ export default function App() {
         const id = activeTermFor(activeRef.current);
         if (id != null) { fitTerm(id); getTerm(id)?.term.focus(); }
       }
+      else if (mod && e.shiftKey && (e.key === "f" || e.key === "F") && activeRef.current) {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
       else if (mod && e.key === "o") { e.preventDefault(); openDialog(); }
       else if (mod && e.key === "/") { e.preventDefault(); setShortcutsOpen(true); }
       else if (mod && e.key === "j" && activeRef.current) {
@@ -472,6 +496,25 @@ export default function App() {
         basePath="~/Documents"
       />
       <ShortcutsOverlay open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <SearchOverlay
+        open={searchOpen}
+        onOpenChange={setSearchOpen}
+        dir={activeDir}
+        onOpenFile={(path) => {
+          if (!activeRef.current) return;
+          openFileInRepo(activeRef.current, path);
+          setPane("repo");
+        }}
+        onOpenHistory={() => {
+          if (!activeRef.current) return;
+          openHistoryView(activeRef.current, "repo");
+          setPane("repo");
+        }}
+        onOpenTask={(id) => {
+          openTaskInKanban(id);
+          setPane("kanban");
+        }}
+      />
       <ChronicleToaster />
     </>
   );

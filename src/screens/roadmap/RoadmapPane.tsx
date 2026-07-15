@@ -15,7 +15,12 @@ import {
   gitPull,
   gitPush,
   gitWorktreePrune,
+  execLogPath,
+  journalRead,
+  statusReport,
   initCancel,
+  roundExecCancel,
+  roundExecStatus,
   initStart,
   initStatus,
   runCommand,
@@ -32,6 +37,7 @@ import {
   type RoadmapCtx,
 } from "@/lib/roadmap-data";
 import { setActiveTermFor, spawnTerm, termsFor } from "@/lib/term-sessions";
+import { AWAY_THRESHOLD_MS, announce, lastSeen, markSeen } from "@/lib/journal";
 import { openFileInRepo } from "@/screens/repo/RepoPane";
 import { fixesCancel, fixesLogPath, fixesStatus, initLogPath } from "@/lib/ipc";
 import { kanbanFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
@@ -76,6 +82,8 @@ export function RoadmapPane({
     });
   }, []);
   const [fixesRun, setFixesRun] = useState<InitRun | null>(null);
+  const [execRun, setExecRun] = useState<InitRun | null>(null);
+  const [digest, setDigest] = useState<{ ts: number; text: string }[] | null>(null);
   const [, kbBump] = useState(0);
   useEffect(() => subscribeKanban(() => kbBump((n) => n + 1)), []);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
@@ -106,6 +114,27 @@ export function RoadmapPane({
   stateRef.current = state;
   const onPollNowRef = useRef(onPollNow);
   onPollNowRef.current = onPollNow;
+
+  /* the away digest: entries recorded since the user last looked (F2) */
+  useEffect(() => {
+    const d = dir;
+    const seen = lastSeen(d);
+    if (seen > 0 && Date.now() - seen > AWAY_THRESHOLD_MS) {
+      journalRead(d, seen)
+        .then((entries) => {
+          if (dirRef.current !== d || !Array.isArray(entries) || entries.length === 0) return;
+          setDigest(entries.map((e) => ({ ts: e.ts, text: e.text })));
+        })
+        .catch(() => {});
+    }
+    markSeen(d);
+  }, [dir]);
+
+  /* looking at the roadmap = caught up — advance the seen marker on each poll */
+  useEffect(() => {
+    if (document.hasFocus()) markSeen(dir);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state?.checked_at, dir]);
 
   /* per-project state resets when the project changes — then the backend is
      asked whether a build session is still running here, so a rebuild started
@@ -196,6 +225,7 @@ export function RoadmapPane({
           if ((st.code ?? 1) === 0) {
             setInitRun(null); // the roadmap appears on the next poll
             toastSuccess("The roadmap is written");
+            announce(dir, "roadmap", "The roadmap was written", "Chronicle");
           } else if (stateRef.current?.manifest_present) {
             // a failed REBUILD has no problem-card home (the old roadmap still shows) —
             // say so instead of vanishing silently
@@ -210,6 +240,60 @@ export function RoadmapPane({
     void tick();
     return () => clearInterval(id);
   }, [dir, initRun?.running, initRun?.startedAt]);
+
+  /* a headless round execution is live → mirror it on the roadmap (3s poll) */
+  const kb = kanbanFor(dir);
+  const execRoundN = (() => {
+    for (const r of [...kb.rounds].reverse()) {
+      if (r.state !== "ready") continue;
+      const mine = kb.tasks.filter((t) => t.round === r.n && !t.archived);
+      if (mine.length > 0 && mine.some((t) => t.column !== "completed")) return r.n;
+    }
+    return null;
+  })();
+  useEffect(() => {
+    if (execRoundN == null) { setExecRun(null); return; }
+    const startedAt = Date.now();
+    let sawLive = false;
+    const tick = async () => {
+      try {
+        const st = await roundExecStatus(dir);
+        if (dirRef.current !== dir) return;
+        const tail = st.log_tail ?? "";
+        const lines = logLinesFrom(tail);
+        if (st.running === true) {
+          sawLive = true;
+          const began = st.started_at || startedAt;
+          setExecRun({
+            running: true,
+            startedAt: began,
+            logLines: lines.slice(0, -1),
+            activeLine: lines[lines.length - 1] ?? "Starting the session…",
+            progress: initProgress(tail),
+            code: null,
+            elapsedS: Math.round((Date.now() - began) / 1000),
+          });
+        } else {
+          setExecRun(null);
+          if (sawLive) {
+            sawLive = false;
+            void refreshKanban(dir);
+            if ((st.code ?? 1) === 0) {
+              toastSuccess("The round finished", "Check the board — completed tasks are ticked");
+              announce(dir, "round-done", `Round ${execRoundN} finished`, "Chronicle");
+            } else {
+              toastError("The round session ended", `Exited with code ${st.code ?? "?"} — unfinished tasks stay on the board`);
+              announce(dir, "round-ended", `Round ${execRoundN} ended early`, "Chronicle");
+            }
+            onPollNowRef.current();
+          }
+        }
+      } catch { /* keep the last shown state */ }
+    };
+    const id = setInterval(tick, 3000);
+    void tick();
+    return () => clearInterval(id);
+  }, [dir, execRoundN]);
 
   /* a kanban round is generating → mirror its session on the roadmap (3s poll) */
   const generating = kanbanFor(dir).rounds.some((r) => r.state === "generating");
@@ -236,7 +320,10 @@ export function RoadmapPane({
         } else {
           setFixesRun(null);
           await refreshKanban(dir);
-          if ((st.code ?? 1) === 0) toastSuccess("The fix plan is written", "The round is on your roadmap");
+          if ((st.code ?? 1) === 0) {
+            toastSuccess("The fix plan is written", "The round is on your roadmap");
+            announce(dir, "round-plan", "A round's fix plan is ready", "Chronicle");
+          }
           onPollNowRef.current();
         }
       } catch { /* keep the last shown state */ }
@@ -287,6 +374,7 @@ export function RoadmapPane({
           dir={dir}
           phase={phase}
           status={state.statuses[idx] ?? null}
+          projectState={state}
           onBack={() => setDetailId(null)}
           onCopyDoc={doCopyDoc}
           onStart={() => {
@@ -318,6 +406,9 @@ export function RoadmapPane({
     partOf,
     initRun,
     fixesRun,
+    execRun,
+    execRoundN,
+    digest,
     consent: consentLocal ?? state.init_consent,
     copiedPath,
     expandedId,
@@ -345,6 +436,30 @@ export function RoadmapPane({
       onBasicView: () => {
         setConsentLocal("basic");
         setInitConsent(dir, "basic").catch(() => {});
+      },
+      onDismissDigest: () => { setDigest(null); markSeen(dir); },
+      onCopyStatus: () => {
+        statusReport(dir)
+          .then((md) => copyText(md))
+          .then(() => toastSuccess("Status report copied", "Paste it anywhere — it's markdown"))
+          .catch((e) => toastError("Couldn't build the report", String(e).slice(0, 90)));
+      },
+      onCancelExec: () => {
+        roundExecCancel(dir)
+          .then(() => { setExecRun(null); void refreshKanban(dir); toastSuccess("Stopped the round", "Finished tasks stay done; the rest are still on the board"); })
+          .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)));
+      },
+      onViewExecLog: () => {
+        const existing = termsFor(dir).find((t) => t.title === "Round log" && !t.dead);
+        if (existing) {
+          setActiveTermFor(dir, existing.id);
+          return;
+        }
+        execLogPath(dir)
+          .then((path) =>
+            spawnTerm(dir, { title: "Round log", autoType: `tail -n 200 -f '${path.replace(/'/g, "'\\''")}'` }),
+          )
+          .catch((e) => toastError("Couldn't open the log", String(e).slice(0, 90)));
       },
       onCancelFixes: () => {
         fixesCancel(dir)

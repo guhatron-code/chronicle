@@ -47,7 +47,9 @@ export type ExecuteFlowProps =
       planFile: string;
       promptFile: string;
       onOpenFile?: (name: string) => void;
-      /** Opens a terminal with the agent and copies the prompt — one click to begin. */
+      /** Runs the round in a background session — Chronicle does the work (F1). */
+      onRunHeadless?: () => void;
+      /** Opens a terminal with the agent and copies the prompt — you drive. */
       onStartRound?: () => void;
       onViewRoadmap?: () => void;
       className?: string;
@@ -61,7 +63,7 @@ export function RoundExecutingNote({
 }: {
   round: number;
   /** What the round is actually doing — the strip must not say more than it knows. */
-  state?: "generating" | "ready";
+  state?: "generating" | "ready" | "running";
   className?: string;
 }) {
   const word =
@@ -69,7 +71,9 @@ export function RoundExecutingNote({
       ? `Round ${round} is being planned`
       : state === "ready"
         ? `Round ${round} is waiting to run`
-        : `Round ${round} is underway`;
+        : state === "running"
+          ? `Round ${round} is running`
+          : `Round ${round} is underway`;
   return (
     <div
       className={cn(
@@ -179,13 +183,16 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
         </span>
       </div>
       <div className="text-[12.5px] leading-[1.55] text-text-muted">
-        The plan is written. Start the round to open a terminal with{" "}
-        {AGENT_NAME[p.agent ?? "claude"]} and the prompt on your clipboard.
+        The plan is written. Chronicle can run it for you in the background, or open a
+        terminal with {AGENT_NAME[p.agent ?? "claude"]} and the prompt on your clipboard.
       </div>
-      <div>
-        <BtnPrimary size="md" onClick={p.onStartRound} className="gap-[7px]">
-          Start the round
+      <div className="flex gap-2">
+        <BtnPrimary size="md" onClick={p.onRunHeadless} className="gap-[7px]">
+          Run the round for me
         </BtnPrimary>
+        <BtnSecondary size="md" onClick={p.onStartRound}>
+          Run it in a terminal
+        </BtnSecondary>
       </div>
       <div className="flex flex-wrap gap-2">
         <PasteChip

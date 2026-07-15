@@ -16,6 +16,7 @@ import {
   kanbanFor,
   mutateKanban,
   newTask,
+  takePendingOpenTask,
   taskId,
   nextRoundN,
   refreshKanban,
@@ -24,6 +25,8 @@ import {
 } from "@/lib/kanban-store";
 import {
   copyFile,
+  roundExecStatus,
+  roundExecute,
   fixesCancel,
   kanbanDetach,
   fixesGenerate,
@@ -233,6 +236,12 @@ export function KanbanPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [genRoundOpen, flow.kind]);
 
+  /* a task targeted from global search opens its composer on arrival */
+  useEffect(() => {
+    const id = takePendingOpenTask();
+    if (id) openEdit(id);
+  });
+
   /* ---- ⌘N while the pane is up ---- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -245,6 +254,43 @@ export function KanbanPane({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [draft, openCreate]);
+
+  /* ---- the headless round session (F1): poll while one could be running ---- */
+  const [execLive, setExecLive] = useState(false);
+  const execCandidate = executingRound(store) != null &&
+    store.rounds.find((x) => x.n === executingRound(store))?.state === "ready";
+  useEffect(() => {
+    if (!execCandidate) { setExecLive(false); return; }
+    let stop = false;
+    const tick = async () => {
+      try {
+        const st = await roundExecStatus(dir);
+        if (stop || dirRef.current !== dir) return;
+        setExecLive(st?.running === true);
+      } catch { /* keep the last known */ }
+    };
+    const id = setInterval(tick, 3000);
+    void tick();
+    return () => { stop = true; clearInterval(id); };
+  }, [dir, execCandidate]);
+
+  const runHeadless = useCallback((n: number) => {
+    onConfirm({
+      title: `Run round ${n} for you?`,
+      body: `A ${agent === "codex" ? "Codex" : "Claude"} session will execute the round's plan in this project with full permissions, marking tasks done as it verifies them. You can cancel from the roadmap at any time.`,
+      cancelLabel: "Not yet",
+      confirmLabel: "Run the round",
+      onConfirm: () => {
+        roundExecute(dir, n, agent)
+          .then(() => {
+            setExecLive(true);
+            setFlow({ kind: "idle" });
+            toastSuccess("The round is running", "Watch it on the roadmap — tasks tick as they finish");
+          })
+          .catch(fail("Couldn't start the round"));
+      },
+    });
+  }, [dir, agent, onConfirm, fail]);
 
   /* ---- view assembly ---- */
 
@@ -293,6 +339,7 @@ export function KanbanPane({
           .then((n) => toastSuccess(`Copied ${name}`, `${Number(n).toLocaleString()} characters`))
           .catch(fail("Couldn't copy it"));
       },
+      onRunHeadless: () => runHeadless(flow.round),
       onStartRound: () => {
         const agentName = agent === "codex" ? "Codex" : "Claude";
         const promptPath = r?.prompt_path ?? `fixes/phase_${flow.round}_fixes_prompt.md`;
@@ -335,7 +382,9 @@ export function KanbanPane({
         executingRoundState={
           store.rounds.find((x) => x.n === executingRound(store))?.state === "generating"
             ? "generating"
-            : "ready"
+            : execLive
+              ? "running"
+              : "ready"
         }
         onNewTask={openCreate}
         onReadyToExecute={() => queued > 0 && setFlow({ kind: "preflight" })}

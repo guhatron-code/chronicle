@@ -6,7 +6,7 @@
  * data (the mark palette); agent saves get the star mark. Presentational only.
  */
 import { Input } from "@/components/ui/input";
-import { BtnPrimary, Eyebrow } from "@/components/chrome/atoms";
+import { BtnPrimary, Eyebrow, Spinner } from "@/components/chrome/atoms";
 import {
   AgentStarGlyph,
   CheckGlyph,
@@ -72,6 +72,9 @@ export type HistoryPaneProps = {
   onBack?: () => void;
   onCloseHistory?: () => void;
   onMessageChange?: (message: string) => void;
+  /** Draft a plain-language message from the staged changes (F4). */
+  onDraftMessage?: () => void;
+  drafting?: boolean;
   onSave?: () => void;
   onSkip?: (path: string) => void;
   onToggleGroup?: (dir: string) => void;
@@ -471,19 +474,32 @@ export function HistoryPane(p: HistoryPaneProps) {
 
           {/* save box */}
           <div className="flex flex-col gap-[9px] border-b border-divider px-[18px] py-3.5">
-            <Input
-              value={s.message}
-              placeholder="What changed?"
-              aria-label="Save message"
-              onChange={(e) => p.onMessageChange?.(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && s.message.trim() !== "" && !nothingToSave) p.onSave?.();
-              }}
-              className={cn(
-                "h-9 rounded-md border-border-field bg-surface-input px-3 text-[12.5px] text-text-primary shadow-none placeholder:text-text-dimmer dark:bg-surface-input md:text-[12.5px]",
-                "focus-visible:border-border-field-focus focus-visible:ring-0 focus-visible:[box-shadow:var(--focus-ring)]!",
+            <div className="flex items-center gap-2">
+              <Input
+                value={s.message}
+                placeholder="What changed?"
+                aria-label="Save message"
+                onChange={(e) => p.onMessageChange?.(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && s.message.trim() !== "" && !nothingToSave) p.onSave?.();
+                }}
+                className={cn(
+                  "h-9 min-w-0 flex-1 rounded-md border-border-field bg-surface-input px-3 text-[12.5px] text-text-primary shadow-none placeholder:text-text-dimmer dark:bg-surface-input md:text-[12.5px]",
+                  "focus-visible:border-border-field-focus focus-visible:ring-0 focus-visible:[box-shadow:var(--focus-ring)]!",
+                )}
+              />
+              {p.onDraftMessage && (
+                <button
+                  title="Claude drafts a message from the changes — you can edit it"
+                  disabled={p.drafting || nothingToSave}
+                  onClick={p.onDraftMessage}
+                  className="flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border-strong px-[11px] text-[11.5px] font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary disabled:opacity-45 disabled:hover:bg-transparent"
+                >
+                  {p.drafting ? <Spinner size={11} /> : null}
+                  {p.drafting ? "Drafting…" : "Draft it"}
+                </button>
               )}
-            />
+            </div>
             <BtnPrimary
             onClick={p.onSave}
  disabled={s.message.trim() === "" || nothingToSave}
