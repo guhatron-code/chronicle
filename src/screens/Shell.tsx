@@ -35,6 +35,7 @@ export function Shell({
   activeTerminalId,
   onNewTerminal,
   onStartAgent,
+  terminalSpawning,
   onTerminalSelect,
   onTerminalClose,
   onTerminalRenameCommit,
@@ -62,6 +63,8 @@ export function Shell({
   activeTerminalId?: number | null;
   onNewTerminal: () => void;
   onStartAgent: (agent: TerminalAgent) => void;
+  /** Which spawn affordance is mid-flight — buttons disable + show it. */
+  terminalSpawning?: "claude" | "codex" | "shell" | null;
   onTerminalSelect?: (id: number) => void;
   onTerminalClose?: (id: number) => void;
   onTerminalRenameCommit?: (id: number, name: string) => void;
@@ -160,6 +163,7 @@ export function Shell({
               activeId={activeTerminalId ?? terminalTabs[0]?.id ?? null}
               onNewTerminal={onNewTerminal}
               onStartAgent={onStartAgent}
+              spawning={terminalSpawning}
               onSelect={onTerminalSelect}
               onClose={onTerminalClose}
               onRenameCommit={onTerminalRenameCommit}

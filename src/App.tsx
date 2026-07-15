@@ -241,12 +241,23 @@ export default function App() {
     }
     return cb;
   }, []);
-  const newTerminal = useCallback((opts?: { agent?: "claude" | "codex"; title?: string; autoType?: string }) => {
+  /* spawn is single-flight: the pty takes a moment and a second click during
+     the wait used to stack a twin session. The ref blocks same-frame clicks;
+     the state drives the buttons' loading treatment. */
+  const spawnGate = useRef(false);
+  const [spawningKind, setSpawningKind] = useState<"claude" | "codex" | "shell" | null>(null);
+  const newTerminal = useCallback((opts?: { agent?: "claude" | "codex"; title?: string; autoType?: string; kind?: "claude" | "codex" | "shell" }) => {
     const dir = activeRef.current;
-    if (!dir) return;
+    if (!dir || spawnGate.current) return;
+    spawnGate.current = true;
+    setSpawningKind(opts?.kind ?? opts?.agent ?? "shell");
     spawnTerm(dir, opts ?? {})
       .then((sess) => setActiveTerm(dir, sess.id))
-      .catch((e) => toastError("Couldn't start a shell", String(e).slice(0, 90)));
+      .catch((e) => toastError("Couldn't start a shell", String(e).slice(0, 90)))
+      .finally(() => {
+        spawnGate.current = false;
+        setSpawningKind(null);
+      });
   }, [setActiveTerm]);
   const closeTerminalTab = useCallback((id: number) => {
     const s = getTerm(id);
@@ -531,7 +542,8 @@ export default function App() {
         terminalTabs={termTabs}
         activeTerminalId={activeTermId}
         onNewTerminal={() => newTerminal()}
-        onStartAgent={(a) => newTerminal({ agent: undefined, title: a === "claude" ? "Claude" : "Codex", autoType: a })}
+        terminalSpawning={spawningKind}
+        onStartAgent={(a) => newTerminal({ agent: undefined, title: a === "claude" ? "Claude" : "Codex", autoType: a, kind: a })}
         onTerminalSelect={(id) => setActiveTerm(active.dir, id)}
         onTerminalClose={closeTerminalTab}
         onTerminalRenameCommit={(id, name) => renameTerm(id, name)}

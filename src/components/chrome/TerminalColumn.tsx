@@ -23,7 +23,7 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ClaudeStar, CodexTile, PlusGlyph, XGlyph } from "./icons";
-import { Eyebrow, Kbd } from "./atoms";
+import { Eyebrow, Kbd, Spinner } from "./atoms";
 
 export type TerminalAgent = "claude" | "codex";
 
@@ -94,6 +94,7 @@ export function TerminalColumn({
   activeId,
   onNewTerminal,
   onStartAgent,
+  spawning,
   onSelect,
   onClose,
   onRenameStart,
@@ -104,6 +105,9 @@ export function TerminalColumn({
   activeId: number | null;
   onNewTerminal: () => void;
   onStartAgent: (agent: TerminalAgent) => void;
+  /** A spawn is mid-flight — every spawn affordance disables; the one that was
+   *  clicked shows a spinner (the pty takes a moment; double-clicks stacked twins). */
+  spawning?: "claude" | "codex" | "shell" | null;
   onSelect?: (id: number) => void;
   onClose?: (id: number) => void;
   onRenameStart?: (id: number) => void;
@@ -185,18 +189,20 @@ export function TerminalColumn({
         <button
           aria-label="Start Claude Code"
           title="Start Claude Code"
+          disabled={spawning != null}
           onClick={() => onStartAgent("claude")}
-          className="flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-fill-hover"
+          className="flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-fill-hover disabled:opacity-55 disabled:hover:bg-transparent"
         >
-          <ClaudeStar size={16} />
+          {spawning === "claude" ? <Spinner size={13} /> : <ClaudeStar size={16} />}
         </button>
         <button
           aria-label="Start Codex"
           title="Start Codex"
+          disabled={spawning != null}
           onClick={() => onStartAgent("codex")}
-          className="flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-fill-hover"
+          className="flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-fill-hover disabled:opacity-55 disabled:hover:bg-transparent"
         >
-          <CodexTile />
+          {spawning === "codex" ? <Spinner size={13} /> : <CodexTile />}
         </button>
       </div>
 
@@ -209,25 +215,28 @@ export function TerminalColumn({
           </div>
           <div className="flex gap-2 pt-1">
             <button
+              disabled={spawning != null}
               onClick={() => onStartAgent("claude")}
-              className="flex h-[33px] items-center gap-2 rounded-md border border-border-strong px-[13px] text-[12.5px] font-medium text-text-primary hover:bg-fill-hover"
+              className="flex h-[33px] items-center gap-2 rounded-md border border-border-strong px-[13px] text-[12.5px] font-medium text-text-primary hover:bg-fill-hover disabled:opacity-55 disabled:hover:bg-transparent"
             >
-              <ClaudeStar size={14} />
-              Claude Code
+              {spawning === "claude" ? <Spinner size={12} /> : <ClaudeStar size={14} />}
+              {spawning === "claude" ? "Starting…" : "Claude Code"}
             </button>
             <button
+              disabled={spawning != null}
               onClick={() => onStartAgent("codex")}
-              className="flex h-[33px] items-center gap-2 rounded-md border border-border-strong px-[13px] text-[12.5px] font-medium text-text-primary hover:bg-fill-hover"
+              className="flex h-[33px] items-center gap-2 rounded-md border border-border-strong px-[13px] text-[12.5px] font-medium text-text-primary hover:bg-fill-hover disabled:opacity-55 disabled:hover:bg-transparent"
             >
-              <CodexTile size={13} />
-              Codex
+              {spawning === "codex" ? <Spinner size={12} /> : <CodexTile size={13} />}
+              {spawning === "codex" ? "Starting…" : "Codex"}
             </button>
           </div>
           <button
+            disabled={spawning != null}
             onClick={onNewTerminal}
-            className="text-xs text-text-dim hover:text-text-secondary"
+            className="text-xs text-text-dim hover:text-text-secondary disabled:opacity-55"
           >
-            New terminal — <Kbd>⌘T</Kbd>
+            {spawning === "shell" ? "Starting…" : <>New terminal — <Kbd>⌘T</Kbd></>}
           </button>
         </div>
       ) : (
