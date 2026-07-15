@@ -2,7 +2,7 @@
  * C3 shared micro-bits — the tiny compositions the roadmap frames repeat
  * (F15 / F18 / F19 / F21 / F22). Values transcribed 1:1 from the decks; tokens only.
  */
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDownGlyph, ChevronUpGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 
@@ -98,10 +98,28 @@ export function AccBody({
   children: ReactNode;
   className?: string;
 }) {
+  // Animate via 0fr↔1fr, but SETTLE an open body at `auto`: WKWebView keeps a
+  // 1fr track's used size when the content re-wraps taller (pane resize), which
+  // clipped open accordions. Closing passes back through 1fr for a frame so the
+  // transition has a number to leave from.
+  const [rows, setRows] = useState(open ? "auto" : "0fr");
+  const first = useRef(true);
+  useLayoutEffect(() => {
+    if (first.current) { first.current = false; return; }
+    if (open) {
+      setRows("1fr");
+      const t = setTimeout(() => setRows("auto"), 230);
+      return () => clearTimeout(t);
+    }
+    setRows("1fr");
+    let raf2 = 0;
+    const raf = requestAnimationFrame(() => { raf2 = requestAnimationFrame(() => setRows("0fr")); });
+    return () => { cancelAnimationFrame(raf); cancelAnimationFrame(raf2); };
+  }, [open]);
   return (
     <div
       className="grid transition-[grid-template-rows] duration-200 ease-out"
-      style={{ gridTemplateRows: open ? "1fr" : "0fr" }}
+      style={{ gridTemplateRows: rows }}
       aria-hidden={!open}
       inert={!open} // a closed body must not catch focus or clicks
     >
