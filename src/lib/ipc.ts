@@ -149,8 +149,8 @@ export const removeRecent = (path: string) =>
 export const openProject = (path: string) =>
   invoke<ProjectData>("open_project", { path });
 export const getState = (dir: string) => invoke<StateData>("get_state", { dir });
-export const initStart = (dir: string, agent: string | null) =>
-  invoke<void>("init_start", { dir, agent });
+export const initStart = (dir: string, agent: string | null, fresh = false) =>
+  invoke<void>("init_start", { dir, agent, fresh });
 export const initStatus = (dir: string) =>
   invoke<InitStatusData>("init_status", { dir });
 /** Stop a running roadmap session (SIGTERM → grace → SIGKILL, always reaped). */

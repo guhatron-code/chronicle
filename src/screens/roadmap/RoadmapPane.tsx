@@ -247,10 +247,12 @@ export function RoadmapPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dir, generating]);
 
-  const startInit = useCallback(() => {
+  /** fresh: an explicit Rebuild re-derives chronicle.json from scratch; a first
+   *  build (or a plan-drift refresh) keeps the skill's diff-and-patch mode. */
+  const startInit = useCallback((fresh = false) => {
     const startedAt = Date.now();
     setInitRun({ running: true, startedAt, logLines: [], activeLine: "Starting the session…", progress: 0.06, code: null, elapsedS: 0 });
-    initStart(dir, agent).catch((e) => {
+    initStart(dir, agent, fresh).catch((e) => {
       setInitRun(null);
       toastError("Couldn't start the session", String(e).slice(0, 90));
     });
@@ -331,7 +333,7 @@ export function RoadmapPane({
       onBuild: () => {
         setConsentLocal("auto");
         setInitConsent(dir, "auto").catch(() => {});
-        startInit();
+        startInit(); // first build — refresh mode is correct here
       },
       onRunMyself: () => {
         setConsentLocal("manual");
@@ -384,7 +386,7 @@ export function RoadmapPane({
           body: `${agent === "codex" ? "A Codex" : "A Claude"} session will read the plan documents again and rewrite the roadmap. Your files aren't changed.`,
           cancelLabel: "Not yet",
           confirmLabel: "Rebuild",
-          onConfirm: startInit,
+          onConfirm: () => startInit(true), // Rebuild = from scratch, not refresh
         }),
       onRebuild: () =>
         onConfirm({
@@ -392,7 +394,7 @@ export function RoadmapPane({
           body: `${agent === "codex" ? "A Codex" : "A Claude"} session will read the plan documents again and rewrite the roadmap. Your files aren't changed.`,
           cancelLabel: "Not yet",
           confirmLabel: "Rebuild",
-          onConfirm: startInit,
+          onConfirm: () => startInit(true), // Rebuild = from scratch, not refresh
         }),
       onDismissWarning: () => setWarningDismissed(true),
       onOpenPartOf: onOpenProject,

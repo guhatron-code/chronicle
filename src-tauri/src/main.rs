@@ -138,6 +138,10 @@ fn set_default_agent(agent: String) -> Result<(), String> {
 }
 
 /// Codex has no skill system, so the whole task travels inline as the prompt.
+/// Appended when the user explicitly asks to REBUILD: the skill's refresh mode
+/// (diff-and-patch) must not kick in — the manifest is re-derived from evidence.
+const FRESH_REBUILD_NOTE: &str = "REBUILD FROM SCRATCH: do not use refresh mode. Re-read the plan documents and the live git state, re-derive every phase and every status rule from evidence, and rewrite chronicle.json in full (recompute every generatedFrom hash). Treat the existing chronicle.json as untrusted output of a previous run — verify against ground truth, never copy from it.";
+
 const CODEX_INIT_PROMPT_HEAD: &str = "You are running the chronicle-init task in the current working directory (the folder the user opened in the Chronicle app). Follow the instructions below exactly. The referenced example files are not available to you; follow the schema strictly instead. Where the instructions mention naming the destination tool for paste rows, use \"Codex\" for terminal prompts if this project is worked with Codex.\n\n";
 
 fn config_dir() -> PathBuf {
@@ -752,7 +756,7 @@ async fn get_state(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, St
 /* ================= background /chronicle-init ================= */
 
 #[tauri::command]
-async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>) -> Result<(), String> {
+async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>, fresh: Option<bool>) -> Result<(), String> {
     let dirp = project_for(&roots, &dir)?.dir; // only an OPENED project may run a session
     let (key, log) = canon_key(&dir)?; // canonical path key + hashed log name — no collisions
     let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
@@ -769,8 +773,10 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
         || (agent.is_none() && claude_bin.is_none() && codex_bin.is_some());
     let child = if use_codex {
         let bin = codex_bin.ok_or("Codex isn't installed (couldn't find `codex`)")?;
-        let prompt = format!("{}{}\n\n---\n\n{}",
+        let fresh_note = if fresh == Some(true) { format!("{FRESH_REBUILD_NOTE}\n\n") } else { String::new() };
+        let prompt = format!("{}{}{}\n\n---\n\n{}",
             CODEX_INIT_PROMPT_HEAD,
+            fresh_note,
             include_str!("../../skill/chronicle-init/SKILL.md"),
             include_str!("../../skill/chronicle-init/SCHEMA.md"));
         std::process::Command::new(bin)
@@ -784,8 +790,13 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
             .map_err(|e| format!("couldn't start a Codex session: {e}"))?
     } else {
         let bin = claude_bin.ok_or("Claude Code isn't installed (couldn't find `claude`)")?;
+        let slash = if fresh == Some(true) {
+            format!("/chronicle-init {FRESH_REBUILD_NOTE}")
+        } else {
+            "/chronicle-init".to_string()
+        };
         std::process::Command::new(bin)
-            .args(["-p", "/chronicle-init", "--permission-mode", "bypassPermissions",
+            .args(["-p", &slash, "--permission-mode", "bypassPermissions",
                    "--verbose", "--output-format", "stream-json"])
             .current_dir(&dirp)
             .stdin(std::process::Stdio::null())
