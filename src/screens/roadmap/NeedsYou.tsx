@@ -69,23 +69,20 @@ function Row({ row, last }: { row: NeedsYouRow; last: boolean }) {
       </div>
       {row.kind === "one-click" ? (
         row.primary ? (
-          <BtnPrimary
-            className="h-[31px] shrink-0 self-center px-3 text-[12.5px]"
+          <BtnPrimary size="md" className="shrink-0 self-center"
             onClick={row.onAction}
           >
             {row.actionLabel}
           </BtnPrimary>
         ) : (
-          <BtnSecondary
-            className="h-[31px] shrink-0 self-center px-3 text-[12.5px]"
+          <BtnSecondary size="md" className="shrink-0 self-center"
             onClick={row.onAction}
           >
             {row.actionLabel}
           </BtnSecondary>
         )
       ) : row.command !== "" ? (
-        <BtnSecondary
-          className="h-[31px] shrink-0 gap-1.5 self-center px-3 text-[12.5px]"
+        <BtnSecondary size="md" className="shrink-0 gap-1.5 self-center"
           onClick={row.onCopy}
         >
           <CopyGlyph size={12} />

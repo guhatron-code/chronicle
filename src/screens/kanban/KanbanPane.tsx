@@ -192,8 +192,7 @@ export function KanbanPane({
           await refreshKanban(dir);
           const rounds = kanbanFor(dir).rounds;
           const latest = rounds.reduce((m, r) => Math.max(m, r.n), 0);
-          setFlow({ kind: "done", round: latest });
-          toastSuccess("The fix plan is written", "The round is on your roadmap");
+          setFlow({ kind: "done", round: latest }); // the done card announces it — no twin toast
         } else {
           // refresh FIRST: the resume effect must not see a stale generating
           // round and re-open the flow (that looped a toast per tick)
@@ -227,8 +226,7 @@ export function KanbanPane({
       // it settled while nobody watched — still land on the done card
       const latest = [...store.rounds].reverse().find((r) => r.state === "ready");
       if (latest) {
-        setFlow({ kind: "done", round: latest.n });
-        toastSuccess("The fix plan is written", "The round is on your roadmap");
+        setFlow({ kind: "done", round: latest.n }); // the done card announces it — no twin toast
       }
     }
     prevGenOpen.current = genRoundOpen;

@@ -234,7 +234,7 @@ export function PhaseDetail(p: PhaseDetailProps) {
         </StateWord>
         <span className="flex-1" />
         {p.statusWord !== "Done" && (
-          <BtnPrimary className="h-[33px] gap-[7px] px-3.5 text-[12.5px]" onClick={p.onStart}>
+          <BtnPrimary size="md" className="gap-[7px]" onClick={p.onStart}>
             <PlayGlyph size={11} />
             Start this phase
           </BtnPrimary>

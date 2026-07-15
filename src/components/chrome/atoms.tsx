@@ -10,26 +10,38 @@ import { CheckGlyph, ErrorGlyph } from "./icons";
 /* ---- buttons: the two comp treatments on top of shadcn Button ---- */
 
 /** Primary: 36px, --primary bg, radius 8 (comps: F1 hero, dialogs). */
-export const BtnPrimary = ({ className, ...p }: ComponentProps<typeof Button>) => (
+/** One size scale for both buttons — sm 28 · md 33 · lg 36. Callers pick a
+ * size instead of scattering h-[Npx] overrides. */
+const BTN_SIZE = {
+  sm: "h-7 px-[11px] text-[11.5px]",
+  md: "h-[33px] px-3.5 text-[12.5px]",
+  lg: "h-9 px-4 text-[13px]",
+} as const;
+type BtnSize = keyof typeof BTN_SIZE;
+
+export const BtnPrimary = ({ className, size = "lg", ...p }: Omit<ComponentProps<typeof Button>, "size"> & { size?: BtnSize }) => (
   <Button
     {...p}
     className={cn(
-      "h-9 rounded-md px-4 text-[13px] font-medium",
+      "rounded-md font-medium",
+      BTN_SIZE[size],
       "bg-primary text-primary-foreground hover:bg-(--primary-hover)",
       "focus-visible:border-transparent focus-visible:ring-0 focus-visible:[box-shadow:var(--focus-ring)]!",
-      "disabled:opacity-40",
+      // disabled: a quiet filled state, not a ghost of the enabled one
+      "disabled:bg-fill-subtle disabled:text-text-dimmer disabled:opacity-100",
       className,
     )}
   />
 );
 
-/** Secondary: 33–34px, transparent, --border-strong 1px, radius 8. */
-export const BtnSecondary = ({ className, ...p }: ComponentProps<typeof Button>) => (
+/** Secondary: transparent, --border-strong 1px, radius 8; same size scale. */
+export const BtnSecondary = ({ className, size = "md", ...p }: Omit<ComponentProps<typeof Button>, "size"> & { size?: BtnSize }) => (
   <Button
     variant="outline"
     {...p}
     className={cn(
-      "h-[34px] rounded-md border border-border-strong bg-transparent px-3.5 text-[13px] font-medium text-text-primary shadow-none",
+      "rounded-md border border-border-strong bg-transparent font-medium text-text-primary shadow-none",
+      BTN_SIZE[size],
       "dark:border-border-strong", // shadcn outline's dark:border-input bleeds past the unprefixed class (twMerge modifier variance)
       "hover:bg-fill-hover hover:text-text-primary dark:bg-transparent dark:hover:bg-fill-hover",
       "focus-visible:ring-0 focus-visible:[box-shadow:var(--focus-ring)]!",
@@ -64,7 +76,7 @@ export const Kbd = ({ className, children }: { className?: string; children: Rea
 export const IdChip = ({ className, children }: { className?: string; children: ReactNode }) => (
   <span
     className={cn(
-      "rounded-sm bg-fill-subtle px-1.5 py-px font-mono text-[10.5px] text-text-subtle",
+      "shrink-0 whitespace-nowrap rounded-sm bg-fill-subtle px-1.5 py-px font-mono text-[10.5px] text-text-subtle",
       className,
     )}
   >

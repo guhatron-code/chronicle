@@ -61,6 +61,9 @@ function ensureListeners() {
     const s = sessions.get(id);
     if (s && !s.dead) {
       s.dead = true;
+      // an ended session must not keep a live-looking cursor
+      s.term.options.cursorBlink = false;
+      s.term.write("\x1b[?25l");
       s.term.write("\r\n\x1b[2m[session ended]\x1b[0m\r\n");
       notify();
     }

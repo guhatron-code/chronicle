@@ -26,10 +26,9 @@ export function StaleAlert({ scanning = false, onScan, className }: StaleAlertPr
       </span>
       <span className="flex-1" />
       {scanning ? (
-        <BtnPrimary
-          disabled
-          className="h-[30px] gap-2 px-[13px] text-[12.5px] disabled:opacity-55"
-        >
+        <BtnPrimary size="sm"
+ disabled
+ className="gap-2 disabled:opacity-55">
           <span
             aria-hidden
             className="inline-block size-[11px] rounded-full border-[1.5px] border-(--primary-fg)"
@@ -38,7 +37,7 @@ export function StaleAlert({ scanning = false, onScan, className }: StaleAlertPr
           Rebuilding…
         </BtnPrimary>
       ) : (
-        <BtnPrimary className="h-[30px] px-[13px] text-[12.5px]" onClick={onScan}>
+        <BtnPrimary size="sm" onClick={onScan}>
           Rebuild
         </BtnPrimary>
       )}

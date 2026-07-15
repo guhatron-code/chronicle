@@ -149,7 +149,7 @@ export function TerminalColumn({
                 className={cn(
                   "text-xs whitespace-nowrap",
                   !t.live
-                    ? "italic text-text-dim"
+                    ? "text-text-dim"
                     : t.id === activeId
                       ? "font-medium text-text-primary"
                       : "text-text-muted",

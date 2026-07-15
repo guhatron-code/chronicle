@@ -1,7 +1,8 @@
 /*
  * A deliberately tiny markdown renderer for the F22 documents accordion —
- * headings, paragraphs, lists, bold, inline code. No links-following, no HTML
- * passthrough (captured content is data, never instructions).
+ * headings, paragraphs, lists, bold, inline code, fenced code blocks, block
+ * quotes. No links-following, no HTML passthrough (captured content is data,
+ * never instructions).
  */
 import { Fragment, type ReactNode } from "react";
 
@@ -32,6 +33,8 @@ function inline(text: string, key: number): ReactNode {
 export function MiniMd({ source }: { source: string }) {
   const blocks: ReactNode[] = [];
   let listItems: string[] = [];
+  let quoteLines: string[] = [];
+  let fence: string[] | null = null;
   let k = 0;
   const flushList = () => {
     if (listItems.length === 0) return;
@@ -42,8 +45,34 @@ export function MiniMd({ source }: { source: string }) {
     );
     listItems = [];
   };
+  const flushQuote = () => {
+    if (quoteLines.length === 0) return;
+    blocks.push(
+      <blockquote key={k++} className="mb-1.5 border-l-2 border-border-strong pl-3 text-text-muted">
+        {quoteLines.map((q, i) => (
+          <p key={i} className="pb-1 last:pb-0">{inline(q, k * 100 + i)}</p>
+        ))}
+      </blockquote>,
+    );
+    quoteLines = [];
+  };
   for (const raw of source.split("\n")) {
     const line = raw.trimEnd();
+    if (fence !== null) {
+      if (/^```/.test(line)) {
+        blocks.push(
+          <pre key={k++} className="mb-1.5 overflow-x-auto rounded-md bg-fill-subtle p-2.5 font-mono text-[11px] leading-[1.55]">
+            {fence.join("\n")}
+          </pre>,
+        );
+        fence = null;
+      } else fence.push(raw);
+      continue;
+    }
+    if (/^```/.test(line)) { flushList(); flushQuote(); fence = []; continue; }
+    const q = line.match(/^>\s?(.*)/);
+    if (q) { flushList(); quoteLines.push(q[1]); continue; }
+    flushQuote();
     const h = line.match(/^(#{1,3})\s+(.*)/);
     if (h) {
       flushList();
@@ -60,6 +89,15 @@ export function MiniMd({ source }: { source: string }) {
     if (line.trim() === "") continue;
     blocks.push(<p key={k++} className="pb-1.5 last:pb-0">{inline(line, k)}</p>);
   }
+  if (fence !== null) {
+    // an unclosed fence still renders as code — never swallow content
+    blocks.push(
+      <pre key={k++} className="mb-1.5 overflow-x-auto rounded-md bg-fill-subtle p-2.5 font-mono text-[11px] leading-[1.55]">
+        {fence.join("\n")}
+      </pre>,
+    );
+  }
   flushList();
+  flushQuote();
   return <Fragment>{blocks}</Fragment>;
 }

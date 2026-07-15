@@ -209,7 +209,7 @@ export function Composer(p: ComposerProps) {
               onChange={(e) => p.onLinkDraftChange?.(e.target.value)}
               className={cn("h-[34px] flex-1 px-3 text-xs md:text-xs", fieldClass)}
             />
-            <BtnSecondary onClick={p.onAddLink} className="h-[34px] px-3 text-xs">
+            <BtnSecondary size="md" onClick={p.onAddLink}>
               Add
             </BtnSecondary>
           </div>
@@ -283,7 +283,7 @@ export function Composer(p: ComposerProps) {
           </>
         )}
         <span className="flex-1" />
-        <BtnPrimary onClick={p.onSave} className="h-[33px] px-3.5 text-[12.5px]">
+        <BtnPrimary onClick={p.onSave}>
           {p.mode === "edit" ? "Save task" : "Add task"}
         </BtnPrimary>
       </div>

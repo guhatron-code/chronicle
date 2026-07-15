@@ -88,8 +88,7 @@ export function NewProjectDialog({
 
         <div className="flex justify-end gap-2">
           <BtnSecondary onClick={() => onOpenChange(false)}>Cancel</BtnSecondary>
-          <BtnPrimary
-            className="h-[34px] px-3.5"
+          <BtnPrimary size="md"
             disabled={!name.trim() || invalid}
             onClick={() => onCreate(name.trim())}
           >

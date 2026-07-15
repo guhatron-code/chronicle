@@ -143,7 +143,7 @@ function AuthorTile({ author }: { author: CommitAuthor }) {
   return (
     <span
       title={author.kind === "agent" ? "Agent save" : "You"}
-      className="flex size-3.5 items-center justify-center rounded-[4px] bg-surface-card-raised text-[7.5px] font-semibold text-text-subtle"
+      className="flex size-4 items-center justify-center rounded-[5px] bg-surface-card-raised text-[8px] font-semibold text-text-subtle"
     >
       {author.kind === "agent" ? <AgentStarGlyph size={8} /> : author.initials}
     </span>
@@ -171,14 +171,14 @@ function CommitRow({ commit, onCommit }: { commit: Commit; onCommit?: (hash: str
           ref.current ? (
             <span
               key={ref.label}
-              className="shrink-0 rounded-[4px] bg-selected-bg px-[5px] py-px font-mono text-[9.5px] text-selected-fg"
+              className="shrink-0 rounded-[5px] bg-selected-bg px-[5px] py-px font-mono text-[10.5px] text-selected-fg"
             >
               {ref.label}
             </span>
           ) : (
             <span
               key={ref.label}
-              className="shrink-0 rounded-[4px] bg-fill-subtle px-[5px] font-mono text-[9.5px] text-text-subtle"
+              className="shrink-0 rounded-[5px] bg-fill-subtle px-[5px] font-mono text-[10.5px] text-text-subtle"
             >
               {ref.label}
             </span>
@@ -283,7 +283,7 @@ function PublishFooter({
             {sentence(publish.behindLabel)}
           </button>
         )}
-        <BtnPrimary onClick={onPush} className="h-[29px] shrink-0 px-[10px] text-[11.5px]">
+        <BtnPrimary size="sm" onClick={onPush} className="shrink-0">
           Publish online
         </BtnPrimary>
       </div>
@@ -485,10 +485,9 @@ export function HistoryPane(p: HistoryPaneProps) {
               )}
             />
             <BtnPrimary
-              onClick={p.onSave}
-              disabled={s.message.trim() === "" || nothingToSave}
-              className="h-[34px] w-full text-[12.5px]"
-            >
+            onClick={p.onSave}
+ disabled={s.message.trim() === "" || nothingToSave}
+ className="w-full">
               Save to history
             </BtnPrimary>
             {nothingToSave && !s.statusUnknown && (

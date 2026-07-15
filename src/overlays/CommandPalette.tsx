@@ -51,7 +51,7 @@ export function CommandPalette({
       <span className="text-[13px] font-medium text-text-primary">{p.name}</span>
       <span className="font-mono text-[11px] text-text-dim">{p.tildePath}</span>
       <span className="flex-1" />
-      <StateWord kind={p.statusKind} dotSize={5} glyphSize={10} className="text-[11.5px]">
+      <StateWord kind={p.statusKind} dotSize={5} glyphSize={10} className="shrink-0 whitespace-nowrap text-[11.5px]">
         {p.statusWord}
       </StateWord>
       {kbd && <Kbd>{kbd}</Kbd>}

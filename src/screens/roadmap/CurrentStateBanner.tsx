@@ -79,14 +79,14 @@ export function CurrentStateBanner(p: CurrentStateBannerProps) {
       {p.kind === "all-done" ? (
         <div className="flex items-center gap-2.5">
           <CheckGlyph size={16} className="text-state-success" />
-          <span className="text-[17px] font-semibold text-text-primary">
+          <span className="text-[15px] font-semibold text-text-primary">
             Everything on the plan is done
           </span>
         </div>
       ) : (
         <div className="flex items-center gap-2.5">
           <BannerChip>{p.phaseId}</BannerChip>
-          <span className="text-[17px] font-semibold text-text-primary">{p.phaseName}</span>
+          <span className="text-[15px] font-semibold text-text-primary">{p.phaseName}</span>
           {p.kind === "waiting" ? (
             <span className="inline-flex items-center gap-1.5 text-[12.5px] text-text-secondary">
               <ClockGlyph size={12} />
@@ -125,7 +125,7 @@ export function CurrentStateBanner(p: CurrentStateBannerProps) {
 
       {p.kind === "waiting" && (
         <div className="mt-0.5 flex gap-2">
-          <BtnPrimary className="h-[31px] px-3 text-[12.5px]" onClick={p.onAction}>
+          <BtnPrimary size="md" onClick={p.onAction}>
             {p.actionLabel}
           </BtnPrimary>
         </div>
@@ -133,10 +133,10 @@ export function CurrentStateBanner(p: CurrentStateBannerProps) {
 
       {p.kind === "all-done" && (
         <div className="mt-0.5 flex gap-2">
-          <BtnPrimary className="h-[31px] px-3 text-[12.5px]" onClick={p.onAddNext}>
+          <BtnPrimary size="md" onClick={p.onAddNext}>
             Add what's next in the Kanban
           </BtnPrimary>
-          <BtnSecondary className="h-[31px] px-3 text-[12.5px]" onClick={p.onRebuild}>
+          <BtnSecondary size="md" onClick={p.onRebuild}>
             Rebuild the roadmap
           </BtnSecondary>
         </div>

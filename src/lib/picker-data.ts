@@ -34,7 +34,10 @@ export function agoFrom(openedAtEpoch: string, nowMs = Date.now()): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
   if (days < 7) return `${days}d ago`;
-  return `${Math.round(days / 7)}w ago`;
+  const weeks = Math.round(days / 7);
+  if (weeks <= 8) return `${weeks}w ago`;
+  // past ~2 months a relative stamp stops meaning anything — show the date
+  return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric", year: days > 365 ? "numeric" : undefined });
 }
 
 /** A running init for this path (app state) forces the "writing" card. */

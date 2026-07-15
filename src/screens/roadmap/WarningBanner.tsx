@@ -1,6 +1,6 @@
 /*
  * F14 (Deck 2) — the roadmap warning banner. Non-alarming: hairline card, glyph +
- * words, a pill action, a quiet dismiss. Presentational only.
+ * words, a bordered action, a quiet dismiss. Presentational only.
  */
 import { WarnGlyph, XGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
@@ -28,7 +28,7 @@ export function WarningBanner({ count, onRebuild, onDismiss, className }: Warnin
       <span className="flex-1" />
       <button
         onClick={onRebuild}
-        className="h-[27px] shrink-0 rounded-full border border-border-strong px-[11px] text-xs font-medium text-text-primary hover:bg-fill-hover"
+        className="h-[27px] shrink-0 rounded-md border border-border-strong px-[11px] text-xs font-medium text-text-primary hover:bg-fill-hover"
       >
         Rebuild the roadmap
       </button>

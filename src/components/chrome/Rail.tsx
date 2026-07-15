@@ -40,7 +40,7 @@ function RailButton({
           aria-label={label}
           onClick={onClick}
           className={cn(
-            "flex size-[30px] items-center justify-center rounded-[7px] border",
+            "flex size-[30px] items-center justify-center rounded-md border",
             selected
               ? "border-selected-bg bg-selected-bg text-selected-fg"
               : cn(

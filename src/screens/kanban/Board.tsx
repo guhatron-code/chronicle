@@ -149,11 +149,9 @@ export function Board({
           {tasks.length} {tasks.length === 1 ? "task" : "tasks"}
         </MonoMeta>
         <span className="flex-1" />
-        <BtnSecondary
-          onClick={onReadyToExecute}
-          disabled={queued === 0}
-          className="h-[31px] px-3 text-xs"
-        >
+        <BtnSecondary size="md"
+ onClick={onReadyToExecute}
+ disabled={queued === 0}>
           Ready to execute — {queued} queued
         </BtnSecondary>
         <BtnPrimary onClick={onNewTask} className="h-8 gap-[7px] px-[13px] text-xs">

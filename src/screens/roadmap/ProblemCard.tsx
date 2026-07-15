@@ -52,13 +52,13 @@ const Detail = ({ children }: { children: ReactNode }) => (
 );
 
 const Primary = ({ label, onClick }: { label: string; onClick?: () => void }) => (
-  <BtnPrimary className="h-[31px] px-3 text-[12.5px]" onClick={onClick}>
+  <BtnPrimary size="md" onClick={onClick}>
     {label}
   </BtnPrimary>
 );
 
 const Secondary = ({ label, onClick }: { label: string; onClick?: () => void }) => (
-  <BtnSecondary className="h-[31px] px-3 text-[12.5px]" onClick={onClick}>
+  <BtnSecondary size="md" onClick={onClick}>
     {label}
   </BtnSecondary>
 );

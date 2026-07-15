@@ -115,10 +115,10 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
           in the project is touched.
         </div>
         <div className="flex justify-end gap-2">
-          <BtnSecondary onClick={p.onNotYet} className="h-[33px] px-[13px] text-[12.5px]">
+          <BtnSecondary size="md" onClick={p.onNotYet}>
             Not yet
           </BtnSecondary>
-          <BtnPrimary onClick={p.onConfirm} className="h-[33px] px-[13px] text-[12.5px]">
+          <BtnPrimary size="md" onClick={p.onConfirm}>
             Write the fix plan
           </BtnPrimary>
         </div>
@@ -157,7 +157,7 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
           </div>
         </div>
         <div className="flex justify-end">
-          <BtnSecondary onClick={p.onCancel} className="h-[31px] px-3 text-xs">
+          <BtnSecondary onClick={p.onCancel} >
             Cancel
           </BtnSecondary>
         </div>
@@ -183,7 +183,7 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
         {AGENT_NAME[p.agent ?? "claude"]} and the prompt on your clipboard.
       </div>
       <div>
-        <BtnPrimary onClick={p.onStartRound} className="h-[31px] gap-[7px] px-3 text-xs">
+        <BtnPrimary size="md" onClick={p.onStartRound} className="gap-[7px]">
           Start the round
         </BtnPrimary>
       </div>

@@ -108,7 +108,7 @@ export const XGlyph = ({ size = 9, ...p }: P) => (
 
 /** Claude starburst — brand colour, one of the two chroma exceptions. */
 export const ClaudeStar = ({ size = 14 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="#D97757">
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="#D97757" className="agent-mark">
     <path d="M8 0.8 9.4 5 13.8 3.2 10.9 6.9 15.2 8.6 10.6 9.2 12.3 13.6 8.6 10.7 6.9 15 6.3 10.4 1.9 12.1 4.8 8.4 0.5 6.7 5.1 6.1 3.4 1.7 7.1 4.6z" />
   </svg>
 );
@@ -116,7 +116,7 @@ export const ClaudeStar = ({ size = 14 }: { size?: number }) => (
 /** Codex tile — brand gradient, the other chroma exception. */
 export const CodexTile = ({ size = 15 }: { size?: number }) => (
   <span
-    className="inline-block rounded-[5px]"
+    className="agent-mark inline-block rounded-[5px]"
     style={{ width: size, height: size, background: "linear-gradient(135deg,#6ba6ff,#2563eb)" }}
   />
 );

@@ -77,7 +77,7 @@ export function RecentCard({
           <span className="text-text-subtle">It may have been moved or renamed.</span>
         </div>
         <div className="flex gap-2">
-          <BtnSecondary className="h-[29px] px-3 text-[12.5px]" onClick={() => onLocate?.(project.path)}>
+          <BtnSecondary size="sm" onClick={() => onLocate?.(project.path)}>
             Locate…
           </BtnSecondary>
           <button
