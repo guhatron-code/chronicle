@@ -23,6 +23,46 @@ export type ProjectTab = {
 
 const MAX_VISIBLE_TABS = 4;
 
+/** The window lights — quiet monochrome dots at rest; hovering the cluster
+ * shows the real macOS colours and glyphs (close ×, minimize −, zoom ⤢). */
+export function TrafficLights() {
+  const dot =
+    "group/tl flex size-3 items-center justify-center rounded-full border border-border-strong bg-fill-hover " +
+    "transition-colors duration-100 [&_svg]:opacity-0 group-hover/lights:[&_svg]:opacity-100";
+  const glyph = "text-black/50";
+  return (
+    <div className="group/lights flex gap-2">
+      <button
+        aria-label="Close window"
+        onClick={() => void windowControls().close()}
+        className={cn(dot, "group-hover/lights:border-[#e0443e] group-hover/lights:bg-[#ff5f57]")}
+      >
+        <svg width="6" height="6" viewBox="0 0 6 6" stroke="currentColor" strokeWidth="1.1" className={glyph}>
+          <path d="M1 1l4 4M5 1L1 5" />
+        </svg>
+      </button>
+      <button
+        aria-label="Minimize window"
+        onClick={() => void windowControls().minimize()}
+        className={cn(dot, "group-hover/lights:border-[#dea123] group-hover/lights:bg-[#febc2e]")}
+      >
+        <svg width="6" height="6" viewBox="0 0 6 6" stroke="currentColor" strokeWidth="1.1" className={glyph}>
+          <path d="M0.5 3h5" />
+        </svg>
+      </button>
+      <button
+        aria-label="Zoom window"
+        onClick={() => void windowControls().toggleMaximize()}
+        className={cn(dot, "group-hover/lights:border-[#1f9a31] group-hover/lights:bg-[#28c840]")}
+      >
+        <svg width="6" height="6" viewBox="0 0 6 6" fill="currentColor" className={glyph}>
+          <path d="M1 3.6V1h2.6zM5 2.4V5H2.4z" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 export function TitleBar({
   tabs,
   activeDir,
@@ -65,14 +105,7 @@ export function TitleBar({
       }}
       className="flex h-11 shrink-0 items-center gap-3 border-b border-divider px-3.5"
     >
-      <div className="flex gap-2">
-        <button aria-label="Close window" onClick={() => void windowControls().close()}
-          className="size-3 rounded-full border border-border-strong bg-fill-hover" />
-        <button aria-label="Minimize window" onClick={() => void windowControls().minimize()}
-          className="size-3 rounded-full border border-border-strong bg-fill-hover" />
-        <button aria-label="Zoom window" onClick={() => void windowControls().toggleMaximize()}
-          className="size-3 rounded-full border border-border-strong bg-fill-hover" />
-      </div>
+      <TrafficLights />
       <button
         aria-label="Home — all projects"
         title="Home — all projects"

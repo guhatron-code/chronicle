@@ -45,6 +45,7 @@ import {
   termsFor,
 } from "@/lib/term-sessions";
 import type { TerminalTab } from "@/components/chrome/TerminalColumn";
+import { TrafficLights } from "@/components/chrome/TitleBar";
 import { KanbanPane } from "@/screens/kanban/KanbanPane";
 import { evictKanban, kanbanFor, openTaskInKanban, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { announce } from "@/lib/journal";
@@ -594,12 +595,7 @@ export default function App() {
           }}
           className="flex h-11 shrink-0 items-center gap-2 px-4"
         >
-          <button aria-label="Close window" onClick={() => void windowControls().close()}
-            className="size-3 rounded-full border border-border-strong bg-fill-hover" />
-          <button aria-label="Minimize window" onClick={() => void windowControls().minimize()}
-            className="size-3 rounded-full border border-border-strong bg-fill-hover" />
-          <button aria-label="Zoom window" onClick={() => void windowControls().toggleMaximize()}
-            className="size-3 rounded-full border border-border-strong bg-fill-hover" />
+          <TrafficLights />
         </div>
         <div className="min-h-0 flex-1">
           <Picker
