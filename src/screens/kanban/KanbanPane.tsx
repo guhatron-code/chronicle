@@ -419,7 +419,7 @@ export function KanbanPane({
           aria-label={draft.mode === "create" ? "New task" : `Edit ${draft.task.id}`}
           tabIndex={-1}
           ref={(el) => { if (el && !el.contains(document.activeElement)) el.focus(); }}
-          className="absolute inset-0 z-40 flex items-center justify-center bg-black/45 p-6 outline-none"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-6 outline-none"
           onMouseDown={(e) => { if (e.target === e.currentTarget) closeDraft(); }}
           onKeyDown={(e) => { if (e.key === "Escape") closeDraft(); }}
         >
@@ -492,7 +492,7 @@ export function KanbanPane({
           aria-label="Ready to execute"
           tabIndex={-1}
           ref={(el) => { if (el && !el.contains(document.activeElement)) el.focus(); }}
-          className="absolute inset-0 z-40 flex items-center justify-center bg-black/45 p-6 outline-none"
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-6 outline-none"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget && flow.kind !== "generating") setFlow({ kind: "idle" });
           }}

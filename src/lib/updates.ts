@@ -29,15 +29,14 @@ export function updateAvailable(): UpdateState | null {
   return state;
 }
 
-const CHECK_KEY = "chronicle.update.checked";
 const DISMISS_KEY = "chronicle.update.dismissed";
-const DAY_MS = 20 * 60 * 60_000; // ~daily, forgiving of launch-time jitter
+let checkedThisSession = false;
 
-/** Throttled check — call freely; it self-limits to ~once a day. */
+/** Checks once per LAUNCH (a launch is one cheap request — a cross-launch
+ * throttle once swallowed a release for 20 hours). force re-checks any time. */
 export async function checkForUpdate(force = false): Promise<void> {
-  const last = Number(localStorage.getItem(CHECK_KEY)) || 0;
-  if (!force && Date.now() - last < DAY_MS) return;
-  localStorage.setItem(CHECK_KEY, String(Date.now()));
+  if (!force && checkedThisSession) return;
+  checkedThisSession = true;
   try {
     const upd = await check();
     if (upd && localStorage.getItem(DISMISS_KEY) !== upd.version) {

@@ -527,6 +527,12 @@ export default function App() {
         githubError={ghError}
         cloningRepo={cloningRepo}
         onCloneRepo={cloneRepo}
+        onCheckUpdates={() => {
+          setPaletteOpen(false);
+          void checkForUpdate(true).then(() => {
+            if (!updateAvailable()) toastSuccess("You're on the latest version");
+          });
+        }}
         onGithubSetup={() => {
           void copyText("gh auth login")
             .then(() => toastSuccess("Copied the command", "Paste `gh auth login` in the terminal, then reopen the palette"))

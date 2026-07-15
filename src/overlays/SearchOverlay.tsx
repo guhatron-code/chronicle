@@ -75,7 +75,7 @@ export function SearchOverlay({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="top-14 max-w-[600px] translate-y-0 gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 [box-shadow:var(--shadow-overlay)] sm:max-w-[600px]"
+        className="max-w-[600px] gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 [box-shadow:var(--shadow-overlay)] sm:max-w-[600px]"
       >
         <DialogTitle className="sr-only">Search this project</DialogTitle>
         <Command

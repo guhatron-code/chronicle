@@ -14,7 +14,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { Kbd, MarkTile, StateWord, type StateKind, type MarkIndex } from "@/components/chrome/atoms";
-import { FolderGlyph, PlusGlyph } from "@/components/chrome/icons";
+import { FolderGlyph, PlusGlyph, RefreshGlyph } from "@/components/chrome/icons";
 
 export type PaletteProject = {
   path: string;
@@ -46,6 +46,7 @@ export function CommandPalette({
   onNewProject,
   onCloneRepo,
   onGithubSetup,
+  onCheckUpdates,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -63,6 +64,7 @@ export function CommandPalette({
   onNewProject: () => void;
   onCloneRepo?: (nameWithOwner: string) => void;
   onGithubSetup?: () => void;
+  onCheckUpdates?: () => void;
 }) {
   const row = (p: PaletteProject, kbd?: string) => (
     <>
@@ -81,7 +83,7 @@ export function CommandPalette({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="top-14 max-w-[560px] translate-y-0 gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 [box-shadow:var(--shadow-overlay)] sm:max-w-[560px]"
+        className="max-w-[560px] gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 [box-shadow:var(--shadow-overlay)] sm:max-w-[560px]"
       >
         <DialogTitle className="sr-only">Project switcher</DialogTitle>
         <Command
@@ -206,6 +208,16 @@ export function CommandPalette({
                 <PlusGlyph />
                 <span className="text-[13px]">New blank project…</span>
               </CommandItem>
+              {onCheckUpdates && (
+                <CommandItem
+                  value="check for updates"
+                  onSelect={onCheckUpdates}
+                  className="gap-2.5 rounded-md px-2.5 py-2 text-text-secondary data-[selected=true]:bg-fill-hover"
+                >
+                  <RefreshGlyph size={13} />
+                  <span className="text-[13px]">Check for updates</span>
+                </CommandItem>
+              )}
             </CommandGroup>
           </CommandList>
 
