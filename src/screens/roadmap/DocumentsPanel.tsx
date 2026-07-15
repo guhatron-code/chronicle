@@ -10,7 +10,7 @@ export type DocChipProps =
   | { kind: "default"; name: string; onCopy?: () => void }
   | { kind: "copied"; name: string }
   | { kind: "missing"; name: string; note: string } // e.g. "not written yet"
-  | { kind: "paste"; name: string; hint: string; onCopy?: () => void } // e.g. "→ Claude Code, when R-1 starts"
+  | { kind: "paste"; name: string; hint: string; note?: string; onCopy?: () => void } // chip: "→ Claude Code" · note renders OUTSIDE
   | { kind: "ghost"; name: string; note: string }; // e.g. "written when EL-1 begins"
 
 export function DocChip(p: DocChipProps) {
@@ -42,7 +42,7 @@ export function DocChip(p: DocChipProps) {
   return (
     <button
       onClick={p.onCopy}
-      className="inline-flex h-[30px] items-center gap-[7px] rounded-md border border-border-hairline bg-surface-card-raised px-[11px] font-mono text-xs text-text-secondary hover:border-border-strong hover:text-text-primary"
+      className="inline-flex h-[30px] shrink-0 items-center gap-[7px] whitespace-nowrap rounded-md border border-border-hairline bg-surface-card-raised px-[11px] font-mono text-xs text-text-secondary hover:border-border-strong hover:text-text-primary"
     >
       {p.kind === "default" && <DocGlyph size={12} />}
       {p.name}
@@ -71,10 +71,20 @@ export function DocumentsPanel({ chips, className }: DocumentsPanelProps) {
         <span className="text-[11.5px] text-text-dim">click a file to copy it</span>
       </div>
       <div className="flex flex-wrap gap-2">
-        {chips.map((chip, i) => (
+        {chips.filter((c) => c.kind !== "paste").map((chip, i) => (
           <DocChip key={`${chip.name}-${i}`} {...chip} />
         ))}
       </div>
+      {chips.filter((c) => c.kind === "paste").map((chip, i) => (
+        // a paste target is a row: the chip stays one line; the when-note is
+        // plain prose OUTSIDE it (C4 law: into IN the chip, note OUTSIDE)
+        <div key={`p-${chip.name}-${i}`} className="flex flex-wrap items-center gap-2.5">
+          <DocChip {...chip} />
+          {chip.kind === "paste" && chip.note && (
+            <span className="text-[11.5px] leading-[1.5] text-text-subtle">{chip.note}</span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

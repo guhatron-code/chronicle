@@ -456,11 +456,11 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     const nowPhase = ni2 >= 0 ? phases[ni2] : undefined;
     for (const c of nowPhase?.paste ?? []) {
       const name = c.path ? (c.path.split("/").pop() ?? "") : (c.label ?? "");
-      const hint = `→ ${c.into ?? ""}${c.when ? `, ${c.when}` : ""}`;
+      const hint = `→ ${c.into ?? ""}`;
       if (c.path && s.docs[c.path]) {
         const path = c.path;
         if (ctx.copiedPath === path) chips.push({ kind: "copied", name });
-        else chips.push({ kind: "paste", name, hint, onCopy: () => H.onCopyDoc(path) });
+        else chips.push({ kind: "paste", name, hint, note: c.when, onCopy: () => H.onCopyDoc(path) });
       } else {
         chips.push({ kind: "ghost", name, note: c.when ?? "not written yet" });
       }
