@@ -82,7 +82,7 @@ export type HistoryPaneProps = {
   onDiscard?: (path: string) => void;
   onPush?: () => void;
   onPull?: () => void;
-  onCopySetup?: () => void;
+  onCreateOnline?: () => void;
   onCommit?: (hash: string) => void;
   onShowMore?: () => void;
   onStartHistory?: () => void;
@@ -217,12 +217,12 @@ function PublishFooter({
   publish,
   onPush,
   onPull,
-  onCopySetup,
+  onCreateOnline,
 }: {
   publish: PublishState;
   onPush?: () => void;
   onPull?: () => void;
-  onCopySetup?: () => void;
+  onCreateOnline?: () => void;
 }) {
   if (publish.kind === "published") {
     return (
@@ -237,16 +237,12 @@ function PublishFooter({
       <div className="flex flex-col gap-2 border-t border-divider px-[18px] py-3.5">
         <div className="flex items-center gap-2">
           <span className="flex-1 text-[12.5px] text-text-secondary">Not on GitHub yet</span>
-          <button
-            onClick={onCopySetup}
-            className="h-7 shrink-0 rounded-md border border-border-strong px-[11px] text-[11.5px] font-medium text-text-primary hover:bg-fill-hover"
-          >
-            Copy the setup command
-          </button>
+          <BtnPrimary size="sm" onClick={onCreateOnline}>
+            Put it on GitHub
+          </BtnPrimary>
         </div>
         <div className="text-[11px] text-text-dim">
-          Copies a command — paste it in the terminal. Chronicle doesn't create the online copy
-          itself.
+          Creates a private repository under your account and publishes — using your gh sign-in.
         </div>
       </div>
     );
@@ -518,7 +514,7 @@ export function HistoryPane(p: HistoryPaneProps) {
             publish={s.publish}
             onPush={p.onPush}
             onPull={p.onPull}
-            onCopySetup={p.onCopySetup}
+            onCreateOnline={p.onCreateOnline}
           />
         </div>
 

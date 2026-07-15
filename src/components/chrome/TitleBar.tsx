@@ -27,6 +27,7 @@ export function TitleBar({
   tabs,
   activeDir,
   checkedAt,
+  update,
   degraded,
   onSwitch,
   onClose,
@@ -36,6 +37,8 @@ export function TitleBar({
   tabs: ProjectTab[];
   activeDir: string;
   checkedAt: string | null;
+  /** A newer Chronicle is ready — the quiet right-side affordance. */
+  update?: { version: string; busy: boolean; onInstall: () => void; onDismiss: () => void } | null;
   degraded: string | null;
   onSwitch: (dir: string) => void;
   onClose: (dir: string) => void;
@@ -159,6 +162,27 @@ export function TitleBar({
       </div>
 
       <span className="flex-1" data-tauri-drag-region />
+      {update && (
+        <span className="mr-3 inline-flex shrink-0 items-center gap-2 text-[11.5px]">
+          <span className="text-text-secondary">Chronicle {update.version} is ready</span>
+          <button
+            disabled={update.busy}
+            onClick={update.onInstall}
+            className="font-medium text-text-primary underline underline-offset-2 hover:text-text-secondary disabled:opacity-55"
+          >
+            {update.busy ? "Updating…" : "Update"}
+          </button>
+          {!update.busy && (
+            <button
+              aria-label="Dismiss the update notice"
+              onClick={update.onDismiss}
+              className="flex size-4 items-center justify-center rounded-[4px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+            >
+              <XGlyph size={8} />
+            </button>
+          )}
+        </span>
+      )}
       {degraded ? (
         <span className="inline-flex items-center gap-1.5 text-[11.5px] text-text-subtle">
           <ErrorGlyph size={11} strokeWidth={1.4} />

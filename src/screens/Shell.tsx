@@ -20,6 +20,7 @@ export function Shell({
   pane,
   onPane,
   checkedAt,
+  update,
   degraded,
   queuedCount,
   checking,
@@ -47,6 +48,7 @@ export function Shell({
   pane: Pane;
   onPane: (p: Pane) => void;
   checkedAt: string | null;
+  update?: { version: string; busy: boolean; onInstall: () => void; onDismiss: () => void } | null;
   degraded: string | null;
   queuedCount: number;
   checking?: boolean;
@@ -116,6 +118,7 @@ export function Shell({
         tabs={tabs}
         activeDir={activeDir}
         checkedAt={checkedAt}
+        update={update}
         degraded={degraded}
         onSwitch={onSwitch}
         onClose={onClose}

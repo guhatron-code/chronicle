@@ -363,6 +363,18 @@ export default function App() {
       .finally(() => setCloningRepo(null));
   }, [cloningRepo, doOpenProject]);
 
+  const updateProps = updateAvailable()
+    ? {
+        version: updateAvailable()!.version,
+        busy: updateAvailable()!.busy,
+        onInstall: () =>
+          void installUpdate().catch((e) =>
+            toastError("The update didn't finish", String(e).slice(0, 90)),
+          ),
+        onDismiss: dismissUpdate,
+      }
+    : null;
+
   const openDialog = useCallback(() => {
     setPaletteOpen(false);
     pickFolder()
@@ -592,19 +604,7 @@ export default function App() {
         <div className="min-h-0 flex-1">
           <Picker
             recents={recents}
-            update={
-              updateAvailable()
-                ? {
-                    version: updateAvailable()!.version,
-                    busy: updateAvailable()!.busy,
-                    onInstall: () =>
-                      void installUpdate().catch((e) =>
-                        toastError("The update didn't finish", String(e).slice(0, 90)),
-                      ),
-                    onDismiss: dismissUpdate,
-                  }
-                : null
-            }
+            update={updateProps}
             onOpenDialog={openDialog}
             onNewProject={() => { setNewProjError(null); setNewProjOpen(true); }}
             onOpenProject={doOpenProject}
@@ -631,6 +631,7 @@ export default function App() {
         pane={pane}
         onPane={setPane}
         checkedAt={active.state?.checked_at ?? null}
+        update={updateProps}
         degraded={degraded}
         queuedCount={queuedCountFor(active.dir)}
         checking={checking}

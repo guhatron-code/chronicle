@@ -309,6 +309,8 @@ export interface GithubRepo {
 export const githubRepos = () => invoke<GithubRepo[]>("github_repos");
 /** Clone into ~/Documents/GitHub (reused if already there); returns the path. */
 export const githubClone = (repo: string) => invoke<string>("github_clone", { repo });
+/** Create the private online copy and publish; returns the repo name. */
+export const githubCreate = (dir: string) => invoke<string>("github_create", { dir });
 
 /** The roadmap state as sendable markdown (F7). */
 export const statusReport = (dir: string) => invoke<string>("status_report", { dir });

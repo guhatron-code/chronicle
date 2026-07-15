@@ -16,6 +16,7 @@ import {
   gitPush,
   gitWorktreePrune,
   execLogPath,
+  githubCreate,
   journalRead,
   statusReport,
   initCancel,
@@ -524,6 +525,23 @@ export function RoadmapPane({
       },
       onAction: (id, arg) => {
         if (publishing) return; // single-flight: no double-fire while one runs
+        if (id === "github") {
+          // creating the online copy is outward-facing — always confirmed
+          onConfirm({
+            title: "Put this project on GitHub?",
+            body: `Creates a private repository "${arg}" under your GitHub account and publishes every save — using your gh sign-in. You can make it public on GitHub any time.`,
+            cancelLabel: "Not yet",
+            confirmLabel: "Create and publish",
+            onConfirm: () => {
+              setPublishing(true);
+              githubCreate(dir)
+                .then((name) => { toastSuccess("Published online", `${name} — private, under your account`); onPollNow(); })
+                .catch((e) => toastError("That didn't finish", humanGitError(e)))
+                .finally(() => setPublishing(false));
+            },
+          });
+          return;
+        }
         const run = async () => {
           setPublishing(true);
           try {

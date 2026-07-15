@@ -186,10 +186,10 @@ export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
         rows.push({
           id: "github", icon: createElement(UploadGlyph, { size: 14 }),
           title: "Put this project on GitHub",
-          sub: "It has no online home yet. Copies a command — paste it in the terminal.",
+          sub: "It has no online home yet. Chronicle creates a private repo under your account and publishes.",
           command: cmd,
-          kind: "one-click", hi: rows.length === 0, actionLabel: "Copy the setup command",
-          onAction: () => H.onCopyCommand(cmd),
+          kind: "one-click", hi: rows.length === 0, primary: true, actionLabel: "Put it on GitHub",
+          onAction: () => H.onAction("github", slug),
         });
       } else {
         rows.push({

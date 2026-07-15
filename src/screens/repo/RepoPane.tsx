@@ -11,6 +11,7 @@ import type { ViewerBody, ViewerProps } from "./Viewer";
 import type { HistoryPaneProps, HistoryReady } from "./HistoryPane";
 import {
   IMG_MIME,
+  githubCreate,
   copyFile as copyFileIpc,
   copyText,
   gitCommit,
@@ -508,10 +509,19 @@ export function RepoPane({
         },
         onPush: () => { gitPush(dir).then(() => afterGitOp("Published")).catch(opError("Couldn't publish")); },
         onPull: () => { gitPull(dir).then(() => afterGitOp("Brought down the newer saves")).catch(opError("Couldn't bring them down")); },
-        onCopySetup: () => {
-          copyText(`gh repo create ${slug} --private --source=. --push`)
-            .then(() => toastSuccess("Command copied", "Paste it into a terminal to put this project on GitHub"))
-            .catch(opError("Couldn't copy it"));
+        onCreateOnline: () => {
+          const repoName = slug.replace(/[^a-zA-Z0-9._-]/g, "-");
+          onConfirm({
+            title: "Put this project on GitHub?",
+            body: `Creates a private repository "${repoName}" under your GitHub account and publishes every save — using your gh sign-in. You can make it public on GitHub any time.`,
+            cancelLabel: "Not yet",
+            confirmLabel: "Create and publish",
+            onConfirm: () => {
+              githubCreate(dir)
+                .then((name) => afterGitOp(`Published online — ${name}`))
+                .catch(opError("Couldn't publish"));
+            },
+          });
         },
         onCommit: (hash) => {
           copyText(hash).then(() => toastSuccess("Save id copied")).catch(() => {});
