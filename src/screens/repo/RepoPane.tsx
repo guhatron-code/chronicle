@@ -48,6 +48,7 @@ import {
   type GitStatus,
 } from "@/lib/repo-data";
 import { toastError, toastSuccess } from "@/overlays/toasts";
+import { listen } from "@tauri-apps/api/event";
 import { humanError, humanGitError } from "@/lib/utils";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
@@ -216,6 +217,28 @@ export function RepoPane({
       });
   }, [dir, state?.branch]);
 
+  /* the tree follows the disk: re-list every already-loaded directory and
+     commit only real changes — a PRD the agent just wrote must appear without
+     collapsing what the user expanded (loads for unopened dirs stay lazy) */
+  const refreshTree = useCallback(() => {
+    const d = dir;
+    for (const [path, load] of stateFor(d).loads) {
+      if (load.kind !== "ready") continue;
+      listDir(d, path)
+        .then((entries) => {
+          if (dirRef.current !== d) return;
+          const cur = stateFor(d).loads.get(path);
+          if (!cur || cur.kind !== "ready") return;
+          const next = Array.isArray(entries) ? entries : [];
+          if (JSON.stringify(next) !== JSON.stringify(cur.entries)) {
+            stateFor(d).loads.set(path, { kind: "ready", entries: next });
+            rerender();
+          }
+        })
+        .catch(() => {/* transient — the next tick retries */});
+    }
+  }, [dir, rerender]);
+
   /* freshness: re-stat open tabs; flag the ones that changed on disk */
   const checkFreshness = useCallback(() => {
     const d = dir;
@@ -248,14 +271,28 @@ export function RepoPane({
   useEffect(() => {
     refreshGit();
     checkFreshness();
+    refreshTree();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkedAt]);
 
   useEffect(() => {
-    const onFocus = () => checkFreshness();
+    const onFocus = () => { checkFreshness(); refreshTree(); };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [checkFreshness]);
+  }, [checkFreshness, refreshTree]);
+
+  /* the watcher is the tree's real trigger — checked_at only ticks per poll
+     (second granularity), but a file the agent just wrote should appear now */
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    let t: ReturnType<typeof setTimeout> | undefined;
+    void listen<string>("project-fs-changed", (ev) => {
+      if (ev.payload !== dir) return;
+      if (t) clearTimeout(t);
+      t = setTimeout(() => { refreshTree(); checkFreshness(); }, 450);
+    }).then((u) => { un = u; });
+    return () => { if (t) clearTimeout(t); un?.(); };
+  }, [dir, refreshTree, checkFreshness]);
 
   /* ---- the viewer: open / load / mode / freshness ---- */
 
