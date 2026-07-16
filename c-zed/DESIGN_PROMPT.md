@@ -1,0 +1,102 @@
+# Claude Design prompt — Chronicle Agent (the Zed update, Deck 7)
+
+You are designing the **Agent pane** for Chronicle, plus four small existing-surface
+amendments. Everything renders inside the shipped Chronicle app — match it exactly.
+
+## Context you must honor
+
+- **The product**: Chronicle is a calm, local-first macOS studio for a NON-developer
+  tracking AI-driven builds. Register: plain-spoken, honest, one glance = one next
+  step. Vocabulary law: save/publish/undo — never commit/push/revert. Sentence case
+  for every statement. Errors say what happened and what to do next, no apologies.
+- **The design system**: the Weave DS bridge already in the app — dark default,
+  `[data-theme="light"]` first-class, tokens only (no raw hex anywhere), radius scale
+  sm 6 / md 8 / lg 10, button scale sm 28 / md 33 / lg 36, mono for paths/ids/numeric
+  metadata, 2px scrollbars, FLAT sections separated by dividers (cards only for
+  alerts + phase cards), chips are one-line pills — name + destination inside,
+  explanatory prose OUTSIDE the pill. Existing atoms to reuse, not reinvent:
+  IdChip, StateWord (dot+word, never color-only), PasteChip, BtnPrimary/BtnSecondary,
+  Eyebrow, Kbd, Spinner, the Claude starburst + Codex gradient marks.
+- **What the pane is**: a chat thread driving Claude Code through a structured
+  protocol. The agent streams text, runs tools (edit files, run commands, read
+  files), and ASKS PERMISSION before acting in ask mode. Every file edit is
+  reviewable and undoable; every user message is preceded by a snapshot the user can
+  restore ("undo everything since this message").
+
+## Deck 7 — frames (design every state listed; cuts must be explicit)
+
+**F31 · The pane at rest (empty state).** Rail gains an Agent destination (4th icon).
+Empty thread: quiet hero — the Claude mark, "Ask for anything." and one sentence:
+"Chronicle asks before the agent touches your project." Composer docked at the bottom.
+
+**F32 · The composer.** Multiline input (⌘Enter sends, stated as a Kbd hint), a
+Stop button that replaces Send while the agent is working, the mode control —
+two-state: **Asks first** (default) / **Works freely** — and a quiet one-line usage
+meter (e.g. "31k of 200k"). States: idle · agent-working (Stop visible, input still
+editable) · disconnected ("The agent bridge isn't running — Start it").
+
+**F33 · Thread entries.**
+- User message: right-weighted block, no bubble chrome wars — flat, divider-separated.
+- Assistant message: streaming markdown (headings, lists, fenced code, quotes — the
+  app's mini-md styles), with a subtle in-progress shimmer ONLY while streaming.
+- The checkpoint row: a thin divider above each user message with a small
+  "↺ Undo to here" affordance (hover-revealed), plus its confirm dialog copy:
+  "Put the project back the way it was before this message? Files the agent changed
+  after it are restored. Your conversation stays."
+
+**F34 · Tool cards (the heart of the pane).** One compact card anatomy, kind-aware:
+- Edit: "Edited `src/App.tsx`" + a ±stat chip + "View the changes" affordance.
+- Run: "Ran `npm test`" + a state word (running/finished/failed) + expandable output
+  (mono, capped height, 2px scrollbar).
+- Read: "Read `PLAN.md`" — quietest treatment, collapses to one line.
+- States for every kind: in-progress (spinner) · done · failed (honest error line) ·
+  rejected ("You said no — skipped").
+- Long paths truncate middle; cards never wrap their title line.
+
+**F35 · The permission card.** The thread's consent moment, inline (not a modal):
+"The agent wants to run `rm -rf node_modules`" + plain-language framing when the
+command is risky, two buttons — Allow (primary) / Don't allow — and a third quiet
+option "Always allow in this session" ONLY for edit-kind requests. Waiting state
+pulses the state dot; answered state collapses to a one-line record ("You allowed
+this" / "You said no").
+
+**F36 · The review strip + review flow.** When the agent has changed files, a
+persistent strip above the composer: "4 files changed · Review · Keep all · Undo all".
+Review opens the existing repo diff viewer with a per-file action bar (Keep / Undo
+this file) and a running count. Design the strip, the viewer's action bar amendment,
+and the empty-after-review resolution state ("All changes kept").
+
+**F37 · Session header + history.** Top bar of the pane: the Claude mark (colored),
+session state word (working / waiting on you / idle / ended), End session, and a
+lightweight history affordance (previous sessions by date, resume). Design the list
+row: first-message excerpt + relative time + resume.
+
+**F38 · Phase-start integration.** The phase detail's action row amended: primary
+"Start with the agent", secondary "Run in a terminal". The agent pane opening with a
+preloaded draft (the phase prompt as an unsent composer draft with a small chip:
+"R-2 prompt loaded — review and send").
+
+**F39 · Round-in-pane.** The kanban's "Run the round for me" now lands in the agent
+pane: a session whose first card is the round's plan ("Round 5 · 12 tasks"), tool
+cards streaming beneath, and the board's tasks ticking (already built) — design the
+round header card + its done/failed terminal states.
+
+**F40 · Amendments (small, four of them).**
+1. Terminal tabs: a live foreground-status treatment — the existing tab + a state
+   word when a known agent runs ("claude · working") vs idle.
+2. Terminal path links: the hover treatment for a detected path (`src/App.tsx:42`) —
+   underline-on-hover + ⌘-click hint tooltip.
+3. The title-bar update line's new states: "Checking…", "Downloading 42%",
+   "Installing…", "Restart to finish".
+4. Publish/bring-down toasts with the new plain-language results ("Pushed 3 saves to
+   origin", "Synchronized — nothing new") and the PR-hint variant with a
+   "Create a pull request" action.
+
+## Deliverable
+
+One deck (`.dc.html`, same format as Decks 1–6) with every frame + state above,
+1:1 buildable: real paddings, tokens by name, exact type sizes on the app's scale
+(11.5/12.5/13/15), light AND dark. No new colors: the only chroma remains the two
+agent marks and the state palette. If any frame conflicts with the shipped app's
+conventions, the app's conventions win — flag the conflict in a note rather than
+diverging silently.
