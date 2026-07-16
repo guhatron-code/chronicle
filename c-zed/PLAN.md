@@ -26,7 +26,7 @@ undo an entire answer with one click. The terminal stays for power use.
 
 | # | Feature | Why it earns its place |
 |---|---------|------------------------|
-| A | **The Agent pane** — chat thread over ACP: streaming markdown, plain-language tool cards, permission handshake, stop/cancel, session resume, light usage line, ask/auto mode toggle | The core of the update — Chronicle finally *drives* the agent instead of watching it |
+| A | **The Agent pane** — chat thread over ACP: streaming markdown, plain-language tool cards, permission handshake, stop/cancel, session resume, light usage line, the Asks-first / Works-freely mode control | The core of the update — Chronicle finally *drives* the agent instead of watching it |
 | B | **Edit review** — every agent file-edit tracked as a diff; a review strip ("4 files changed · Review"); keep/undo per file, Keep all / Undo all; diffs render in the existing repo viewer | The single biggest trust feature for a non-developer: *see what the AI changed, undo any part* |
 | C | **Checkpoints** — a git-plumbing snapshot of the working tree before each user message; "Undo everything since this message" restores it | Cheap (we already speak git), and it converts fear into willingness to let the agent work |
 | D | **Integrations** — "Start this phase" preloads the agent pane with the phase prompt (a NEW secondary "Run in a terminal" appears beside it — today the row has only one action); kanban "Run the round for me" runs *in the agent pane* with visible cards instead of a log tail | Makes it the *Chronicle* agent — wired into the roadmap and rounds, not a bolt-on chat |
@@ -40,7 +40,7 @@ undo an entire answer with one click. The terminal stays for power use.
 
 - **Agent registry / multi-agent marketplace** — we pin ONE adapter version ourselves; Codex-over-ACP can come later if its adapter matures. Registry plumbing is bloat for a single-user tool.
 - **Native agent, tool suite, LLM-provider registry, model picker** — Chronicle delegates the brain to Claude Code entirely. The adapter owns model choice (we keep our per-job `--model` pinning for headless work).
-- **Profiles / per-tool permission maps** — ACP session modes (ask / auto) are the whole permission story. Two modes, one toggle.
+- **Profiles / per-tool permission maps** — permissioning is ACP-native: two session modes (Asks first / Works freely) plus the per-request options each permission card carries from the agent. No Zed-style profile system on top.
 - **Follow-the-agent mode, collab, channels, screen-share** — single-user app; the fs-watcher + explorer already show changes live.
 - **Extensions/WASM, inline assistant, multibuffer, skills browser** — editor concepts; Chronicle's skill ships inside the app already.
 - **Queued messages, thread archive/import, which-key, onboarding pages, Mermaid, branch/stash pickers, blame** — nice, not now; each is deferred, not rejected. Revisit after the agent lands.
@@ -235,7 +235,7 @@ other surface:
   and installing-the-bridge states.
 - **Z-3 · Edits + checkpoints.** The ledger, ReviewStrip, viewer keep/undo, checkpoint
   snapshot/restore. Probes: scripted write_text_file events produce reviewable diffs;
-  undo restores byte-identical files (rust test).
+  undo round-trips created + deleted + modified files, tracked and untracked (rust test).
 - **Z-4 · Integrations + history.** Phase-start preload, round-in-pane,
   journal/notify hooks, the session store + history list + capability-gated resume.
   Probe: featwire-style flows + resume/read-only fallback.

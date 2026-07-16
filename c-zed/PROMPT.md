@@ -13,8 +13,8 @@ phases Z-1 and the refinements' backend halves may proceed comp-free).
    was verified, commit hash). Small commits on `react-shadcn`, synced to main via
    `git push . react-shadcn:main && git push origin main react-shadcn`.
 2. **Verify, don't assert.** Rust: `cargo test` (all existing tests stay green; new
-   seams get tests — the checkpoint restore MUST have a byte-identical round-trip
-   test). Frontend: `npx tsc --noEmit` + `npx vite build` + the Playwright probe
+   seams get tests — the checkpoint restore MUST round-trip created, deleted, AND
+   modified files, tracked and untracked; byte-identity alone passes a broken restore). Frontend: `npx tsc --noEmit` + `npx vite build` + the Playwright probe
    harness. Probes live in the session scratchpad, run their own vite on port 4321+
    with the `PORT` env, stub `__TAURI_INTERNALS__`, and **any stub that overrides a
    command must also log it**. Never `pkill -f vite`. Delete nothing in the scratchpad
