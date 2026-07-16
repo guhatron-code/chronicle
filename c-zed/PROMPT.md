@@ -37,25 +37,47 @@ phases Z-1 and the refinements' backend halves may proceed comp-free).
 
 ## Phase specifics
 
-- **Z-1 (ACP client)**: add `agent-client-protocol = "=1.1.0"` (types only) and build
+- **Z-1 (ACP client)**: add **`agent-client-protocol-schema`** (pure types — the
+  parent crate drags async/transport deps; unstable-only surfaces like usage updates
+  are optional-consume) and build
   the stdio JSON-RPC loop as plain threads + channels (mirror the pty reader pattern).
   Commands: `agent_session_start/prompt/cancel/set_mode/respond_permission/session_stop`
   + `acp-update` events. Include an integration test behind `#[ignore]` +
   a `CHRONICLE_ACP_TEST=1` env gate that runs against the real adapter when npx exists.
-  The adapter spawn: `npx --yes @zed-industries/claude-code-acp@<PIN>` — verify the
-  package name against the npm registry before pinning; if it differs, document the
-  correction in PROGRESS.md.
-- **Z-2 (pane)**: build the comps 100%, then wire. The probe suite must drive every
+  The adapter spawn: Zed resolves its claude adapter from the ACP registry (id
+  `claude-acp`) — Chronicle instead pins a verified npm package. VERIFY the actual
+  package name on the npm registry before pinning (do not trust any name written in
+  these docs), prefer an exact pin, fall back to a bounded range only if exact-pin
+  installs fail (Zed documents that exact pins can break under npm min-release-age).
+  Record what you verified in PROGRESS.md. Session modes are read from the session
+  response, never assumed; map Asks-first=default, Works-freely=acceptEdits, and
+  never expose bypassPermissions in the pane.
+- **Z-2a (shell)**: the stacked right column + visibility system per PLAN §2.2 —
+  including the retirement of the kanban full-bleed rule (`showTerminal` logic in
+  Shell.tsx), ⌥⌘1/2/3, rail auto-reveal, persistence. Probes: the visibility floor,
+  persistence, hidden sessions staying alive.
+- **Z-2b (pane)**: build the comps 100%, then wire. The probe suite must drive every
   card state from stubbed `acp-update` events: streaming chunks, all tool-card kinds
-  and statuses, a permission card answered both ways, cancel, session end, error card.
+  and statuses, a permission card answered both ways AND cancelled-while-pending
+  (the oneshot must resolve — never hang the adapter), session end, error card,
+  needs-login, installing-the-bridge.
 - **Z-3 (edits + checkpoints)**: the ledger lives in Rust (source of truth), the
   ReviewStrip reads it via a `agent_edits(dir)` command. Checkpoints use a temp
   `GIT_INDEX_FILE` (never the user's index) and `refs/chronicle/checkpoints/*`.
-  Rust tests: ledger diff correctness, undo restores bytes, checkpoint round-trip,
-  jail refusals. Probe: review flow end-to-end on stubbed events.
-- **Z-4 (integrations)**: phase-detail primary becomes "Start with the agent"
-  (preloads, never auto-sends); "Run the round for me" gains the in-pane path with the
-  headless path still available; journal + native notify on session end.
+  Rust tests: ledger diff correctness (including created-file undo = deletion),
+  base persistence across a simulated restart, the checkpoint round-trip covering
+  CREATED + DELETED + MODIFIED files (tracked and untracked — a restore that cannot
+  delete a created file is the known failure mode; the recipe is the two-tree
+  `read-tree --reset -u`, PLAN §2.1), turn-end git-status reconciliation, jail
+  refusals. Probe: review flow end-to-end on stubbed events, including the
+  "changed by commands" strip entries.
+- **Z-4 (integrations + history)**: phase-detail primary becomes "Start with the
+  agent" (preloads, never auto-sends, asks before replacing a non-empty draft);
+  "Run the round for me" gains the in-pane path (done/failed from kanban ground
+  truth + stop reason only) with headless still available; the session transcript
+  store (.chronicle/agent/<session>/thread.jsonl), history list, capability-gated
+  resume with the read-only fallback; live-session close confirm extended to agent
+  sessions; journal + native notify on session end.
 - **Z-5 (refinements E–I)**: each lands as its own commit with its own verification.
   E: pure-fn unit tests mapping real git stderr fixtures → sentences. F: probe with a
   fake pty feed containing paths; cmd-click routes to the viewer. G: `pty_info` rust

@@ -1,7 +1,7 @@
 # Claude Design prompt — Chronicle Agent (the Zed update, Deck 7)
 
-You are designing the **Agent experience** for Chronicle — an agent section stacked above the terminal in the right column, plus four small existing-surface
-amendments. Everything renders inside the shipped Chronicle app — match it exactly.
+You are designing the **Agent experience** for Chronicle — an agent section stacked above the terminal in the right column, plus SIX shipped-surface
+amendments (F36 viewer bar, F38 phase row, F39 kanban flow, and F40's four). Everything renders inside the shipped Chronicle app — match it exactly.
 
 ## Context you must honor
 
@@ -26,7 +26,13 @@ amendments. Everything renders inside the shipped Chronicle app — match it exa
 ## Deck 7 — frames (design every state listed; cuts must be explicit)
 
 **F31 · The shell layout + pane visibility (design this first — everything else
-lives inside it).** The agent is NOT a fourth rail destination. The window is three
+lives inside it).** The agent is NOT a fourth rail destination. NOTE, superseding a
+shipped convention: the old "terminal column is absent on Kanban (full-bleed)" rule
+is retired — the right column may sit beside ANY content pane; the visibility
+toggles are how full-bleed happens now. The toggle cluster sits leftmost of the
+title bar's existing right-side items (update line · Checked HH:MM:SS) — design
+their coexistence. Keyboard: ⌥⌘1/2/3 (show as tooltips). Clicking a rail
+destination while the content unit is hidden auto-reveals it. The window is three
 units: the content pane (roadmap/repo/kanban, switched by the existing rail) on the
 left, and a right column stacking **Agent on top, Terminal below** with a horizontal
 splitter. Design:
@@ -42,18 +48,27 @@ splitter. Design:
 
 **F32 · The composer.** Multiline input (⌘Enter sends, stated as a Kbd hint), a
 Stop button that replaces Send while the agent is working, the mode control —
-two-state: **Asks first** (default) / **Works freely** — and a quiet one-line usage
-meter (e.g. "31k of 200k"). States: idle · agent-working (Stop visible, input still
-editable) · disconnected ("The agent bridge isn't running — Start it").
+two-state: **Asks first** (default) / **Works freely** (= edits happen without
+asking; commands still ask — the control's tooltip says exactly that) — and a quiet
+one-line usage meter (e.g. "31k of 200k") that is HIDDEN entirely when the agent
+sends no usage data. States: idle · agent-working (Stop visible, input still
+editable) · disconnected ("The agent bridge isn't running — Start it") ·
+**installing the bridge** (first run downloads the adapter: "Setting up the agent
+bridge…", progress feel, honest failure variant) · **needs login** ("Claude Code
+isn't signed in" + a button that opens a terminal tab running the login, and the
+waiting treatment while it runs). ALSO design the per-session **Works freely
+confirm dialog**: title, body copy stating precisely what stops being asked, and
+that it lasts for this session only.
 
 **F33 · Thread entries.**
 - User message: right-weighted block, no bubble chrome wars — flat, divider-separated.
 - Assistant message: streaming markdown (headings, lists, fenced code, quotes — the
   app's mini-md styles), with a subtle in-progress shimmer ONLY while streaming.
 - The checkpoint row: a thin divider above each user message with a small
-  "↺ Undo to here" affordance (hover-revealed), plus its confirm dialog copy:
-  "Put the project back the way it was before this message? Files the agent changed
-  after it are restored. Your conversation stays."
+  "↺ Undo to here" affordance (hover-revealed). Its confirm dialog: title
+  "Undo everything since this message?", body — honest about scope —
+  "Puts every file back the way it was before this message — including changes you
+  made yourself since. Your conversation stays."
 
 **F34 · Tool cards (the heart of the pane).** One compact card anatomy, kind-aware:
 - Edit: "Edited `src/App.tsx`" + a ±stat chip + "View the changes" affordance.
@@ -64,7 +79,10 @@ editable) · disconnected ("The agent bridge isn't running — Start it").
   rejected ("You said no — skipped").
 - Long paths truncate middle; cards never wrap their title line.
 
-**F35 · The permission card.** The thread's consent moment, inline (not a modal):
+**F35 · The permission card.** The thread's consent moment, inline (not a modal).
+NOTE: the button set is supplied BY THE AGENT per request (ACP PermissionOptions) —
+design the anatomy for one/two/three offered options; the labels below are the
+canonical mapping, and options not offered are simply absent:
 "The agent wants to run `rm -rf node_modules`" + plain-language framing when the
 command is risky, two buttons — Allow (primary) / Don't allow — and a third quiet
 option "Always allow in this session" ONLY for edit-kind requests. Waiting state
@@ -74,23 +92,34 @@ this" / "You said no").
 **F36 · The review strip + review flow.** When the agent has changed files, a
 persistent strip above the composer: "4 files changed · Review · Keep all · Undo all".
 Review opens the existing repo diff viewer with a per-file action bar (Keep / Undo
-this file) and a running count. Design the strip, the viewer's action bar amendment,
-and the empty-after-review resolution state ("All changes kept").
+this file) and a running count. Two file classes render distinctly: edits the agent
+wrote directly (per-file Undo available) and files changed by the agent's COMMANDS
+(reviewable diff, but the row says "changed by a command — covered by Undo to here"
+instead of a per-file Undo). Design the strip, the viewer's action bar amendment,
+both row treatments, and the resolution states ("All changes kept" · auto-kept at
+session end).
 
 **F37 · Session header + history.** Top bar of the pane: the Claude mark (colored),
-session state word (working / waiting on you / idle / ended), End session, and a
-lightweight history affordance (previous sessions by date, resume). Design the list
-row: first-message excerpt + relative time + resume.
+session state word (working / waiting on you / idle / ended / needs login), End
+session, and a lightweight history affordance (previous sessions by date). Design
+the list row (first-message excerpt + relative time) in BOTH variants: resumable
+("Resume") and read-only ("View · Continue in a new session") — resume depends on
+an adapter capability and must not be promised universally.
 
 **F38 · Phase-start integration.** The phase detail's action row amended: primary
 "Start with the agent", secondary "Run in a terminal". The agent section revealing
-(shown + focused if hidden) with a preloaded draft (the phase prompt as an unsent composer draft with a small chip:
-"R-2 prompt loaded — review and send").
+(shown + focused if hidden) with a preloaded draft (the phase prompt as an unsent
+composer draft with a small chip: "R-2 prompt loaded — review and send"). If the
+composer already holds a non-empty draft, a small confirm asks before replacing it —
+design that state too. Preload NEVER auto-sends.
 
 **F39 · Round-in-pane.** The kanban's "Run the round for me" now lands in the agent
 pane: a session whose first card is the round's plan ("Round 5 · 12 tasks"), tool
 cards streaming beneath, and the board's tasks ticking (already built) — design the
-round header card + its done/failed terminal states.
+round header card + its done/failed terminal states. Done/failed derive from
+ground truth only (every round task completed on the board · the session's stop
+reason) — the card must visually attribute its state to the board ("12 of 12 tasks
+done"), never to the agent's own claim.
 
 **F40 · Amendments (small, four of them).**
 1. Terminal tabs: a live foreground-status treatment — the existing tab + a state
@@ -99,9 +128,10 @@ round header card + its done/failed terminal states.
    underline-on-hover + ⌘-click hint tooltip.
 3. The title-bar update line's new states: "Checking…", "Downloading 42%",
    "Installing…", "Restart to finish".
-4. Publish/bring-down toasts with the new plain-language results ("Pushed 3 saves to
-   origin", "Synchronized — nothing new") and the PR-hint variant with a
-   "Create a pull request" action.
+4. Publish/bring-down toasts with the new plain-language results — vocabulary law
+   applies: "Published 3 saves", "Brought down 2 saves", "Already in sync — nothing
+   new" (the raw git detail may appear as small mono secondary text, never in the
+   headline) — and the PR-hint variant with a "Create a pull request" action.
 
 ## Addendum — sync law: the shipped app has moved past Decks 1–6
 
