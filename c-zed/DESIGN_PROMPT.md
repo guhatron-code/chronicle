@@ -1,6 +1,6 @@
 # Claude Design prompt — Chronicle Agent (the Zed update, Deck 7)
 
-You are designing the **Agent pane** for Chronicle, plus four small existing-surface
+You are designing the **Agent experience** for Chronicle — an agent section stacked above the terminal in the right column, plus four small existing-surface
 amendments. Everything renders inside the shipped Chronicle app — match it exactly.
 
 ## Context you must honor
@@ -25,9 +25,20 @@ amendments. Everything renders inside the shipped Chronicle app — match it exa
 
 ## Deck 7 — frames (design every state listed; cuts must be explicit)
 
-**F31 · The pane at rest (empty state).** Rail gains an Agent destination (4th icon).
-Empty thread: quiet hero — the Claude mark, "Ask for anything." and one sentence:
-"Chronicle asks before the agent touches your project." Composer docked at the bottom.
+**F31 · The shell layout + pane visibility (design this first — everything else
+lives inside it).** The agent is NOT a fourth rail destination. The window is three
+units: the content pane (roadmap/repo/kanban, switched by the existing rail) on the
+left, and a right column stacking **Agent on top, Terminal below** with a horizontal
+splitter. Design:
+- the stacked right column (both sections' headers, the splitter's grab treatment);
+- the **pane-visibility cluster**: three toggles (content · agent · terminal) on the
+  title bar's right side — states: all visible · any two · exactly one (the last
+  visible unit's toggle disables); include hover/tooltip copy;
+- each section header's own collapse affordance and where a collapsed section's
+  strip lives (a slim re-open handle, not a vanished pane);
+- the agent section's empty state: quiet hero — the Claude mark, "Ask for anything."
+  and one sentence: "Chronicle asks before the agent touches your project." Composer
+  docked at the bottom of the agent section.
 
 **F32 · The composer.** Multiline input (⌘Enter sends, stated as a Kbd hint), a
 Stop button that replaces Send while the agent is working, the mode control —
@@ -72,8 +83,8 @@ lightweight history affordance (previous sessions by date, resume). Design the l
 row: first-message excerpt + relative time + resume.
 
 **F38 · Phase-start integration.** The phase detail's action row amended: primary
-"Start with the agent", secondary "Run in a terminal". The agent pane opening with a
-preloaded draft (the phase prompt as an unsent composer draft with a small chip:
+"Start with the agent", secondary "Run in a terminal". The agent section revealing
+(shown + focused if hidden) with a preloaded draft (the phase prompt as an unsent composer draft with a small chip:
 "R-2 prompt loaded — review and send").
 
 **F39 · Round-in-pane.** The kanban's "Run the round for me" now lands in the agent

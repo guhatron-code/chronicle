@@ -80,10 +80,31 @@ undo an entire answer with one click. The terminal stays for power use.
   Restore = `read-tree` + `checkout-index` from that tree + clear the edit ledger.
   Checkpoints are pruned when the session ends cleanly (keep the last N=20).
 
-### 2.2 The Agent pane (React, `src/screens/agent/`)
+### 2.2 The shell layout (operator-directed)
 
-A fourth rail destination. Presentational components built to comps (see
-DESIGN_PROMPT.md), wired like every other pane:
+The agent is NOT a fourth rail destination. The window becomes three units:
+
+```
+[rail] [ content pane (roadmap / repo / kanban via rail) ] | [ right column ]
+                                                              [   AGENT     ]
+                                                              [ ──splitter─ ]
+                                                              [  TERMINAL   ]
+```
+
+- The right column stacks **Agent on top, Terminal below**, separated by a
+  horizontal splitter (persisted per project, like the existing vertical one).
+- **Pane visibility**: each unit (content · agent · terminal) can be shown or
+  hidden — all three visible at max, exactly one at min. The toggle that would
+  hide the last visible unit is disabled. Visibility persists per project.
+  Affordance: a three-toggle cluster (content/agent/terminal) in the title bar's
+  right side, plus each column section's own collapse control in its header.
+- Hiding the agent or terminal never kills sessions — both keep running exactly
+  as hidden terminal tabs already do.
+
+### 2.2b The Agent section (React, `src/screens/agent/`)
+
+Presentational components built to comps (see DESIGN_PROMPT.md), wired like every
+other surface:
 
 - `AgentPane` (container: session state, event subscription, IPC) →
   `Thread` (entries) → `UserMessage` / `AssistantMessage` (mini-md, streaming) /
@@ -104,7 +125,7 @@ DESIGN_PROMPT.md), wired like every other pane:
 ### 2.3 Integrations
 
 - **Start this phase**: the phase detail's primary becomes *Start with the agent*
-  (opens the pane, preloads the phase prompt as the drafted first message — the user
+  (reveals the agent section, preloads the phase prompt as the drafted first message — the user
   still presses send); *Run in a terminal* stays as secondary. Pre-flight row logic
   unchanged.
 - **Run the round for me**: `round_execute` gains an agent-pane path: the round's
