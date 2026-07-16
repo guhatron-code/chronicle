@@ -904,7 +904,7 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
             "/chronicle-init".to_string()
         };
         std::process::Command::new(bin)
-            .args(["-p", &slash, "--permission-mode", "bypassPermissions",
+            .args(["-p", &slash, "--model", "opus", "--permission-mode", "bypassPermissions",
                    "--verbose", "--output-format", "stream-json"])
             .current_dir(&dirp)
             .stdin(std::process::Stdio::null())
@@ -1289,7 +1289,7 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
     } else {
         let bin = claude_bin.ok_or("couldn't find `claude` — if it's installed, make sure `command -v claude` works in a terminal, then reopen Chronicle")?;
         std::process::Command::new(bin)
-            .args(["-p", &prompt, "--permission-mode", "bypassPermissions",
+            .args(["-p", &prompt, "--model", "opus", "--permission-mode", "bypassPermissions",
                    "--verbose", "--output-format", "stream-json"])
             .current_dir(&p.dir)
             .stdin(std::process::Stdio::null())
@@ -1656,7 +1656,7 @@ async fn round_execute(roots: State<'_, OpenRoots>, init: State<'_, InitState>, 
     } else {
         let bin = claude_bin.ok_or("couldn't find `claude` — if it's installed, make sure `command -v claude` works in a terminal, then reopen Chronicle")?;
         std::process::Command::new(bin)
-            .args(["-p", &prompt, "--permission-mode", "bypassPermissions",
+            .args(["-p", &prompt, "--model", "opus", "--permission-mode", "bypassPermissions",
                    "--verbose", "--output-format", "stream-json"])
             .current_dir(&p.dir)
             .stdin(std::process::Stdio::null())
@@ -1776,7 +1776,7 @@ async fn draft_save_message(roots: State<'_, OpenRoots>, dir: String) -> Result<
     let prompt = format!(
         "You are drafting a one-line save message for a non-developer's project history. Reply with ONLY the message: plain language, present tense, what changed and why it matters, no jargon, no quotes, at most 72 characters.\n\nThe changes being saved:\n\n{diff}");
     let mut child = std::process::Command::new(bin)
-        .args(["-p", &prompt])
+        .args(["-p", &prompt, "--model", "haiku"])
         .current_dir(&p.dir)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
