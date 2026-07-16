@@ -103,6 +103,73 @@ round header card + its done/failed terminal states.
    origin", "Synchronized — nothing new") and the PR-hint variant with a
    "Create a pull request" action.
 
+## Addendum — sync law: the shipped app has moved past Decks 1–6
+
+The app (v0.2.12) carries many operator-directed changes made AFTER the original
+decks. **Comps must match the shipped app, not Decks 1–6**, wherever a frame touches
+these. Bake every one of these into any frame that includes the element; if a frame
+deliberately diverges, flag it in a note instead of diverging silently.
+
+**Controls & primitives**
+- Buttons ride ONE size scale — sm 28 · md 33 · lg 36; primary AND secondary default
+  to md; rows of paired buttons share one height on one baseline. Disabled primary is
+  a quiet filled state (fill-subtle + text-dimmer), never a ghosted enabled button.
+- Chips are one-line pills, always: name + destination INSIDE, explanatory prose
+  OUTSIDE on the row (paste chips, ghost "not written yet" chips, doc chips). Chips
+  never wrap mid-name; IdChip and status words never wrap or shed their dot.
+- StateWord: dot pinned, label truncates — one line everywhere.
+- Micro-chips are 10.5px on radius 5; author tiles size-4 with 8px initials; rail
+  icons sit on the radius scale (8). Focus rings SNAP (no fade).
+- The agent brand marks (the original Claude starburst, the Codex gradient badge)
+  are COLORED at rest — no monochrome treatment.
+- Scrollbars are literally 2px — gutter and thumb.
+- All popups center to the APP window (palette, search, dialogs, the kanban composer
+  and execute flow). Toasts are bottom-center pills, truly centered.
+- Traffic lights: quiet monochrome dots at rest; hovering the cluster shows real
+  macOS colours + glyphs (× − zoom triangles).
+
+**Shell & picker**
+- Title bar right side: the update notice ("Chronicle X.Y.Z is ready · Update" +
+  quiet dismiss) sits before "Checked HH:MM:SS".
+- Picker cards pin their progress bar to the card bottom (uniform across the grid);
+  the phase row truncates the phase NAME first, the status word last; open projects
+  show an "Open" badge and a "Session running" badge when a terminal is live.
+- The ⌘K palette has a "GitHub — clone and open" group (repos, Private badges,
+  Cloning… state) and a "Check for updates" action row. The shortcuts overlay lists
+  ⌘⇧F search, "⌘J or ⌃tab" as ONE row, and double-click terminal rename.
+
+**Roadmap**
+- Section rhythm: panels py-26, slim alert banners py-18, the phase rail py-28.
+- The current-state banner headline is 15px and carries "Open the phase ›".
+- Rebuild has ONE name everywhere (no "Scan"); the building card says "Rebuilding
+  your roadmap…" when a roadmap is already on screen; confirms share "Not yet".
+- The phase detail has a pre-flight readiness row beside the start helper (green
+  checks / one honest red one) and its primary action row is being amended by F38.
+- A returning user sees the "While you were away" digest section (dismissable).
+- The documents panel renders paste/ghost targets as ROWS: one-line chip + prose
+  note beside it.
+- The needs-you GitHub row is a one-click primary "Put it on GitHub"; the publish
+  footer says "Chronicle publishes for you and shows its progress here".
+- Round overlay phases show a retrospective line ("This round made N saves touching
+  M files") in their detail.
+
+**Repo & viewer**
+- The viewer's mode segment says "Changes" (never "Diff") and marks a staged file
+  "Ready to save"; save box sits BELOW the changes list with the "Draft it" button
+  beside the input.
+- The explorer follows the disk live (no refresh affordances needed in comps).
+
+**Kanban**
+- The round strip is honest: "being planned" / "waiting to run" / "running"; frozen
+  cards say "locked until the round finishes"; the done card leads with "Run the
+  round for me" (primary) + "Run it in a terminal" (secondary).
+
+**Type & theme details**
+- mini-md renders fenced code blocks and blockquotes; light theme --text-dimmer is
+  the darkened step (#6e6e6e-equivalent token); accordions size to content (design
+  nothing that assumes a fixed open height).
+- Ended terminal tabs: no italics, "· ended" word, no cursor in the surface.
+
 ## Deliverable
 
 One deck (`.dc.html`, same format as Decks 1–6) with every frame + state above,
