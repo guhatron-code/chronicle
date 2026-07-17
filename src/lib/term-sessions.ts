@@ -15,6 +15,7 @@ import {
   decodePtyChunk,
   onPtyOut,
   onPtyExit,
+  ptyInfo,
   ptyKill,
   ptyResize,
   ptySpawn,
@@ -51,9 +52,53 @@ export function subscribeTerms(cb: () => void): () => void {
   return () => subscribers.delete(cb);
 }
 
+/* ---- G — the foreground truth, polled: the tab dot says what's actually
+   running, never what the tab title guesses ---- */
+const fgAgents = new Map<number, "claude" | "codex" | null>();
+/** sessions that had an agent in the foreground at some point — after it
+ *  exits, the tab honestly says "idle" instead of saying nothing */
+const everAgent = new Set<number>();
+let fgPoller: ReturnType<typeof setInterval> | null = null;
+
+export function fgAgentFor(id: number): "claude" | "codex" | null {
+  return fgAgents.get(id) ?? null;
+}
+
+export function hadAgentFor(id: number): boolean {
+  return everAgent.has(id);
+}
+
+/** The agent actually running in any of this project's live sessions. */
+export function agentRunningFor(dir: string): "claude" | "codex" | null {
+  for (const s of sessions.values()) {
+    if (s.dir === dir && !s.dead) {
+      const a = fgAgents.get(s.id);
+      if (a) return a;
+    }
+  }
+  return null;
+}
+
+function pollForeground() {
+  for (const s of sessions.values()) {
+    if (s.dead) continue;
+    void ptyInfo(s.id)
+      .then((info) => {
+        const agent = info?.agent ?? null;
+        if (agent) everAgent.add(s.id);
+        if (fgAgents.get(s.id) !== agent) {
+          fgAgents.set(s.id, agent);
+          notify();
+        }
+      })
+      .catch(() => {});
+  }
+}
+
 function ensureListeners() {
   if (listenersReady) return;
   listenersReady = true;
+  if (!fgPoller) fgPoller = setInterval(pollForeground, 2000);
   void onPtyOut((id, b64) => {
     sessions.get(id)?.term.write(decodePtyChunk(b64));
   });

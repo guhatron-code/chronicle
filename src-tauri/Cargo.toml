@@ -23,6 +23,7 @@ notify = "6"
 # ACP types only (serde structs; the parent agent-client-protocol crate drags
 # async/transport machinery we don't want — our loop is plain threads + channels)
 agent-client-protocol-schema = { version = "1.4.0", features = ["unstable"] }
+sysinfo = "0.39.6"
 
 [profile.release]
 strip = true

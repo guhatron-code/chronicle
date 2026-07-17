@@ -37,6 +37,11 @@ export type TerminalTab = {
   live: boolean;
   /** Which agent runs in it, if any — prefixes the label. */
   agent?: TerminalAgent;
+  /** G — the agent ACTUALLY in the pty's foreground right now (truth, not
+   *  the title's guess). Drives the live dot + "working". */
+  fgAgent?: TerminalAgent | null;
+  /** an agent ran here at some point — its exit reads as "idle" */
+  hadAgent?: boolean;
 };
 
 const tabLabel = (t: TerminalTab) =>
@@ -189,6 +194,18 @@ export function TerminalColumn({
               >
                 {tabLabel(t)}
               </span>
+              {t.live && t.fgAgent && (
+                <span data-tab-fg="working" className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] text-state-neutral">
+                  <span
+                    className="size-1 shrink-0 rounded-full bg-state-neutral"
+                    style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }}
+                  />
+                  working
+                </span>
+              )}
+              {t.live && !t.fgAgent && (t.agent || t.hadAgent) && (
+                <span data-tab-fg="idle" className="whitespace-nowrap text-[11px] text-text-dim">idle</span>
+              )}
               {t.id === activeId && (
                 <button
                   aria-label="Close terminal"

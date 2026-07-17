@@ -42,6 +42,9 @@ import {
   setActiveTermFor,
   setTermPathHandler,
   spawnTerm,
+  fgAgentFor,
+  hadAgentFor,
+  agentRunningFor,
   subscribeTerms,
   termsFor,
 } from "@/lib/term-sessions";
@@ -677,6 +680,8 @@ export default function App() {
     title: t.title,
     live: !t.dead,
     agent: t.agent,
+    fgAgent: fgAgentFor(t.id),
+    hadAgent: hadAgentFor(t.id),
   }));
   const activeTermId = active ? activeTermFor(active.dir) : null;
   const tabs: ProjectTab[] = [...projects.values()].map((p) => ({
@@ -694,6 +699,7 @@ export default function App() {
         writing: isInitRunning(r.path), // a build running while you're on Home
         openNow: projects.has(r.path),
         liveSessions: liveCount(r.path),
+        agentRunning: agentRunningFor(r.path),
       }),
     );
   const openPalette: PaletteProject[] = tabs.map((t) => {

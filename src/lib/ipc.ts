@@ -354,6 +354,10 @@ export const onPtyOut = (
 export const onPtyExit = (cb: (id: number) => void): Promise<UnlistenFn> =>
   listen<number>("pty-exit", (e) => cb(e.payload));
 
+/** G — what's actually running in the pty's foreground. */
+export const ptyInfo = (id: number) =>
+  invoke<{ name: string | null; agent: "claude" | "codex" | null }>("pty_info", { id });
+
 /** Decode a pty-out chunk for xterm's write(). */
 export const decodePtyChunk = (b64: string): Uint8Array =>
   Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));

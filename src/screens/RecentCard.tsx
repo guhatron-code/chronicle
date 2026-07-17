@@ -28,6 +28,8 @@ export type RecentProject = {
   openNow?: boolean;
   /** Live terminal sessions running in the open project. */
   liveSessions?: number;
+  /** G — the agent actually in a session's foreground ("Claude running"). */
+  agentRunning?: "claude" | "codex" | null;
   variant:
     | {
         kind: "phase";
@@ -108,7 +110,7 @@ export function RecentCard({
           )}
           {(project.liveSessions ?? 0) > 0 && (
             <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-state-neutral">
-              Session running
+              {project.agentRunning === "claude" ? "Claude running" : project.agentRunning === "codex" ? "Codex running" : "Session running"}
             </span>
           )}
           <span className="font-mono text-[11.5px] text-text-dim">{project.tildePath}</span>
@@ -165,7 +167,7 @@ export function RecentCard({
           )}
           {(project.liveSessions ?? 0) > 0 && (
             <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-state-neutral">
-              Session running
+              {project.agentRunning === "claude" ? "Claude running" : project.agentRunning === "codex" ? "Codex running" : "Session running"}
             </span>
           )}
             <span className="font-mono text-[11.5px] text-text-dim">{project.tildePath}</span>

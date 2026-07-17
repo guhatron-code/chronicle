@@ -2395,6 +2395,44 @@ fn pty_resize(pty: State<PtyState>, id: u32, cols: u16, rows: u16) -> Result<(),
     Ok(())
 }
 
+/* ---- G — honest terminal-tab status: read the pty's FOREGROUND process
+   instead of guessing from tab titles. `process_group_leader` is the
+   foreground process group; sysinfo names it; a known agent binary anywhere
+   in its name/cmdline makes the tab say so. ---- */
+
+fn agent_of(name: &str, cmd: &str) -> Option<&'static str> {
+    let hay = format!("{name} {cmd}").to_lowercase();
+    if hay.contains("claude") { Some("claude") }
+    else if hay.contains("codex") { Some("codex") }
+    else { None }
+}
+
+fn process_info(pid: i32) -> Option<(String, Option<&'static str>)> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let mut sys = System::new();
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[Pid::from(pid as usize)]),
+        true,
+        ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always).with_exe(UpdateKind::Always),
+    );
+    let p = sys.process(Pid::from(pid as usize))?;
+    let name = p.name().to_string_lossy().to_string();
+    let cmd = p.cmd().iter().map(|c| c.to_string_lossy()).collect::<Vec<_>>().join(" ");
+    let agent = agent_of(&name, &cmd);
+    Some((name, agent))
+}
+
+/// What's actually running in the pty's foreground — name + known-agent flag.
+#[tauri::command]
+fn pty_info(pty: State<PtyState>, id: u32) -> Value {
+    let leader = pty.sessions.lock().ok()
+        .and_then(|g| g.get(&id).and_then(|h| h.master.process_group_leader()));
+    match leader.and_then(process_info) {
+        Some((name, agent)) => json!({ "name": name, "agent": agent }),
+        None => json!({ "name": Value::Null, "agent": Value::Null }),
+    }
+}
+
 #[tauri::command]
 fn pty_kill(pty: State<PtyState>, id: u32) -> Result<(), String> {
     if let Some(h) = pty.sessions.lock().map_err(|e| e.to_string())?.remove(&id) {
@@ -2677,7 +2715,7 @@ fn main() {
             git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
             list_dir, read_file, copy_file, copy_text,
             pty_spawn, init_log_path,
-            pty_write, pty_resize, pty_kill,
+            pty_write, pty_resize, pty_kill, pty_info,
             round_execute, round_exec_status, round_exec_cancel, round_retro, exec_log_path,
             agent_session_start, agent_session_state, agent_prompt, agent_cancel,
             agent_set_mode, agent_respond_permission, agent_session_stop,
@@ -2797,6 +2835,29 @@ mod r1_tests {
         let alive = std::process::Command::new("ps").args(["-p", &pid.to_string()])
             .output().map(|o| o.status.success()).unwrap_or(false);
         assert!(!alive, "the child must be dead and reaped (ps -p must fail)");
+    }
+
+    #[test]
+    fn pty_info_reads_the_foreground_process_truthfully() {
+        // the detection is name+cmdline based — a node-wrapped claude counts
+        assert_eq!(agent_of("node", "/usr/local/bin/claude --resume"), Some("claude"));
+        assert_eq!(agent_of("claude", ""), Some("claude"));
+        assert_eq!(agent_of("codex", "exec"), Some("codex"));
+        assert_eq!(agent_of("zsh", "-l"), None);
+        // a REAL pty: the foreground process group leader is what's running
+        let pty = native_pty_system()
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .unwrap();
+        let mut cmd = CommandBuilder::new("/bin/sleep");
+        cmd.arg("30");
+        let mut child = pty.slave.spawn_command(cmd).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let leader = pty.master.process_group_leader().expect("a foreground group exists");
+        let (name, agent) = process_info(leader).expect("the process resolves");
+        assert!(name.contains("sleep"), "got {name}");
+        assert_eq!(agent, None);
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]

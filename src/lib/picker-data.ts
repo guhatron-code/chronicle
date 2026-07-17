@@ -43,7 +43,7 @@ export function agoFrom(openedAtEpoch: string, nowMs = Date.now()): string {
 /** A running init for this path (app state) forces the "writing" card. */
 export function toRecentProject(
   r: PickerRecent,
-  opts: { home?: string; agent?: string; writing?: boolean; openNow?: boolean; liveSessions?: number } = {},
+  opts: { home?: string; agent?: string; writing?: boolean; openNow?: boolean; liveSessions?: number; agentRunning?: "claude" | "codex" | null } = {},
 ): RecentProject {
   const base = {
     path: r.path,
@@ -55,6 +55,7 @@ export function toRecentProject(
     ago: agoFrom(r.opened_at),
     openNow: opts.openNow,
     liveSessions: opts.liveSessions,
+    agentRunning: opts.agentRunning ?? null,
   };
   if (r.missing) return { ...base, variant: { kind: "missing" } };
   if (opts.writing) return { ...base, variant: { kind: "writing" } };
