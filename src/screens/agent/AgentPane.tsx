@@ -17,7 +17,7 @@ import {
   type AgentSessionState,
 } from "@/lib/agent-session";
 import { kanbanFor, subscribeKanban } from "@/lib/kanban-store";
-import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint } from "@/lib/ipc";
+import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint, agentsAvailable } from "@/lib/ipc";
 import { CheckGlyph } from "@/components/chrome/icons";
 import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term-sessions";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
@@ -28,6 +28,10 @@ import { BtnPrimary, BtnSecondary, Spinner } from "@/components/chrome/atoms";
 import { Composer } from "./Composer";
 import { ToolCard } from "./ToolCard";
 import { PermissionCard } from "./PermissionCard";
+
+/** Projects we've auto-started the agent for this app session — so toggling the
+ *  pane's visibility or ending a session never re-triggers auto-start. */
+const autoStarted = new Set<string>();
 
 /** F33 — the checkpoint row: a thin divider above each user message; the
  *  hover-revealed "Undo to here" restores the snapshot taken before it. */
@@ -349,7 +353,23 @@ export function AgentPane({
   useEffect(() => subscribeAgent(() => bump((n) => n + 1)), []);
   useEffect(() => subscribeKanban(() => bump((n) => n + 1)), []); // round cards tick with the board
   useEffect(() => {
-    void adoptAgentSession(dir); // a live backend session survives a reload
+    // a live backend session survives a reload; if there's none AND the agent
+    // is actually installed, auto-start once — the pane is only mounted for the
+    // active, visible-and-expanded project, so this never spins up background
+    // tabs. Gated on Claude being present so an unconfigured machine doesn't
+    // auto-launch into an error banner on every open; skipped after an explicit
+    // End session (phase is then "ended", not "none").
+    let cancelled = false;
+    void adoptAgentSession(dir).then(async () => {
+      if (cancelled || autoStarted.has(dir)) return;
+      if (agentSessionFor(dir).phase !== "none") return;
+      const a = (await agentsAvailable().catch(() => null)) as { claude?: string | null } | null;
+      if (cancelled || !a?.claude) return;
+      if (agentSessionFor(dir).phase !== "none") return; // re-check across the await
+      autoStarted.add(dir);
+      void startAgentSession(dir).catch(() => {});
+    });
+    return () => { cancelled = true; };
   }, [dir]);
   const s = agentSessionFor(dir);
 
