@@ -106,4 +106,4 @@ resolving (never hanging); needs-login with the terminal sign-in + retry
 after exit; bridge error + turn error + session end + the works-freely
 confirm. Full suite: 12/12 passed (Z-2a probes stay green).
 
-**Commit** — recorded in the following docs commit
+**Commit** — 53698a1
