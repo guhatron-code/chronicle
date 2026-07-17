@@ -11,6 +11,7 @@ import {
   agentEdits,
   agentHistoryRead,
   agentPrompt,
+  agentSetConfigOption,
   agentRespondPermission,
   agentSessionResume,
   agentSessionStart,
@@ -36,6 +37,15 @@ export interface AgentMode {
   id: string;
   name: string;
   description?: string;
+}
+
+/** A session config option (model, effort, …) the agent advertised. */
+export interface AgentConfigOption {
+  id: string;
+  name: string;
+  category?: string;
+  currentValue: string;
+  options: { value: string; name: string; description?: string }[];
 }
 
 export type PermOutcome = { type: "selected"; optionId: string } | { type: "cancelled" };
@@ -81,6 +91,8 @@ export interface AgentSessionState {
   phase: AgentPhase;
   sessionId: string | null;
   modes: { currentModeId: string; availableModes: AgentMode[] } | null;
+  /** the agent's config options — the model picker reads the "model" one */
+  configOptions: AgentConfigOption[];
   loadSession: boolean; // adapter capability — Z-4 resume gating
   turnActive: boolean;
   usage: { used: number; size: number } | null;
@@ -112,6 +124,7 @@ const blank = (): AgentSessionState => ({
   entries: [],
   errorMessage: null,
   worksFreelyConfirmed: false,
+  configOptions: [],
   draft: null,
   composerText: "",
   viewing: null,
@@ -159,6 +172,23 @@ export function agentStateWord(s: AgentSessionState): { word: string; kind: "dim
 }
 
 /* ---------- wire reduction ---------- */
+
+function parseConfigOptions(raw: unknown): AgentConfigOption[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as Raw[])
+    .filter((o) => o.type === "select" && Array.isArray(o.options))
+    .map((o) => ({
+      id: str(o.id),
+      name: str(o.name),
+      category: str(o.category) || undefined,
+      currentValue: str(o.currentValue),
+      options: (o.options as Raw[]).map((v) => ({
+        value: str(v.value),
+        name: str(v.name),
+        description: str(v.description) || undefined,
+      })),
+    }));
+}
 
 function ensureListeners() {
   if (listenersReady) return;
@@ -269,6 +299,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
               : [],
           }
         : null;
+      s.configOptions = parseConfigOptions(params.configOptions);
       const caps = params.agentCaps as Raw | null;
       s.loadSession = Boolean((caps?.agentCapabilities as Raw | undefined)?.loadSession);
     } else if (state === "needs-login") {
@@ -419,6 +450,8 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       }
     } else if (kind === "current_mode_update") {
       if (s.modes) s.modes.currentModeId = str(update.currentModeId);
+    } else if (kind === "config_option_update") {
+      s.configOptions = parseConfigOptions(update.configOptions);
     } else if (kind === "usage_update") {
       const used = Number(update.used);
       const size = Number(update.size);
@@ -487,6 +520,7 @@ export async function adoptAgentSession(dir: string): Promise<void> {
             : [],
         };
       }
+      s.configOptions = parseConfigOptions(raw.configOptions);
       s.turnActive = Boolean(raw.turnActive);
       notify();
     }
@@ -519,6 +553,14 @@ export async function setAgentMode(dir: string, modeId: string): Promise<void> {
   if (s.modes) s.modes.currentModeId = modeId;
   if (modeId === "acceptEdits") s.worksFreelyConfirmed = true;
   notify();
+}
+
+export async function setAgentConfigOption(dir: string, configId: string, value: string): Promise<void> {
+  const s = agentSessionFor(dir);
+  const opt = s.configOptions.find((o) => o.id === configId);
+  if (opt) opt.currentValue = value; // optimistic; config_option_update confirms
+  notify();
+  await agentSetConfigOption(dir, configId, value);
 }
 
 export async function answerPermission(dir: string, requestId: string, optionId: string | null): Promise<void> {

@@ -13,6 +13,7 @@ import {
   cancelAgentTurn,
   mirrorComposerText,
   sendAgentMessage,
+  setAgentConfigOption,
   setAgentDraft,
   setAgentMode,
 } from "@/lib/agent-session";
@@ -23,6 +24,72 @@ import { toastError } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
 
 const fmtTokens = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+
+/** F32 addendum — the model picker: the agent's own advertised model options
+ *  (read, never assumed), set via session config. Hidden when the adapter
+ *  offers no model choice. */
+function ModelPicker({ dir }: { dir: string }) {
+  const s = agentSessionFor(dir);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const model = s.configOptions.find((o) => o.id === "model");
+  if (!model || model.options.length === 0) return null;
+  const current = model.options.find((o) => o.value === model.currentValue);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        data-model-picker
+        title="The model the agent uses"
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
+      >
+        {current?.name ?? "Model"}
+        <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="m3 4.5 3 3 3-3" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          data-model-menu
+          className="absolute bottom-8 left-0 z-20 flex w-[260px] flex-col rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
+        >
+          {model.options.map((o) => (
+            <button
+              key={o.value}
+              onClick={() => {
+                setOpen(false);
+                void setAgentConfigOption(dir, "model", o.value).catch((e) =>
+                  toastError("Couldn't switch the model", String(e).slice(0, 90)),
+                );
+              }}
+              className="flex flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left hover:bg-fill-hover"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-[12.5px] text-text-primary">{o.name}</span>
+                {o.value === model.currentValue && (
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="var(--state-success)" strokeWidth="1.6" className="shrink-0">
+                    <path d="M2 6.5 5 9.5 10 3" />
+                  </svg>
+                )}
+              </div>
+              {o.description && <span className="text-[11px] leading-snug text-text-dim">{o.description}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Composer({
   dir,
@@ -156,6 +223,7 @@ export function Composer({
             </button>
           </div>
         )}
+        {!disabled && <ModelPicker dir={dir} />}
         {s.turnActive && (
           <span className="inline-flex items-center gap-1.5 text-[11.5px] text-state-neutral">
             <span

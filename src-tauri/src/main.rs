@@ -2624,6 +2624,13 @@ async fn agent_set_mode(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpS
     agent_for(&roots, &agents, &dir)?.set_mode(&mode)
 }
 
+/// Set a session config option (the model picker). `config_id`/`value` are the
+/// agent's own advertised ids.
+#[tauri::command]
+async fn agent_set_config_option(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, config_id: String, value: String) -> Result<(), String> {
+    agent_for(&roots, &agents, &dir)?.set_config_option(&config_id, &value)
+}
+
 /// Answer a permission ask. `option` is one of the agent's own offered option
 /// ids; None answers "cancelled".
 #[tauri::command]
@@ -2728,7 +2735,7 @@ fn main() {
             pty_write, pty_resize, pty_kill, pty_info,
             round_execute, round_exec_status, round_exec_cancel, round_retro, exec_log_path,
             agent_session_start, agent_session_state, agent_prompt, agent_cancel,
-            agent_set_mode, agent_respond_permission, agent_session_stop,
+            agent_set_mode, agent_set_config_option, agent_respond_permission, agent_session_stop,
             agent_edits, agent_edit_diff, agent_edit_keep, agent_edit_undo, agent_restore_checkpoint,
             agent_session_resume, agent_sessions_list, agent_history_read,
             journal_append, journal_read, notify, draft_save_message,

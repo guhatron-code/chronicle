@@ -380,6 +380,8 @@ export const agentSessionState = (dir: string) => invoke<Record<string, unknown>
 export const agentPrompt = (dir: string, message: string) => invoke("agent_prompt", { dir, message });
 export const agentCancel = (dir: string) => invoke("agent_cancel", { dir });
 export const agentSetMode = (dir: string, mode: string) => invoke("agent_set_mode", { dir, mode });
+export const agentSetConfigOption = (dir: string, configId: string, value: string) =>
+  invoke("agent_set_config_option", { dir, configId, value });
 export const agentRespondPermission = (dir: string, requestId: string, option: string | null) =>
   invoke("agent_respond_permission", { dir, requestId, option });
 /** clean=true (default) is the explicit "End session" — unresolved edits

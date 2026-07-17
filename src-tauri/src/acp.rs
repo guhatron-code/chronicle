@@ -593,6 +593,9 @@ pub struct AcpSession {
     /// defined ids READ from this — never assumed.
     modes: Mutex<Value>,
     agent_caps: Mutex<Value>,
+    /// The agent's session config options (model, effort, …) from the session
+    /// response — read, never assumed. The model picker renders from this.
+    config_options: Mutex<Value>,
     turn_active: AtomicBool,
     emit: Emit,
     sessions: Arc<Mutex<HashMap<String, Arc<AcpSession>>>>,
@@ -700,6 +703,7 @@ pub fn start(
         session_id: Mutex::new(None),
         modes: Mutex::new(Value::Null),
         agent_caps: Mutex::new(Value::Null),
+        config_options: Mutex::new(Value::Null),
         turn_active: AtomicBool::new(false),
         emit,
         sessions: state.sessions.clone(),
@@ -857,6 +861,7 @@ impl AcpSession {
                 if sid.is_empty() { return self.fail_handshake("the agent returned no session id"); }
                 if let Ok(mut g) = self.session_id.lock() { *g = Some(sid.clone()); }
                 if let Ok(mut g) = self.modes.lock() { *g = resp.get("modes").cloned().unwrap_or(Value::Null); }
+                if let Ok(mut g) = self.config_options.lock() { *g = resp.get("configOptions").cloned().unwrap_or(Value::Null); }
                 ledger::set_current_session(&self.project_dir, &sid);
                 checkpoint::prune_old(&self.repo);
                 self.emit_state(json!({
@@ -864,6 +869,7 @@ impl AcpSession {
                     "sessionId": sid,
                     "resumed": self.resume.is_some(),
                     "modes": resp.get("modes").cloned().unwrap_or(Value::Null),
+                    "configOptions": resp.get("configOptions").cloned().unwrap_or(Value::Null),
                     "agentCaps": caps,
                 }));
             }
@@ -932,6 +938,12 @@ impl AcpSession {
                     && msg.get("method").and_then(|m| m.as_str()) == Some("session/update")
                 {
                     continue; // a session/load replay — the transcript already has it
+                }
+                // keep the stored config options current so a reload re-syncs
+                if msg.pointer("/params/update/sessionUpdate").and_then(|v| v.as_str()) == Some("config_option_update") {
+                    if let Some(opts) = msg.pointer("/params/update/configOptions") {
+                        if let Ok(mut g) = self.config_options.lock() { *g = opts.clone(); }
+                    }
                 }
                 if msg.get("method").and_then(|m| m.as_str()) == Some("session/update") {
                     self.append_transcript(&msg);
@@ -1223,6 +1235,31 @@ impl AcpSession {
     /// goes, the current pointer clears. `clean=false` (closing the project,
     /// quitting) just stops the child — the ledger stays reviewable after a
     /// restart or reopen.
+    /// Set a session config option (the model picker uses this). `config_id`
+    /// and `value_id` are the agent's own advertised ids — never assumed.
+    pub fn set_config_option(&self, config_id: &str, value_id: &str) -> Result<(), String> {
+        let sid = self.session_id.lock().map_err(|e| e.to_string())?
+            .clone().ok_or("the session isn't ready yet")?;
+        self.request_blocking(
+            "session/set_config_option",
+            json!({ "sessionId": sid, "configId": config_id, "value": { "value": value_id } }),
+            std::time::Duration::from_secs(30),
+        )?;
+        // reflect the new current value locally so a re-sync is honest
+        if let Ok(mut g) = self.config_options.lock() {
+            if let Some(arr) = g.as_array_mut() {
+                for opt in arr.iter_mut() {
+                    if opt.get("id").and_then(|v| v.as_str()) == Some(config_id) {
+                        if let Some(o) = opt.as_object_mut() {
+                            o.insert("currentValue".into(), json!(value_id));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn stop(&self, clean: bool) {
         if clean {
             if let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) {
@@ -1264,6 +1301,7 @@ impl AcpSession {
             "alive": self.is_alive(),
             "sessionId": self.session_id.lock().ok().and_then(|g| g.clone()),
             "modes": self.modes.lock().map(|g| g.clone()).unwrap_or(Value::Null),
+            "configOptions": self.config_options.lock().map(|g| g.clone()).unwrap_or(Value::Null),
             "agentCaps": self.agent_caps.lock().map(|g| g.clone()).unwrap_or(Value::Null),
             "turnActive": self.turn_active.load(Ordering::SeqCst),
         })
@@ -1527,6 +1565,7 @@ for line in sys.stdin:
             session_id: Mutex::new(None),
             modes: Mutex::new(Value::Null),
             agent_caps: Mutex::new(Value::Null),
+            config_options: Mutex::new(Value::Null),
             turn_active: AtomicBool::new(false),
             resume: None,
             suppress_updates: AtomicBool::new(false),
@@ -1692,6 +1731,7 @@ for line in sys.stdin:
             session_id: Mutex::new(Some(sid.into())),
             modes: Mutex::new(Value::Null),
             agent_caps: Mutex::new(Value::Null),
+            config_options: Mutex::new(Value::Null),
             turn_active: AtomicBool::new(false),
             resume: None,
             suppress_updates: AtomicBool::new(false),
