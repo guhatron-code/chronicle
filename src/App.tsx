@@ -69,6 +69,41 @@ interface ProjectEntry {
 const PANES: Pane[] = ["road", "repo", "kanban"];
 const splitKey = (dir: string) => `chronicle.split.${dir}`;
 
+/* F31 — the three-unit layout (content · agent · terminal): visibility,
+ * per-section collapse, and the horizontal splitter, persisted per project.
+ * The old kanban full-bleed rule is retired — full-bleed happens via the
+ * toggles now. */
+interface PaneLayout {
+  content: boolean;
+  agent: boolean;
+  terminal: boolean;
+  agentCollapsed: boolean;
+  terminalCollapsed: boolean;
+  hSplit: number; // agent section height as % of the right column
+}
+const DEFAULT_LAYOUT: PaneLayout = {
+  content: true,
+  agent: true,
+  terminal: true,
+  agentCollapsed: false,
+  terminalCollapsed: false,
+  hSplit: 52,
+};
+const paneLayoutKey = (dir: string) => `chronicle.panes.${dir}`;
+function loadPaneLayout(dir: string): PaneLayout {
+  try {
+    const raw = localStorage.getItem(paneLayoutKey(dir));
+    if (!raw) return DEFAULT_LAYOUT;
+    const p = JSON.parse(raw) as Partial<PaneLayout>;
+    const l: PaneLayout = { ...DEFAULT_LAYOUT, ...p };
+    if (!l.content && !l.agent && !l.terminal) return DEFAULT_LAYOUT; // the floor survives bad storage
+    l.hSplit = Number.isFinite(l.hSplit) ? Math.min(80, Math.max(20, l.hSplit)) : DEFAULT_LAYOUT.hSplit;
+    return l;
+  } catch {
+    return DEFAULT_LAYOUT;
+  }
+}
+
 export default function App() {
   const [rows, setRows] = useState<PickerRecent[]>([]);
   const [agent, setAgent] = useState<"claude" | "codex">("claude");
@@ -77,6 +112,7 @@ export default function App() {
   const [pane, setPane] = useState<Pane>("road");
   const [checking, setChecking] = useState(false);
   const [splitPct, setSplitPct] = useState(55.5);
+  const [paneLayout, setPaneLayout] = useState<PaneLayout>(DEFAULT_LAYOUT);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [ghRepos, setGhRepos] = useState<GithubRepo[] | null>(null);
   const [ghError, setGhError] = useState<string | null>(null);
@@ -224,9 +260,46 @@ export default function App() {
     });
     const saved = Number(localStorage.getItem(splitKey(dir)));
     setSplitPct(Number.isFinite(saved) && saved >= 30 && saved <= 75 ? saved : 55.5);
+    setPaneLayout(loadPaneLayout(dir));
     const name = projectsRef.current.get(dir)?.name;
     if (name) void windowControls().setTitle(`${name} — Chronicle`).catch?.(() => {});
   }, []);
+
+  /* F31 — every layout change persists for the active project */
+  const patchLayout = useCallback((patch: Partial<PaneLayout>) => {
+    setPaneLayout((prev) => {
+      const next = { ...prev, ...patch };
+      const dir = activeRef.current;
+      if (dir) localStorage.setItem(paneLayoutKey(dir), JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const togglePaneUnit = useCallback((unit: "content" | "agent" | "terminal") => {
+    setPaneLayout((prev) => {
+      const visible = [prev.content, prev.agent, prev.terminal].filter(Boolean).length;
+      if (prev[unit] && visible === 1) return prev; // the floor: the last unit stays open
+      const next = { ...prev, [unit]: !prev[unit] };
+      const dir = activeRef.current;
+      if (dir) localStorage.setItem(paneLayoutKey(dir), JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  /* clicking a content destination while the content unit is hidden reveals it */
+  const revealContent = useCallback(() => {
+    setPaneLayout((prev) => {
+      if (prev.content) return prev;
+      const next = { ...prev, content: true };
+      const dir = activeRef.current;
+      if (dir) localStorage.setItem(paneLayoutKey(dir), JSON.stringify(next));
+      return next;
+    });
+  }, []);
+  const goPane = useCallback((p: Pane) => {
+    setPane(p);
+    revealContent();
+  }, [revealContent]);
 
   const doOpenProject = useCallback((path: string) => {
     if (projectsRef.current.has(path)) {
@@ -466,12 +539,19 @@ export default function App() {
       }
       else if (mod && e.key === "o") { e.preventDefault(); openDialog(); }
       else if (mod && e.key === "/") { e.preventDefault(); setShortcutsOpen(true); }
+      else if (e.metaKey && e.altKey && activeRef.current && /^Digit[123]$/.test(e.code)) {
+        // ⌥⌘1/2/3 — toggle content / agent / terminal (e.code: ⌥ changes e.key on macOS)
+        e.preventDefault();
+        togglePaneUnit(e.code === "Digit1" ? "content" : e.code === "Digit2" ? "agent" : "terminal");
+      }
       else if (mod && e.key === "j" && activeRef.current) {
         e.preventDefault();
         setPane((p) => PANES[(PANES.indexOf(p) + 1) % PANES.length]);
+        revealContent(); // the cycle is a content-view action — hidden content reveals
       } else if (e.ctrlKey && e.key === "Tab" && activeRef.current) {
         e.preventDefault();
         setPane((p) => PANES[(PANES.indexOf(p) + 1) % PANES.length]);
+        revealContent();
       } else if (mod && e.key === "w" && activeRef.current) {
         e.preventDefault();
         closeProject(activeRef.current);
@@ -483,7 +563,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openDialog, activate, closeProject, newTerminal]);
+  }, [openDialog, activate, closeProject, newTerminal, togglePaneUnit, revealContent]);
 
   /* ---- dev-only handle for the cleanroom harness ---- */
   useEffect(() => {
@@ -593,16 +673,16 @@ export default function App() {
         onOpenFile={(path) => {
           if (!activeRef.current) return;
           openFileInRepo(activeRef.current, path);
-          setPane("repo");
+          goPane("repo");
         }}
         onOpenHistory={() => {
           if (!activeRef.current) return;
           openHistoryView(activeRef.current, "repo");
-          setPane("repo");
+          goPane("repo");
         }}
         onOpenTask={(id) => {
           openTaskInKanban(id);
-          setPane("kanban");
+          goPane("kanban");
         }}
       />
       <ChronicleToaster />
@@ -649,7 +729,7 @@ export default function App() {
         tabs={tabs}
         activeDir={active.dir}
         pane={pane}
-        onPane={setPane}
+        onPane={goPane}
         checkedAt={active.state?.checked_at ?? null}
         update={updateProps}
         degraded={degraded}
@@ -660,6 +740,14 @@ export default function App() {
           setSplitPct(pct);
           localStorage.setItem(splitKey(active.dir), String(pct));
         }}
+        panes={{ content: paneLayout.content, agent: paneLayout.agent, terminal: paneLayout.terminal }}
+        onTogglePane={togglePaneUnit}
+        agentCollapsed={paneLayout.agentCollapsed}
+        terminalCollapsed={paneLayout.terminalCollapsed}
+        onToggleAgentCollapsed={() => patchLayout({ agentCollapsed: !paneLayout.agentCollapsed })}
+        onToggleTerminalCollapsed={() => patchLayout({ terminalCollapsed: !paneLayout.terminalCollapsed })}
+        hSplitPct={paneLayout.hSplit}
+        onHSplitPct={(pct) => patchLayout({ hSplit: pct })}
         onSwitch={activate}
         onClose={closeProject}
         onAdd={() => setPaletteOpen(true)}
@@ -689,12 +777,12 @@ export default function App() {
             justSwitched={!!active.justSwitchedAt && Date.now() - active.justSwitchedAt < 2000}
             onAgentChange={setAgent}
             onOpenProject={doOpenProject}
-            onGoRepo={() => setPane("repo")}
+            onGoRepo={() => goPane("repo")}
             onGoHistory={() => {
               openHistoryView(active.dir, "roadmap");
-              setPane("repo");
+              goPane("repo");
             }}
-            onGoKanban={() => setPane("kanban")}
+            onGoKanban={() => goPane("kanban")}
             onConfirm={setConfirm}
             onPollNow={() => void pollOne(active.dir)}
           />
@@ -705,7 +793,7 @@ export default function App() {
             state={active.state}
             onConfirm={setConfirm}
             onPollNow={() => void pollOne(active.dir)}
-            onGoRoadmap={() => setPane("road")}
+            onGoRoadmap={() => goPane("road")}
           />
         ) : (
           <KanbanPane
@@ -713,7 +801,7 @@ export default function App() {
             dir={active.dir}
             agent={agent}
             onConfirm={setConfirm}
-            onGoRoadmap={() => setPane("road")}
+            onGoRoadmap={() => goPane("road")}
           />
         )}
       </Shell>

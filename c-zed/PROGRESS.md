@@ -44,3 +44,33 @@ initialize → session/new (agent's own modes asserted) → prompt → streamed
 chunks → turn_end → stop, passed in 32s.
 
 **Commit** — 343e5ad
+
+## Z-2a · The shell rework (F31)
+
+**What landed** — the right column now stacks **Agent above Terminal** with a
+persisted horizontal splitter (`Shell.tsx` restructured; new
+`components/chrome/PaneCluster.tsx`, `screens/agent/AgentSection.tsx`;
+`TerminalColumn` gained collapse-to-strip). The three-unit visibility system:
+a title-bar toggle cluster (content · agent · terminal) leftmost of the
+update line, all three visible at max, exactly one at min — the last visible
+unit's toggle disables with "The last pane stays open". ⌥⌘1/2/3 keyboard
+twins (via `e.code`, alt-safe on macOS), listed in the shortcuts overlay.
+Per-section collapse leaves a slim re-open strip (agent strip at the top,
+terminal strip at the bottom; both collapsed pin apart). Visibility, collapse,
+and both splitters persist per project (`chronicle.panes.<dir>`).
+**Retired**: the "terminal column is absent on Kanban (full-bleed)" rule —
+the old `showTerminal = pane !== "kanban"` logic is gone; full-bleed now
+happens via the toggles. Rail clicks (and every content navigation, including
+the ⌘J cycle) auto-reveal a hidden content unit. Hiding units never touches
+sessions (xterm sessions live outside React). The agent section body is the
+F31 empty-state hero for now — Z-2b replaces it with the real pane.
+
+**How it was verified** — `npx tsc --noEmit` + `npx vite build` green;
+`cargo test` still 23 passed. New Playwright probe harness (scratchpad,
+own vite on PORT=4322, logged `__TAURI_INTERNALS__` stub): 6 probes passed —
+stacked column + kanban keeps the right column; the visibility floor
+(disabled toggle + ⌥⌘ respects it); visibility/collapse persistence across
+reload; hidden terminal keeps its session (no `pty_kill` in the stub log);
+rail auto-reveal; horizontal splitter drag + persistence.
+
+**Commit** — 9f1fa8e

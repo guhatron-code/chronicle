@@ -100,6 +100,8 @@ export function TerminalColumn({
   onRenameStart,
   onRenameCommit,
   hostFor,
+  collapsed,
+  onToggleCollapsed,
 }: {
   tabs: TerminalTab[];
   activeId: number | null;
@@ -114,11 +116,37 @@ export function TerminalColumn({
   onRenameCommit?: (id: number, name: string) => void;
   /** The host-mount seam — see the header comment. */
   hostFor?: (id: number) => (el: HTMLDivElement | null) => void;
+  /** F31 — collapsed to a slim re-open strip at the bottom of the column.
+   *  Sessions keep running exactly as hidden tabs already do. */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }) {
   const [renamingId, setRenamingId] = useState<number | null>(null);
 
+  if (collapsed) {
+    return (
+      <button
+        data-terminal-strip
+        onClick={onToggleCollapsed}
+        className="flex h-7 shrink-0 items-center gap-2 border-t border-divider px-3 text-left hover:bg-fill-subtle"
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-text-dim">
+          <path d="m3 5 3 3-3 3M8 11h5" />
+        </svg>
+        <span className="text-[11.5px] font-medium text-text-secondary">Terminal</span>
+        <span className="font-mono text-[10.5px] text-text-dim tabular-nums">
+          {tabs.length === 0 ? "no tabs" : tabs.length === 1 ? "1 tab" : `${tabs.length} tabs`}
+        </span>
+        <span className="flex-1" />
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-text-dim">
+          <path d="m3 7.5 3-3 3 3" />
+        </svg>
+      </button>
+    );
+  }
+
   return (
-    <div className="flex min-w-[240px] flex-1 flex-col overflow-hidden border-l border-divider">
+    <div data-terminal-section className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* tab strip — the C2 h-10 row (operator-aligned with the viewer bar) */}
       <div role="tablist" className="flex h-10 shrink-0 items-center gap-0.5 border-b border-divider px-3">
         {tabs.map((t) =>
@@ -204,6 +232,18 @@ export function TerminalColumn({
         >
           {spawning === "codex" ? <Spinner size={13} /> : <CodexTile />}
         </button>
+        {onToggleCollapsed && (
+          <button
+            aria-label="Collapse the terminal section"
+            title="Collapse — a slim strip stays"
+            onClick={onToggleCollapsed}
+            className="flex size-6 shrink-0 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="m3 4.5 3 3 3-3" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {tabs.length === 0 ? (

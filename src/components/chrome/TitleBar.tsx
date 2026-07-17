@@ -8,6 +8,7 @@
 import { Fragment } from "react";
 import { windowControls } from "@/lib/ipc";
 import { BrandGlyph, ErrorGlyph, PlusGlyph, XGlyph } from "./icons";
+import { PaneCluster, type PaneUnit, type PaneVisibility } from "./PaneCluster";
 import { cn } from "@/lib/utils";
 import type { MarkIndex } from "./atoms";
 
@@ -69,6 +70,8 @@ export function TitleBar({
   checkedAt,
   update,
   degraded,
+  panes,
+  onTogglePane,
   onSwitch,
   onClose,
   onAdd,
@@ -80,6 +83,9 @@ export function TitleBar({
   /** A newer Chronicle is ready — the quiet right-side affordance. */
   update?: { version: string; busy: boolean; onInstall: () => void; onDismiss: () => void } | null;
   degraded: string | null;
+  /** F31 — the visibility cluster, leftmost of the right-side items. */
+  panes?: PaneVisibility;
+  onTogglePane?: (unit: PaneUnit) => void;
   onSwitch: (dir: string) => void;
   onClose: (dir: string) => void;
   onAdd: () => void;
@@ -195,6 +201,11 @@ export function TitleBar({
       </div>
 
       <span className="flex-1" data-tauri-drag-region />
+      {panes && onTogglePane && (
+        <span className="mr-3 shrink-0">
+          <PaneCluster visibility={panes} onToggle={onTogglePane} />
+        </span>
+      )}
       {update && (
         <span className="mr-3 inline-flex shrink-0 items-center gap-2 text-[11.5px]">
           <span className="text-text-secondary">Chronicle {update.version} is ready</span>

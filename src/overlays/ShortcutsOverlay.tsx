@@ -23,6 +23,9 @@ const GROUPS: { title: string; col: 0 | 1; pt?: string; rows: [string, string][]
     col: 1,
     rows: [
       ["Cycle Roadmap · Repo · Kanban", "⌘J or ⌃tab"],
+      ["Show or hide the content pane", "⌥⌘1"],
+      ["Show or hide the agent", "⌥⌘2"],
+      ["Show or hide the terminal", "⌥⌘3"],
     ],
   },
   {
