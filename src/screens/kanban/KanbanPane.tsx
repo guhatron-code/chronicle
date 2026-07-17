@@ -58,11 +58,14 @@ export function KanbanPane({
   agent,
   onConfirm,
   onGoRoadmap,
+  onRunRoundInPane,
 }: {
   dir: string;
   agent: "claude" | "codex";
   onConfirm: (spec: ConfirmSpec) => void;
   onGoRoadmap: () => void;
+  /** F39 — reveal the agent pane and run the round there (the default path). */
+  onRunRoundInPane?: (n: number, total: number) => void;
 }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeKanban(() => bump((n) => n + 1)), []);
@@ -340,6 +343,10 @@ export function KanbanPane({
           .catch(fail("Couldn't copy it"));
       },
       onRunHeadless: () => runHeadless(flow.round),
+      onRunInPane: () => {
+        setFlow({ kind: "idle" });
+        onRunRoundInPane?.(flow.round, r?.task_ids.length ?? 0);
+      },
       onStartRound: () => {
         const agentName = agent === "codex" ? "Codex" : "Claude";
         const promptPath = r?.prompt_path ?? `fixes/phase_${flow.round}_fixes_prompt.md`;

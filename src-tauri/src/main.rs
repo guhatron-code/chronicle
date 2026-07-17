@@ -2346,8 +2346,46 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
         let app = app.clone();
         Arc::new(move |v| { let _ = app.emit("acp-update", v); })
     };
-    let started = acp::start(&agents, emit, key, p.repo.clone(), p.dir.clone(), jail_roots, acp::adapter_command(&npx))?;
+    let started = acp::start(&agents, emit, key, p.repo.clone(), p.dir.clone(), jail_roots, None, acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
+}
+
+/// TRUE resume via the adapter's session/load — only offered when the
+/// initialize response advertised loadSession (the history list gates it).
+#[tauri::command]
+async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, id: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let (key, _) = canon_key(&dir)?;
+    let npx = find_tool("npx")
+        .ok_or("the agent needs Node.js — install it from nodejs.org, then try again")?;
+    let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
+    jail_roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
+    let emit: acp::Emit = {
+        let app = app.clone();
+        Arc::new(move |v| { let _ = app.emit("acp-update", v); })
+    };
+    let started = acp::start(&agents, emit, key, p.repo.clone(), p.dir.clone(), jail_roots, Some(id), acp::adapter_command(&npx))?;
+    Ok(json!({ "started": started }))
+}
+
+/// Previous sessions from the transcript store, newest first.
+#[tauri::command]
+async fn agent_sessions_list(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let (key, _) = canon_key(&dir)?;
+    let live = agents.get(&key)
+        .filter(|s| s.current_state().get("alive").and_then(|v| v.as_bool()).unwrap_or(false))
+        .and_then(|s| s.current_state().get("sessionId").and_then(|v| v.as_str()).map(String::from));
+    Ok(json!({ "sessions": acp::transcript::sessions_list(&p.dir, live.as_deref()) }))
+}
+
+/// A stored session's transcript lines — the frontend replays them through
+/// the same reducer that handles live events.
+#[tauri::command]
+async fn agent_history_read(roots: State<'_, OpenRoots>, dir: String, id: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    if id.contains('/') || id.contains("..") { return Err("bad session id".into()); }
+    Ok(json!({ "lines": acp::transcript::read(&p.dir, &id) }))
 }
 
 fn project_roots(p: &Project) -> Vec<PathBuf> {
@@ -2473,9 +2511,12 @@ async fn agent_respond_permission(roots: State<'_, OpenRoots>, agents: State<'_,
     agent_for(&roots, &agents, &dir)?.respond_permission(&request_id, option)
 }
 
+/// `clean` (default true) = the explicit "End session" — unresolved edits
+/// auto-keep. Closing a project passes false: the child stops but the ledger
+/// stays reviewable on reopen.
 #[tauri::command]
-async fn agent_session_stop(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String) -> Result<(), String> {
-    agent_for(&roots, &agents, &dir)?.stop();
+async fn agent_session_stop(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, clean: Option<bool>) -> Result<(), String> {
+    agent_for(&roots, &agents, &dir)?.stop(clean.unwrap_or(true));
     Ok(())
 }
 
@@ -2568,6 +2609,7 @@ fn main() {
             agent_session_start, agent_session_state, agent_prompt, agent_cancel,
             agent_set_mode, agent_respond_permission, agent_session_stop,
             agent_edits, agent_edit_diff, agent_edit_keep, agent_edit_undo, agent_restore_checkpoint,
+            agent_session_resume, agent_sessions_list, agent_history_read,
             journal_append, journal_read, notify, draft_save_message,
             global_search, status_report,
             github_repos, github_clone, github_create,

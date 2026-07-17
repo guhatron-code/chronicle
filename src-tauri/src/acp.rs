@@ -317,6 +317,101 @@ pub mod ledger {
     }
 }
 
+/* ================= the transcript store (Chronicle owns the conversation) =================
+   Every thread-relevant wire message appends to
+   .chronicle/agent/<session>/thread.jsonl AS IT STREAMS — this is also what
+   survives a crash. History lists sessions from this store; the read-only
+   view (and the thread rebuild on resume) replays these lines through the
+   same frontend reducer that handles live events. */
+
+pub mod transcript {
+    use super::ledger::agent_dir;
+    use serde_json::{json, Value};
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+
+    pub fn path(project: &Path, sid: &str) -> PathBuf {
+        agent_dir(project).join(sid).join("thread.jsonl")
+    }
+
+    pub fn append(project: &Path, sid: &str, msg: &Value) {
+        let p = path(project, sid);
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
+            let _ = writeln!(f, "{}", serde_json::to_string(msg).unwrap_or_default());
+        }
+    }
+
+    /// The adapter's resume capability, persisted at handshake so the history
+    /// list can gate "Resume" honestly with no live session around.
+    pub fn save_caps(project: &Path, load_session: bool) {
+        let _ = std::fs::create_dir_all(agent_dir(project));
+        let _ = std::fs::write(
+            agent_dir(project).join("caps.json"),
+            serde_json::to_string(&json!({ "loadSession": load_session })).unwrap_or_default(),
+        );
+    }
+    pub fn load_session_supported(project: &Path) -> bool {
+        std::fs::read_to_string(agent_dir(project).join("caps.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .and_then(|v| v.get("loadSession").and_then(|b| b.as_bool()))
+            .unwrap_or(false)
+    }
+
+    /// Previous sessions, newest first: id · first-message excerpt · user
+    /// message count · last activity (epoch ms) · whether it's the live one.
+    pub fn sessions_list(project: &Path, live_sid: Option<&str>) -> Vec<Value> {
+        let resumable = load_session_supported(project);
+        let mut out = Vec::new();
+        let Ok(rd) = std::fs::read_dir(agent_dir(project)) else { return out };
+        for e in rd.flatten() {
+            if !e.path().is_dir() { continue; }
+            let sid = e.file_name().to_string_lossy().to_string();
+            let tp = path(project, &sid);
+            let Ok(body) = std::fs::read_to_string(&tp) else { continue };
+            let mut first = String::new();
+            let mut users = 0usize;
+            for line in body.lines() {
+                let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+                if v.get("method").and_then(|m| m.as_str()) == Some("_chronicle/user_message") {
+                    users += 1;
+                    if first.is_empty() {
+                        first = v.pointer("/params/text").and_then(|t| t.as_str())
+                            .unwrap_or("").chars().take(120).collect();
+                    }
+                }
+            }
+            if users == 0 { continue; } // an empty session isn't history
+            let updated = std::fs::metadata(&tp).ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let active = live_sid == Some(sid.as_str());
+            out.push(json!({
+                "id": sid, "firstMessage": first, "userMessages": users,
+                "updatedAt": updated, "active": active,
+                "resumable": resumable && !active,
+            }));
+        }
+        out.sort_by_key(|v| std::cmp::Reverse(v.get("updatedAt").and_then(|u| u.as_u64()).unwrap_or(0)));
+        out
+    }
+
+    /// The stored lines for one session (capped — a runaway transcript must
+    /// not freeze the pane). The frontend replays them through its reducer.
+    pub fn read(project: &Path, sid: &str) -> Vec<Value> {
+        const CAP: usize = 5000;
+        let Ok(body) = std::fs::read_to_string(path(project, sid)) else { return Vec::new() };
+        let lines: Vec<&str> = body.lines().collect();
+        let start = lines.len().saturating_sub(CAP);
+        lines[start..].iter().filter_map(|l| serde_json::from_str(l).ok()).collect()
+    }
+}
+
 /* ================= checkpoints (git plumbing — never the user's index) ================= */
 
 pub mod checkpoint {
@@ -479,6 +574,12 @@ pub struct AcpSession {
     project_dir: PathBuf,
     /// The latest pre-message snapshot (this session's ref carries them all).
     last_checkpoint: Mutex<Option<String>>,
+    /// Set when this session resumes an earlier one via session/load.
+    resume: Option<String>,
+    /// During a session/load replay the adapter re-streams history — the
+    /// frontend rebuilds from OUR transcript instead, so replayed updates are
+    /// neither forwarded nor re-appended.
+    suppress_updates: AtomicBool,
     child: Mutex<Option<std::process::Child>>,
     writer: Mutex<Option<std::process::ChildStdin>>,
     next_id: AtomicU64,
@@ -523,6 +624,7 @@ pub fn start(
     cwd: PathBuf,
     project_dir: PathBuf,
     roots: Vec<PathBuf>,
+    resume: Option<String>,
     mut cmd: std::process::Command,
 ) -> Result<bool, String> {
     use std::os::unix::process::CommandExt;
@@ -554,6 +656,8 @@ pub fn start(
         repo: cwd.clone(),
         project_dir,
         last_checkpoint: Mutex::new(None),
+        resume,
+        suppress_updates: AtomicBool::new(false),
         child: Mutex::new(Some(child)),
         writer: Mutex::new(Some(stdin)),
         next_id: AtomicU64::new(1),
@@ -602,6 +706,12 @@ impl AcpSession {
 
     fn emit_msg(&self, message: Value) {
         (self.emit)(json!({ "dir": self.key, "message": message }));
+    }
+
+    fn append_transcript(&self, msg: &Value) {
+        if let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) {
+            transcript::append(&self.project_dir, &sid, msg);
+        }
     }
 
     fn emit_state(&self, params: Value) {
@@ -680,16 +790,36 @@ impl AcpSession {
             Err(e) => return self.fail_handshake(&e),
         };
         if let Ok(mut g) = self.agent_caps.lock() { *g = caps.clone(); }
+        let can_load = caps.pointer("/agentCapabilities/loadSession").and_then(|v| v.as_bool()).unwrap_or(false);
+        transcript::save_caps(&self.project_dir, can_load);
 
         self.emit_state(json!({ "state": "starting" }));
-        let new_req = proto::NewSessionRequest::new(cwd);
-        let new_params = match serde_json::to_value(&new_req) {
-            Ok(v) => v,
-            Err(e) => return self.fail_handshake(&e.to_string()),
+        // TRUE resume only when the adapter advertises loadSession — never assumed
+        let (method, params) = match &self.resume {
+            Some(old_sid) => {
+                if !can_load {
+                    return self.fail_handshake("this agent can't pick sessions back up — start a new one");
+                }
+                // the adapter replays history during load; our transcript is
+                // the UI's source, so the replay stays suppressed
+                self.suppress_updates.store(true, Ordering::SeqCst);
+                ("session/load", json!({ "sessionId": old_sid, "cwd": cwd, "mcpServers": [] }))
+            }
+            None => {
+                let new_req = proto::NewSessionRequest::new(cwd);
+                match serde_json::to_value(&new_req) {
+                    Ok(v) => ("session/new", v),
+                    Err(e) => return self.fail_handshake(&e.to_string()),
+                }
+            }
         };
-        match self.request_blocking("session/new", new_params, NEW_SESSION_TIMEOUT) {
+        match self.request_blocking(method, params, NEW_SESSION_TIMEOUT) {
             Ok(resp) => {
-                let sid = resp.get("sessionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                self.suppress_updates.store(false, Ordering::SeqCst);
+                let sid = match &self.resume {
+                    Some(old_sid) => old_sid.clone(),
+                    None => resp.get("sessionId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                };
                 if sid.is_empty() { return self.fail_handshake("the agent returned no session id"); }
                 if let Ok(mut g) = self.session_id.lock() { *g = Some(sid.clone()); }
                 if let Ok(mut g) = self.modes.lock() { *g = resp.get("modes").cloned().unwrap_or(Value::Null); }
@@ -698,11 +828,13 @@ impl AcpSession {
                 self.emit_state(json!({
                     "state": "ready",
                     "sessionId": sid,
+                    "resumed": self.resume.is_some(),
                     "modes": resp.get("modes").cloned().unwrap_or(Value::Null),
                     "agentCaps": caps,
                 }));
             }
             Err(e) => {
+                self.suppress_updates.store(false, Ordering::SeqCst);
                 // auth_required (-32000): the adapter wants a login run in a
                 // terminal — surface needs-login and end; the frontend opens
                 // `claude /login` in a terminal tab and restarts after it exits.
@@ -739,6 +871,7 @@ impl AcpSession {
                 Ok(Some(status)) => status.code(),
                 _ => { crate::term_then_kill(&mut c); exit_code }
             };
+            self.append_transcript(&json!({ "method": "_chronicle/session_state", "params": { "state": "ended" } }));
             self.emit_state(json!({ "state": "ended", "code": code }));
         }
         if let Ok(mut g) = self.sessions.lock() {
@@ -761,6 +894,14 @@ impl AcpSession {
             if has_method && has_id {
                 self.handle_agent_request(&msg);
             } else if has_method {
+                if self.suppress_updates.load(Ordering::SeqCst)
+                    && msg.get("method").and_then(|m| m.as_str()) == Some("session/update")
+                {
+                    continue; // a session/load replay — the transcript already has it
+                }
+                if msg.get("method").and_then(|m| m.as_str()) == Some("session/update") {
+                    self.append_transcript(&msg);
+                }
                 // notification (session/update et al) — raw passthrough
                 self.emit_msg(msg);
             } else if has_id {
@@ -787,17 +928,19 @@ impl AcpSession {
                 // a turn ending always resolves any ask still on screen
                 self.cancel_all_perms();
                 self.reconcile_turn_end();
-                match outcome {
-                    Ok(result) => self.emit_msg(json!({
+                let end = match outcome {
+                    Ok(result) => json!({
                         "method": "_chronicle/turn_end",
                         "params": { "stopReason": result.get("stopReason").cloned().unwrap_or(Value::Null),
                                      "usage": result.get("usage").cloned().unwrap_or(Value::Null) }
-                    })),
-                    Err(err) => self.emit_msg(json!({
+                    }),
+                    Err(err) => json!({
                         "method": "_chronicle/turn_end",
                         "params": { "error": err }
-                    })),
-                }
+                    }),
+                };
+                self.append_transcript(&end);
+                self.emit_msg(end);
             }
             None => {}
         }
@@ -818,6 +961,7 @@ impl AcpSession {
                 if let Ok(mut g) = self.perms.lock() {
                     g.insert(id.to_string(), id.clone());
                 }
+                self.append_transcript(msg);
                 self.emit_msg(msg.clone());
             }
             _ => self.respond_err(&id, -32601, "method not supported by this client"),
@@ -945,6 +1089,10 @@ impl AcpSession {
                 self.emit_msg(json!({ "method": "_chronicle/checkpoint", "params": { "error": e } }));
             }
         }
+        self.append_transcript(&json!({
+            "method": "_chronicle/user_message",
+            "params": { "text": message, "ts": crate::epoch_ms() }
+        }));
         let req = proto::PromptRequest::new(
             sid,
             vec![proto::ContentBlock::Text(proto::TextContent::new(message))],
@@ -978,10 +1126,12 @@ impl AcpSession {
         };
         for (key, id) in drained {
             self.respond_ok(&id, json!({ "outcome": { "outcome": "cancelled" } }));
-            self.emit_msg(json!({
+            let resolved = json!({
                 "method": "_chronicle/permission_resolved",
                 "params": { "requestId": key, "outcome": "cancelled" }
-            }));
+            });
+            self.append_transcript(&resolved);
+            self.emit_msg(resolved);
         }
     }
 
@@ -996,11 +1146,13 @@ impl AcpSession {
             None => json!({ "outcome": "cancelled" }),
         };
         self.respond_ok(&id, json!({ "outcome": outcome }));
-        self.emit_msg(json!({
+        let resolved = json!({
             "method": "_chronicle/permission_resolved",
             "params": { "requestId": request_id,
                          "outcome": option_id.map(Value::String).unwrap_or(json!("cancelled")) }
-        }));
+        });
+        self.append_transcript(&resolved);
+        self.emit_msg(resolved);
         Ok(())
     }
 
@@ -1032,17 +1184,20 @@ impl AcpSession {
         Ok(())
     }
 
-    /// The EXPLICIT end (the user's "End session"): unresolved edits auto-keep
-    /// ("All changes kept"), the checkpoint ref goes, the current pointer
-    /// clears. A quit or crash never comes through here — those leave the
-    /// ledger reviewable after restart.
-    pub fn stop(&self) {
-        if let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) {
-            let _ = ledger::keep(&self.project_dir, &sid, None);
-            ledger::clear(&self.project_dir, &sid);
-            checkpoint::delete_ref(&self.repo, &sid);
-            ledger::clear_current_session(&self.project_dir);
-            self.emit_msg(json!({ "method": "_chronicle/edits_changed", "params": {} }));
+    /// End the session. `clean` = the user's explicit "End session":
+    /// unresolved edits auto-keep ("All changes kept"), the checkpoint ref
+    /// goes, the current pointer clears. `clean=false` (closing the project,
+    /// quitting) just stops the child — the ledger stays reviewable after a
+    /// restart or reopen.
+    pub fn stop(&self, clean: bool) {
+        if clean {
+            if let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) {
+                let _ = ledger::keep(&self.project_dir, &sid, None);
+                ledger::clear(&self.project_dir, &sid);
+                checkpoint::delete_ref(&self.repo, &sid);
+                ledger::clear_current_session(&self.project_dir);
+                self.emit_msg(json!({ "method": "_chronicle/edits_changed", "params": {} }));
+            }
         }
         self.shutdown(None);
     }
@@ -1189,7 +1344,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        assert!(start(&state, emit, key.clone(), dir.clone(), dir.clone(), vec![dir.clone()], cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), dir.clone(), dir.clone(), vec![dir.clone()], None, cmd).unwrap());
         Some(Harness { state, rx, key, dir })
     }
 
@@ -1258,7 +1413,7 @@ for line in sys.stdin:
         s.set_mode("acceptEdits").unwrap();
         assert_eq!(s.current_state().pointer("/modes/currentModeId").and_then(|v| v.as_str()), Some("acceptEdits"));
 
-        s.stop();
+        s.stop(true);
         wait_for(&h.rx, 20, |v| state_is(v, "ended"));
         assert!(h.state.get(&h.key).is_none(), "a stopped session leaves the map");
         let _ = std::fs::remove_dir_all(&h.dir);
@@ -1291,7 +1446,7 @@ for line in sys.stdin:
 
         // after the cancelled turn a new prompt is accepted again
         s.prompt("turn three".into()).unwrap();
-        s.stop();
+        s.stop(true);
         wait_for(&h.rx, 20, |v| state_is(v, "ended"));
         let _ = std::fs::remove_dir_all(&h.dir);
     }
@@ -1314,6 +1469,8 @@ for line in sys.stdin:
             modes: Mutex::new(Value::Null),
             agent_caps: Mutex::new(Value::Null),
             turn_active: AtomicBool::new(false),
+            resume: None,
+            suppress_updates: AtomicBool::new(false),
             emit: Arc::new(|_| {}),
             sessions: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -1477,6 +1634,8 @@ for line in sys.stdin:
             modes: Mutex::new(Value::Null),
             agent_caps: Mutex::new(Value::Null),
             turn_active: AtomicBool::new(false),
+            resume: None,
+            suppress_updates: AtomicBool::new(false),
             emit: Arc::new(move |v| { let _ = tx.send(v); }),
             sessions: Arc::new(Mutex::new(HashMap::new())),
         };
@@ -1553,6 +1712,43 @@ for line in sys.stdin:
         assert!(checkpoint::contains(&d, "sess-fresh", &fresh), "a fresh ref survives");
     }
 
+    /* ---------- Z-4: the transcript store ---------- */
+
+    #[test]
+    fn transcript_store_lists_reads_and_gates_resume() {
+        let d = tmp("transcript");
+        transcript::append(&d, "s1", &json!({"method":"_chronicle/user_message","params":{"text":"make the pricing cards align"}}));
+        transcript::append(&d, "s1", &json!({"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}}}));
+        transcript::append(&d, "s1", &json!({"method":"_chronicle/turn_end","params":{"stopReason":"end_turn"}}));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        transcript::append(&d, "s2", &json!({"method":"_chronicle/user_message","params":{"text":"round 5"}}));
+        // a dir with no user message is not history
+        let _ = std::fs::create_dir_all(super::ledger::agent_dir(&d).join("empty"));
+
+        // no caps file yet → resume is NEVER promised
+        let list = transcript::sessions_list(&d, None);
+        assert_eq!(list.len(), 2, "{list:?}");
+        assert!(list.iter().all(|s| s["resumable"] == false));
+        assert_eq!(list[0]["id"], "s2", "newest first");
+        assert_eq!(list[1]["firstMessage"], "make the pricing cards align");
+        assert_eq!(list[1]["userMessages"], 1);
+
+        // capability saved at handshake → resumable, except the live session
+        transcript::save_caps(&d, true);
+        let list = transcript::sessions_list(&d, Some("s2"));
+        let s2 = list.iter().find(|s| s["id"] == "s2").unwrap();
+        assert_eq!(s2["active"], true);
+        assert_eq!(s2["resumable"], false, "the live session doesn't offer Resume");
+        let s1 = list.iter().find(|s| s["id"] == "s1").unwrap();
+        assert_eq!(s1["resumable"], true);
+
+        // the read replays the stored lines in order
+        let lines = transcript::read(&d, "s1");
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0]["method"], "_chronicle/user_message");
+        assert_eq!(lines[2]["method"], "_chronicle/turn_end");
+    }
+
     /// The real adapter, end to end: gated behind CHRONICLE_ACP_TEST=1 (needs
     /// npx + a logged-in Claude Code). Run with:
     ///   CHRONICLE_ACP_TEST=1 cargo test acp_real_adapter -- --ignored --nocapture
@@ -1573,7 +1769,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        start(&state, emit, key.clone(), dir.clone(), dir.clone(), vec![dir.clone()], adapter_command(&npx)).unwrap();
+        start(&state, emit, key.clone(), dir.clone(), dir.clone(), vec![dir.clone()], None, adapter_command(&npx)).unwrap();
 
         let ready = wait_for(&rx, 300, |v| state_is(v, "ready") || state_is(v, "needs-login") || state_is(v, "error"));
         if !state_is(&ready, "ready") {
@@ -1605,7 +1801,7 @@ for line in sys.stdin:
             if method_is(&v, "_chronicle/turn_end") { break; }
         }
         assert!(saw_chunk, "streamed message chunks must arrive");
-        s.stop();
+        s.stop(true);
         wait_for(&rx, 30, |v| state_is(v, "ended"));
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -148,3 +148,43 @@ command-changed bar; checkpoint restore through the confirm; mid-turn undo
 hidden). Full probe suite: 17/17.
 
 **Commit** — d5778bc
+
+## Z-4 · Integrations + history (F37 · F38 · F39)
+
+**What landed** — **Rust**: the transcript store — every thread-relevant wire
+message appends to `.chronicle/agent/<session>/thread.jsonl` AS IT STREAMS
+(user messages, session updates, permission asks + outcomes, checkpoints,
+turn ends, session end); `agent_sessions_list` (newest first, first-message
+excerpt, user-message count, active flag), `agent_history_read` (capped
+replay lines), `agent_session_resume` — TRUE resume via `session/load`, only
+when the initialize response advertised `loadSession` (persisted to
+`caps.json` so history gates Resume honestly with no live session); the
+adapter's load-replay is suppressed (the UI rebuilds from OUR transcript —
+no double-append, no double-render). `agent_session_stop` gained `clean`:
+project close stops the child WITHOUT auto-keeping, so the ledger stays
+reviewable on reopen. **Frontend**: the reducer is now shared between live
+events and transcript replay (`reduceInto`); F37 history popover in the
+agent header (Resume where allowed; View · Continue in a new session
+elsewhere, with the honest read-only footer) + the read-only viewing mode
+("nothing here can act"); F38 — the phase detail's primary is "Start with
+the agent" (reveals the pane, preloads the prompt as an UNSENT draft with
+the chip + "review and send" note; a held draft asks "Replace what you've
+written?" first; "Run in a terminal" is the secondary); F39 — "Run the round
+for me" now lands in the pane (round prompt = first message, sent only when
+the session is ready), with the round card deriving done/stopped-early from
+the BOARD's columns + the stop reason only — never the agent's claim;
+headless stays as "Run it in the background instead". Close-project confirm
+covers a live agent session; agent-session endings journal + native-notify
+exactly like today's session endings.
+
+**How it was verified** — `cargo test`: 30 passed (new: transcript store
+lists newest-first with excerpts/counts, skips empty sessions, gates
+resumable on the persisted capability and never on the live session, replay
+reads in order). `npx tsc --noEmit` + `npx vite build` green. 4 new probes:
+phase-start preload (never auto-sends, keep/replace confirm both ways);
+round-in-pane (card from board ground truth: running → stopped early with
+stop reason → done only when the board completes); history resume vs
+read-only fallback (session/load call gated, viewing mode inert); close
+confirm + un-clean stop (`clean: false` asserted). Full suite: 21/21 probes.
+
+**Commit** — recorded in the following docs commit

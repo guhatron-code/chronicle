@@ -4,10 +4,11 @@
  * description / steps checklist / you-paste / documents accordion  |  saves timeline.
  * Presentational only.
  */
-import { BtnPrimary, Eyebrow, IdChip, Spinner, StateWord } from "@/components/chrome/atoms";
+import { BtnPrimary, BtnSecondary, Eyebrow, IdChip, Spinner, StateWord } from "@/components/chrome/atoms";
 import {
   AgentStarGlyph,
   CheckGlyph,
+  ClaudeStar,
   ChevronLeftGlyph,
   ChevronRightGlyph,
   ChevronUpGlyph,
@@ -59,6 +60,8 @@ export type PhaseDetailProps = {
   onBack?: () => void;
   onClose?: () => void;
   onStart?: () => void;
+  /** F38 — the new primary: reveal the agent pane with the prompt as a draft. */
+  onStartAgent?: () => void;
   onChip?: (name: string) => void;
   className?: string;
 };
@@ -236,10 +239,16 @@ export function PhaseDetail(p: PhaseDetailProps) {
         </StateWord>
         <span className="flex-1" />
         {p.statusWord !== "Done" && (
-          <BtnPrimary size="md" className="gap-[7px]" onClick={p.onStart}>
-            <PlayGlyph size={11} />
-            Start this phase
-          </BtnPrimary>
+          <>
+            <BtnPrimary size="md" className="gap-[7px]" onClick={p.onStartAgent}>
+              <ClaudeStar size={12} />
+              Start with the agent
+            </BtnPrimary>
+            <BtnSecondary size="md" className="gap-[7px]" onClick={p.onStart}>
+              <PlayGlyph size={11} />
+              Run in a terminal
+            </BtnSecondary>
+          </>
         )}
         <button
           aria-label="Close"

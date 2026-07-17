@@ -370,7 +370,12 @@ export const agentCancel = (dir: string) => invoke("agent_cancel", { dir });
 export const agentSetMode = (dir: string, mode: string) => invoke("agent_set_mode", { dir, mode });
 export const agentRespondPermission = (dir: string, requestId: string, option: string | null) =>
   invoke("agent_respond_permission", { dir, requestId, option });
-export const agentSessionStop = (dir: string) => invoke("agent_session_stop", { dir });
+/** clean=true (default) is the explicit "End session" — unresolved edits
+ *  auto-keep. Project close passes false so the ledger survives reopen. */
+export const agentSessionStop = (dir: string, clean = true) => invoke("agent_session_stop", { dir, clean });
+export const agentSessionResume = (dir: string, id: string) => invoke("agent_session_resume", { dir, id });
+export const agentSessionsList = (dir: string) => invoke<Record<string, unknown>>("agent_sessions_list", { dir });
+export const agentHistoryRead = (dir: string, id: string) => invoke<Record<string, unknown>>("agent_history_read", { dir, id });
 export const onAcpUpdate = (cb: (u: AcpUpdate) => void): Promise<UnlistenFn> =>
   listen<AcpUpdate>("acp-update", (e) => cb(e.payload));
 

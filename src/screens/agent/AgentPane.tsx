@@ -9,11 +9,14 @@ import { useEffect, useRef, useState } from "react";
 import {
   agentSessionFor,
   startAgentSession,
+  startRoundInPane,
   adoptAgentSession,
+  closeAgentViewing,
   subscribeAgent,
   type AgentEntry,
   type AgentSessionState,
 } from "@/lib/agent-session";
+import { kanbanFor, subscribeKanban } from "@/lib/kanban-store";
 import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint } from "@/lib/ipc";
 import { CheckGlyph } from "@/components/chrome/icons";
 import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term-sessions";
@@ -198,23 +201,118 @@ function TurnError({ message }: { message: string }) {
   );
 }
 
+/** F39 — the round header card. Done/failed derive from GROUND TRUTH only:
+ *  the board's task columns plus the session's stop reason — never the
+ *  agent's own claim. */
+function RoundCard({
+  dir,
+  entry,
+  onRetry,
+  onOpenBoard,
+}: {
+  dir: string;
+  entry: Extract<AgentEntry, { kind: "round" }>;
+  onRetry?: () => void;
+  onOpenBoard?: () => void;
+}) {
+  const tasks = kanbanFor(dir).tasks.filter((t) => t.round === entry.n && !t.archived);
+  const total = tasks.length || entry.total;
+  const done = tasks.filter((t) => t.column === "completed").length;
+  const allDone = total > 0 && done === total;
+  const stopped = entry.ended && !allDone;
+  return (
+    <div data-round-card className="flex flex-col gap-2 rounded-[10px] border border-border-hairline bg-surface-card-raised px-3.5 py-3">
+      <div className="flex items-center gap-2 whitespace-nowrap">
+        <span className="text-[13px] font-semibold text-text-primary">
+          Round {entry.n} · {total} {total === 1 ? "task" : "tasks"}
+        </span>
+        {allDone ? (
+          <span className="inline-flex items-center gap-[5px] text-xs text-state-success">
+            <CheckGlyph size={11} />
+            done
+          </span>
+        ) : stopped ? (
+          <span className="inline-flex items-center gap-[5px] text-xs text-state-error">
+            <span className="size-[5px] shrink-0 rounded-full bg-state-error" />
+            stopped early
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-[5px] text-xs text-state-neutral">
+            <span className="size-[5px] shrink-0 rounded-full bg-state-neutral" style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }} />
+            running
+          </span>
+        )}
+        <span className="flex-1" />
+        <button onClick={onOpenBoard} className="text-[11.5px] text-text-secondary hover:text-text-primary">
+          Open the board ›
+        </button>
+      </div>
+      {!entry.ended && (
+        <div className="h-[3px] overflow-hidden rounded-[2px] bg-fill-hover">
+          <span className="block h-full rounded-[2px] bg-state-neutral" style={{ width: `${total > 0 ? Math.round((done / total) * 100) : 0}%` }} />
+        </div>
+      )}
+      <span className="font-mono text-[10.5px] text-text-dim tabular-nums">
+        {done} of {total} tasks done on the board
+      </span>
+      {allDone && (
+        <span className="text-[11.5px] text-text-muted">
+          Every task in the round is completed on the board — that's what "done" means here.
+        </span>
+      )}
+      {stopped && (
+        <>
+          <span className="text-[11.5px] leading-[1.55] text-text-muted">
+            The session ended before the round finished
+            {entry.stopReason ? <> — stop reason: <span className="font-mono text-[11px]">{entry.stopReason}</span></> : null}
+            . The {total - done} remaining {total - done === 1 ? "task stays" : "tasks stay"} on the board.
+          </span>
+          {onRetry && (
+            <div className="flex gap-2">
+              <BtnPrimary size="sm" onClick={onRetry}>Pick the round back up</BtnPrimary>
+              <BtnSecondary size="sm" onClick={onOpenBoard}>Open the board</BtnSecondary>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function Entry({
   dir,
   entry,
   turnActive,
   onConfirm,
+  readOnly,
+  onRetryRound,
+  onOpenBoard,
 }: {
   dir: string;
   entry: AgentEntry;
   turnActive: boolean;
   onConfirm: (spec: ConfirmSpec) => void;
+  readOnly?: boolean;
+  onRetryRound?: (n: number, total: number) => void;
+  onOpenBoard?: () => void;
 }) {
   if (entry.kind === "user")
     return (
       <>
-        <CheckpointRow dir={dir} checkpoint={entry.checkpoint} disabled={turnActive} onConfirm={onConfirm} />
+        <CheckpointRow dir={dir} checkpoint={entry.checkpoint} disabled={turnActive || !!readOnly} onConfirm={onConfirm} />
         <UserMessage text={entry.text} />
       </>
+    );
+  if (entry.kind === "round")
+    return (
+      <div className="px-3.5 py-1.5">
+        <RoundCard
+          dir={dir}
+          entry={entry}
+          onRetry={readOnly ? undefined : () => onRetryRound?.(entry.n, entry.total)}
+          onOpenBoard={onOpenBoard}
+        />
+      </div>
     );
   if (entry.kind === "assistant") return <AssistantMessage text={entry.text} streaming={entry.streaming} />;
   if (entry.kind === "turn-error") return <TurnError message={entry.message} />;
@@ -236,6 +334,7 @@ export function AgentPane({
   onConfirm,
   onRevealTerminal,
   onOpenReview,
+  onOpenBoard,
 }: {
   dir: string;
   onConfirm: (spec: ConfirmSpec) => void;
@@ -243,9 +342,12 @@ export function AgentPane({
   onRevealTerminal: () => void;
   /** F36 — Review opens the repo viewer on the ledger diff */
   onOpenReview: () => void;
+  /** F39 — the round card's "Open the board" */
+  onOpenBoard?: () => void;
 }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeAgent(() => bump((n) => n + 1)), []);
+  useEffect(() => subscribeKanban(() => bump((n) => n + 1)), []); // round cards tick with the board
   useEffect(() => {
     void adoptAgentSession(dir); // a live backend session survives a reload
   }, [dir]);
@@ -365,6 +467,35 @@ export function AgentPane({
     return null;
   })();
 
+  /* F37 — a read-only view of an earlier session's transcript */
+  if (s.viewing) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col" data-agent-viewing>
+        <div className="flex shrink-0 items-center gap-2 border-b border-divider bg-fill-subtle px-3.5 py-2">
+          <span className="text-xs text-text-muted">Viewing an earlier session — nothing here can act</span>
+          <span className="flex-1" />
+          <BtnSecondary size="sm" onClick={() => closeAgentViewing(dir)}>Back</BtnSecondary>
+          <BtnPrimary
+            size="sm"
+            onClick={() => {
+              closeAgentViewing(dir);
+              if (s.phase === "none" || s.phase === "ended" || s.phase === "error") {
+                void startAgentSession(dir).catch((e) => toastError("Couldn't start the agent", String(e).slice(0, 90)));
+              }
+            }}
+          >
+            Continue in a new session
+          </BtnPrimary>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
+          {s.viewing.entries.map((entry, i) => (
+            <Entry key={i} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenBoard={onOpenBoard} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   const empty = s.entries.length === 0;
 
   return (
@@ -388,7 +519,17 @@ export function AgentPane({
           className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2"
         >
           {s.entries.map((entry, i) => (
-            <Entry key={i} dir={dir} entry={entry} turnActive={s.turnActive} onConfirm={onConfirm} />
+            <Entry
+              key={i}
+              dir={dir}
+              entry={entry}
+              turnActive={s.turnActive}
+              onConfirm={onConfirm}
+              onOpenBoard={onOpenBoard}
+              onRetryRound={(n, total) => {
+                void startRoundInPane(dir, n, total).catch((e) => toastError("Couldn't restart the round", String(e).slice(0, 90)));
+              }}
+            />
           ))}
         </div>
       )}

@@ -11,9 +11,12 @@ import { useEffect, useRef, useState } from "react";
 import {
   agentSessionFor,
   cancelAgentTurn,
+  mirrorComposerText,
   sendAgentMessage,
+  setAgentDraft,
   setAgentMode,
 } from "@/lib/agent-session";
+import { XGlyph } from "@/components/chrome/icons";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { Kbd } from "@/components/chrome/atoms";
 import { toastError } from "@/overlays/toasts";
@@ -39,20 +42,22 @@ export function Composer({
   /* F38 — a preloaded draft lands in the input, unsent */
   const lastDraft = useRef<string | null>(null);
   useEffect(() => {
-    if (s.draft != null && s.draft !== lastDraft.current) {
-      lastDraft.current = s.draft;
-      setText(s.draft);
+    if (s.draft != null && s.draft.text !== lastDraft.current) {
+      lastDraft.current = s.draft.text;
+      setText(s.draft.text);
+      mirrorComposerText(dir, s.draft.text);
       taRef.current?.focus();
     }
     if (s.draft == null) lastDraft.current = null;
-  }, [s.draft]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.draft, dir]);
 
   const send = () => {
     const body = text.trim();
     if (!body || disabled || sending || s.turnActive) return;
     setSending(true);
     sendAgentMessage(dir, body)
-      .then(() => setText(""))
+      .then(() => { setText(""); mirrorComposerText(dir, ""); })
       .catch((e) => toastError("Couldn't send it", String(e).slice(0, 90)))
       .finally(() => setSending(false));
   };
@@ -83,13 +88,34 @@ export function Composer({
 
   return (
     <div className="flex shrink-0 flex-col gap-2 border-t border-divider px-3 py-2.5">
+      {s.draft && text === s.draft.text && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span data-draft-chip className="inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-fill-subtle px-2.5 text-[11px] text-text-subtle">
+            {s.draft.label}
+            <span className="text-text-dim">→ composer</span>
+            <button
+              aria-label="Clear the loaded prompt"
+              onClick={() => { setAgentDraft(dir, null); setText(""); mirrorComposerText(dir, ""); }}
+              className="flex text-text-dim hover:text-text-secondary"
+            >
+              <XGlyph size={8} />
+            </button>
+          </span>
+          <span className="text-[11px] text-text-dim">review and send — nothing goes until you do</span>
+        </div>
+      )}
       <textarea
         ref={taRef}
         data-agent-input
         value={text}
         disabled={disabled}
         placeholder="Ask for anything…"
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          mirrorComposerText(dir, e.target.value);
+          // hand-editing the preload keeps the text but drops the chip's claim
+          if (s.draft && e.target.value !== s.draft.text) setAgentDraft(dir, null);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && e.metaKey) {
             e.preventDefault();

@@ -9,11 +9,14 @@
 import {
   agentCancel,
   agentEdits,
+  agentHistoryRead,
   agentPrompt,
   agentRespondPermission,
+  agentSessionResume,
   agentSessionStart,
   agentSessionState,
   agentSessionStop,
+  agentSessionsList,
   agentSetMode,
   onAcpUpdate,
   type AcpUpdate,
@@ -63,7 +66,16 @@ export type AgentEntry =
       options: { optionId: string; name: string; kind: string }[];
       outcome?: PermOutcome;
     }
-  | { kind: "turn-error"; message: string };
+  | { kind: "turn-error"; message: string }
+  | {
+      kind: "round";
+      n: number;
+      total: number;
+      /** set when the turn carrying the round ended — done/failed derive from
+       *  the BOARD's columns plus this stop reason, never the agent's claim */
+      ended?: boolean;
+      stopReason?: string | null;
+    };
 
 export interface AgentSessionState {
   phase: AgentPhase;
@@ -76,8 +88,12 @@ export interface AgentSessionState {
   errorMessage: string | null;
   /** the Works-freely confirm is per SESSION — reset on every new session */
   worksFreelyConfirmed: boolean;
-  /** composer preload (F38) — a draft the user still has to send */
-  draft: string | null;
+  /** composer preload (F38) — a labeled draft the user still has to send */
+  draft: { label: string; text: string } | null;
+  /** a mirror of the composer's current text — preload checks read it */
+  composerText: string;
+  /** F37 — a read-only view of an earlier session's transcript */
+  viewing: { id: string; entries: AgentEntry[] } | null;
   /** the review strip's ground truth — refetched on _chronicle/edits_changed */
   editFiles: AgentEditFile[];
   /** files just resolved to zero — the strip's "All changes kept" moment */
@@ -97,6 +113,8 @@ const blank = (): AgentSessionState => ({
   errorMessage: null,
   worksFreelyConfirmed: false,
   draft: null,
+  composerText: "",
+  viewing: null,
   editFiles: [],
   editsResolved: false,
   pendingCheckpoint: null,
@@ -221,8 +239,11 @@ function settleStreaming(s: AgentSessionState) {
 }
 
 function routeUpdate(u: AcpUpdate) {
-  const s = agentSessionFor(u.dir);
-  const msg = u.message ?? {};
+  reduceInto(agentSessionFor(u.dir), u.dir, u.message ?? {});
+}
+
+/** The ONE reducer — live events and transcript replay share it. */
+function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]) {
   const method = str(msg.method);
   const params = (msg.params ?? {}) as Raw;
 
@@ -285,13 +306,29 @@ function routeUpdate(u: AcpUpdate) {
   }
 
   if (method === "_chronicle/write" || method === "_chronicle/edits_changed") {
-    refreshAgentEdits(u.dir);
+    refreshAgentEdits(dir);
+    return;
+  }
+
+  if (method === "_chronicle/user_message") {
+    // transcript replay only — live sends push their entry directly
+    s.entries.push({ kind: "user", text: str(params.text), checkpoint: s.pendingCheckpoint ?? undefined });
+    s.pendingCheckpoint = null;
     return;
   }
 
   if (method === "_chronicle/turn_end") {
     s.turnActive = false;
     settleStreaming(s);
+    // a running round settles with the turn — its face derives from the board
+    for (let i = s.entries.length - 1; i >= 0; i--) {
+      const e = s.entries[i];
+      if (e.kind === "round" && !e.ended) {
+        e.ended = true;
+        e.stopReason = params.error != null ? "error" : str(params.stopReason) || null;
+        break;
+      }
+    }
     if (params.error != null) {
       const err = params.error as Raw;
       s.entries.push({
@@ -332,7 +369,7 @@ function routeUpdate(u: AcpUpdate) {
             : kind === "read" || kind === "search" || kind === "fetch"
               ? "The agent wants to read"
               : "The agent asks to continue",
-      detail: toolDetail(u.dir, kind, tc),
+      detail: toolDetail(dir, kind, tc),
       options: Array.isArray(params.options)
         ? (params.options as Raw[]).map((o) => ({
             optionId: str(o.optionId),
@@ -364,9 +401,9 @@ function routeUpdate(u: AcpUpdate) {
         toolKind,
         title: str(update.title),
         status: (str(update.status) || "pending") as Extract<AgentEntry, { kind: "tool" }>["status"],
-        detail: toolDetail(u.dir, toolKind, update),
+        detail: toolDetail(dir, toolKind, update),
       };
-      applyToolContent(u.dir, entry, update.content);
+      applyToolContent(dir, entry, update.content);
       s.entries.push(entry);
     } else if (kind === "tool_call_update") {
       const id = str(update.toolCallId);
@@ -375,9 +412,9 @@ function routeUpdate(u: AcpUpdate) {
           if (update.status != null) e.status = str(update.status) as typeof e.status;
           if (update.title != null) e.title = str(update.title);
           if (update.kind != null) e.toolKind = str(update.kind);
-          const freshDetail = toolDetail(u.dir, e.toolKind, update);
+          const freshDetail = toolDetail(dir, e.toolKind, update);
           if (freshDetail && freshDetail !== str(update.title)) e.detail = freshDetail;
-          applyToolContent(u.dir, e, update.content);
+          applyToolContent(dir, e, update.content);
         }
       }
     } else if (kind === "current_mode_update") {
@@ -495,9 +532,113 @@ export async function endAgentSession(dir: string): Promise<void> {
 }
 
 /** F38 — preload the composer without ever sending. */
-export function setAgentDraft(dir: string, draft: string | null) {
+export function setAgentDraft(dir: string, draft: { label: string; text: string } | null) {
   const s = agentSessionFor(dir);
   s.draft = draft;
+  notify();
+}
+
+/** The composer mirrors its text here so preload checks can see an unsent
+ *  draft without owning the input. No notify — this is a read-side mirror. */
+export function mirrorComposerText(dir: string, text: string) {
+  agentSessionFor(dir).composerText = text;
+}
+
+/* ---------- history (F37) — the transcript store is the source ---------- */
+
+export interface AgentHistoryRow {
+  id: string;
+  firstMessage: string;
+  userMessages: number;
+  updatedAt: number;
+  active: boolean;
+  resumable: boolean;
+}
+
+export async function listAgentSessions(dir: string): Promise<AgentHistoryRow[]> {
+  const r = (await agentSessionsList(dir)) as { sessions?: AgentHistoryRow[] } | null;
+  return Array.isArray(r?.sessions) ? r.sessions : [];
+}
+
+/** Rebuild a thread by replaying stored lines through the ONE reducer. */
+async function replayTranscript(dir: string, id: string): Promise<AgentEntry[]> {
+  const r = (await agentHistoryRead(dir, id)) as { lines?: AcpUpdate["message"][] } | null;
+  const tmp = blank();
+  for (const line of r?.lines ?? []) {
+    if (line && typeof line === "object") reduceInto(tmp, dir, line);
+  }
+  settleStreaming(tmp);
+  // asks from an ended session can't be answered anymore
+  for (const e of tmp.entries) {
+    if (e.kind === "perm" && !e.outcome) e.outcome = { type: "cancelled" };
+  }
+  return tmp.entries;
+}
+
+/** Read-only view of an earlier session ("View" in the history list). */
+export async function viewAgentSession(dir: string, id: string): Promise<void> {
+  const entries = await replayTranscript(dir, id);
+  const s = agentSessionFor(dir);
+  s.viewing = { id, entries };
+  notify();
+}
+
+export function closeAgentViewing(dir: string) {
+  const s = agentSessionFor(dir);
+  s.viewing = null;
+  notify();
+}
+
+/** TRUE resume — only offered when the adapter advertised loadSession. The
+ *  thread rebuilds from OUR transcript; the adapter's replay is suppressed. */
+export async function resumeAgentSession(dir: string, id: string): Promise<void> {
+  const entries = await replayTranscript(dir, id);
+  const s = agentSessionFor(dir);
+  Object.assign(s, blank(), { phase: "installing" as AgentPhase, entries });
+  notify();
+  try {
+    await agentSessionResume(dir, id);
+  } catch (e) {
+    s.phase = "error";
+    s.errorMessage = String(e);
+    notify();
+    throw e;
+  }
+}
+
+/* ---------- round-in-pane (F39) ---------- */
+
+/** Run a kanban round in the pane: the round card enters the thread, the
+ *  round prompt becomes the session's next message (sent as soon as the
+ *  session is ready — starting one if needed). Done/failed derive from the
+ *  BOARD plus the stop reason, never from the agent's prose. */
+export async function startRoundInPane(dir: string, n: number, total: number): Promise<void> {
+  const s = agentSessionFor(dir);
+  const message =
+    `Read fixes/phase_${n}_fixes_prompt.md and fixes/phase_${n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: ` +
+    `every item, verified honestly, and after each item completes update that task's "column" to "completed" in .chronicle/kanban.json (match by task id, touch updated_at, change nothing else in that file).`;
+  s.viewing = null;
+  if (s.phase === "ready" && !s.turnActive) {
+    s.entries.push({ kind: "round", n, total });
+    notify();
+    await sendAgentMessage(dir, message);
+    return;
+  }
+  // start (or restart) the session, then land the card and send once ready —
+  // startAgentSession resets the thread, so the card goes in AFTER it
+  const un = subscribeAgent(() => {
+    const cur = agentSessionFor(dir);
+    if (cur.phase === "ready" && !cur.turnActive) {
+      un();
+      void sendAgentMessage(dir, message).catch(() => {});
+    }
+    if (cur.phase === "error" || cur.phase === "needs-login") un();
+  });
+  if (s.phase !== "installing" && s.phase !== "starting") {
+    await startAgentSession(dir);
+  }
+  const cur = agentSessionFor(dir);
+  cur.entries.push({ kind: "round", n, total });
   notify();
 }
 

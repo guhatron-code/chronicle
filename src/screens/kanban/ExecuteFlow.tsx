@@ -49,6 +49,8 @@ export type ExecuteFlowProps =
       onOpenFile?: (name: string) => void;
       /** Runs the round in a background session — Chronicle does the work (F1). */
       onRunHeadless?: () => void;
+      /** F39 — the default: the round runs in the agent pane, steps visible. */
+      onRunInPane?: () => void;
       /** Opens a terminal with the agent and copies the prompt — you drive. */
       onStartRound?: () => void;
       onViewRoadmap?: () => void;
@@ -183,17 +185,24 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
         </span>
       </div>
       <div className="text-[12.5px] leading-[1.55] text-text-muted">
-        The plan is written. Chronicle can run it for you in the background, or open a
-        terminal with {AGENT_NAME[p.agent ?? "claude"]} and the prompt on your clipboard.
+        The plan is written. Chronicle can run it in the agent pane with every step
+        visible, in a terminal, or quietly in the background.
       </div>
       <div className="flex gap-2">
-        <BtnPrimary size="md" onClick={p.onRunHeadless} className="gap-[7px]">
+        <BtnPrimary size="md" onClick={p.onRunInPane} className="gap-[7px]">
           Run the round for me
         </BtnPrimary>
         <BtnSecondary size="md" onClick={p.onStartRound}>
           Run it in a terminal
         </BtnSecondary>
       </div>
+      <button
+        type="button"
+        onClick={p.onRunHeadless}
+        className="self-start text-[11.5px] text-text-dim underline underline-offset-2 hover:text-text-secondary"
+      >
+        Run it in the background instead
+      </button>
       <div className="flex flex-wrap gap-2">
         <PasteChip
           name={p.planFile}

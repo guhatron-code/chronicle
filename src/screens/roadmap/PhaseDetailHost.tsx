@@ -20,6 +20,7 @@ export function PhaseDetailHost({
   onBack,
   onCopyDoc,
   onStart,
+  onStartAgent,
 }: {
   dir: string;
   phase: ManifestPhase;
@@ -29,6 +30,8 @@ export function PhaseDetailHost({
   onBack: () => void;
   onCopyDoc: (path: string) => void;
   onStart: () => void;
+  /** F38 — primary: reveal the agent pane, preload the prompt as a draft. */
+  onStartAgent: () => void;
 }) {
   const [saves, setSaves] = useState<DetailSaves>({ kind: "loading" });
   const [openDoc, setOpenDoc] = useState<string | null>(null);
@@ -153,8 +156,8 @@ export function PhaseDetailHost({
       startHelper={(() => {
         const pf = (phase.paste ?? []).find((x) => x.path)?.path?.split("/").pop();
         return pf
-          ? `Opens a terminal, starts the agent, and copies ${pf} — you paste it as the first message.`
-          : "Opens a terminal and starts the agent in this project.";
+          ? `Start with the agent shows the agent pane and loads ${pf} as a draft — nothing is sent until you send it.`
+          : "Start with the agent shows the agent pane — you write the first message.";
       })()}
       description={
         retroLine
@@ -179,6 +182,7 @@ export function PhaseDetailHost({
       onClose={onBack}
       preflight={preflight}
       onStart={onStart}
+      onStartAgent={onStartAgent}
       onChip={(n) => {
         const hit = (phase.paste ?? []).find((c) => (c.path ?? "").endsWith(n));
         if (hit?.path) onCopyDoc(hit.path);

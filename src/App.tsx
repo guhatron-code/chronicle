@@ -53,7 +53,8 @@ import { listen } from "@tauri-apps/api/event";
 import { checkForUpdate, dismissUpdate, installUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
 import { AgentPane } from "@/screens/agent/AgentPane";
-import { agentSessionFor, subscribeAgent } from "@/lib/agent-session";
+import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, subscribeAgent } from "@/lib/agent-session";
+import { agentSessionStop, readFile } from "@/lib/ipc";
 import { openAgentReview } from "@/screens/repo/RepoPane";
 import { copyText, fixesStatus, githubClone, githubRepos, initStatus, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
@@ -342,6 +343,60 @@ export default function App() {
   const [, termBump] = useState(0);
   useEffect(() => subscribeTerms(() => termBump((n) => n + 1)), []);
   useEffect(() => subscribeAgent(() => termBump((n) => n + 1)), []);
+  /* agent-session endings journal + notify exactly like today's session endings */
+  const agentPhases = useRef(new Map<string, string>());
+  useEffect(
+    () =>
+      subscribeAgent(() => {
+        for (const [dir, entry] of projectsRef.current) {
+          const phase = agentSessionFor(dir).phase;
+          const prev = agentPhases.current.get(dir);
+          if (prev === "ready" && (phase === "ended" || phase === "error")) {
+            announce(
+              dir,
+              "agent-session",
+              phase === "ended" ? "The agent session ended" : "The agent session stopped with an error",
+              entry.name,
+            );
+          }
+          agentPhases.current.set(dir, phase);
+        }
+      }),
+    [],
+  );
+
+  /* F38 — "Start with the agent": reveal the pane, preload the phase prompt
+     as an UNSENT draft; a non-empty composer asks before being replaced. */
+  const startPhaseWithAgent = useCallback((phaseId: string, promptPath: string | null) => {
+    const dir = activeRef.current;
+    if (!dir) return;
+    const apply = (text: string | null) => {
+      patchLayout({ agent: true, agentCollapsed: false });
+      if (text != null) setAgentDraft(dir, { label: `${phaseId} prompt`, text });
+      const ph = agentSessionFor(dir).phase;
+      if (ph === "none" || ph === "ended" || ph === "error") {
+        void startAgentSession(dir).catch((e) => toastError("Couldn't start the agent", String(e).slice(0, 110)));
+      }
+    };
+    if (!promptPath) {
+      apply(null);
+      return;
+    }
+    readFile(dir, promptPath)
+      .then((text) => {
+        const cur = agentSessionFor(dir).composerText;
+        if (cur.trim() && cur !== text) {
+          setConfirm({
+            title: "Replace what you've written?",
+            body: `The composer holds an unsent message. Loading the ${phaseId} prompt replaces it — the draft isn't kept anywhere.`,
+            cancelLabel: "Keep my draft",
+            confirmLabel: "Replace it",
+            onConfirm: () => apply(text),
+          });
+        } else apply(text);
+      })
+      .catch((e) => toastError("Couldn't read the prompt file", String(e).slice(0, 90)));
+  }, [patchLayout]);
   useEffect(() => subscribeKanban(() => termBump((n) => n + 1)), []);
   useEffect(() => subscribeRunFlags(() => termBump((n) => n + 1)), []);
   const setActiveTerm = useCallback((dir: string, id: number) => {
@@ -410,7 +465,9 @@ export default function App() {
   }, []);
 
   const closeProject = useCallback((dir: string) => {
+    const agentRunning = agentLive(dir);
     const doClose = () => {
+      if (agentRunning) void agentSessionStop(dir, false).catch(() => {});
       closeTermsFor(dir);
       evictRepo(dir);
       evictKanban(dir);
@@ -428,11 +485,16 @@ export default function App() {
         return next;
       });
     };
-    const live = liveCount(dir);
+    const live = liveCount(dir) + (agentRunning ? 1 : 0);
     if (live > 0) {
+      const body = agentRunning && liveCount(dir) === 0
+        ? "The agent is still running here. Closing the project stops it — its changes stay reviewable when you come back."
+        : agentRunning
+          ? `${live} sessions are still running here (including the agent). Closing the project stops them.`
+          : `${live === 1 ? "A session is" : `${live} sessions are`} still running in its terminal. Closing the project stops ${live === 1 ? "it" : "them"}.`;
       setConfirm({
         title: "Close this project?",
-        body: `${live === 1 ? "A session is" : `${live} sessions are`} still running in its terminal. Closing the project stops ${live === 1 ? "it" : "them"}.`,
+        body,
         cancelLabel: "Keep it running",
         confirmLabel: live === 1 ? "Close and stop the session" : "Close and stop the sessions",
         danger: true,
@@ -762,6 +824,7 @@ export default function App() {
               openAgentReview(active.dir, agentSessionFor(active.dir).editFiles);
               goPane("repo");
             }}
+            onOpenBoard={() => goPane("kanban")}
           />
         }
         onConfirm={setConfirm}
@@ -802,6 +865,7 @@ export default function App() {
             onGoKanban={() => goPane("kanban")}
             onConfirm={setConfirm}
             onPollNow={() => void pollOne(active.dir)}
+            onStartPhaseWithAgent={startPhaseWithAgent}
           />
         ) : pane === "repo" ? (
           <RepoPane
@@ -819,6 +883,12 @@ export default function App() {
             agent={agent}
             onConfirm={setConfirm}
             onGoRoadmap={() => goPane("road")}
+            onRunRoundInPane={(n, total) => {
+              patchLayout({ agent: true, agentCollapsed: false });
+              void startRoundInPane(active.dir, n, total).catch((e) =>
+                toastError("Couldn't start the round", String(e).slice(0, 110)),
+              );
+            }}
           />
         )}
       </Shell>

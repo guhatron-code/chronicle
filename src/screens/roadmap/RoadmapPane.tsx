@@ -60,6 +60,7 @@ export function RoadmapPane({
   onGoKanban,
   onConfirm,
   onPollNow,
+  onStartPhaseWithAgent,
 }: {
   dir: string;
   state: StateData | null;
@@ -73,6 +74,8 @@ export function RoadmapPane({
   onGoKanban: () => void;
   onConfirm: (spec: ConfirmSpec) => void;
   onPollNow: () => void;
+  /** F38 — reveal the agent pane and preload this phase's prompt as a draft. */
+  onStartPhaseWithAgent: (phaseId: string, promptPath: string | null) => void;
 }) {
   const [initRun, setInitRunRaw] = useState<InitRun | null>(null);
   const setInitRun = useCallback((v: InitRun | null | ((prev: InitRun | null) => InitRun | null)) => {
@@ -378,6 +381,10 @@ export function RoadmapPane({
           projectState={state}
           onBack={() => setDetailId(null)}
           onCopyDoc={doCopyDoc}
+          onStartAgent={() => {
+            const pf = (phase.paste ?? []).find((x) => x.path)?.path ?? null;
+            onStartPhaseWithAgent(phase.id ?? "?", pf);
+          }}
           onStart={() => {
             const agentName = agent === "codex" ? "Codex" : "Claude";
             const pf = (phase.paste ?? []).find((x) => x.path);
