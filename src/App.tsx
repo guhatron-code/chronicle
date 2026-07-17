@@ -56,6 +56,8 @@ import { announce } from "@/lib/journal";
 import { listen } from "@tauri-apps/api/event";
 import { checkForUpdate, dismissUpdate, installUpdate, restartUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
+import { SetupScreen } from "@/screens/setup/SetupScreen";
+import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/lib/setup-store";
 import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, subscribeAgent } from "@/lib/agent-session";
 import { agentSessionStop, readFile } from "@/lib/ipc";
@@ -126,6 +128,8 @@ export default function App() {
   const [ghError, setGhError] = useState<string | null>(null);
   const [cloningRepo, setCloningRepo] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [setupMode, setSetupMode] = useState<"gate" | "health" | null>(null);
+
   const [searchOpen, setSearchOpen] = useState(false);
   const [newProjOpen, setNewProjOpen] = useState(false);
   const [newProjError, setNewProjError] = useState<string | null>(null);
@@ -242,6 +246,18 @@ export default function App() {
   useEffect(() => {
     const un = subscribeUpdates(() => updBump((n) => n + 1));
     void checkForUpdate();
+    return un;
+  }, []);
+
+  /* first-launch smart gate: if the essentials aren't ready and the user
+     hasn't dismissed setup this launch, open the gate over the picker */
+  useEffect(() => {
+    const un = subscribeDoctor(() => {});
+    void refreshDoctor().then(() => {
+      if (!doctorAllReady() && localStorage.getItem("chronicle.setup.dismissed") !== "1") {
+        setSetupMode("gate");
+      }
+    });
     return un;
   }, []);
 
@@ -660,6 +676,7 @@ export default function App() {
       recentsPreset: (name: string) => { devPreset.current = presets[name] ?? null; bump((n) => n + 1); },
       palette: setPaletteOpen,
       shortcuts: setShortcutsOpen,
+      setup: (m: "gate" | "health") => setSetupMode(m),
       newProject: (err: string | null) => { setNewProjError(err); setNewProjOpen(true); },
       confirm: setConfirm,
       toastSuccess,
@@ -774,6 +791,23 @@ export default function App() {
     </>
   );
 
+  if (setupMode) {
+    return (
+      <>
+        <SetupScreen
+          mode={setupMode}
+          dir={activeDir}
+          onClose={() => {
+            if (setupMode === "gate") localStorage.setItem("chronicle.setup.dismissed", "1");
+            setSetupMode(null);
+          }}
+          onOpenProject={() => { setSetupMode(null); localStorage.setItem("chronicle.setup.dismissed", "1"); }}
+        />
+        {overlays}
+      </>
+    );
+  }
+
   if (!active) {
     return (
       <div className="flex h-full flex-col bg-surface-app font-sans text-text-primary">
@@ -856,6 +890,7 @@ export default function App() {
         }}
         onRefresh={refreshNow}
         onHelp={() => setShortcutsOpen(true)}
+        onSetup={() => setSetupMode("health")}
         terminalTabs={termTabs}
         activeTerminalId={activeTermId}
         onNewTerminal={() => newTerminal()}

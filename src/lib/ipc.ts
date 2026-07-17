@@ -358,6 +358,34 @@ export const onPtyExit = (cb: (id: number) => void): Promise<UnlistenFn> =>
 export const ptyInfo = (id: number) =>
   invoke<{ name: string | null; agent: "claude" | "codex" | null }>("pty_info", { id });
 
+/* ---------- the doctor (setup & health — src-tauri/src/setup.rs) ---------- */
+
+/** One check's detected state. */
+export interface SetupCheck {
+  id: string;
+  state: "ready" | "missing" | "needs_you" | "blocked" | "checking" | "installing" | "couldnt_finish";
+  detail?: string;
+  action?: string; // install | signin | fix_path | ""
+  pct?: number | null;
+  gotBytes?: number;
+  totalBytes?: number;
+  tech?: string | null;
+}
+export interface SetupStatus {
+  checks: SetupCheck[];
+  ready: number;
+  total: number;
+}
+export const setupStatus = () => invoke<SetupStatus>("setup_status");
+export const setupInstall = (check: string) => invoke("setup_install", { check });
+export const setupFixTerminalPath = () => invoke("setup_fix_terminal_path");
+export const setupCancel = (check: string) => invoke("setup_cancel", { check });
+export const setupRunAll = () => invoke("setup_run_all");
+export const setupOpenLogin = (kind: string) =>
+  invoke<{ title: string }>("setup_open_login", { kind });
+export const onSetupUpdate = (cb: (u: { message: SetupCheck & { state?: string } }) => void): Promise<UnlistenFn> =>
+  listen<{ message: SetupCheck & { state?: string } }>("setup-update", (e) => cb(e.payload));
+
 /** Decode a pty-out chunk for xterm's write(). */
 export const decodePtyChunk = (b64: string): Uint8Array =>
   Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));

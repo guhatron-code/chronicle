@@ -96,7 +96,7 @@ fn interactive_finds(name: &str) -> bool {
 /// The PATH every setup subprocess gets: the managed bin + node's dir + the
 /// well-known dirs, ahead of the inherited (minimal, Finder) PATH — so `curl`,
 /// `tar`, `claude`, and `gh` all resolve `node`.
-fn tool_env_path() -> String {
+pub fn tool_env_path() -> String {
     let mut dirs: Vec<String> = vec![bin_dir().to_string_lossy().to_string()];
     if let Some(node) = resolve("node") {
         if let Some(parent) = Path::new(&node).parent() {

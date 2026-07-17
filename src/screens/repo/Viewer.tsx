@@ -276,7 +276,7 @@ export function Viewer(p: ViewerProps) {
           )}
           <button
             onClick={p.review.onKeep}
-            className="h-[26px] shrink-0 rounded-md bg-primary px-3 text-[11.5px] font-medium text-primary-fg hover:bg-primary-hover"
+            className="h-[26px] shrink-0 rounded-md bg-primary px-3 text-[11.5px] font-medium text-primary-foreground hover:bg-[--primary-hover]"
           >
             Keep
           </button>

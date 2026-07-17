@@ -51,6 +51,7 @@ export function Shell({
   onHome,
   onRefresh,
   onHelp,
+  onSetup,
   terminalTabs,
   activeTerminalId,
   onNewTerminal,
@@ -93,6 +94,7 @@ export function Shell({
   onHome?: () => void;
   onRefresh: () => void;
   onHelp: () => void;
+  onSetup?: () => void;
   terminalTabs: TerminalTab[];
   /** Defaults to the first tab — the C2 behavior — until C6 wires selection. */
   activeTerminalId?: number | null;
@@ -198,6 +200,7 @@ export function Shell({
           checking={checking}
           onRefresh={onRefresh}
           onHelp={onHelp}
+          onSetup={onSetup}
         />
         {showContent && (
           <div

@@ -64,3 +64,38 @@ extract → the extracted `node --version` runs — passed in ~10s. `cargo build
 clean (only the pre-existing `log` warning).
 
 **Commit** — 88b0477
+
+## S-2 · The Setup screen (G1–G5)
+
+**What landed** — the Setup screen built to Deck 8 and wired to the doctor.
+`src/lib/setup-store.ts`: a framework-free per-app doctor store (the
+agent-session pattern) that folds live `setup-update` progress over the last
+full `setup_status`, exposing the six checks + run-all + install/repair/
+sign-in actions. `src/screens/setup/`: `CheckRow` (kind icon · plain name +
+blurb · a StateWord for every state: checking · ready · installing % + bar +
+MB · needs you · couldn't finish + tech line · fixed · the sign-in waiting
+treatment matched 1:1 to the agent pane · one action button) and
+`SetupScreen` (the summary card + "Set everything up for me", the checklist,
+the all-green "You're all set" celebration, and BOTH framings — the
+first-launch GATE and the always-reachable HEALTH console — over one shared
+body). Wired into `App`: a smart gate that opens over the picker on first
+launch when a prerequisite is missing (dismiss persists per launch), and a
+"Setup & health" rail entry (G6). **Design fix caught in the render**: the
+invalid `text-primary-fg` class (should be `text-primary-foreground`) was
+making primary-button text invisible — it was ALSO in the shipped agent
+composer's Send button and the repo viewer's Keep button (white-on-white in
+0.3.0–0.3.2); fixed in all three. **Sign-in surface**: during the
+first-launch gate there is no in-app terminal column, so setup sign-ins open a
+real macOS Terminal window (`setup_open_login` via osascript, node on its
+PATH) and the row polls the doctor until the check flips to ready — honest and
+functional in both the gate and the health console.
+
+**How it was verified** — `npx tsc --noEmit` + `npx vite build` green;
+`cargo test` still green. Rendered the real components and screenshotted both
+the gate and the health console (shown to the user). Probe suite: 7 new
+probes — every checklist state; install → live progress event → ready; the
+terminal-access repair → fixed + the "new terminal" honesty; couldn't-finish +
+Try again; run-all; the sign-in Terminal hand-off + doctor-poll auto-advance
+to the celebration; the health framing. Full probe suite stays green.
+
+**Commit** — (next docs commit)

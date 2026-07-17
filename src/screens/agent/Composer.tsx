@@ -260,7 +260,7 @@ export function Composer({
                 "h-7 rounded-md px-3 text-xs font-medium",
                 disabled || sending || !text.trim()
                   ? "cursor-default bg-fill-subtle text-text-dimmer"
-                  : "bg-primary text-primary-fg hover:bg-primary-hover",
+                  : "bg-primary text-primary-foreground hover:bg-[--primary-hover]",
               )}
             >
               Send

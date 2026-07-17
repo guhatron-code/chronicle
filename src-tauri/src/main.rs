@@ -2699,18 +2699,27 @@ async fn setup_run_all(app: tauri::AppHandle, setup_state: State<'_, setup::Setu
         .map_err(|e| e.to_string())
 }
 
-/// Open a managed terminal running the sign-in for `kind` (claude | github).
-/// Reuses the same terminal the app already spawns; the frontend polls the
-/// check back to ready when the sign-in tab exits.
+/// Open a real Terminal window running the sign-in for `kind`
+/// (claude | github). During the first-launch gate there's no in-app terminal
+/// column, so a proper Terminal window is the honest surface; the row polls
+/// the check back to ready once the user finishes. Node is put on the
+/// Terminal's PATH so `claude`/`gh` resolve.
 #[tauri::command]
-async fn setup_signin_command(kind: String) -> Result<Value, String> {
+async fn setup_open_login(kind: String) -> Result<Value, String> {
     let (bin_name, args, title) = match kind.as_str() {
         "claude" => ("claude", "/login", "claude · sign-in"),
         "github" => ("gh", "auth login", "github · sign-in"),
         _ => return Err("unknown sign-in".into()),
     };
     let bin = setup::resolve(bin_name).ok_or("that tool isn't installed yet")?;
-    Ok(json!({ "bin": bin, "args": args, "title": title }))
+    let path = setup::tool_env_path();
+    // escape for AppleScript's double-quoted string
+    let cmd = format!("PATH=\"{}\" {} {}", path, bin, args).replace('\\', "\\\\").replace('"', "\\\"");
+    let script = format!(
+        "tell application \"Terminal\"\nactivate\ndo script \"{cmd}\"\nend tell"
+    );
+    Command::new("osascript").args(["-e", &script]).output().map_err(|e| e.to_string())?;
+    Ok(json!({ "title": title }))
 }
 
 /* ================= main (with --derive CLI for the golden test) ================= */
@@ -2806,7 +2815,7 @@ fn main() {
             agent_edits, agent_edit_diff, agent_edit_keep, agent_edit_undo, agent_restore_checkpoint,
             agent_session_resume, agent_sessions_list, agent_history_read,
             setup_status, setup_install, setup_fix_terminal_path, setup_cancel,
-            setup_run_all, setup_signin_command,
+            setup_run_all, setup_open_login,
             journal_append, journal_read, notify, draft_save_message,
             global_search, status_report,
             github_repos, github_clone, github_create,

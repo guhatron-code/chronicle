@@ -71,6 +71,7 @@ export function Rail({
   checking,
   onRefresh,
   onHelp,
+  onSetup,
 }: {
   pane: Pane;
   onPane: (p: Pane) => void;
@@ -78,6 +79,7 @@ export function Rail({
   checking?: boolean;
   onRefresh: () => void;
   onHelp: () => void;
+  onSetup?: () => void;
 }) {
   return (
     <TooltipProvider delayDuration={400}>
@@ -105,6 +107,13 @@ export function Rail({
         )}
       </div>
       <span className="flex-1" />
+      {onSetup && (
+        <RailButton label="Setup and health" tooltip="Setup & health" onClick={onSetup} dim>
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+            <path d="M1.8 8h2.4l1.3 3.4 2.4-7 1.3 3.6h3" />
+          </svg>
+        </RailButton>
+      )}
       <RailButton
         label={checking ? "Checking…" : "Check again now"}
         tooltip={checking ? "Checking…" : "Check again now"}
