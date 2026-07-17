@@ -123,4 +123,4 @@ words; search matches across BOTH kinds in one list (plus a no-match state);
 "Show me" closes Help and lands on the right surface. Full probe suite: 39
 green.
 
-**Commit** — (next docs commit)
+**Commit** — db17a40
