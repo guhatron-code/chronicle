@@ -39,6 +39,26 @@ confirmed action.
 - Click any file chip to copy its whole contents; paste into the built-in terminal or
   Claude Design, as the chip says.
 
+## Getting set up
+
+The first time you open Chronicle — or any time something stops working — the
+**Setup screen** gets the machine ready without you typing a single command. It
+installs and repairs the five things Chronicle needs, each without admin, into a
+managed folder in your home directory: Claude Code (and its sign-in), the engine
+it runs on (Node), your online home (GitHub, and its sign-in), and the extra
+skills. One button — **Set everything up for me** — runs the whole chain with
+honest per-step progress; or fix any one row on its own. It also repairs the
+classic "the AI is installed but the terminal can't find it" problem in one
+click. Reach it again any time from the rail's **Setup & health** entry.
+
+## Help
+
+The rail's **Help** destination (or ⌘/) opens plain-language help built for a
+non-developer: "How do I…" task recipes (publish, undo the agent, start a
+phase, bring down changes…), each with a **Show me** that takes you to the real
+control; a glossary that translates every term the app uses; and the keyboard
+shortcuts. Search matches across recipes and the glossary at once.
+
 ## The agent
 
 The agent pane speaks the Agent Client Protocol to a pinned Claude Code adapter
