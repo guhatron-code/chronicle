@@ -57,7 +57,7 @@ function midTruncate(s: string, max = 46): string {
   return `${s.slice(0, keep)}…${s.slice(-keep)}`;
 }
 
-export function ToolCard({ tool, dir, onViewChanges }: { tool: Tool; dir: string; onViewChanges?: () => void }) {
+export function ToolCard({ tool, dir, readOnly, onViewChanges }: { tool: Tool; dir: string; readOnly?: boolean; onViewChanges?: () => void }) {
   const [open, setOpen] = useState(false);
   const quiet = ["read", "search", "fetch", "think"].includes(tool.toolKind) && tool.status !== "failed" && !tool.rejected;
   const running = tool.status === "pending" || tool.status === "in_progress";
@@ -148,7 +148,7 @@ export function ToolCard({ tool, dir, onViewChanges }: { tool: Tool; dir: string
             View the changes ›
           </button>
         )}
-        {isEdit && tool.diff && !running && (
+        {isEdit && tool.diff && !running && !readOnly && (
           <button
             onClick={toggleDiff}
             className="inline-flex shrink-0 items-center gap-1 text-[11.5px] text-text-dim hover:text-text-secondary"

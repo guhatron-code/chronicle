@@ -377,9 +377,14 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
         message: str(err.message) || "The agent stopped with an error.",
       });
     }
-    // #4 — a clean turn end releases the next queued message (FIFO, one/turn);
-    // on error we keep the queue so a broken session doesn't fire into the void
-    if (params.error == null && s.queue.length > 0) {
+    // #4 — a clean turn end releases the next queued message (FIFO, one/turn).
+    // A cancel (Stop) ends with stopReason "cancelled" and no error — it must
+    // NOT flush (the queue persists so the user can still cancel items); on an
+    // errored turn we also keep the queue rather than fire into a broken session.
+    // NOTE: this is safe under transcript replay because replay runs on a blank
+    // tmp state whose queue is always empty (the queue is only populated from
+    // the composer, never from the wire).
+    if (params.error == null && str(params.stopReason) !== "cancelled" && s.queue.length > 0) {
       const next = s.queue.shift()!;
       void sendAgentMessage(dir, next).catch(() => {});
     }
