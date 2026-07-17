@@ -73,4 +73,4 @@ stacked column + kanban keeps the right column; the visibility floor
 reload; hidden terminal keeps its session (no `pty_kill` in the stub log);
 rail auto-reveal; horizontal splitter drag + persistence.
 
-**Commit** — 9f1fa8e
+**Commit** — 9fb1e96
