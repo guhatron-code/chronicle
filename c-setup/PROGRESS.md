@@ -25,7 +25,7 @@ the comp's placeholders.
 **Verified** — visual read against DESIGN_PROMPT.md; all eight frames + the
 light-theme proof present.
 
-**Commit** — (next docs commit)
+**Commit** — 88b0477
 
 ## S-1 · The doctor (Rust backend)
 
@@ -63,4 +63,4 @@ pipeline against the live Node vendor — download → vendor-checksum verify �
 extract → the extracted `node --version` runs — passed in ~10s. `cargo build`
 clean (only the pre-existing `log` warning).
 
-**Commit** — (next docs commit)
+**Commit** — 88b0477
