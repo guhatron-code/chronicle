@@ -146,6 +146,15 @@ export function Composer({
         confirmLabel: "Work freely this session",
         onConfirm: apply,
       });
+    } else if (modeId === "bypassPermissions" && !s.fullAutoConfirmed) {
+      onConfirm({
+        title: "Turn on Full auto?",
+        body:
+          "Edits and commands both run without asking — nothing is confirmed. Every change still stays reviewable and undoable. This lasts for this session only — the next session asks first again.",
+        cancelLabel: "Keep confirming",
+        confirmLabel: "Turn on Full auto",
+        onConfirm: apply,
+      });
     } else apply();
   };
 
