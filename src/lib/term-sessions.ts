@@ -115,6 +115,68 @@ export function liveCount(dir?: string): number {
   return [...sessions.values()].filter((s) => !s.dead && (!dir || s.dir === dir)).length;
 }
 
+/* ---- F — clickable paths in terminal output ----
+   A bounded per-line scan (xterm calls provideLinks per hovered line, never
+   per frame); ⌘-click routes the path to the repo viewer via the handler the
+   app installs. Underline + pointer on hover, with the ⌘-click hint. */
+
+let pathOpenHandler: ((dir: string, path: string) => void) | null = null;
+export function setTermPathHandler(fn: (dir: string, path: string) => void) {
+  pathOpenHandler = fn;
+}
+
+const PATH_RE = /(?:^|[\s"'`(\[])((?:\.?[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,8})(:\d+)?/g;
+const PATH_SCAN_CAP = 20; // links per line — a pathological line must not stall a frame
+
+let linkTip: HTMLDivElement | null = null;
+function showLinkTip(x: number, y: number) {
+  if (!linkTip) {
+    linkTip = document.createElement("div");
+    linkTip.dataset.termPathTip = "";
+    linkTip.className =
+      "pointer-events-none fixed z-50 flex items-center gap-1.5 rounded-md border border-border-strong bg-surface-overlay px-2 py-1 font-sans text-[11.5px] text-text-secondary [box-shadow:var(--shadow-overlay)]";
+    linkTip.innerHTML =
+      'Open in the repo view <span class="rounded-[5px] bg-fill-subtle px-1 font-mono text-[10.5px] text-text-subtle">⌘-click</span>';
+    document.body.appendChild(linkTip);
+  }
+  linkTip.style.left = `${x + 12}px`;
+  linkTip.style.top = `${y + 14}px`;
+  linkTip.style.display = "flex";
+}
+function hideLinkTip() {
+  if (linkTip) linkTip.style.display = "none";
+}
+
+function registerPathLinks(term: Terminal, dir: string) {
+  term.registerLinkProvider({
+    provideLinks(y, callback) {
+      const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+      const links: Parameters<typeof callback>[0] = [];
+      PATH_RE.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      let guard = 0;
+      while ((m = PATH_RE.exec(line)) !== null && guard++ < PATH_SCAN_CAP) {
+        const path = m[1];
+        const shown = path + (m[2] ?? "");
+        const start = m.index + m[0].length - shown.length;
+        links.push({
+          range: { start: { x: start + 1, y }, end: { x: start + shown.length, y } },
+          text: shown,
+          decorations: { underline: true, pointerCursor: true },
+          activate: (event) => {
+            // ⌘-click only — plain clicks stay the terminal's own business
+            if (!event.metaKey) return;
+            pathOpenHandler?.(dir, path);
+          },
+          hover: (event) => showLinkTip(event.clientX, event.clientY),
+          leave: () => hideLinkTip(),
+        });
+      }
+      callback(links.length > 0 ? links : undefined);
+    },
+  });
+}
+
 export interface SpawnOpts {
   title?: string;
   agent?: "claude" | "codex";
@@ -139,6 +201,7 @@ export async function spawnTerm(dir: string, opts: SpawnOpts = {}): Promise<Term
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open(host);
+  registerPathLinks(term, dir); // F — ⌘-click a path to open it in the repo view
   // host is detached — cols/rows are wrong until the frame attaches; spawn with
   // a sane default and let the first attach fit+resize
   let id: number;

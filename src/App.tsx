@@ -40,6 +40,7 @@ import {
   liveCount,
   renameTerm,
   setActiveTermFor,
+  setTermPathHandler,
   spawnTerm,
   subscribeTerms,
   termsFor,
@@ -338,6 +339,15 @@ export default function App() {
         toastError("Couldn't open the project", String(e).split("\n")[0].slice(0, 90)),
       );
   }, [activate, pollOne, refreshPicker]);
+
+  /* F — a ⌘-clicked terminal path lands in the repo viewer */
+  useEffect(() => {
+    setTermPathHandler((dir, path) => {
+      if (dir !== activeRef.current) return;
+      openFileInRepo(dir, path);
+      goPane("repo");
+    });
+  }, [goPane]);
 
   /* ---- terminal sessions (C6) ---- */
   const [, termBump] = useState(0);
