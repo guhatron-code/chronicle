@@ -365,7 +365,7 @@ function Entry({
     );
   return (
     <div className="px-3.5 py-1">
-      <ToolCard tool={entry} />
+      <ToolCard tool={entry} dir={dir} />
     </div>
   );
 }

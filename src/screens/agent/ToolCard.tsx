@@ -8,6 +8,9 @@ import { useState } from "react";
 import type { AgentEntry } from "@/lib/agent-session";
 import { Spinner } from "@/components/chrome/atoms";
 import { ChevronDownGlyph, ChevronRightGlyph, ErrorGlyph } from "@/components/chrome/icons";
+import { agentEditDiff } from "@/lib/ipc";
+import { parseDiff, sideBySide, type DiffPair } from "@/lib/repo-data";
+import { cn } from "@/lib/utils";
 
 type Tool = Extract<AgentEntry, { kind: "tool" }>;
 
@@ -54,13 +57,33 @@ function midTruncate(s: string, max = 46): string {
   return `${s.slice(0, keep)}…${s.slice(-keep)}`;
 }
 
-export function ToolCard({ tool, onViewChanges }: { tool: Tool; onViewChanges?: () => void }) {
+export function ToolCard({ tool, dir, onViewChanges }: { tool: Tool; dir: string; onViewChanges?: () => void }) {
   const [open, setOpen] = useState(false);
   const quiet = ["read", "search", "fetch", "think"].includes(tool.toolKind) && tool.status !== "failed" && !tool.rejected;
   const running = tool.status === "pending" || tool.status === "in_progress";
   const failed = tool.status === "failed" && !tool.rejected;
   const detail = midTruncate(tool.detail || tool.title);
   const hasOutput = !!tool.output?.trim();
+
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [diffRows, setDiffRows] = useState<DiffPair[] | null>(null);
+  const [diffState, setDiffState] = useState<"idle" | "loading" | "empty" | "error">("idle");
+  const isEdit = ["edit", "delete", "move"].includes(tool.toolKind);
+
+  const toggleDiff = () => {
+    const next = !diffOpen;
+    setDiffOpen(next);
+    if (next && diffRows == null && diffState === "idle") {
+      setDiffState("loading");
+      agentEditDiff(dir, `${dir}/${tool.detail}`)
+        .then((raw) => {
+          const pairs = sideBySide(parseDiff(raw).rows);
+          setDiffRows(pairs);
+          setDiffState(pairs.length ? "idle" : "empty");
+        })
+        .catch(() => setDiffState("error"));
+    }
+  };
 
   if (quiet) {
     return (
@@ -125,6 +148,15 @@ export function ToolCard({ tool, onViewChanges }: { tool: Tool; onViewChanges?: 
             View the changes ›
           </button>
         )}
+        {isEdit && tool.diff && !running && (
+          <button
+            onClick={toggleDiff}
+            className="inline-flex shrink-0 items-center gap-1 text-[11.5px] text-text-dim hover:text-text-secondary"
+          >
+            {diffOpen ? "Hide the diff" : "Show the diff"}
+            {diffOpen ? <ChevronDownGlyph size={10} /> : <ChevronRightGlyph size={10} />}
+          </button>
+        )}
         {hasOutput && !running && (
           <button
             onClick={() => setOpen((o) => !o)}
@@ -144,6 +176,49 @@ export function ToolCard({ tool, onViewChanges }: { tool: Tool; onViewChanges?: 
         <div className="max-h-24 overflow-y-auto rounded-b-md bg-surface-input px-3 py-2 font-mono text-[11px] leading-[1.7] text-text-muted">
           <pre className="whitespace-pre-wrap">{tool.output}</pre>
         </div>
+      )}
+      {diffOpen && (
+        <div className="max-h-64 overflow-auto rounded-b-md border-t border-border-hairline bg-surface-input font-mono text-[11px] leading-[1.7]">
+          {diffState === "loading" && <div className="px-3 py-2 text-text-dim">Loading the diff…</div>}
+          {diffState === "empty" && <div className="px-3 py-2 text-text-dim">No diff to show.</div>}
+          {diffState === "error" && <div className="px-3 py-2 text-text-dim">Couldn't load the diff.</div>}
+          {diffRows && diffState !== "error" && <DiffSideBySide pairs={diffRows} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** #3 — two mono columns (old | new); del tinted red, add tinted green. */
+function DiffSideBySide({ pairs }: { pairs: DiffPair[] }) {
+  const cell = (c: { n?: number; text: string; kind: string }) => (
+    <div
+      className={cn(
+        "flex min-w-0 flex-1 basis-1/2",
+        c.kind === "add" && "bg-[color-mix(in_srgb,var(--state-success)_9%,transparent)]",
+        c.kind === "del" && "bg-[color-mix(in_srgb,var(--state-error)_10%,transparent)]",
+      )}
+    >
+      <span aria-hidden className="w-[34px] shrink-0 select-none px-2 text-right text-text-dimmer tabular-nums">
+        {c.n ?? ""}
+      </span>
+      <span className="min-w-0 flex-1 whitespace-pre pr-2 text-text-secondary">{c.text}</span>
+    </div>
+  );
+  return (
+    <div className="min-w-max">
+      {pairs.map((p, i) =>
+        p.hunk != null ? (
+          <div key={i} className="border-y border-divider-faint bg-surface-card-raised px-3 py-[3px] text-[10.5px] text-text-dim">
+            {p.hunk}
+          </div>
+        ) : (
+          <div key={i} className="flex">
+            {cell(p.left)}
+            <span className="w-px shrink-0 bg-border-hairline" />
+            {cell(p.right)}
+          </div>
+        ),
       )}
     </div>
   );

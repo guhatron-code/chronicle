@@ -138,6 +138,48 @@ export function parseDiff(raw: string): { rows: DiffRow[]; added: number; remove
   return { rows, added, removed };
 }
 
+export type DiffCell = { n?: number; text: string; kind: "ctx" | "add" | "del" | "empty" };
+/** One printed row of a side-by-side diff: a left (old) and right (new) cell,
+ *  or a full-width hunk separator. */
+export type DiffPair = { left: DiffCell; right: DiffCell; hunk?: string };
+
+const EMPTY_CELL: DiffCell = { text: "", kind: "empty" };
+
+/** Turn unified diff rows into paired old|new columns. Context rows fill both
+ *  sides; a run of deletions pairs index-aligned against the following run of
+ *  additions, padding the shorter side with empty cells. */
+export function sideBySide(rows: DiffRow[]): DiffPair[] {
+  const out: DiffPair[] = [];
+  let dels: Extract<DiffRow, { kind: "ctx" | "add" | "del" }>[] = [];
+  let adds: Extract<DiffRow, { kind: "ctx" | "add" | "del" }>[] = [];
+  const flush = () => {
+    const n = Math.max(dels.length, adds.length);
+    for (let i = 0; i < n; i++) {
+      const d = dels[i];
+      const a = adds[i];
+      out.push({
+        left: d ? { n: d.old, text: d.text, kind: "del" } : EMPTY_CELL,
+        right: a ? { n: a.new, text: a.text, kind: "add" } : EMPTY_CELL,
+      });
+    }
+    dels = [];
+    adds = [];
+  };
+  for (const row of rows) {
+    if (row.kind === "del") { dels.push(row); continue; }
+    if (row.kind === "add") { adds.push(row); continue; }
+    flush();
+    if (row.kind === "hunk") {
+      out.push({ left: EMPTY_CELL, right: EMPTY_CELL, hunk: `${row.header}${row.context ? `  ${row.context}` : ""}` });
+    } else {
+      // ctx: same text on both sides
+      out.push({ left: { n: row.old, text: row.text, kind: "ctx" }, right: { n: row.new, text: row.text, kind: "ctx" } });
+    }
+  }
+  flush();
+  return out;
+}
+
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
