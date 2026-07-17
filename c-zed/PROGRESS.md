@@ -147,4 +147,4 @@ command-changed files remaining; the full review pass incl. the
 command-changed bar; checkpoint restore through the confirm; mid-turn undo
 hidden). Full probe suite: 17/17.
 
-**Commit** — recorded in the following docs commit
+**Commit** — d5778bc
