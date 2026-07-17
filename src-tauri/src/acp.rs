@@ -610,8 +610,42 @@ pub fn adapter_command(npx: &str) -> std::process::Command {
         // the adapter's inner claude refuses to launch when it thinks it's
         // nested in another Claude Code session — Chronicle's session is a
         // deliberate, independent child, not a nested one
-        .env_remove("CLAUDECODE");
+        .env_remove("CLAUDECODE")
+        // CRUCIAL for a Finder-launched app: our PATH is minimal
+        // (/usr/bin:/bin:/usr/sbin:/sbin), but `npx` is a Node script whose
+        // `#!/usr/bin/env node` shebang needs `node` ON THE CHILD'S PATH.
+        // Resolving npx by absolute path is not enough — without this the
+        // adapter dies instantly with `env: node: No such file or directory`
+        // (exit 127) and the pane reports "session ended". Prepend npx's own
+        // dir (node sits beside it) + the well-known tool dirs.
+        .env("PATH", child_path(npx));
     cmd
+}
+
+/// Build a child PATH that can find `node`: the resolved tool's own directory
+/// (node lives beside npx) and the well-known install dirs, ahead of whatever
+/// PATH this process inherited. Idempotent-ish — duplicate dirs are harmless.
+fn child_path(tool: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut dirs: Vec<String> = Vec::new();
+    if let Some(parent) = Path::new(tool).parent() {
+        dirs.push(parent.to_string_lossy().to_string());
+    }
+    for d in [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        &format!("{home}/.local/bin"),
+        &format!("{home}/.npm-global/bin"),
+        &format!("{home}/bin"),
+    ] {
+        dirs.push(d.to_string());
+    }
+    if let Ok(existing) = std::env::var("PATH") {
+        dirs.push(existing);
+    } else {
+        dirs.push("/usr/bin:/bin:/usr/sbin:/sbin".to_string());
+    }
+    dirs.join(":")
 }
 
 /// Start (or return) the one live session for a project. `cmd` is the adapter
@@ -1449,6 +1483,31 @@ for line in sys.stdin:
         s.stop(true);
         wait_for(&h.rx, 20, |v| state_is(v, "ended"));
         let _ = std::fs::remove_dir_all(&h.dir);
+    }
+
+    #[test]
+    fn adapter_command_puts_node_on_the_child_path() {
+        // the Finder-launched bug: without node's dir on the child PATH, npx's
+        // `#!/usr/bin/env node` shebang fails and the adapter exits 127. The
+        // command MUST carry a PATH that includes npx's own directory so node
+        // (which sits beside it) resolves.
+        let cmd = adapter_command("/opt/homebrew/bin/npx");
+        let path = cmd.get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new("PATH"))
+            .and_then(|(_, v)| v)
+            .map(|v| v.to_string_lossy().to_string())
+            .expect("adapter_command must set PATH");
+        assert!(path.starts_with("/opt/homebrew/bin"), "npx's own dir leads the PATH: {path}");
+        // ANTHROPIC_API_KEY blanked, CLAUDECODE removed — the other spawn seams
+        assert!(cmd.get_envs().any(|(k, v)| k == std::ffi::OsStr::new("ANTHROPIC_API_KEY") && v == Some(std::ffi::OsStr::new(""))));
+    }
+
+    #[test]
+    fn child_path_prepends_the_tool_dir_and_keeps_standard_dirs() {
+        let p = child_path("/Users/x/.nvm/versions/node/v24/bin/npx");
+        assert!(p.starts_with("/Users/x/.nvm/versions/node/v24/bin"), "{p}");
+        assert!(p.contains("/opt/homebrew/bin"), "{p}");
+        assert!(p.contains("/usr/local/bin"), "{p}");
     }
 
     #[test]
