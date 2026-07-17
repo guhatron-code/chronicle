@@ -188,3 +188,48 @@ read-only fallback (session/load call gated, viewing mode inert); close
 confirm + un-clean stop (`clean: false` asserted). Full suite: 21/21 probes.
 
 **Commit** — 1cf68b4
+
+## Z-5 · The five refinements (E–I) — one commit each
+
+**E — plain-language remote output** (`161ce60`). A pure fixture-tested Rust
+mapping (`remote_sentences`) turns push/pull output into sentences —
+"Published 3 saves", "Brought down 2 saves", "Already in sync — nothing new" —
+with the raw git line as small mono secondary and GitHub's
+create-a-pull-request hint detected into a toast ACTION (https-only
+`open_url`). `git_push`/`git_pull` now return the outcome; both toast sites
+use it. Verified: 2 rust tests over real git stderr fixtures (new-branch push
+with the hint, existing push, up-to-date both ways; remote: chatter never
+leads).
+
+**F — clickable terminal paths** (`a33a4a2`). A bounded xterm link provider
+(per-hovered-line scan, 20-link cap): paths incl. `:line` underline with the
+"Open in the repo view ⌘-click" tooltip; ⌘-click routes to the repo viewer
+(line suffix stripped), plain clicks stay the terminal's. Verified: probe
+with a fake pty feed — hover tooltip, plain-click inertness, ⌘-click landing
+in the viewer (stat_file for the path asserted).
+
+**G — honest terminal-tab status** (`3b72ca8`). `pty_info(id)` reads the
+pty's FOREGROUND process group (portable-pty `process_group_leader` +
+sysinfo name/cmdline); a known agent shows the pulsing "working" word, its
+exit shows "idle" (sessions remember an agent ever ran — no word before one
+does), and the picker badge says "Claude running"/"Codex running". Verified:
+rust test drives a REAL pty (`/bin/sleep` foreground resolves; agent
+detection incl. node-wrapped claude) + probe walks idle → working → idle
+through stubbed `pty_info`.
+
+**H — Draft-it prompt** (`335f445`). The save-message prompt adopts Zed's
+commit-message discipline in Chronicle's register: imperative mood,
+50-character target (72 hard), what-and-why in plain words, no diff
+restating. Model stays haiku; no surface change. Verified: compile (prompt
+const only).
+
+**I — update download progress** (`1b0ec72`). `lib/updates.ts` is a state
+machine (available · checking · downloading pct · installing · restart) fed
+by the updater plugin's own progress events; the title-bar line renders
+Checking… / Downloading 42% (mono tabular) / Installing… / "Restart to
+finish · Restart" — restart offered, never forced; failed auto-checks stay
+silent, manual checks stay loud. Picker's line follows. Verified: probe
+drives every state through stubbed updater channel events, ending on the
+real relaunch call.
+
+Full probe suite after Z-5: **24/24**; `cargo test`: **33 passed**.
