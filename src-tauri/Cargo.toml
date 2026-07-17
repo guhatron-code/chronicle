@@ -24,6 +24,7 @@ notify = "6"
 # async/transport machinery we don't want — our loop is plain threads + channels)
 agent-client-protocol-schema = { version = "1.4.0", features = ["unstable"] }
 sysinfo = "0.39.6"
+tauri-plugin-notification = "2.3.3"
 
 [profile.release]
 strip = true

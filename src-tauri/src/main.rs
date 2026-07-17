@@ -1756,13 +1756,19 @@ async fn journal_read(roots: State<'_, OpenRoots>, dir: String, since: u64) -> R
     Ok(json!(entries.into_iter().rev().collect::<Vec<_>>()))
 }
 
-/// A native macOS notification — no plugin, no network: osascript.
+/// A native notification posted under CHRONICLE'S own bundle identity — the
+/// banner carries our icon, clicking it focuses Chronicle, and the permission
+/// toggle in System Settings lives under "Chronicle". (The old osascript
+/// shortcut attributed every notification to Script Editor.)
 #[tauri::command]
-async fn notify(title: String, body: String) -> Result<(), String> {
-    let esc = |s: &str| s.replace('\\', "").replace('"', "'").chars().take(140).collect::<String>();
-    let script = format!("display notification \"{}\" with title \"{}\"", esc(&body), esc(&title));
-    Command::new("osascript").args(["-e", &script]).output().map_err(|e| e.to_string())?;
-    Ok(())
+async fn notify(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .builder()
+        .title(title.chars().take(140).collect::<String>())
+        .body(body.chars().take(240).collect::<String>())
+        .show()
+        .map_err(|e| e.to_string())
 }
 
 /* ================= drafted save messages (F4 — model drafts, human gates) ================= */
@@ -2678,6 +2684,7 @@ fn main() {
         .collect();
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(OpenRoots(Mutex::new(seeded)))
