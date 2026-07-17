@@ -233,3 +233,34 @@ drives every state through stubbed updater channel events, ending on the
 real relaunch call.
 
 Full probe suite after Z-5: **24/24**; `cargo test`: **33 passed**.
+
+## Z-6 · Ship
+
+**What landed** — the README gained "The agent" section (register-true: what
+the pane is, the two modes, review/undo honesty, Undo to here, history,
+integrations) plus the ⌥⌘1/2/3 shortcut row and the acp.rs backend note
+(`5bc45d3`). Chronicle **v0.3.0** released via `./release.sh 0.3.0` —
+signed, notarized (Accepted), Gatekeeper-verified, tagged `v0.3.0` on main,
+GitHub release with DMG + updater tarball + signature + OTA `latest.json`
+(now serving 0.3.0 for darwin-aarch64). One hiccup, resolved: the first
+release run died at DMG bundling because a stale `/Volumes/Chronicle` image
+from the aborted pass was still mounted — detached it and the rerun went
+clean end to end.
+
+**How it was verified** — the full Z-6 sweep before shipping: `cargo test`
+33 passed + the `CHRONICLE_ACP_TEST=1` real-adapter round-trip re-run green
+AFTER all ledger/checkpoint changes (7.4s); `npx tsc --noEmit` +
+`npx vite build` green; the full probe suite 24/24 (Z-2a shell · Z-2b pane ·
+Z-3 review/checkpoints · Z-4 integrations/history · Z-5 F/G/I). Post-release:
+`gh release view v0.3.0` shows all four assets, `spctl -a` accepts the
+shipped .app, and the OTA manifest at releases/latest resolves to 0.3.0.
+Memory updated (adapter-rename warning, gated-test recipe, probe-harness
+shape, ledger semantics, release flow).
+
+**Commit** — `884272e` (chore: v0.3.0) · README `5bc45d3`
+
+---
+
+The Zed update is shipped: Z-1 → Z-6 all green, honestly verified at every
+phase. Deferred per plan §1-Out: OS sandboxing for auto-mode, queued
+messages, thread archive/import, Codex-over-ACP.
