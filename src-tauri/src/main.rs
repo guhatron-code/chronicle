@@ -6,6 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod acp;
+mod setup;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -44,7 +45,7 @@ fn hhmmss_now() -> String {
     }
 }
 
-fn epoch_ms() -> u64 {
+pub(crate) fn epoch_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
@@ -71,7 +72,7 @@ fn canon_key(dir: &str) -> Result<(String, PathBuf), String> {
 }
 
 /// SIGTERM, give the child a moment to exit cleanly, then SIGKILL; always reap.
-fn term_then_kill(child: &mut std::process::Child) {
+pub(crate) fn term_then_kill(child: &mut std::process::Child) {
     let pid = child.id() as i32;
     // agent sessions are spawned as their own process group (see process_group(0)
     // at the spawn sites) — signal the group so agent-spawned grandchildren die
@@ -107,7 +108,7 @@ fn agent_paths() -> (Option<String>, Option<String>) {
 
 /// Take the last absolute path a shell printed — interactive rc files
 /// (starship, instant prompts) can emit noise around the answer.
-fn last_path_line(chunk: &str) -> Option<String> {
+pub(crate) fn last_path_line(chunk: &str) -> Option<String> {
     chunk.lines().rev()
         .map(str::trim)
         .find(|l| l.starts_with('/') && !l.contains(' '))
@@ -1507,7 +1508,7 @@ fn unwatch_project(watch: State<WatchState>, dir: String) -> Result<(), String> 
 /* ================= GitHub (via the user's own gh CLI — Chronicle holds no credentials) ================= */
 
 /// Resolve a tool the way the terminal would — well-known dirs, then shells.
-fn find_tool(name: &str) -> Option<String> {
+pub(crate) fn find_tool(name: &str) -> Option<String> {
     use std::os::unix::fs::PermissionsExt;
     let home = std::env::var("HOME").unwrap_or_default();
     let is_exec = |p: &str| std::fs::metadata(p)
@@ -2647,6 +2648,71 @@ async fn agent_session_stop(roots: State<'_, OpenRoots>, agents: State<'_, acp::
     Ok(())
 }
 
+/* ================= the doctor (setup & health — see setup.rs) ================= */
+
+/// Every check's current state (checking/ready/needs-you), for the checklist.
+#[tauri::command]
+async fn setup_status() -> Value {
+    setup::status()
+}
+
+fn setup_emit(app: &tauri::AppHandle) -> acp::Emit {
+    let app = app.clone();
+    Arc::new(move |v: Value| { let _ = app.emit("setup-update", v); })
+}
+
+/// Install (or repair) one check; progress streams as `setup-update` events.
+#[tauri::command]
+async fn setup_install(app: tauri::AppHandle, setup_state: State<'_, setup::SetupState>, check: String) -> Result<(), String> {
+    setup_state.reset(&check);
+    let flag = setup_state.cancel_flag(&check);
+    let emit = setup_emit(&app);
+    // installs are blocking (download + extract) — run off the async pool
+    tauri::async_runtime::spawn_blocking(move || setup::install(&check, &emit, &flag))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The terminal-PATH repair — the "claude works in the terminal" fix.
+#[tauri::command]
+async fn setup_fix_terminal_path(app: tauri::AppHandle) -> Result<(), String> {
+    let r = setup::fix_terminal_path();
+    let emit = setup_emit(&app);
+    let _ = emit; // detect() re-reads live; the frontend re-checks after
+    r
+}
+
+/// Cancel an in-flight install (stops the download, cleans the partial file).
+#[tauri::command]
+async fn setup_cancel(setup_state: State<'_, setup::SetupState>, check: String) -> Result<(), String> {
+    setup_state.request_cancel(&check);
+    Ok(())
+}
+
+/// "Set everything up for me" — the whole chain in dependency order.
+#[tauri::command]
+async fn setup_run_all(app: tauri::AppHandle, setup_state: State<'_, setup::SetupState>) -> Result<(), String> {
+    let state = setup_state.inner().clone(); // cloneable Arc handle
+    let emit = setup_emit(&app);
+    tauri::async_runtime::spawn_blocking(move || setup::run_all(&state, &emit))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Open a managed terminal running the sign-in for `kind` (claude | github).
+/// Reuses the same terminal the app already spawns; the frontend polls the
+/// check back to ready when the sign-in tab exits.
+#[tauri::command]
+async fn setup_signin_command(kind: String) -> Result<Value, String> {
+    let (bin_name, args, title) = match kind.as_str() {
+        "claude" => ("claude", "/login", "claude · sign-in"),
+        "github" => ("gh", "auth login", "github · sign-in"),
+        _ => return Err("unknown sign-in".into()),
+    };
+    let bin = setup::resolve(bin_name).ok_or("that tool isn't installed yet")?;
+    Ok(json!({ "bin": bin, "args": args, "title": title }))
+}
+
 /* ================= main (with --derive CLI for the golden test) ================= */
 
 fn main() {
@@ -2702,6 +2768,7 @@ fn main() {
             next_id: std::sync::atomic::AtomicU32::new(1),
         })
         .manage(acp::AcpState::new())
+        .manage(setup::SetupState::new())
         .on_window_event(|window, event| {
             // the window is gone: no orphaned children, ever — kill + reap every PTY
             // shell and every background roadmap session.
@@ -2738,6 +2805,8 @@ fn main() {
             agent_set_mode, agent_set_config_option, agent_respond_permission, agent_session_stop,
             agent_edits, agent_edit_diff, agent_edit_keep, agent_edit_undo, agent_restore_checkpoint,
             agent_session_resume, agent_sessions_list, agent_history_read,
+            setup_status, setup_install, setup_fix_terminal_path, setup_cancel,
+            setup_run_all, setup_signin_command,
             journal_append, journal_read, notify, draft_save_message,
             global_search, status_report,
             github_repos, github_clone, github_create,

@@ -26,3 +26,41 @@ the comp's placeholders.
 light-theme proof present.
 
 **Commit** — (next docs commit)
+
+## S-1 · The doctor (Rust backend)
+
+**Install methods VERIFIED against the vendors on 2026-07-17** (per the
+standing law — not trusted from the plan): Node = latest LTS from
+`nodejs.org/dist/index.json` (currently v24.18.0), official darwin tarball for
+the arch, verified against the vendor's `SHASUMS256.txt`. Claude Code =
+`curl -fsSL https://claude.ai/install.sh | bash` (302→ok), npm-via-managed-node
+fallback. GitHub = latest `cli/cli` release's `gh_*_macOS_<arch>.zip` asset
+(the `.pkg` needs admin — avoided). Superpowers = `claude plugin marketplace
+add anthropics/claude-plugins-official` + `claude plugin install
+superpowers@claude-plugins-official`.
+
+**What landed** — `src-tauri/src/setup.rs`: the six checks
+(claude · claude sign-in · node · terminal-path · github · superpowers) each
+with detect + install/repair. Everything installs WITHOUT admin into
+`~/.chronicle/tools/` from direct, arch-picked, HTTPS downloads (checksum-
+verified for Node); binaries symlinked into a managed `bin/`. Downloads stream
+progress (`setup-update` events with pct + bytes) and honor a cancel flag. The
+terminal-path repair writes ONE marker-fenced, idempotent block into
+`~/.zshrc` + `~/.zprofile` (never clobbers a hand-edit — the skill-install
+safety model). Detection uses the extended tool ladder (managed dir + well-
+known dirs + a login-interactive probe); the "installed but the terminal can't
+find it" split is the star fix's trigger. Every subprocess gets a PATH that can
+find node (`tool_env_path`). Commands (main.rs): `setup_status`,
+`setup_install` (blocking work on `spawn_blocking`), `setup_fix_terminal_path`,
+`setup_cancel`, `setup_run_all`, `setup_signin_command` (hands the frontend the
+managed-terminal sign-in for claude/gh).
+
+**How it was verified** — `cargo test`: 41 passed (6 new: the PATH-writer's
+idempotency + marker-safety + never-clobber-outside-markers, arch tokens,
+nested-binary location, tar extraction round-trip, sha256, the status shape).
+Plus the gated `CHRONICLE_SETUP_TEST=1` test exercising the REAL install
+pipeline against the live Node vendor — download → vendor-checksum verify →
+extract → the extracted `node --version` runs — passed in ~10s. `cargo build`
+clean (only the pre-existing `log` warning).
+
+**Commit** — (next docs commit)
