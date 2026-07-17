@@ -288,15 +288,51 @@ fn gh_authed() -> bool {
         .unwrap_or(false)
 }
 
-/// A best-effort "is Claude signed in" probe. There is no clean status command,
-/// so we treat a persisted credentials file as the signal; when we can't tell,
-/// we report `needs_you` (offer sign-in) rather than a false green.
+/// Is Claude signed in? Claude Code (2.1+) keeps its login in the macOS
+/// Keychain (service `Claude Code-credentials`), NOT a file — the old
+/// file-only check reported "needs sign-in" on a signed-in machine. Primary
+/// signal: the Keychain item exists (metadata only, no secret read, no access
+/// prompt). Fallbacks: a credentials file (older versions), then the
+/// authoritative `claude auth status`. We only report NOT-signed-in when a
+/// check positively says so — never on "couldn't tell" (the agent's own
+/// needs-login flow is the real safety net, so a false nag is the worse bug).
 fn claude_signed_in() -> bool {
-    let creds = [
+    // 1 · the Keychain credentials item (current Claude Code)
+    let keychain = std::process::Command::new("security")
+        .args(["find-generic-password", "-s", "Claude Code-credentials"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if keychain {
+        return true;
+    }
+    // 2 · a persisted credentials file (older versions / alt installs)
+    let files = [
         home().join(".claude/.credentials.json"),
         home().join(".config/claude/.credentials.json"),
     ];
-    creds.iter().any(|p| p.exists())
+    if files.iter().any(|p| p.exists()) {
+        return true;
+    }
+    // 3 · authoritative last resort — `claude auth status` (exit 0 = signed in)
+    if let Some(claude) = resolve("claude") {
+        if let Ok(out) = std::process::Command::new(&claude)
+            .args(["auth", "status"])
+            .env("PATH", tool_env_path())
+            .stdin(std::process::Stdio::null())
+            .output()
+        {
+            let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr)).to_lowercase();
+            // positive signal only; ambiguous output does NOT flip to signed-out
+            if out.status.success() && !text.contains("not logged in") && !text.contains("logged out") && !text.contains("sign in") {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Detect one check's state, as the row renders it.
@@ -657,6 +693,28 @@ mod setup_tests {
         for c in s["checks"].as_array().unwrap() {
             let st = c["state"].as_str().unwrap();
             assert!(matches!(st, "ready" | "missing" | "needs_you" | "blocked" | "checking"), "bad state {st}");
+        }
+    }
+
+    /// On THIS machine, claude_signed_in() must agree with the Keychain — the
+    /// bug was reporting "needs sign-in" on a signed-in machine. Gated on the
+    /// setup env so it only runs where a real Claude login is present.
+    #[test]
+    #[ignore]
+    fn detects_the_real_signed_in_state() {
+        if std::env::var("CHRONICLE_SETUP_TEST").ok().as_deref() != Some("1") {
+            eprintln!("skipped: set CHRONICLE_SETUP_TEST=1 on a machine with Claude signed in");
+            return;
+        }
+        let keychain = std::process::Command::new("security")
+            .args(["find-generic-password", "-s", "Claude Code-credentials"])
+            .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+            .status().map(|s| s.success()).unwrap_or(false);
+        assert_eq!(claude_signed_in(), keychain || claude_signed_in(),
+            "detection must not be a false negative when the Keychain has the login");
+        if keychain {
+            assert!(claude_signed_in(), "Keychain has the login but we reported signed-out");
+            assert_eq!(detect("claude_signin")["state"], "ready", "the setup row must read ready");
         }
     }
 
