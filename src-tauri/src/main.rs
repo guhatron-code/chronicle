@@ -1174,6 +1174,41 @@ async fn kanban_attach(roots: State<'_, OpenRoots>, dir: String, task_id: String
     Ok(rel)
 }
 
+/// Save a composer attachment into `.chronicle/attachments/`, never clobbering:
+/// a name collision gets a `-2`, `-3`, … suffix before the extension. Returns
+/// the repo-relative path (approach A — the agent reads it from disk).
+fn save_agent_attachment(root: &Path, name: &str, bytes: &[u8]) -> Result<String, String> {
+    let safe: String = name.rsplit('/').next().unwrap_or(name).chars()
+        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '-' })
+        .collect();
+    let safe = safe.trim_matches('-').to_string();
+    if safe.is_empty() || safe == "." { return Err("bad attachment name".into()); }
+    if bytes.len() > 10_000_000 { return Err("attachment is over 10 MB".into()); }
+    let adir = root.join(".chronicle/attachments");
+    std::fs::create_dir_all(&adir).map_err(|e| e.to_string())?;
+    let (stem, ext) = match safe.rfind('.') {
+        Some(i) if i > 0 => (&safe[..i], &safe[i..]),
+        _ => (safe.as_str(), ""),
+    };
+    let mut rel = format!(".chronicle/attachments/{safe}");
+    let mut n = 2;
+    while root.join(&rel).exists() {
+        rel = format!(".chronicle/attachments/{stem}-{n}{ext}");
+        n += 1;
+    }
+    std::fs::write(root.join(&rel), bytes).map_err(|e| e.to_string())?;
+    Ok(rel)
+}
+
+/// Composer attachment: save a base64 file beside the manifest; returns the
+/// repo-relative path to reference in the prompt.
+#[tauri::command]
+async fn agent_attach(roots: State<'_, OpenRoots>, dir: String, name: String, b64: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|e| e.to_string())?;
+    save_agent_attachment(&p.dir, &name, &bytes)
+}
+
 const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written tasks (bugs, issues, ideas — with optional screenshots and design links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every task below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its task id. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the tasks' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly. The prompt MUST also instruct the executor: after each item is completed AND verified, edit .chronicle/kanban.json and set that task's \"column\" to \"completed\" (match by task id; touch \"updated_at\" with epoch ms; change nothing else in the file) — this is how the board and the roadmap track the round live.\n\nDo not change any other file except the two above (and the kanban column updates the executor makes later). The tasks are in `{TASKS}` — read that file (a JSON array) before writing anything.\n";
 
 fn fixes_run_key(dir: &str) -> Result<(String, PathBuf), String> {
@@ -2802,7 +2837,7 @@ fn main() {
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
             init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
             kanban_get, kanban_save, kanban_attach,
-            kanban_detach,
+            kanban_detach, agent_attach,
             fixes_log_path, fixes_generate, fixes_status, fixes_cancel,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
@@ -2989,6 +3024,25 @@ mod r1_tests {
         std::fs::write(&f, format!("{}END", "x".repeat(100_000))).unwrap();
         let t = read_tail(&f, 100);
         assert!(t.len() <= 100 && t.ends_with("END"));
+    }
+
+    #[test]
+    fn agent_attach_saves_and_disambiguates() {
+        let repo = tmp("agent-attach");
+        let p1 = save_agent_attachment(&repo, "shot.png", b"one").unwrap();
+        assert_eq!(p1, ".chronicle/attachments/shot.png");
+        assert_eq!(std::fs::read(repo.join(&p1)).unwrap(), b"one");
+        // same name again must not clobber — it disambiguates
+        let p2 = save_agent_attachment(&repo, "shot.png", b"two").unwrap();
+        assert_eq!(p2, ".chronicle/attachments/shot-2.png");
+        assert_eq!(std::fs::read(repo.join(&p1)).unwrap(), b"one", "first file untouched");
+        assert_eq!(std::fs::read(repo.join(&p2)).unwrap(), b"two");
+        // a name with unsafe characters is sanitized, extension preserved
+        let p3 = save_agent_attachment(&repo, "a b/c.PNG", b"x").unwrap();
+        assert!(p3.starts_with(".chronicle/attachments/"), "stays in the jail dir");
+        assert!(!p3.contains('/') || p3.matches('/').count() == 2, "no nested dirs");
+        // an empty/invalid name is rejected
+        assert!(save_agent_attachment(&repo, "", b"x").is_err());
     }
 }
 

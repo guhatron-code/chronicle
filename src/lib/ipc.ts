@@ -264,6 +264,10 @@ export const kanbanSave = (dir: string, data: KanbanStore) =>
 /** Save an image attachment; returns the repo-relative path to reference in the task. */
 export const kanbanAttach = (dir: string, taskId: string, name: string, b64: string) =>
   invoke<string>("kanban_attach", { dir, taskId, name, b64 });
+/** Composer attachment (approach A): save a base64 file into .chronicle/attachments;
+ *  returns its repo-relative path to reference in the agent prompt. */
+export const agentAttach = (dir: string, name: string, b64: string) =>
+  invoke<string>("agent_attach", { dir, name, b64 });
 /** Remove one attachment file (jailed to .chronicle/attachments). */
 export const kanbanDetach = (dir: string, path: string) =>
   invoke<void>("kanban_detach", { dir, path });
