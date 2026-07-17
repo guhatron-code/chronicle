@@ -7,7 +7,7 @@
  */
 import { Fragment } from "react";
 import { windowControls } from "@/lib/ipc";
-import { BrandGlyph, ErrorGlyph, PlusGlyph, XGlyph } from "./icons";
+import { BrandGlyph, ErrorGlyph, HelpGlyph, PlusGlyph, XGlyph } from "./icons";
 import { PaneCluster, type PaneUnit, type PaneVisibility } from "./PaneCluster";
 import { cn } from "@/lib/utils";
 import type { MarkIndex } from "./atoms";
@@ -86,6 +86,7 @@ export function TitleBar({
   onClose,
   onAdd,
   onHome,
+  onHelp,
 }: {
   tabs: ProjectTab[];
   activeDir: string;
@@ -100,6 +101,8 @@ export function TitleBar({
   onClose: (dir: string) => void;
   onAdd: () => void;
   onHome?: () => void;
+  /** Opens the Help screen — the primary entry, replacing the rail's. */
+  onHelp?: () => void;
 }) {
   // the active tab must always be visible — swap it over the last slot when it
   // falls outside the window (T-013)
@@ -272,6 +275,20 @@ export function TitleBar({
             Checked {checkedAt}
           </span>
         )
+      )}
+      {onHelp && (
+        <>
+          <span className="mx-3 h-3.5 w-px shrink-0 bg-divider" aria-hidden />
+          <button
+            data-no-zoom
+            onClick={onHelp}
+            title="Guides, how-tos, and shortcuts — ⌘/"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-[7px] px-2 py-1 text-[11.5px] font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"
+          >
+            <HelpGlyph size={13} />
+            Need help?
+          </button>
+        </>
       )}
     </div>
   );

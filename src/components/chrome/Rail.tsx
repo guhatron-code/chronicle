@@ -6,7 +6,6 @@
 import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  HelpGlyph,
   KanbanGlyph,
   RefreshGlyph,
   RepoGlyph,
@@ -70,7 +69,6 @@ export function Rail({
   queuedCount,
   checking,
   onRefresh,
-  onHelp,
   onSetup,
 }: {
   pane: Pane;
@@ -78,7 +76,6 @@ export function Rail({
   queuedCount: number;
   checking?: boolean;
   onRefresh: () => void;
-  onHelp: () => void;
   onSetup?: () => void;
 }) {
   return (
@@ -129,9 +126,6 @@ export function Rail({
         ) : (
           <RefreshGlyph />
         )}
-      </RailButton>
-      <RailButton label="Help and shortcuts" tooltip="Shortcuts" mono="⌘/" onClick={onHelp} dim>
-        <HelpGlyph />
       </RailButton>
     </div>
     </TooltipProvider>

@@ -191,6 +191,7 @@ export function Shell({
         onClose={onClose}
         onAdd={onAdd}
         onHome={onHome}
+        onHelp={onHelp}
       />
       <div ref={rowRef} className="flex min-h-0 flex-1">
         <Rail
@@ -199,7 +200,6 @@ export function Shell({
           queuedCount={queuedCount}
           checking={checking}
           onRefresh={onRefresh}
-          onHelp={onHelp}
           onSetup={onSetup}
         />
         {showContent && (
