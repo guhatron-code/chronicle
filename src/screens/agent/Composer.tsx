@@ -1,6 +1,7 @@
 /*
- * F32 — the composer: multiline input (⌘Enter sends), Stop replaces Send
- * while the agent works (input stays editable), the two-state mode control
+ * F32 — the composer: multiline input (Enter sends, Shift+Enter for a
+ * newline), Stop replaces Send while the agent works (input stays
+ * editable), the two-state mode control
  * (Asks first / Works freely — modes are the AGENT'S OWN ids read from the
  * session; bypassPermissions is never offered), and the quiet usage meter
  * that is hidden entirely when the agent sends no usage data. Switching to
@@ -22,6 +23,7 @@ import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { Kbd } from "@/components/chrome/atoms";
 import { toastError } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
+import { agentAttach, IMG_MIME } from "@/lib/ipc";
 
 const fmtTokens = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
@@ -106,6 +108,32 @@ export function Composer({
   const [sending, setSending] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
+  type Attachment = { id: string; name: string; absPath: string; relPath: string; isImage: boolean };
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const attachSeq = useRef(0);
+
+  const addFiles = async (files: File[]) => {
+    for (const f of files) {
+      try {
+        const buf = new Uint8Array(await f.arrayBuffer());
+        let bin = "";
+        for (const byte of buf) bin += String.fromCharCode(byte);
+        const name = f.name || `pasted-${(attachSeq.current += 1)}.png`;
+        const relPath = await agentAttach(dir, name, btoa(bin));
+        const ext = relPath.split(".").pop()?.toLowerCase() ?? "";
+        setAttachments((prev) => [
+          ...prev,
+          { id: `${Date.now()}-${attachSeq.current++}`, name, absPath: `${dir}/${relPath}`, relPath, isImage: ext in IMG_MIME },
+        ]);
+      } catch (e) {
+        toastError("Couldn't attach the file", String(e).slice(0, 90));
+      }
+    }
+  };
+
+  const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id));
+
   /* F38 — a preloaded draft lands in the input, unsent */
   const lastDraft = useRef<string | null>(null);
   useEffect(() => {
@@ -128,11 +156,14 @@ export function Composer({
   }, [text]);
 
   const send = () => {
-    const body = text.trim();
-    if (!body || disabled || sending || s.turnActive) return;
+    const typed = text.trim();
+    if ((!typed && attachments.length === 0) || disabled || sending || s.turnActive) return;
+    const refs = attachments.length
+      ? `${typed ? `${typed}\n\n` : ""}Attached files:\n${attachments.map((a) => `- ${a.relPath}`).join("\n")}`
+      : typed;
     setSending(true);
-    sendAgentMessage(dir, body)
-      .then(() => { setText(""); mirrorComposerText(dir, ""); })
+    sendAgentMessage(dir, refs)
+      .then(() => { setText(""); mirrorComposerText(dir, ""); setAttachments([]); })
       .catch((e) => toastError("Couldn't send it", String(e).slice(0, 90)))
       .finally(() => setSending(false));
   };
@@ -172,7 +203,18 @@ export function Composer({
   const current = s.modes?.currentModeId;
 
   return (
-    <div className="flex shrink-0 flex-col gap-2 border-t border-divider px-3 py-2.5">
+    <div
+      className="flex shrink-0 flex-col gap-2 border-t border-divider px-3 py-2.5"
+      onDragOver={(e) => {
+        // accept Finder file drops; ignore a chip being dragged (Task 5)
+        if (Array.from(e.dataTransfer.types).includes("Files")) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (e.dataTransfer.types.includes("application/x-chronicle-path")) return; // a chip, not a file
+        const files = Array.from(e.dataTransfer.files);
+        if (files.length) { e.preventDefault(); void addFiles(files); }
+      }}
+    >
       {s.draft && text === s.draft.text && (
         <div className="flex flex-wrap items-center gap-2">
           <span data-draft-chip className="inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-fill-subtle px-2.5 text-[11px] text-text-subtle">
@@ -187,6 +229,34 @@ export function Composer({
             </button>
           </span>
           <span className="text-[11px] text-text-dim">review and send — nothing goes until you do</span>
+        </div>
+      )}
+      {attachments.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {attachments.map((a) => (
+            <span
+              key={a.id}
+              data-attach-chip
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData("application/x-chronicle-path", a.absPath);
+                e.dataTransfer.setData("text/plain", a.absPath);
+                e.dataTransfer.effectAllowed = "copy";
+              }}
+              className="inline-flex h-6 max-w-[180px] cursor-grab items-center gap-1.5 rounded-full bg-fill-subtle px-2.5 text-[11px] text-text-subtle active:cursor-grabbing"
+              title={`${a.absPath} — drag onto a terminal (hold Shift) to insert the path`}
+            >
+              <span className="text-text-dim">{a.isImage ? "🖼" : "📎"}</span>
+              <span className="truncate">{a.name}</span>
+              <button
+                aria-label={`Remove ${a.name}`}
+                onClick={() => removeAttachment(a.id)}
+                className="flex text-text-dim hover:text-text-secondary"
+              >
+                <XGlyph size={8} />
+              </button>
+            </span>
+          ))}
         </div>
       )}
       <textarea
@@ -207,6 +277,13 @@ export function Composer({
             e.preventDefault();
             send();
           }
+        }}
+        onPaste={(e) => {
+          const imgs = Array.from(e.clipboardData.items)
+            .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+            .map((it) => it.getAsFile())
+            .filter((f): f is File => f != null);
+          if (imgs.length) { e.preventDefault(); void addFiles(imgs); }
         }}
         className={cn(
           "max-h-[200px] min-h-14 resize-none overflow-y-auto rounded-md border border-border-field bg-surface-input px-[11px] py-[9px] text-[13px] leading-normal text-text-primary outline-none placeholder:text-text-dimmer",
@@ -254,7 +331,24 @@ export function Composer({
             )}
           </div>
         )}
+        {!disabled && (
+          <button
+            data-agent-attach
+            title="Attach a file"
+            onClick={() => fileInput.current?.click()}
+            className="inline-flex h-[26px] items-center rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
+          >
+            📎
+          </button>
+        )}
         {!disabled && <ModelPicker dir={dir} />}
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(e) => { void addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }}
+        />
         {s.turnActive && (
           <span className="inline-flex items-center gap-1.5 text-[11.5px] text-state-neutral">
             <span
@@ -285,11 +379,11 @@ export function Composer({
             <Kbd>↩</Kbd>
             <button
               data-agent-send
-              disabled={disabled || sending || !text.trim()}
+              disabled={disabled || sending || (!text.trim() && attachments.length === 0)}
               onClick={send}
               className={cn(
                 "h-7 rounded-md px-3 text-xs font-medium",
-                disabled || sending || !text.trim()
+                disabled || sending || (!text.trim() && attachments.length === 0)
                   ? "cursor-default bg-fill-subtle text-text-dimmer"
                   : "bg-primary text-primary-foreground hover:bg-[--primary-hover]",
               )}
