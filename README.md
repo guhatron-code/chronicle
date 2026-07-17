@@ -21,10 +21,15 @@ confirmed action.
   always-on documents, the phase timeline), **Repo** (file tree · reader with live disk
   freshness · Project history: save / publish / bring down in plain words), and the
   **Kanban** (see below). ⌘J cycles them.
-- **Terminals** live in the right column on Roadmap/Repo: ⌘T or the Claude Code / Codex
+- **The agent** (v0.3) sits above the terminal in the right column — a chat thread that
+  DRIVES Claude Code instead of watching it. See "The agent" below.
+- **Terminals** live below the agent in the right column: ⌘T or the Claude Code / Codex
   buttons start real shells; sessions survive switching panes and projects; a finished
-  session keeps its scrollback until you close its tab. "Start this phase" on a phase page
-  opens a terminal, starts your agent, and copies the paste file in one click.
+  session keeps its scrollback until you close its tab. Tab words tell the truth — the
+  "working" dot appears only when an agent is actually in the pty's foreground — and
+  ⌘-clicking a printed path opens it in the repo viewer. Each unit of the window
+  (content · agent · terminal) shows or hides from the title-bar cluster (⌥⌘1/2/3);
+  hiding never stops a session.
 - **The kanban** (per project): write down bugs and ideas as tasks (⌘N), attach screenshots,
   drag them between Queued / In progress / Blocked / Completed. **Ready to execute** freezes
   the queued tasks into a round — a background session writes `fixes/phase_N_fixes_plan.md`
@@ -33,6 +38,32 @@ confirmed action.
   `.chronicle/kanban.json` inside the project, so it travels with the repo.
 - Click any file chip to copy its whole contents; paste into the built-in terminal or
   Claude Design, as the chip says.
+
+## The agent
+
+The agent pane speaks the Agent Client Protocol to a pinned Claude Code adapter
+(`@agentclientprotocol/claude-agent-acp`, spawned via npx with your Claude Code login —
+Chronicle never holds a key). Everything meaningful arrives as typed events and renders as
+plain-language cards: streamed answers, "Edited `file` +12 −4 · View the changes",
+"Ran `npm test` — finished", inline permission asks with the agent's own options.
+
+- **Asks first / Works freely** — two modes, read from the agent itself. Works freely
+  (edits stop asking; commands still ask) is confirmed once per session and never
+  outlives it. The bypass-everything mode is deliberately not offered.
+- **Every edit is reviewable and undoable.** The review strip ("4 files changed · Review ·
+  Keep all · Undo all…") opens the repo viewer on each diff with Keep / Undo per file.
+  Files the agent changed through shell commands are listed honestly as "changed by a
+  command — covered by Undo to here", reviewable but not per-file undoable.
+- **Undo to here.** Every message is preceded by a git-plumbing snapshot (never your
+  index, never a branch). Restoring puts every file back — including files created after
+  the snapshot, which are deleted — and says exactly that before doing it.
+- **History.** Sessions persist to `.chronicle/agent/` as they stream; previous sessions
+  list by date and resume when the adapter supports it (read-only view + "Continue in a
+  new session" when it doesn't). Undo survives an app restart.
+- **Integrations.** "Start with the agent" on a phase preloads the phase prompt as an
+  unsent draft; "Run the round for me" on the kanban runs the round in the pane, with
+  done/failed derived from the board's columns and the stop reason — never the agent's
+  own claim.
 
 ## Trust boundary
 
@@ -57,7 +88,8 @@ worked examples in `skill/chronicle-init/examples/`. The `/chronicle-init` skill
 ## Shortcuts
 
 ⌘O open · ⌘K palette · ⌘1–9 switch project · ⌘W close (confirms live sessions) · ⌘J cycle
-panes · ⌃Tab cycle panes · ⌘T new terminal · ⌘N new kanban task · ⌘/ all shortcuts.
+panes · ⌃Tab cycle panes · ⌥⌘1/2/3 show/hide content · agent · terminal · ⌘T new terminal ·
+⌘N new kanban task · ⌘/ all shortcuts.
 
 ## Accuracy contract
 
@@ -81,4 +113,6 @@ set `APPLE_SIGNING_IDENTITY="Developer ID Application: …"` (and optionally
 
 UI: React + Vite + Tailwind v4 + shadcn/ui on the Weave design system (`src/`).
 Backend: `src-tauri/src/main.rs` (manifest model, 3-valued condition engine, jailed file
-access, multi-session PTY, consent-gated background sessions, the kanban store).
+access, multi-session PTY, consent-gated background sessions, the kanban store) and
+`src-tauri/src/acp.rs` (the ACP seam: stdio JSON-RPC loop, the jailed+ledgered fs
+handlers, checkpoints, the transcript store).
