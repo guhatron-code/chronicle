@@ -1775,8 +1775,11 @@ async fn draft_save_message(roots: State<'_, OpenRoots>, dir: String) -> Result<
     if diff.len() > 60_000 { diff.truncate(60_000); diff.push_str("\n… (truncated)"); }
     let (claude_bin, _) = agent_paths();
     let bin = claude_bin.ok_or("drafting needs Claude Code installed")?;
+    // H — Zed's commit-message prompt discipline, in Chronicle's register:
+    // one imperative line, ~50-character target, say what changed and why,
+    // never restate the diff, no filler body.
     let prompt = format!(
-        "You are drafting a one-line save message for a non-developer's project history. Reply with ONLY the message: plain language, present tense, what changed and why it matters, no jargon, no quotes, at most 72 characters.\n\nThe changes being saved:\n\n{diff}");
+        "You are an expert at writing save messages for a project's history, read by a non-developer. Reply with ONLY the message — a single line.\n\nRules:\n- Imperative mood, present tense (\"Add\", \"Fix\", \"Make\" — never \"Added\" or \"This adds\").\n- Aim for 50 characters; never exceed 72.\n- Say WHAT changed and WHY it matters, in plain words — no jargon, no file lists, no restating the diff.\n- No quotes, no trailing period, no explanations around the message.\n\nThe changes being saved:\n\n{diff}");
     let mut child = std::process::Command::new(bin)
         .args(["-p", &prompt, "--model", "haiku"])
         .current_dir(&p.dir)
