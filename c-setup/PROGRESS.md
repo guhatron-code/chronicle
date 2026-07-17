@@ -99,3 +99,28 @@ Try again; run-all; the sign-in Terminal hand-off + doctor-poll auto-advance
 to the celebration; the health framing. Full probe suite stays green.
 
 **Commit** — 06b35ba
+
+## S-3 · The Help screen (G6–G8)
+
+**What landed** — the Help screen built to Deck 8. `src/lib/help-content.ts`:
+the seven "How do I…" recipes (each with plain-language steps + a navigation
+target), the ten-term plain glossary (with the technical word in mono where
+there is one), the shortcuts reconciled to the ACTUAL shipped bindings (the
+comp's ⌘J/⌘R were placeholders — this lists ⌘K, ⌘J = cycle panes, ⌥⌘1/2/3,
+⌘⏎, etc.), and a `searchHelp` that matches across recipes + glossary into one
+ranked list. `src/screens/help/HelpScreen.tsx`: a full-window surface with the
+search field (⌘/ hint), the recipe card grid, the glossary, and the folded-in
+shortcuts; searching swaps to the one-list results view. "Show me" closes Help
+and navigates to the real surface (roadmap/repo/kanban/agent/setup). Wired into
+`App`: the rail's Help destination and ⌘/ both open the Help screen (G6 — the
+lone "?" glyph is retired; the standalone ⌘/ shortcuts overlay is superseded by
+the folded-in section).
+
+**How it was verified** — `npx tsc --noEmit` + `npx vite build` green;
+`cargo test` 41 passed. Rendered the real component and screenshotted it (shown
+to the user). 3 new probes: recipes + glossary + shortcuts render in plain
+words; search matches across BOTH kinds in one list (plus a no-match state);
+"Show me" closes Help and lands on the right surface. Full probe suite: 39
+green.
+
+**Commit** — (next docs commit)

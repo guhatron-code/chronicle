@@ -57,6 +57,8 @@ import { listen } from "@tauri-apps/api/event";
 import { checkForUpdate, dismissUpdate, installUpdate, restartUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
 import { SetupScreen } from "@/screens/setup/SetupScreen";
+import { HelpScreen } from "@/screens/help/HelpScreen";
+import type { HelpTarget } from "@/lib/help-content";
 import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/lib/setup-store";
 import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, subscribeAgent } from "@/lib/agent-session";
@@ -129,6 +131,7 @@ export default function App() {
   const [cloningRepo, setCloningRepo] = useState<string | null>(null);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [setupMode, setSetupMode] = useState<"gate" | "health" | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [newProjOpen, setNewProjOpen] = useState(false);
@@ -636,7 +639,7 @@ export default function App() {
         setSearchOpen(true);
       }
       else if (mod && e.key === "o") { e.preventDefault(); openDialog(); }
-      else if (mod && e.key === "/") { e.preventDefault(); setShortcutsOpen(true); }
+      else if (mod && e.key === "/") { e.preventDefault(); setHelpOpen(true); }
       else if (e.metaKey && e.altKey && activeRef.current && /^Digit[123]$/.test(e.code)) {
         // ⌥⌘1/2/3 — toggle content / agent / terminal (e.code: ⌥ changes e.key on macOS)
         e.preventDefault();
@@ -677,12 +680,22 @@ export default function App() {
       palette: setPaletteOpen,
       shortcuts: setShortcutsOpen,
       setup: (m: "gate" | "health") => setSetupMode(m),
+      help: () => setHelpOpen(true),
       newProject: (err: string | null) => { setNewProjError(err); setNewProjOpen(true); },
       confirm: setConfirm,
       toastSuccess,
       toastError,
     };
   }, []);
+
+  const showMe = useCallback((t: HelpTarget) => {
+    setHelpOpen(false);
+    if (t === "setup") { setSetupMode("health"); return; }
+    if (t === "repo") { goPane("repo"); patchLayout({ content: true }); }
+    else if (t === "kanban") { goPane("kanban"); patchLayout({ content: true }); }
+    else if (t === "road") { goPane("road"); patchLayout({ content: true }); }
+    else if (t === "agent") { patchLayout({ agent: true, agentCollapsed: false }); }
+  }, [goPane, patchLayout]);
 
   const active = activeDir ? projects.get(activeDir) : null;
   // the 2s "changed just now" emphasis needs a re-render AT the boundary
@@ -791,6 +804,15 @@ export default function App() {
     </>
   );
 
+  if (helpOpen) {
+    return (
+      <>
+        <HelpScreen onClose={() => setHelpOpen(false)} onShowMe={showMe} />
+        {overlays}
+      </>
+    );
+  }
+
   if (setupMode) {
     return (
       <>
@@ -889,7 +911,7 @@ export default function App() {
           void windowControls().setTitle("Chronicle").catch?.(() => {});
         }}
         onRefresh={refreshNow}
-        onHelp={() => setShortcutsOpen(true)}
+        onHelp={() => setHelpOpen(true)}
         onSetup={() => setSetupMode("health")}
         terminalTabs={termTabs}
         activeTerminalId={activeTermId}
