@@ -34,10 +34,6 @@ const INIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180); /
 const NEW_SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const AUTH_REQUIRED_CODE: i64 = -32000;
 
-/// The mode deliberately NOT exposed in the pane: an unconfirmed irreversible
-/// non-repo action has no undo (checkpoints only cover the worktree).
-const FORBIDDEN_MODE: &str = "bypassPermissions";
-
 pub type Emit = Arc<dyn Fn(Value) + Send + Sync>;
 
 pub struct AcpState {
@@ -1202,12 +1198,10 @@ impl AcpSession {
         Ok(())
     }
 
-    /// Switch session mode — only to a mode the agent itself advertised, and
-    /// never to bypassPermissions (deliberately not exposed in the pane).
+    /// Switch session mode — only to a mode the agent itself advertised. This
+    /// includes bypassPermissions ("Full auto"): once the agent offers it, the
+    /// pane exposes it, and the user owns that choice.
     pub fn set_mode(&self, mode_id: &str) -> Result<(), String> {
-        if mode_id == FORBIDDEN_MODE {
-            return Err("that mode isn't available in Chronicle".into());
-        }
         let advertised = self.modes.lock().map_err(|e| e.to_string())?
             .get("availableModes").and_then(|v| v.as_array())
             .map(|a| a.iter().any(|m| m.get("id").and_then(|i| i.as_str()) == Some(mode_id)))
@@ -1479,9 +1473,11 @@ for line in sys.stdin:
         let end = wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/turn_end"));
         assert_eq!(end.pointer("/message/params/stopReason").and_then(|v| v.as_str()), Some("end_turn"));
 
-        // mode guard: bypassPermissions is advertised by the mock but still refused
-        assert!(s.set_mode("bypassPermissions").is_err());
+        // any advertised mode is settable — including bypassPermissions ("Full
+        // auto"); only a mode the agent never advertised is refused
         assert!(s.set_mode("madeUpMode").is_err());
+        s.set_mode("bypassPermissions").unwrap();
+        assert_eq!(s.current_state().pointer("/modes/currentModeId").and_then(|v| v.as_str()), Some("bypassPermissions"));
         s.set_mode("acceptEdits").unwrap();
         assert_eq!(s.current_state().pointer("/modes/currentModeId").and_then(|v| v.as_str()), Some("acceptEdits"));
 

@@ -151,6 +151,7 @@ export function Composer({
 
   const asksFirst = s.modes?.availableModes.find((m) => m.id === "default");
   const worksFreely = s.modes?.availableModes.find((m) => m.id === "acceptEdits");
+  const fullAuto = s.modes?.availableModes.find((m) => m.id === "bypassPermissions");
   const current = s.modes?.currentModeId;
 
   return (
@@ -221,6 +222,19 @@ export function Composer({
             >
               Works freely
             </button>
+            {fullAuto && (
+              <button
+                title="Edits and commands both run without asking — nothing is confirmed."
+                disabled={disabled}
+                onClick={() => switchMode("bypassPermissions")}
+                className={cn(
+                  "h-[26px] border-l border-border-hairline px-2.5 text-[11.5px]",
+                  current === "bypassPermissions" ? "bg-fill-hover font-medium text-text-primary" : "text-text-muted hover:text-text-primary",
+                )}
+              >
+                Full auto
+              </button>
+            )}
           </div>
         )}
         {!disabled && <ModelPicker dir={dir} />}
