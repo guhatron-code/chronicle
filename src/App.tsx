@@ -53,7 +53,8 @@ import { listen } from "@tauri-apps/api/event";
 import { checkForUpdate, dismissUpdate, installUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
 import { AgentPane } from "@/screens/agent/AgentPane";
-import { subscribeAgent } from "@/lib/agent-session";
+import { agentSessionFor, subscribeAgent } from "@/lib/agent-session";
+import { openAgentReview } from "@/screens/repo/RepoPane";
 import { copyText, fixesStatus, githubClone, githubRepos, initStatus, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
 
@@ -757,6 +758,10 @@ export default function App() {
             dir={active.dir}
             onConfirm={setConfirm}
             onRevealTerminal={() => patchLayout({ terminal: true, terminalCollapsed: false })}
+            onOpenReview={() => {
+              openAgentReview(active.dir, agentSessionFor(active.dir).editFiles);
+              goPane("repo");
+            }}
           />
         }
         onConfirm={setConfirm}

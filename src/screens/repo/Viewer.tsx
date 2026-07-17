@@ -47,6 +47,14 @@ export type ViewerProps =
       diffStat?: { added: number; removed: number };
       /** "File changed on disk — Reload" bar. */
       changedOnDisk?: boolean;
+      /** F36 — reviewing the agent's changes: the per-file action bar. */
+      review?: {
+        progress: string; // "2 of 4 reviewed"
+        /** changed by the agent's commands — no per-file undo, only Keep */
+        viaCommand: boolean;
+        onKeep: () => void;
+        onUndo?: () => void;
+      };
       body: ViewerBody;
       onSelectTab?: (id: string) => void;
       onCloseTab?: (id: string) => void;
@@ -243,6 +251,35 @@ export function Viewer(p: ViewerProps) {
               <span className="text-state-error">{"−"}{p.diffStat.removed}</span>
             </span>
           )}
+        </div>
+      )}
+
+      {/* F36 — the review action bar (amends the shipped viewer) */}
+      {p.review && (
+        <div data-review-bar className="flex items-center gap-[9px] border-b border-divider bg-fill-subtle px-3.5 py-2">
+          {p.review.viaCommand ? (
+            <span className="text-[11.5px] text-text-dim">
+              changed by a command — covered by Undo to here
+            </span>
+          ) : (
+            <span className="text-[11.5px] text-text-muted">Reviewing the agent's changes</span>
+          )}
+          <span className="shrink-0 font-mono text-[10.5px] text-text-dim tabular-nums">{p.review.progress}</span>
+          <span className="flex-1" />
+          {p.review.onUndo && (
+            <button
+              onClick={p.review.onUndo}
+              className="h-[26px] shrink-0 rounded-md border border-border-strong px-[11px] text-[11.5px] font-medium text-text-primary hover:bg-fill-hover"
+            >
+              Undo this file
+            </button>
+          )}
+          <button
+            onClick={p.review.onKeep}
+            className="h-[26px] shrink-0 rounded-md bg-primary px-3 text-[11.5px] font-medium text-primary-fg hover:bg-primary-hover"
+          >
+            Keep
+          </button>
         </div>
       )}
 

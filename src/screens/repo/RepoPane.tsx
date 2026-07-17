@@ -31,6 +31,10 @@ import {
   type FileStat,
   type StateData,
   draftSaveMessage,
+  agentEditDiff,
+  agentEditKeep,
+  agentEditUndo,
+  type AgentEditFile,
 } from "@/lib/ipc";
 import {
   buildTree,
@@ -64,6 +68,8 @@ interface TabState {
   diffStat?: { added: number; removed: number };
   mtime?: number; // as loaded — freshness baseline
   changedOnDisk?: boolean;
+  /** F36 — a review tab: the diff comes from the agent's ledger, not git. */
+  agentReview?: { abs: string; viaCommand: boolean };
 }
 
 interface RepoState {
@@ -79,6 +85,8 @@ interface RepoState {
   message: string;
   logLimit: number;
   banner?: string;
+  /** F36 — the active review pass over the agent's ledger. */
+  review?: { files: AgentEditFile[]; resolved: Set<string> };
 }
 
 const CACHE = new Map<string, RepoState>();
@@ -115,6 +123,29 @@ export function openFileInRepo(dir: string, path: string) {
   if (!s.tabs.find((t) => t.path === path)) s.tabs.push({ path, mode: "contents", body: null });
   s.activeTab = path;
   s.selectedId = path;
+}
+
+/** F36 — start a review pass over the agent's unresolved edits: the viewer
+ * opens on the first file's ledger diff with the Keep/Undo action bar. */
+export function openAgentReview(dir: string, files: AgentEditFile[]) {
+  if (files.length === 0) return;
+  const s = stateFor(dir);
+  s.historyView = false;
+  s.review = { files, resolved: new Set() };
+  openReviewFile(s, files[0]);
+}
+
+function openReviewFile(s: RepoState, f: AgentEditFile) {
+  let t = s.tabs.find((x) => x.path === f.path);
+  if (!t) {
+    t = { path: f.path, mode: "diff", body: null };
+    s.tabs.push(t);
+  }
+  t.mode = "diff";
+  t.body = null;
+  t.agentReview = { abs: f.abs, viaCommand: f.viaCommand };
+  s.activeTab = f.path;
+  s.selectedId = f.path;
 }
 
 /** Open the project-history view next time the repo pane mounts for `dir` —
@@ -261,8 +292,13 @@ export function RepoPane({
     if (!rs.loads.has("")) loadDir("");
     setHistoryLoading(true);
     refreshGit();
-    // tabs opened from outside the pane (openFileInRepo) arrive body-less
-    for (const t of rs.tabs) if (t.body === null) loadContents(t.path);
+    // tabs opened from outside the pane (openFileInRepo / openAgentReview)
+    // arrive body-less — load them in their own mode
+    for (const t of rs.tabs) {
+      if (t.body !== null) continue;
+      if (t.mode === "diff") loadDiff(t.path);
+      else loadContents(t.path);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dir]);
 
@@ -363,7 +399,8 @@ export function RepoPane({
     const st = gitStatus;
     const un = st?.unstaged.find((f) => f.path === path);
     const staged = !un && !!st?.staged.find((f) => f.path === path);
-    gitDiff(d, path, staged, !!un?.untracked)
+    const reviewTab = stateFor(d).tabs.find((x) => x.path === path)?.agentReview;
+    (reviewTab ? agentEditDiff(d, reviewTab.abs) : gitDiff(d, path, staged, !!un?.untracked))
       .then((raw) => {
         if (dirRef.current !== d) return;
         const t = stateFor(d).tabs.find((x) => x.path === path);
@@ -591,6 +628,25 @@ export function RepoPane({
       onOpenHistory: () => { rs.historyView = true; rs.historyFrom = "repo"; rerender(); },
     };
     const active = rs.tabs.find((t) => t.path === rs.activeTab);
+    /* F36 — resolve one review file and move to the next unresolved one */
+    const advanceReview = (abs: string) => {
+      const rev = rs.review;
+      if (!rev) return;
+      rev.resolved.add(abs);
+      const f = rev.files.find((x) => x.abs === abs);
+      if (f) {
+        const i = rs.tabs.findIndex((t) => t.path === f.path);
+        if (i >= 0) rs.tabs.splice(i, 1);
+      }
+      const next = rev.files.find((x) => !rev.resolved.has(x.abs));
+      if (next) openReviewFile(rs, next);
+      else {
+        rs.review = undefined;
+        rs.activeTab = rs.tabs[rs.tabs.length - 1]?.path ?? null;
+        rs.selectedId = rs.activeTab;
+      }
+      rerender();
+    };
     const viewer: ViewerProps = !active
       ? { kind: "empty" }
       : {
@@ -606,6 +662,36 @@ export function RepoPane({
             !!gitStatus?.staged.some((f) => f.path === active.path) &&
             !gitStatus?.unstaged.some((f) => f.path === active.path),
           changedOnDisk: active.changedOnDisk,
+          review:
+            active.agentReview && rs.review
+              ? {
+                  progress: `${rs.review.resolved.size} of ${rs.review.files.length} reviewed`,
+                  viaCommand: active.agentReview.viaCommand,
+                  onKeep: () => {
+                    const abs = active.agentReview!.abs;
+                    agentEditKeep(dir, abs)
+                      .then(() => advanceReview(abs))
+                      .catch((e) => toastError("Couldn't keep it", String(e).slice(0, 90)));
+                  },
+                  onUndo: active.agentReview.viaCommand
+                    ? undefined
+                    : () => {
+                        const abs = active.agentReview!.abs;
+                        onConfirm({
+                          title: "Undo this file?",
+                          body: `Puts ${splitName(active.path).name} back the way it was before the agent's changes. The agent's edit is gone for good.`,
+                          cancelLabel: "Keep reviewing",
+                          confirmLabel: "Undo this file",
+                          danger: true,
+                          onConfirm: () => {
+                            agentEditUndo(dir, abs)
+                              .then(() => advanceReview(abs))
+                              .catch((e) => toastError("Couldn't undo it", String(e).slice(0, 90)));
+                          },
+                        });
+                      },
+                }
+              : undefined,
           body: active.body ?? { kind: "code", lines: [] },
           onSelectTab: (id) => { rs.activeTab = id; rs.selectedId = id; rerender(); },
           onCloseTab: (id) => {

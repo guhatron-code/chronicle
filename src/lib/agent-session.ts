@@ -8,6 +8,7 @@
  */
 import {
   agentCancel,
+  agentEdits,
   agentPrompt,
   agentRespondPermission,
   agentSessionStart,
@@ -16,6 +17,7 @@ import {
   agentSetMode,
   onAcpUpdate,
   type AcpUpdate,
+  type AgentEditFile,
 } from "./ipc";
 
 export type AgentPhase =
@@ -36,7 +38,7 @@ export interface AgentMode {
 export type PermOutcome = { type: "selected"; optionId: string } | { type: "cancelled" };
 
 export type AgentEntry =
-  | { kind: "user"; text: string }
+  | { kind: "user"; text: string; checkpoint?: string | null }
   | { kind: "assistant"; text: string; streaming: boolean }
   | {
       kind: "tool";
@@ -76,6 +78,12 @@ export interface AgentSessionState {
   worksFreelyConfirmed: boolean;
   /** composer preload (F38) — a draft the user still has to send */
   draft: string | null;
+  /** the review strip's ground truth — refetched on _chronicle/edits_changed */
+  editFiles: AgentEditFile[];
+  /** files just resolved to zero — the strip's "All changes kept" moment */
+  editsResolved: boolean;
+  /** a checkpoint announced before its user message landed in the thread */
+  pendingCheckpoint: string | null;
 }
 
 const blank = (): AgentSessionState => ({
@@ -89,6 +97,9 @@ const blank = (): AgentSessionState => ({
   errorMessage: null,
   worksFreelyConfirmed: false,
   draft: null,
+  editFiles: [],
+  editsResolved: false,
+  pendingCheckpoint: null,
 });
 
 const sessions = new Map<string, AgentSessionState>();
@@ -135,6 +146,19 @@ function ensureListeners() {
   if (listenersReady) return;
   listenersReady = true;
   void onAcpUpdate(routeUpdate);
+}
+
+/** Refetch the ledger list; flags the kept-everything moment honestly. */
+export function refreshAgentEdits(dir: string) {
+  const s = agentSessionFor(dir);
+  agentEdits(dir)
+    .then((r) => {
+      const files = Array.isArray(r?.files) ? r.files : [];
+      s.editsResolved = s.editFiles.length > 0 && files.length === 0;
+      s.editFiles = files;
+      notify();
+    })
+    .catch(() => {});
 }
 
 /** A cheap, honest ± stat: multiset line difference (not a full Myers diff,
@@ -241,6 +265,27 @@ function routeUpdate(u: AcpUpdate) {
       settleStreaming(s);
     }
     notify();
+    return;
+  }
+
+  if (method === "_chronicle/checkpoint") {
+    const id = str(params.id);
+    if (id) {
+      // attach to the message this snapshot preceded — the entry may or may
+      // not have landed yet (event vs invoke resolution order)
+      const lastUser = [...s.entries].reverse().find((e) => e.kind === "user");
+      if (lastUser && lastUser.kind === "user" && lastUser.checkpoint === undefined) {
+        lastUser.checkpoint = id;
+      } else {
+        s.pendingCheckpoint = id;
+      }
+      notify();
+    }
+    return;
+  }
+
+  if (method === "_chronicle/write" || method === "_chronicle/edits_changed") {
+    refreshAgentEdits(u.dir);
     return;
   }
 
@@ -387,6 +432,7 @@ export async function startAgentSession(dir: string): Promise<void> {
 /** Re-sync after a reload: a live backend session re-adopts its state (the
  *  thread itself is rebuilt from the transcript store in Z-4). */
 export async function adoptAgentSession(dir: string): Promise<void> {
+  refreshAgentEdits(dir); // the ledger outlives sessions — a restart still reviews
   const s = agentSessionFor(dir);
   if (s.phase !== "none") return;
   try {
@@ -417,9 +463,11 @@ export async function sendAgentMessage(dir: string, text: string): Promise<void>
   const body = text.trim();
   if (!body) return;
   await agentPrompt(dir, body); // throws before anything is shown, honest to the wire
-  s.entries.push({ kind: "user", text: body });
+  s.entries.push({ kind: "user", text: body, checkpoint: s.pendingCheckpoint ?? undefined });
+  s.pendingCheckpoint = null;
   s.turnActive = true;
   s.draft = null;
+  s.editsResolved = false; // the strip's resolution flash ends with a new turn
   notify();
 }
 

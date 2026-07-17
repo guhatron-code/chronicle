@@ -2346,8 +2346,93 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
         let app = app.clone();
         Arc::new(move |v| { let _ = app.emit("acp-update", v); })
     };
-    let started = acp::start(&agents, emit, key, p.repo.clone(), jail_roots, acp::adapter_command(&npx))?;
+    let started = acp::start(&agents, emit, key, p.repo.clone(), p.dir.clone(), jail_roots, acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
+}
+
+fn project_roots(p: &Project) -> Vec<PathBuf> {
+    let mut roots = vec![p.repo.clone(), p.dir.clone()];
+    roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
+    roots
+}
+
+/// Emit a `_chronicle/*` event for commands that mutate the ledger with no
+/// live session in the loop (keep/undo/restore) — the pane refetches on it.
+fn emit_edits_changed(app: &tauri::AppHandle, dir: &str) {
+    if let Ok((key, _)) = canon_key(dir) {
+        let _ = app.emit("acp-update", json!({
+            "dir": key,
+            "message": { "method": "_chronicle/edits_changed", "params": {} }
+        }));
+    }
+}
+
+/// The review strip's ground truth: every unresolved agent edit, with honest
+/// ± stats. Works with or without a live session (undo survives a restart).
+#[tauri::command]
+async fn agent_edits(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    match acp::ledger::current_session(&p.dir) {
+        None => Ok(json!({ "files": [] })),
+        Some(sid) => Ok(json!({ "files": acp::ledger::files(&p.dir, &sid, &p.repo), "session": sid })),
+    }
+}
+
+/// The reviewable diff for one ledger entry (base vs disk). `path` is the
+/// absolute path as `agent_edits` returned it — jailed before any read.
+#[tauri::command]
+async fn agent_edit_diff(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    if !acp::path_in_roots(Path::new(&path), &project_roots(&p)) {
+        return Err("the path is outside this project — refused".into());
+    }
+    let sid = acp::ledger::current_session(&p.dir).ok_or("there are no agent changes to review")?;
+    acp::ledger::diff(&p.dir, &sid, &p.repo, &path)
+}
+
+/// Keep = accept: drop the entry. `path: None` keeps everything.
+#[tauri::command]
+async fn agent_edit_keep(app: tauri::AppHandle, roots: State<'_, OpenRoots>, dir: String, path: Option<String>) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    let sid = acp::ledger::current_session(&p.dir).ok_or("there are no agent changes to review")?;
+    acp::ledger::keep(&p.dir, &sid, path.as_deref())?;
+    emit_edits_changed(&app, &dir);
+    Ok(())
+}
+
+/// Undo a DIRECT agent edit (write the base back; a created file is deleted).
+/// `path: None` undoes every direct edit. Command-changed files are refused —
+/// only "Undo to here" covers those.
+#[tauri::command]
+async fn agent_edit_undo(app: tauri::AppHandle, roots: State<'_, OpenRoots>, dir: String, path: Option<String>) -> Result<u64, String> {
+    let p = project_for(&roots, &dir)?;
+    let sid = acp::ledger::current_session(&p.dir).ok_or("there are no agent changes to undo")?;
+    let n = acp::ledger::undo(&p.dir, &sid, path.as_deref(), &project_roots(&p))?;
+    emit_edits_changed(&app, &dir);
+    Ok(n as u64)
+}
+
+/// "Undo everything since this message": restore the checkpoint (a two-tree
+/// update that also DELETES files created after it), then clear the ledger.
+/// Only commits on this session's own ref are honored; a working agent must
+/// be stopped first.
+#[tauri::command]
+async fn agent_restore_checkpoint(app: tauri::AppHandle, roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, id: String) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    let (key, _) = canon_key(&dir)?;
+    if let Some(s) = agents.get(&key) {
+        if s.current_state().get("turnActive").and_then(|v| v.as_bool()).unwrap_or(false) {
+            return Err("the agent is still working — stop it first".into());
+        }
+    }
+    let sid = acp::ledger::current_session(&p.dir).ok_or("there's no session to undo")?;
+    if !acp::checkpoint::contains(&p.repo, &sid, &id) {
+        return Err("that snapshot isn't from this session".into());
+    }
+    acp::checkpoint::restore(&p.repo, &id)?;
+    acp::ledger::clear(&p.dir, &sid);
+    emit_edits_changed(&app, &dir);
+    Ok(())
 }
 
 /// The session's current snapshot — lets the pane re-sync after a reload
@@ -2482,6 +2567,7 @@ fn main() {
             round_execute, round_exec_status, round_exec_cancel, round_retro, exec_log_path,
             agent_session_start, agent_session_state, agent_prompt, agent_cancel,
             agent_set_mode, agent_respond_permission, agent_session_stop,
+            agent_edits, agent_edit_diff, agent_edit_keep, agent_edit_undo, agent_restore_checkpoint,
             journal_append, journal_read, notify, draft_save_message,
             global_search, status_report,
             github_repos, github_clone, github_create,

@@ -12,7 +12,10 @@ import {
   adoptAgentSession,
   subscribeAgent,
   type AgentEntry,
+  type AgentSessionState,
 } from "@/lib/agent-session";
+import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint } from "@/lib/ipc";
+import { CheckGlyph } from "@/components/chrome/icons";
 import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term-sessions";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { toastError } from "@/overlays/toasts";
@@ -23,12 +26,133 @@ import { Composer } from "./Composer";
 import { ToolCard } from "./ToolCard";
 import { PermissionCard } from "./PermissionCard";
 
+/** F33 — the checkpoint row: a thin divider above each user message; the
+ *  hover-revealed "Undo to here" restores the snapshot taken before it. */
+function CheckpointRow({
+  dir,
+  checkpoint,
+  disabled,
+  onConfirm,
+}: {
+  dir: string;
+  checkpoint?: string | null;
+  disabled: boolean;
+  onConfirm: (spec: ConfirmSpec) => void;
+}) {
+  const undo = () =>
+    onConfirm({
+      title: "Undo everything since this message?",
+      body: "Puts every file back the way it was before this message — including changes you made yourself since. Your conversation stays.",
+      cancelLabel: "Keep things as they are",
+      confirmLabel: "Undo to here",
+      danger: true,
+      onConfirm: () => {
+        agentRestoreCheckpoint(dir, checkpoint!)
+          .catch((e) => toastError("Couldn't undo to here", String(e).slice(0, 110)));
+      },
+    });
+  return (
+    <div className="group flex h-4 items-center gap-2 px-3.5">
+      <span className="h-px flex-1 bg-divider" />
+      {checkpoint && !disabled && (
+        <button
+          data-checkpoint-undo
+          onClick={undo}
+          className="inline-flex h-[22px] items-center gap-[5px] rounded-[6px] bg-fill-hover px-2 text-[11px] text-text-secondary opacity-0 hover:text-text-primary focus-visible:opacity-100 group-hover:opacity-100"
+        >
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4">
+            <path d="M4.5 2 2 4.5 4.5 7" />
+            <path d="M2 4.5h5a3 3 0 0 1 0 6H4" />
+          </svg>
+          Undo to here
+        </button>
+      )}
+    </div>
+  );
+}
+
 function UserMessage({ text }: { text: string }) {
   return (
-    <div className="flex flex-col items-end gap-1 border-t border-divider px-3.5 py-2.5 first:border-t-0">
+    <div className="flex flex-col items-end gap-1 px-3.5 pb-2.5 pt-1.5">
       <div className="max-w-[86%] text-right text-[13px] leading-relaxed text-text-primary [text-wrap:pretty]">
         {text}
       </div>
+    </div>
+  );
+}
+
+/** F36 — the persistent strip above the composer while the ledger is
+ *  non-empty, and its honest resolution states. */
+function ReviewStrip({
+  dir,
+  s,
+  onOpenReview,
+  onConfirm,
+}: {
+  dir: string;
+  s: AgentSessionState;
+  onOpenReview: () => void;
+  onConfirm: (spec: ConfirmSpec) => void;
+}) {
+  const files = s.editFiles;
+  if (files.length === 0) {
+    if (!s.editsResolved) return null;
+    return (
+      <div data-review-strip="resolved" className="mx-3 mb-2 flex items-center gap-2 rounded-md bg-fill-subtle px-3 py-[9px]">
+        {s.phase === "ended" || s.phase === "none" ? (
+          <span className="text-[12.5px] text-text-muted">
+            The session ended — changes you hadn't reviewed were kept. They're still in the repo view.
+          </span>
+        ) : (
+          <>
+            <span className="shrink-0 text-state-success"><CheckGlyph size={11} /></span>
+            <span className="text-[12.5px] text-text-secondary">All changes reviewed</span>
+          </>
+        )}
+      </div>
+    );
+  }
+  const direct = files.filter((f) => !f.viaCommand).length;
+  const undoAll = () =>
+    onConfirm({
+      title: "Undo the agent's edits?",
+      body:
+        direct === files.length
+          ? "Puts every file the agent changed back the way it was. The edits are gone for good."
+          : "Puts every file the agent edited directly back the way it was. Files changed by commands aren't touched — Undo to here covers those.",
+      cancelLabel: "Keep them",
+      confirmLabel: "Undo the edits",
+      danger: true,
+      onConfirm: () => {
+        agentEditUndo(dir, null).catch((e) => toastError("Couldn't undo the edits", String(e).slice(0, 90)));
+      },
+    });
+  return (
+    <div data-review-strip className="mx-3 mb-2 flex items-center gap-2 whitespace-nowrap rounded-md bg-fill-subtle px-3 py-2">
+      <span className="text-[12.5px] font-medium text-text-primary">
+        {files.length === 1 ? "1 file changed" : `${files.length} files changed`}
+      </span>
+      <span className="flex-1" />
+      <button
+        onClick={onOpenReview}
+        className="h-[26px] rounded-md border border-border-strong px-[11px] text-[11.5px] font-medium text-text-primary hover:bg-fill-hover"
+      >
+        Review
+      </button>
+      <button
+        onClick={() => void agentEditKeep(dir, null).catch((e) => toastError("Couldn't keep them", String(e).slice(0, 90)))}
+        className="h-[26px] rounded-md border border-border-strong px-[11px] text-[11.5px] font-medium text-text-primary hover:bg-fill-hover"
+      >
+        Keep all
+      </button>
+      {direct > 0 && (
+        <button
+          onClick={undoAll}
+          className="h-[26px] rounded-md border border-border-hairline px-[11px] text-[11.5px] font-medium text-state-error hover:bg-fill-hover"
+        >
+          Undo all…
+        </button>
+      )}
     </div>
   );
 }
@@ -74,8 +198,24 @@ function TurnError({ message }: { message: string }) {
   );
 }
 
-function Entry({ dir, entry }: { dir: string; entry: AgentEntry }) {
-  if (entry.kind === "user") return <UserMessage text={entry.text} />;
+function Entry({
+  dir,
+  entry,
+  turnActive,
+  onConfirm,
+}: {
+  dir: string;
+  entry: AgentEntry;
+  turnActive: boolean;
+  onConfirm: (spec: ConfirmSpec) => void;
+}) {
+  if (entry.kind === "user")
+    return (
+      <>
+        <CheckpointRow dir={dir} checkpoint={entry.checkpoint} disabled={turnActive} onConfirm={onConfirm} />
+        <UserMessage text={entry.text} />
+      </>
+    );
   if (entry.kind === "assistant") return <AssistantMessage text={entry.text} streaming={entry.streaming} />;
   if (entry.kind === "turn-error") return <TurnError message={entry.message} />;
   if (entry.kind === "perm")
@@ -95,11 +235,14 @@ export function AgentPane({
   dir,
   onConfirm,
   onRevealTerminal,
+  onOpenReview,
 }: {
   dir: string;
   onConfirm: (spec: ConfirmSpec) => void;
   /** the sign-in flow runs in a terminal tab — the unit must be on screen */
   onRevealTerminal: () => void;
+  /** F36 — Review opens the repo viewer on the ledger diff */
+  onOpenReview: () => void;
 }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeAgent(() => bump((n) => n + 1)), []);
@@ -245,10 +388,11 @@ export function AgentPane({
           className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2"
         >
           {s.entries.map((entry, i) => (
-            <Entry key={i} dir={dir} entry={entry} />
+            <Entry key={i} dir={dir} entry={entry} turnActive={s.turnActive} onConfirm={onConfirm} />
           ))}
         </div>
       )}
+      <ReviewStrip dir={dir} s={s} onOpenReview={onOpenReview} onConfirm={onConfirm} />
       {banner}
       <Composer dir={dir} disabled={s.phase !== "ready"} onConfirm={onConfirm} />
     </div>

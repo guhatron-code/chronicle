@@ -374,6 +374,26 @@ export const agentSessionStop = (dir: string) => invoke("agent_session_stop", { 
 export const onAcpUpdate = (cb: (u: AcpUpdate) => void): Promise<UnlistenFn> =>
   listen<AcpUpdate>("acp-update", (e) => cb(e.payload));
 
+/** One unresolved agent edit, as agent_edits returns it. */
+export interface AgentEditFile {
+  path: string; // display-relative
+  abs: string; // the key for diff/keep/undo
+  kind: "created" | "modified" | "deleted";
+  viaCommand: boolean;
+  plus: number;
+  minus: number;
+}
+export const agentEdits = (dir: string) =>
+  invoke<{ files: AgentEditFile[] }>("agent_edits", { dir });
+export const agentEditDiff = (dir: string, path: string) =>
+  invoke<string>("agent_edit_diff", { dir, path });
+export const agentEditKeep = (dir: string, path: string | null) =>
+  invoke("agent_edit_keep", { dir, path });
+export const agentEditUndo = (dir: string, path: string | null) =>
+  invoke<number>("agent_edit_undo", { dir, path });
+export const agentRestoreCheckpoint = (dir: string, id: string) =>
+  invoke("agent_restore_checkpoint", { dir, id });
+
 /* ---------- window chrome + dialogs (frameless window) ---------- */
 export const pickFolder = () => openDialog({ directory: true });
 

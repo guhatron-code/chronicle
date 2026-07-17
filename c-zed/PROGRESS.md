@@ -107,3 +107,44 @@ after exit; bridge error + turn error + session end + the works-freely
 confirm. Full suite: 12/12 passed (Z-2a probes stay green).
 
 **Commit** — 53698a1
+
+## Z-3 · Edits + checkpoints (F33 checkpoint row + F36 review flow)
+
+**What landed** — **Rust (source of truth)**: the disk-backed ledger in
+`acp.rs` — bases under `.chronicle/agent/<session>/bases/` (raw pre-change
+bytes; no base file = created, undo DELETES it) with `index.json` and a
+`current` session pointer, so undo survives an app restart. fs/write is
+jailed AND ledgered before the write lands. Checkpoints: temp
+`GIT_INDEX_FILE` → `add -A` → `write-tree` → `commit-tree` onto
+`refs/chronicle/checkpoints/<session>` before every prompt; restore is the
+two-tree `read-tree --reset -u` (re-snapshot current first) so files created
+after the snapshot are DELETED; restores only honored for commits on the
+session's own ref, refused mid-turn. Turn-end reconciliation diffs the
+checkpoint tree against a fresh snapshot: shell-changed files enter the
+ledger as via_command with bases pulled from the checkpoint (reviewable
+diffs, per-file undo refused — "Undo to here covers it"). Clean session end
+auto-keeps + deletes the ref; orphaned refs >14 days pruned at session start.
+Commands: `agent_edits`, `agent_edit_diff`, `agent_edit_keep`,
+`agent_edit_undo`, `agent_restore_checkpoint` — all jailed, all usable with
+no live session. **Frontend**: the ReviewStrip ("N files changed · Review ·
+Keep all · Undo all…" with honest scope copy in the Undo-all confirm, and the
+resolution states incl. the session-ended auto-keep message); Review opens
+the existing repo viewer on the ledger diff with the F36 action bar (progress
+count, Keep / Undo-this-file with confirm, the command-changed variant with
+Keep only); the F33 checkpoint row above every user message (hover-revealed
+"Undo to here", the exact honest confirm copy, hidden mid-turn).
+
+**How it was verified** — `cargo test`: 29 passed — new: the checkpoint
+round-trip covering CREATED + DELETED + MODIFIED files, tracked AND
+untracked (created files must be deleted by restore — the known failure
+mode; the user's real index asserted untouched); ledger diff correctness +
+created-file undo = deletion + original-base-wins; base persistence across a
+simulated restart; turn-end reconciliation (direct vs via_command, checkpoint
+bases, refusals, undo-all scope); jail refusals; ref pruning (old pruned,
+fresh survives). Frontend: `npx tsc --noEmit` + `npx vite build` green;
+5 new probes (strip counts + Keep all; Undo all honest scope with
+command-changed files remaining; the full review pass incl. the
+command-changed bar; checkpoint restore through the confirm; mid-turn undo
+hidden). Full probe suite: 17/17.
+
+**Commit** — recorded in the following docs commit
