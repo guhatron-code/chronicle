@@ -85,6 +85,10 @@ export type AgentEntry =
        *  the BOARD's columns plus this stop reason, never the agent's claim */
       ended?: boolean;
       stopReason?: string | null;
+    }
+  | {
+      kind: "plan";
+      items: { text: string; status: "pending" | "in_progress" | "completed" }[];
     };
 
 export interface AgentSessionState {
@@ -468,8 +472,24 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       const used = Number(update.used);
       const size = Number(update.size);
       if (Number.isFinite(used) && Number.isFinite(size) && size > 0) s.usage = { used, size };
+    } else if (kind === "plan") {
+      const raw = Array.isArray(update.entries) ? (update.entries as Raw[]) : [];
+      const items = raw.map((e) => {
+        const st = str(e.status);
+        return {
+          text: str(e.content),
+          status: (st === "in_progress" || st === "completed" ? st : "pending") as
+            | "pending"
+            | "in_progress"
+            | "completed",
+        };
+      });
+      // update the live plan in place; a session has one evolving list
+      const last = [...s.entries].reverse().find((e) => e.kind === "plan");
+      if (last && last.kind === "plan") last.items = items;
+      else s.entries.push({ kind: "plan", items });
     }
-    // user_message_chunk (we already pushed the sent text), thoughts, plans,
+    // user_message_chunk (we already pushed the sent text), thoughts,
     // available_commands: not rendered in v0.3
     notify();
     return;

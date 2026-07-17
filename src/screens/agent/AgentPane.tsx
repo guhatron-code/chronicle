@@ -26,6 +26,7 @@ import { toastError } from "@/overlays/toasts";
 import { MiniMd } from "@/lib/mini-md";
 import { Chronigirl, ErrorGlyph, XGlyph } from "@/components/chrome/icons";
 import { BtnPrimary, BtnSecondary, Spinner } from "@/components/chrome/atoms";
+import { cn } from "@/lib/utils";
 import { Composer } from "./Composer";
 import { ToolCard } from "./ToolCard";
 import { PermissionCard } from "./PermissionCard";
@@ -320,6 +321,38 @@ function RoundCard({
   );
 }
 
+/** #1 — the agent's live plan/todo list; updates in place as items progress. */
+function PlanCard({ entry }: { entry: Extract<AgentEntry, { kind: "plan" }> }) {
+  if (entry.items.length === 0) return null;
+  const done = entry.items.filter((i) => i.status === "completed").length;
+  return (
+    <div data-plan-card className="flex flex-col gap-2 rounded-[10px] border border-border-hairline bg-surface-card-raised px-3.5 py-3">
+      <div className="flex items-center gap-2 text-[11.5px] text-text-dim">
+        <span className="font-medium text-text-secondary">Plan</span>
+        <span className="tabular-nums">{done}/{entry.items.length}</span>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {entry.items.map((item, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <span className="mt-[2px] flex size-3.5 shrink-0 items-center justify-center">
+              {item.status === "completed" ? (
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="var(--state-success)" strokeWidth="1.7"><path d="M2 6.5 5 9.5 10 3" /></svg>
+              ) : item.status === "in_progress" ? (
+                <span className="size-2.5 rounded-full border-[1.5px] border-state-neutral" style={{ borderTopColor: "transparent", animation: "wv-spin 0.7s linear infinite" }} />
+              ) : (
+                <span className="size-2.5 rounded-full border border-border-strong" />
+              )}
+            </span>
+            <span className={cn("text-[12.5px] leading-[1.5]", item.status === "completed" ? "text-text-dim line-through" : "text-text-secondary")}>
+              {item.text}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Entry({
   dir,
   entry,
@@ -361,6 +394,12 @@ function Entry({
     return (
       <div className="px-3.5 py-1">
         <PermissionCard dir={dir} perm={entry} />
+      </div>
+    );
+  if (entry.kind === "plan")
+    return (
+      <div className="px-3.5 py-1">
+        <PlanCard entry={entry} />
       </div>
     );
   return (
