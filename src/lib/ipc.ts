@@ -174,8 +174,16 @@ export const gitDiscard = (dir: string, path: string, untracked: boolean) =>
 export const gitInitHere = (dir: string) => invoke<void>("git_init_here", { dir });
 export const gitCommit = (dir: string, message: string, stageAll: boolean) =>
   invoke<void>("git_commit", { dir, message, stageAll }); // Rust: stage_all
-export const gitPush = (dir: string) => invoke<void>("git_push", { dir });
-export const gitPull = (dir: string) => invoke<void>("git_pull", { dir });
+/** E — the plain-language outcome of a push/pull, for the toast. */
+export interface RemoteOutcome {
+  headline: string;
+  detail: string;
+  prUrl: string | null;
+}
+export const gitPush = (dir: string) => invoke<RemoteOutcome>("git_push", { dir });
+export const gitPull = (dir: string) => invoke<RemoteOutcome>("git_pull", { dir });
+/** https-only, validated in Rust — the PR-hint toast's action. */
+export const openUrl = (url: string) => invoke<void>("open_url", { url });
 export const gitLogGraph = (dir: string, limit?: number) =>
   invoke<GitLogRow[]>("git_log_graph", { dir, limit });
 export const gitDiff = (

@@ -1984,24 +1984,97 @@ async fn git_commit(roots: State<'_, OpenRoots>, dir: String, message: String, s
     git_full(&p.repo, &["commit", "-m", &message]).map(|_| ())
 }
 
+/* ---- E — plain-language remote output (the Zed remote_output mapping,
+   adapted to the product register). The headline is a sentence; the raw git
+   detail stays small mono secondary; GitHub's "Create a pull request" hint
+   becomes an action. Pure — fixture-tested below. ---- */
+
+fn saves_word(n: u32) -> String {
+    if n == 1 { "1 save".into() } else { format!("{n} saves") }
+}
+
+/// `moved` = how many commits this op will move (ahead for push, behind for
+/// pull), counted BEFORE the op ran — git's own output doesn't say.
+fn remote_sentences(kind: &str, moved: u32, raw: &str) -> Value {
+    let detail = raw.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("remote:"))
+        .unwrap_or("")
+        .chars().take(80).collect::<String>();
+    // GitHub's hint: a "Create a pull request" remote line followed by the URL
+    let pr_url = if raw.contains("Create a pull request") {
+        raw.lines()
+            .skip_while(|l| !l.contains("Create a pull request"))
+            .find_map(|l| l.split_whitespace().find(|w| w.starts_with("https://")))
+            .map(String::from)
+    } else { None };
+    let headline = if kind == "push" {
+        if raw.contains("Everything up-to-date") {
+            "Already published — nothing new".to_string()
+        } else if raw.contains("[new branch]") {
+            if moved > 0 { format!("Published {} to a branch", saves_word(moved)) }
+            else { "Published the branch".to_string() }
+        } else if moved > 0 {
+            format!("Published {}", saves_word(moved))
+        } else {
+            "Published your saves".to_string()
+        }
+    } else if raw.contains("Already up to date") {
+        "Already in sync — nothing new".to_string()
+    } else if moved > 0 {
+        format!("Brought down {}", saves_word(moved))
+    } else {
+        "Brought down the newer saves".to_string()
+    };
+    json!({ "headline": headline, "detail": detail, "prUrl": pr_url })
+}
+
 /// Plain push only. No force flag exists anywhere in this app.
+/// Returns the plain-language outcome for the toast (E).
 #[tauri::command]
-async fn git_push(roots: State<'_, OpenRoots>, dir: String) -> Result<(), String> {
+async fn git_push(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
     let upstream = Command::new("git").arg("-C").arg(&p.repo)
         .args(["rev-parse", "--abbrev-ref", "@{u}"]).output()
         .map(|o| o.status.success()).unwrap_or(false);
-    if upstream { git_full(&p.repo, &["push"]).map(|_| ()) }
-    else {
+    let ahead: u32 = if upstream {
+        git_in(&p.repo, &["rev-list", "--count", "@{u}..HEAD"]).parse().unwrap_or(0)
+    } else {
+        git_in(&p.repo, &["rev-list", "--count", "HEAD"]).parse().unwrap_or(0)
+    };
+    // git writes remote chatter to STDERR — capture both streams for the mapping
+    let out = if upstream {
+        Command::new("git").arg("-C").arg(&p.repo).args(["push"]).output()
+    } else {
         let br = git_in(&p.repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
-        git_full(&p.repo, &["push", "-u", "origin", &br]).map(|_| ())
+        Command::new("git").arg("-C").arg(&p.repo).args(["push", "-u", "origin", &br]).output()
+    }.map_err(|e| e.to_string())?;
+    let raw = format!("{}\n{}", String::from_utf8_lossy(&out.stderr), String::from_utf8_lossy(&out.stdout));
+    if !out.status.success() {
+        return Err(raw.lines().map(str::trim).filter(|l| !l.is_empty()).last().unwrap_or("push failed").to_string());
     }
+    Ok(remote_sentences("push", ahead, &raw))
 }
 
 #[tauri::command]
-async fn git_pull(roots: State<'_, OpenRoots>, dir: String) -> Result<(), String> {
+async fn git_pull(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
-    git_full(&p.repo, &["pull", "--ff-only"]).map(|_| ())
+    let behind: u32 = {
+        let _ = git_full(&p.repo, &["fetch", "--quiet"]);
+        git_in(&p.repo, &["rev-list", "--count", "HEAD..@{u}"]).parse().unwrap_or(0)
+    };
+    let raw = git_full(&p.repo, &["pull", "--ff-only"])?;
+    Ok(remote_sentences("pull", behind, &raw))
+}
+
+/// The PR-hint toast's action. https only — never a local path, never a scheme trick.
+#[tauri::command]
+async fn open_url(url: String) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("only https links open from here".into());
+    }
+    Command::new("open").arg(&url).output().map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// One-click "Switch branch" from the needs-you queue. Plain checkout — git itself
@@ -2601,7 +2674,7 @@ fn main() {
             kanban_detach,
             fixes_log_path, fixes_generate, fixes_status, fixes_cancel,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
-            git_checkout, git_worktree_prune, stat_file, read_file_b64,
+            git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
             list_dir, read_file, copy_file, copy_text,
             pty_spawn, init_log_path,
             pty_write, pty_resize, pty_kill,
@@ -2760,6 +2833,63 @@ mod r1_tests {
         std::fs::write(&f, format!("{}END", "x".repeat(100_000))).unwrap();
         let t = read_tail(&f, 100);
         assert!(t.len() <= 100 && t.ends_with("END"));
+    }
+}
+
+#[cfg(test)]
+mod z5e_tests {
+    use super::*;
+
+    const PUSH_NEW_BRANCH: &str = "remote: 
+remote: Create a pull request for 'feature-x' on GitHub by visiting:
+remote:      https://github.com/user/repo/pull/new/feature-x
+remote: 
+To https://github.com/user/repo.git
+ * [new branch]      feature-x -> feature-x
+";
+    const PUSH_EXISTING: &str = "To https://github.com/user/repo.git
+   1ad9536..343e5ad  main -> main
+";
+    const PUSH_NOTHING: &str = "Everything up-to-date
+";
+    const PULL_FF: &str = "Updating 1ad9536..343e5ad
+Fast-forward
+ src/App.tsx | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+";
+    const PULL_NOTHING: &str = "Already up to date.
+";
+
+    #[test]
+    fn remote_output_becomes_sentences() {
+        let v = remote_sentences("push", 3, PUSH_EXISTING);
+        assert_eq!(v["headline"], "Published 3 saves");
+        assert_eq!(v["detail"], "To https://github.com/user/repo.git");
+        assert!(v["prUrl"].is_null());
+
+        let v = remote_sentences("push", 1, PUSH_EXISTING);
+        assert_eq!(v["headline"], "Published 1 save");
+
+        let v = remote_sentences("push", 0, PUSH_NOTHING);
+        assert_eq!(v["headline"], "Already published — nothing new");
+
+        let v = remote_sentences("pull", 2, PULL_FF);
+        assert_eq!(v["headline"], "Brought down 2 saves");
+
+        let v = remote_sentences("pull", 0, PULL_NOTHING);
+        assert_eq!(v["headline"], "Already in sync — nothing new");
+    }
+
+    #[test]
+    fn the_github_pr_hint_is_detected() {
+        let v = remote_sentences("push", 3, PUSH_NEW_BRANCH);
+        assert_eq!(v["headline"], "Published 3 saves to a branch");
+        assert_eq!(v["prUrl"], "https://github.com/user/repo/pull/new/feature-x");
+        // the raw remote: chatter never becomes the headline or the detail
+        assert!(!v["detail"].as_str().unwrap().starts_with("remote:"));
+        // a URL with no hint line is NOT a PR hint
+        let v = remote_sentences("push", 1, PUSH_EXISTING);
+        assert!(v["prUrl"].is_null());
     }
 }
 

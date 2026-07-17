@@ -43,7 +43,7 @@ import { openFileInRepo } from "@/screens/repo/RepoPane";
 import { fixesCancel, fixesLogPath, fixesStatus, initLogPath } from "@/lib/ipc";
 import { kanbanFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { setInitRunning } from "@/lib/run-flags";
-import { toastError, toastSuccess } from "@/overlays/toasts";
+import { toastError, toastSuccess, toastRemoteOutcome } from "@/overlays/toasts";
 import { humanError, humanGitError } from "@/lib/utils";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
@@ -552,8 +552,8 @@ export function RoadmapPane({
         const run = async () => {
           setPublishing(true);
           try {
-            if (id === "push" || id === "publish-first") { await gitPush(dir); toastSuccess("Published"); }
-            else if (id === "pull") { await gitPull(dir); toastSuccess("Brought it down"); }
+            if (id === "push" || id === "publish-first") { toastRemoteOutcome(await gitPush(dir)); }
+            else if (id === "pull") { toastRemoteOutcome(await gitPull(dir)); }
             else if (id === "branch") { await gitCheckout(dir, arg); toastSuccess(`Switched to ${arg}`); }
             else if (id === "prune") { await gitWorktreePrune(dir); toastSuccess("Cleaned up"); }
             onPollNow();

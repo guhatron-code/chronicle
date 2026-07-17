@@ -51,7 +51,7 @@ import {
   type DirLoad,
   type GitStatus,
 } from "@/lib/repo-data";
-import { toastError, toastSuccess } from "@/overlays/toasts";
+import { toastError, toastRemoteOutcome, toastSuccess } from "@/overlays/toasts";
 import { listen } from "@tauri-apps/api/event";
 import { humanError, humanGitError } from "@/lib/utils";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
@@ -581,8 +581,16 @@ export function RepoPane({
             },
           });
         },
-        onPush: () => { gitPush(dir).then(() => afterGitOp("Published")).catch(opError("Couldn't publish")); },
-        onPull: () => { gitPull(dir).then(() => afterGitOp("Brought down the newer saves")).catch(opError("Couldn't bring them down")); },
+        onPush: () => {
+          gitPush(dir)
+            .then((r) => { toastRemoteOutcome(r); refreshGit(); onPollNow(); })
+            .catch(opError("Couldn't publish"));
+        },
+        onPull: () => {
+          gitPull(dir)
+            .then((r) => { toastRemoteOutcome(r); refreshGit(); onPollNow(); })
+            .catch(opError("Couldn't bring them down"));
+        },
         onCreateOnline: () => {
           const repoName = slug.replace(/[^a-zA-Z0-9._-]/g, "-");
           onConfirm({

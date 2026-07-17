@@ -4,6 +4,7 @@
  */
 import { Toaster, toast } from "sonner";
 import { CheckGlyph, ErrorGlyph } from "@/components/chrome/icons";
+import { openUrl } from "@/lib/ipc";
 
 export function ChronicleToaster() {
   // NOTE: never set --width to max-content — sonner centers the stack via
@@ -30,6 +31,27 @@ export function toastSuccess(message: string, monoDetail?: string) {
   ), { duration: 2100 });
 }
 
+/** E — a success pill with one action button (the PR hint). */
+export function toastAction(message: string, actionLabel: string, onAction: () => void, monoDetail?: string) {
+  toast.custom((id) => (
+    <div className={pill.replace("px-4", "py-2 pl-4 pr-2.5")}>
+      <span className="text-state-success">
+        <CheckGlyph size={13} />
+      </span>
+      <span className="text-[12.5px] text-text-primary">{message}</span>
+      {monoDetail && (
+        <span className="font-mono text-[11.5px] text-text-dim tabular-nums">{monoDetail}</span>
+      )}
+      <button
+        onClick={() => { toast.dismiss(id); onAction(); }}
+        className="h-[26px] rounded-full border border-border-strong px-[11px] text-[11.5px] font-medium text-text-primary hover:bg-fill-hover"
+      >
+        {actionLabel}
+      </button>
+    </div>
+  ), { duration: 6000 });
+}
+
 export function toastError(message: string, detail?: string) {
   toast.custom(() => (
     <div className={pill}>
@@ -40,4 +62,15 @@ export function toastError(message: string, detail?: string) {
       {detail && <span className="text-xs text-text-muted">{detail}</span>}
     </div>
   ), { duration: 2100 });
+}
+
+/** E — one toast per remote outcome: plain words lead, raw git stays mono,
+ *  the GitHub PR hint becomes an action. */
+export function toastRemoteOutcome(r: { headline: string; detail: string; prUrl: string | null }) {
+  if (r.prUrl) {
+    const url = r.prUrl;
+    toastAction(r.headline, "Create a pull request", () => void openUrl(url).catch(() => {}), r.detail || undefined);
+  } else {
+    toastSuccess(r.headline, r.detail || undefined);
+  }
 }
