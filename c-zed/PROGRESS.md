@@ -187,4 +187,4 @@ stop reason → done only when the board completes); history resume vs
 read-only fallback (session/load call gated, viewing mode inert); close
 confirm + un-clean stop (`clean: false` asserted). Full suite: 21/21 probes.
 
-**Commit** — recorded in the following docs commit
+**Commit** — 1cf68b4
