@@ -1,12 +1,12 @@
 /*
  * F32 — the composer: multiline input (Enter sends, Shift+Enter for a
  * newline), Stop replaces Send while the agent works (input stays
- * editable), the two-state mode control
- * (Asks first / Works freely — modes are the AGENT'S OWN ids read from the
- * session; bypassPermissions is never offered), and the quiet usage meter
+ * editable), the three-state mode control
+ * (Asks first / Works freely / Full auto — modes are the AGENT'S OWN ids
+ * read from the session), and the quiet usage meter
  * that is hidden entirely when the agent sends no usage data. Switching to
- * Works freely is confirmed once per session, with copy that states exactly
- * what it covers.
+ * Works freely or Full auto is confirmed once per session, with copy that
+ * states exactly what it covers.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
@@ -210,7 +210,7 @@ export function Composer({
         if (Array.from(e.dataTransfer.types).includes("Files")) e.preventDefault();
       }}
       onDrop={(e) => {
-        if (e.dataTransfer.types.includes("application/x-chronicle-path")) return; // a chip, not a file
+        if (e.dataTransfer.types.includes("application/x-chronicle-path")) { e.preventDefault(); return; } // a chip, not a file
         const files = Array.from(e.dataTransfer.files);
         if (files.length) { e.preventDefault(); void addFiles(files); }
       }}
