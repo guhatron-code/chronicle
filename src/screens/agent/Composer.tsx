@@ -27,10 +27,10 @@ import { agentAttach, IMG_MIME } from "@/lib/ipc";
 
 const fmtTokens = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
-/** F32 addendum — the model picker: the agent's own advertised model options
- *  (read, never assumed), set via session config. Hidden when the adapter
- *  offers no model choice. */
-function ModelPicker({ dir }: { dir: string }) {
+/** F32 addendum — a config dropdown for ONE of the agent's advertised select
+ *  options (model, effort, …), read from the session and set via config.
+ *  Hidden when the adapter offers no such option. */
+function ConfigSelect({ dir, optionId, title }: { dir: string; optionId: string; title: string }) {
   const s = agentSessionFor(dir);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -43,42 +43,42 @@ function ModelPicker({ dir }: { dir: string }) {
     return () => window.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  const model = s.configOptions.find((o) => o.id === "model");
-  if (!model || model.options.length === 0) return null;
-  const current = model.options.find((o) => o.value === model.currentValue);
+  const opt = s.configOptions.find((o) => o.id === optionId);
+  if (!opt || opt.options.length === 0) return null;
+  const current = opt.options.find((o) => o.value === opt.currentValue);
 
   return (
     <div ref={ref} className="relative">
       <button
-        data-model-picker
-        title="The model the agent uses"
+        data-config-select={optionId}
+        title={title}
         onClick={() => setOpen((o) => !o)}
         className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
       >
-        {current?.name ?? "Model"}
+        {current?.name ?? opt.name}
         <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="m3 4.5 3 3 3-3" />
         </svg>
       </button>
       {open && (
         <div
-          data-model-menu
+          data-config-menu={optionId}
           className="absolute bottom-8 left-0 z-20 flex w-[260px] flex-col rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
         >
-          {model.options.map((o) => (
+          {opt.options.map((o) => (
             <button
               key={o.value}
               onClick={() => {
                 setOpen(false);
-                void setAgentConfigOption(dir, "model", o.value).catch((e) =>
-                  toastError("Couldn't switch the model", String(e).slice(0, 90)),
+                void setAgentConfigOption(dir, optionId, o.value).catch((e) =>
+                  toastError("Couldn't change the setting", String(e).slice(0, 90)),
                 );
               }}
               className="flex flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left hover:bg-fill-hover"
             >
               <div className="flex items-center gap-2">
                 <span className="text-[12.5px] text-text-primary">{o.name}</span>
-                {o.value === model.currentValue && (
+                {o.value === opt.currentValue && (
                   <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="var(--state-success)" strokeWidth="1.6" className="shrink-0">
                     <path d="M2 6.5 5 9.5 10 3" />
                   </svg>
@@ -341,7 +341,8 @@ export function Composer({
             📎
           </button>
         )}
-        {!disabled && <ModelPicker dir={dir} />}
+        {!disabled && <ConfigSelect dir={dir} optionId="model" title="The model the agent uses" />}
+        {!disabled && <ConfigSelect dir={dir} optionId="effort" title="How hard the model thinks" />}
         <input
           ref={fileInput}
           type="file"
