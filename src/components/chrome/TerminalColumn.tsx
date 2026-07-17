@@ -21,6 +21,7 @@
  * scrollback until closed.
  */
 import { useEffect, useRef, useState } from "react";
+import { ptyWrite } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { ClaudeStar, CodexTile, PlusGlyph, XGlyph } from "./icons";
 import { Eyebrow, Kbd, Spinner } from "./atoms";
@@ -92,6 +93,12 @@ function RenameInput({
       />
     </div>
   );
+}
+
+/** Quote a path for the shell only when it needs it; always trailing-spaced,
+ *  never newline-terminated (dropping a path must never run a command). */
+function shellPath(p: string): string {
+  return /[^A-Za-z0-9_./-]/.test(p) ? `'${p.replace(/'/g, `'\\''`)}' ` : `${p} `;
 }
 
 export function TerminalColumn({
@@ -304,6 +311,19 @@ export function TerminalColumn({
             <div
               key={t.id}
               ref={hostFor?.(t.id)}
+              onDragOver={(e) => {
+                // Shift-gated: only accept our attachment path while Shift is held
+                if (e.shiftKey && e.dataTransfer.types.includes("application/x-chronicle-path")) {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                }
+              }}
+              onDrop={(e) => {
+                const path = e.dataTransfer.getData("application/x-chronicle-path");
+                if (!e.shiftKey || !path) return;
+                e.preventDefault();
+                void ptyWrite(t.id, shellPath(path)).catch(() => {});
+              }}
               className={cn(
                 "h-full w-full min-w-0 overflow-hidden px-4 py-3.5 font-mono text-xs leading-[1.7] text-text-secondary",
                 t.id !== activeId && "hidden",
