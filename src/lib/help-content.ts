@@ -35,12 +35,12 @@ export const GUIDES: Guide[] = [
     blurb: "The big picture, in two minutes. No code, no jargon.",
     minutes: 2,
     body: [
-      { kind: "para", text: "Chronicle is a calm home for building your idea with an AI. You describe what you want in plain English; the AI — her name is Chrongirl — writes and edits the actual project for you. Chronicle sits around that conversation and keeps everything honest: it shows you what changed, lets you undo anything, and translates the technical bits into words you already know." },
-      { kind: "para", text: "You do not need to know how to code. You do not need to touch a terminal. Your job is to describe the outcome you want and to review what Chrongirl does — like art-directing a very fast, very literal teammate." },
+      { kind: "para", text: "Chronicle is a calm home for building your idea with an AI. You describe what you want in plain English; the AI — her name is Chronigirl — writes and edits the actual project for you. Chronicle sits around that conversation and keeps everything honest: it shows you what changed, lets you undo anything, and translates the technical bits into words you already know." },
+      { kind: "para", text: "You do not need to know how to code. You do not need to touch a terminal. Your job is to describe the outcome you want and to review what Chronigirl does — like art-directing a very fast, very literal teammate." },
       { kind: "heading", text: "The three places you'll spend time" },
       { kind: "steps", items: [
         "The roadmap — the plan for your build, broken into phases (chunks of work with a goal).",
-        "Chrongirl — the chat where you talk to the AI and watch it work.",
+        "Chronigirl — the chat where you talk to the AI and watch it work.",
         "The project view — your files and your history (saving, publishing, undoing).",
       ] },
       { kind: "tip", text: "You are never one wrong click from disaster. Every change the AI makes is reviewable and undoable, and Chronicle never touches your project without you asking." },
@@ -76,16 +76,16 @@ export const GUIDES: Guide[] = [
         "New project — from the welcome screen, press New project, give it a name, and Chronicle makes a fresh folder ready to build in.",
         "Open a folder — already have work somewhere? Press Open and pick its folder. Chronicle reads it and shows you where things stand.",
       ] },
-      { kind: "para", text: "Once a project is open, the agent starts on its own so Chrongirl is ready the moment you want her. If you'd rather she wait, just don't type anything." },
+      { kind: "para", text: "Once a project is open, the agent starts on its own so Chronigirl is ready the moment you want her. If you'd rather she wait, just don't type anything." },
     ],
   },
   {
     id: "first-plan",
-    title: "Talking to Chrongirl — your first plan",
+    title: "Talking to Chronigirl — your first plan",
     blurb: "How to write a first message that gets great results.",
     minutes: 4,
     body: [
-      { kind: "para", text: "This is the most important skill, and it's one you already have as a designer: describing what you want. Chrongirl is literal and fast, so the clearer your brief, the better the result. Talk about the OUTCOME — what it should look like and do — not the code." },
+      { kind: "para", text: "This is the most important skill, and it's one you already have as a designer: describing what you want. Chronigirl is literal and fast, so the clearer your brief, the better the result. Talk about the OUTCOME — what it should look like and do — not the code." },
       { kind: "heading", text: "A good first message has three things" },
       { kind: "steps", items: [
         "What you're building — “a landing page for a coffee subscription”.",
@@ -96,7 +96,7 @@ export const GUIDES: Guide[] = [
       { kind: "para", text: "Notice the good version says what to build, the mood, and where to stop. You don't need design or code words — plain description is perfect. You can even paste a reference or describe a site you like." },
       { kind: "heading", text: "How the conversation goes" },
       { kind: "steps", items: [
-        "Type your message and press send. Chrongirl thinks, then starts working — you'll see her edits as cards you can open.",
+        "Type your message and press send. Chronigirl thinks, then starts working — you'll see her edits as cards you can open.",
         "She asks permission before doing anything risky. You choose Allow or Don't allow.",
         "When she's done, review the changes (see the next guide). Then reply with the next thing: “now add the pricing section”.",
       ] },
@@ -106,14 +106,14 @@ export const GUIDES: Guide[] = [
   {
     id: "starting-a-phase",
     title: "Using the roadmap and phases",
-    blurb: "Let Chronicle hand Chrongirl a ready-made plan.",
+    blurb: "Let Chronicle hand Chronigirl a ready-made plan.",
     minutes: 2,
     body: [
-      { kind: "para", text: "If your project has a roadmap, it's already broken into phases — chunks of work with a goal, like “design the sign-up flow”. Each phase can hand Chrongirl a prepared prompt so you don't have to write one from scratch." },
+      { kind: "para", text: "If your project has a roadmap, it's already broken into phases — chunks of work with a goal, like “design the sign-up flow”. Each phase can hand Chronigirl a prepared prompt so you don't have to write one from scratch." },
       { kind: "steps", items: [
         "Open a phase from the roadmap.",
         "Press “Start with the agent”. Chronicle loads that phase's plan into the chat as a draft — nothing is sent yet.",
-        "Read it, tweak anything you want, then press send. Chrongirl runs the phase while you watch.",
+        "Read it, tweak anything you want, then press send. Chronigirl runs the phase while you watch.",
       ] },
       { kind: "tip", text: "The draft is a starting point, not a rule. Add a sentence about the look you want before you send it — the phase plan plus your taste is the best combination." },
     ],
@@ -124,7 +124,7 @@ export const GUIDES: Guide[] = [
     blurb: "See every change, keep what you like, undo the rest.",
     minutes: 3,
     body: [
-      { kind: "para", text: "The whole point of Chronicle is that you never have to trust the AI blindly. Everything Chrongirl changes is shown to you and can be undone." },
+      { kind: "para", text: "The whole point of Chronicle is that you never have to trust the AI blindly. Everything Chronigirl changes is shown to you and can be undone." },
       { kind: "heading", text: "While she works" },
       { kind: "para", text: "Each edit appears as a card in the chat — “Edited PricingTable · view the changes”. Click it to see exactly what changed, in a clear before/after." },
       { kind: "heading", text: "After she works" },

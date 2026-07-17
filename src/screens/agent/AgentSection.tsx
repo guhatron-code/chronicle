@@ -21,7 +21,7 @@ import {
 } from "@/lib/agent-session";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { toastError } from "@/overlays/toasts";
-import { Chrongirl, HistoryClockGlyph } from "@/components/chrome/icons";
+import { Chronigirl, HistoryClockGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 
 function fmtAgo(ms: number): string {
@@ -172,8 +172,8 @@ export function AgentSection({
         onClick={onToggleCollapsed}
         className="flex h-7 shrink-0 items-center gap-2 border-b border-divider px-3 text-left hover:bg-fill-subtle"
       >
-        <Chrongirl size={15} />
-        <span className="text-[11.5px] font-medium text-text-secondary">Chrongirl</span>
+        <Chronigirl size={15} />
+        <span className="text-[11.5px] font-medium text-text-secondary">Chronigirl</span>
         <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[11px]", c.text)}>
           <span className={cn("size-1 shrink-0 rounded-full", c.dot)} />
           {word}
@@ -189,8 +189,8 @@ export function AgentSection({
   return (
     <div data-agent-section className="relative flex min-h-0 flex-1 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-divider px-3">
-        <Chrongirl size={16} />
-        <span className="text-[12.5px] font-medium text-text-primary">Chrongirl</span>
+        <Chronigirl size={16} />
+        <span className="text-[12.5px] font-medium text-text-primary">Chronigirl</span>
         <span data-agent-state className={cn("inline-flex items-center gap-[5px] whitespace-nowrap text-xs", c.text)}>
           <span
             className={cn("size-[5px] shrink-0 rounded-full", c.dot)}

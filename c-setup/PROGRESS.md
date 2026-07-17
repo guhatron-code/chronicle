@@ -134,9 +134,9 @@ the agent chat redesign and the fixes surfaced during testing:
   — the agent Send + repo Keep buttons were white-on-white in 0.3.x).
 - The "Sign in to Claude" false-negative fix (detect the macOS Keychain
   credentials item, not a nonexistent file).
-- The agent pane reshaped into a chat: speaker avatars + You/Chrongirl labels
+- The agent pane reshaped into a chat: speaker avatars + You/Chronigirl labels
   (single column), a real typing indicator (no gradient-clipped shimmer),
-  markdown that formats AS IT STREAMS, and the Chrongirl identity mark.
+  markdown that formats AS IT STREAMS, and the Chronigirl identity mark.
 
 **How it was verified** — final gate before release: `npx tsc --noEmit` +
 `npx vite build` green; `cargo test` 41 passed + the gated real-adapter and

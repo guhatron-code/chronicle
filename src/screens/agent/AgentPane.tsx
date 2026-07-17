@@ -23,7 +23,7 @@ import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { toastError } from "@/overlays/toasts";
 import { MiniMd } from "@/lib/mini-md";
-import { Chrongirl, ErrorGlyph } from "@/components/chrome/icons";
+import { Chronigirl, ErrorGlyph } from "@/components/chrome/icons";
 import { BtnPrimary, BtnSecondary, Spinner } from "@/components/chrome/atoms";
 import { Composer } from "./Composer";
 import { ToolCard } from "./ToolCard";
@@ -82,7 +82,7 @@ function CheckpointRow({
 function AssistantAvatar() {
   return (
     <span className="flex size-[26px] shrink-0 items-center justify-center rounded-full border border-border-hairline bg-surface-card-raised">
-      <Chrongirl size={17} />
+      <Chronigirl size={17} />
     </span>
   );
 }
@@ -207,7 +207,7 @@ function ReviewStrip({
 
 function AssistantMessage({ text, streaming }: { text: string; streaming: boolean }) {
   return (
-    <MessageRow who="Chrongirl" avatar={<AssistantAvatar />}>
+    <MessageRow who="Chronigirl" avatar={<AssistantAvatar />}>
       <span data-streaming={streaming || undefined}>
         {streaming && !text.trim() ? (
           <TypingDots />
@@ -558,10 +558,10 @@ export function AgentPane({
     <div className="flex min-h-0 flex-1 flex-col">
       {empty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[9px] p-5 text-center">
-          <span className="mb-1.5"><Chrongirl size={48} /></span>
+          <span className="mb-1.5"><Chronigirl size={48} /></span>
           <span className="text-[15px] font-semibold text-text-primary">Ask for anything.</span>
           <span className="max-w-[34ch] text-[12.5px] leading-[1.55] text-text-muted [text-wrap:pretty]">
-            Chronicle asks before the agent touches your project.
+            Chronicle asks before Chronigirl touches your project.
           </span>
         </div>
       ) : (
