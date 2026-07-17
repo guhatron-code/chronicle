@@ -98,4 +98,4 @@ terminal-access repair → fixed + the "new terminal" honesty; couldn't-finish +
 Try again; run-all; the sign-in Terminal hand-off + doctor-poll auto-advance
 to the celebration; the health framing. Full probe suite stays green.
 
-**Commit** — (next docs commit)
+**Commit** — 06b35ba
