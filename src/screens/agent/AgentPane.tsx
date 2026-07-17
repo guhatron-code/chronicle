@@ -23,7 +23,7 @@ import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { toastError } from "@/overlays/toasts";
 import { MiniMd } from "@/lib/mini-md";
-import { ClaudeStar, ErrorGlyph } from "@/components/chrome/icons";
+import { Chrongirl, ErrorGlyph } from "@/components/chrome/icons";
 import { BtnPrimary, BtnSecondary, Spinner } from "@/components/chrome/atoms";
 import { Composer } from "./Composer";
 import { ToolCard } from "./ToolCard";
@@ -78,14 +78,55 @@ function CheckpointRow({
   );
 }
 
-function UserMessage({ text }: { text: string }) {
+/** Speaker marks — the single biggest "this is a conversation" signal. */
+function AssistantAvatar() {
   return (
-    <div className="flex flex-col items-end gap-1 px-3.5 pb-2.5 pt-1.5">
-      <div className="max-w-[86%] text-right text-[13px] leading-relaxed text-text-primary [text-wrap:pretty]">
-        {text}
+    <span className="flex size-[26px] shrink-0 items-center justify-center rounded-full border border-border-hairline bg-surface-card-raised">
+      <Chrongirl size={17} />
+    </span>
+  );
+}
+function UserAvatar() {
+  return (
+    <span className="flex size-[26px] shrink-0 items-center justify-center rounded-full border border-border-hairline bg-fill-subtle text-text-subtle">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4">
+        <circle cx="8" cy="5.5" r="2.6" />
+        <path d="M3.4 13a4.6 4.6 0 0 1 9.2 0" />
+      </svg>
+    </span>
+  );
+}
+
+/** The "agent is thinking" indicator — three staggered dots, a classic chat
+ *  signal (and DS-clean: no gradient-clipped text). */
+function TypingDots() {
+  return (
+    <span className="inline-flex items-center gap-1" aria-label="The agent is working">
+      {[0, 1, 2].map((i) => (
+        <span
+          key={i}
+          className="size-1.5 rounded-full bg-text-dim"
+          style={{ animation: "wv-pulse 1.1s ease-in-out infinite", animationDelay: `${i * 0.18}s` }}
+        />
+      ))}
+    </span>
+  );
+}
+
+function MessageRow({ who, avatar, children }: { who: string; avatar: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-2.5 px-3.5 py-2">
+      {avatar}
+      <div className="min-w-0 flex-1">
+        <div className="mb-0.5 text-[12.5px] font-semibold text-text-primary">{who}</div>
+        <div className="text-[13px] leading-[1.65] text-text-primary [text-wrap:pretty]">{children}</div>
       </div>
     </div>
   );
+}
+
+function UserMessage({ text }: { text: string }) {
+  return <MessageRow who="You" avatar={<UserAvatar />}>{text}</MessageRow>;
 }
 
 /** F36 — the persistent strip above the composer while the ledger is
@@ -165,31 +206,26 @@ function ReviewStrip({
 }
 
 function AssistantMessage({ text, streaming }: { text: string; streaming: boolean }) {
-  if (streaming) {
-    // the shimmer runs ONLY while streaming; settled text renders as mini-md
-    return (
-      <div className="px-3.5 py-1">
-        <div
-          data-streaming
-          className="whitespace-pre-wrap text-[13px] leading-[1.65]"
-          style={{
-            background: "linear-gradient(90deg, var(--text-muted) 0%, var(--text-primary) 45%, var(--text-muted) 90%)",
-            backgroundSize: "200% 100%",
-            WebkitBackgroundClip: "text",
-            backgroundClip: "text",
-            color: "transparent",
-            animation: "wv-shimmer 2s linear infinite",
-          }}
-        >
-          {text}
-        </div>
-      </div>
-    );
-  }
   return (
-    <div className="px-3.5 py-1 text-[13px] leading-[1.65] text-text-secondary">
-      <MiniMd source={text} />
-    </div>
+    <MessageRow who="Chrongirl" avatar={<AssistantAvatar />}>
+      <span data-streaming={streaming || undefined}>
+        {streaming && !text.trim() ? (
+          <TypingDots />
+        ) : (
+          // format AS IT STREAMS — markdown renders progressively, not only at
+          // the end; a caret trails the live text
+          <span className="[&>*:last-child]:inline">
+            <MiniMd source={text} />
+            {streaming && (
+              <span
+                className="ml-0.5 inline-block h-[15px] w-px translate-y-[2px] bg-text-secondary"
+                style={{ animation: "wv-pulse 1.1s step-end infinite" }}
+              />
+            )}
+          </span>
+        )}
+      </span>
+    </MessageRow>
   );
 }
 
@@ -522,7 +558,7 @@ export function AgentPane({
     <div className="flex min-h-0 flex-1 flex-col">
       {empty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[9px] p-5 text-center">
-          <ClaudeStar size={20} />
+          <Chrongirl size={30} />
           <span className="text-[15px] font-semibold text-text-primary">Ask for anything.</span>
           <span className="max-w-[34ch] text-[12.5px] leading-[1.55] text-text-muted [text-wrap:pretty]">
             Chronicle asks before the agent touches your project.
@@ -536,7 +572,7 @@ export function AgentPane({
             const el = e.currentTarget;
             nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
           }}
-          className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2"
+          className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-3"
         >
           {s.entries.map((entry, i) => (
             <Entry
@@ -551,6 +587,14 @@ export function AgentPane({
               }}
             />
           ))}
+          {/* the "thinking" beat before the first token, so a turn never
+              looks stalled — the classic chat typing signal */}
+          {s.turnActive && s.entries.at(-1)?.kind !== "assistant" && (
+            <div className="flex gap-2.5 px-3.5 pb-1 pt-2">
+              <AssistantAvatar />
+              <div className="pt-1.5"><TypingDots /></div>
+            </div>
+          )}
         </div>
       )}
       <ReviewStrip dir={dir} s={s} onOpenReview={onOpenReview} onConfirm={onConfirm} />
