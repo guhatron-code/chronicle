@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <meta name="design_doc_mode" content="canvas">
+  <link rel="stylesheet" href="_ds/weave-design-system-901f5a72-771f-4adc-8f51-80d147723844/fonts/fonts.css">
+  <link rel="stylesheet" href="_ds/weave-design-system-901f5a72-771f-4adc-8f51-80d147723844/_ds_bundle.css">
+  <script src="_ds/weave-design-system-901f5a72-771f-4adc-8f51-80d147723844/_ds_bundle.js"></script>
+  <style>
+    body { background: #060606; }
+    a { color: var(--text-secondary); text-decoration: none; }
+    a:hover { color: var(--text-primary); }
+    @keyframes wv-spin { to { transform: rotate(360deg); } }
+    @keyframes wv-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: .001s !important; animation-iteration-count: 1 !important; transition-duration: .001s !important; }
+    }
+  </style>
+</helmet>
+
+<section id="deck8" style="display:flex;flex-direction:column;gap:44px;padding:48px;font-family:var(--font-sans);color:var(--text-primary)">
+
+  <div style="display:flex;flex-direction:column;gap:8px;max-width:820px">
+    <div style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Chronicle v2 · Weave DS · Deck 8 · matches shipped v0.3</div>
+    <div style="font-size:21px;font-weight:600;color:var(--text-primary)">Setup &amp; Help — G1–G8</div>
+    <div style="font-size:13px;line-height:1.55;color:var(--text-muted);text-wrap:pretty">Two app-level surfaces for a non-developer: a <strong style="color:var(--text-secondary);font-weight:600">Setup</strong> screen that installs the five things Chronicle needs — with no typed commands — and a <strong style="color:var(--text-secondary);font-weight:600">Help</strong> screen of task recipes and a plain glossary. Every word is read as the non-developer will read it: no PATH / CLI / npm / git in a headline. Tokens by name; the only chroma is the state palette and the two agent marks. Comps match the shipped app — where a frame would diverge from Decks 1–7, the app's convention wins and the note says so.</div>
+    <div style="display:flex;gap:14px;font-size:12px;font-family:var(--font-mono);color:var(--text-dim);flex-wrap:wrap">
+      <a href="Chronicle 1 · Picker.dc.html">← Deck 1 · Picker</a>
+      <a href="Chronicle 2 · Shell.dc.html">← Deck 2 · Shell</a>
+      <a href="Chronicle 6 · Full layouts.dc.html">← Deck 6 · Full layouts</a>
+      <a href="Chronicle 7 · Agent.dc.html">← Deck 7 · Agent</a>
+    </div>
+    <div style="display:flex;gap:12px;font-size:11.5px;color:var(--text-dim);flex-wrap:wrap;margin-top:2px">
+      <a href="#g1">G1 checklist</a><a href="#g2">G2 install / fail</a><a href="#g3">G3 PATH repair</a><a href="#g4">G4 sign-in</a><a href="#g5">G5 gate vs health</a><a href="#g6">G6 rail</a><a href="#g7">G7 recipes</a><a href="#g8">G8 glossary</a>
+    </div>
+  </div>
+
+  <!-- ============ G1 · Setup checklist ============ -->
+  <div id="g1" style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <a href="#g1" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);background:var(--fill-subtle);border-radius:6px;padding:2px 7px">G1</a>
+      <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">The setup screen — the checklist</span>
+      <span style="font-size:11.5px;color:var(--text-dim);max-width:620px">Full-window, under the same 44px title-bar row as the picker. Summary card (status row — cards allowed) + a FLAT divider-separated checklist. One primary visible: “Set everything up for me”. Row actions are secondary md (33). No raw commands anywhere.</span>
+    </div>
+
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+
+      <!-- G1a · 3 of 6 ready -->
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Default — 3 of 6 ready</span>
+        <div data-screen-label="G1 Setup checklist" style="width:640px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:11px;overflow:hidden;box-shadow:var(--shadow-overlay)">
+          <div style="height:44px;display:flex;align-items:center;padding:0 16px;gap:8px;border-bottom:1px solid var(--divider)">
+            <span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span>
+            <span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span>
+            <span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span>
+          </div>
+          <div style="padding:32px 34px 34px;display:flex;flex-direction:column;gap:22px">
+            <div style="display:flex;flex-direction:column;gap:9px">
+              <div style="font-size:22px;font-weight:600;color:var(--text-primary);letter-spacing:-.01em">Let’s get Chronicle ready</div>
+              <div style="font-size:13px;line-height:1.6;color:var(--text-muted);max-width:52ch;text-wrap:pretty">This sets up the tools Chronicle needs. It won’t touch anything else, and you won’t need to type any commands.</div>
+            </div>
+
+            <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:15px 17px;display:flex;align-items:center;gap:18px">
+              <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:0">
+                <div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:15px;font-weight:600;color:var(--text-primary)">3 of 6 ready</span><span style="font-size:12.5px;color:var(--text-dim)">a few things need you before you can start</span></div>
+                <span style="height:4px;border-radius:2px;background:var(--fill-hover);overflow:hidden;display:block"><span style="display:block;width:50%;height:100%;background:var(--text-secondary);border-radius:2px"></span></span>
+              </div>
+              <button style="height:33px;padding:0 15px;background:var(--primary);color:var(--primary-fg);border:none;border-radius:8px;font-size:12.5px;font-weight:600;font-family:var(--font-sans);cursor:pointer;white-space:nowrap" style-hover="background:var(--primary-hover)">Set everything up for me</button>
+            </div>
+
+            <div style="display:flex;flex-direction:column">
+              <!-- row: ready (Claude Code) -->
+              <div style="display:flex;align-items:center;gap:15px;padding:15px 4px">
+                <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="15" height="15" viewBox="0 0 16 16" fill="#D97757"><path d="M8 0.8 9.4 5 13.8 3.2 10.9 6.9 15.2 8.6 10.6 9.2 12.3 13.6 8.6 10.7 6.9 15 6.3 10.4 1.9 12.1 4.8 8.4 0.5 6.7 5.1 6.1 3.4 1.7 7.1 4.6z"></path></svg></span>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:13px;font-weight:500;color:var(--text-primary)">The AI that does the work</div>
+                  <div style="font-size:12px;line-height:1.45;color:var(--text-dim)">Claude Code — the assistant that writes and edits your project.</div>
+                </div>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-success);white-space:nowrap;flex-shrink:0"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 6.5 5 9.5 10 3"></path></svg>ready</span>
+              </div>
+              <!-- row: ready (Sign in to Claude) -->
+              <div style="display:flex;align-items:center;gap:15px;padding:15px 4px;border-top:1px solid var(--divider)">
+                <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 9.2a2.6 2.6 0 1 0 0-5.2 2.6 2.6 0 0 0 0 5.2Z"></path><path d="M3.4 13.2a4.6 4.6 0 0 1 9.2 0"></path></svg></span>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Sign in to Claude</div>
+                  <div style="font-size:12px;line-height:1.45;color:var(--text-dim)">So the AI can start working on your behalf.</div>
+                </div>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-success);white-space:nowrap;flex-shrink:0"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 6.5 5 9.5 10 3"></path></svg>ready</span>
+              </div>
+              <!-- row: ready (Node) -->
+              <div style="display:flex;align-items:center;gap:15px;padding:15px 4px;border-top:1px solid var(--divider)">
+                <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 1.6 13.4 4.6v6.8L8 14.4 2.6 11.4V4.6z"></path><circle cx="8" cy="8" r="2.1"></circle></svg></span>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:13px;font-weight:500;color:var(--text-primary)">The engine the AI runs on</div>
+                  <div style="font-size:12px;line-height:1.45;color:var(--text-dim)">The background software the AI needs to do its work.</div>
+                </div>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-success);white-space:nowrap;flex-shrink:0"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 6.5 5 9.5 10 3"></path></svg>ready</span>
+              </div>
+              <!-- row: needs you (PATH repair) -->
+              <div style="display:flex;align-items:center;gap:15px;padding:15px 4px;border-top:1px solid var(--divider)">
+                <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="10" rx="1.6"></rect><path d="m4.6 6.4 2 1.6-2 1.6M8.4 9.8h3"></path></svg></span>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Make the AI work in the terminal</div>
+                  <div style="font-size:12px;line-height:1.45;color:var(--text-dim)">The AI is installed, but the terminal can’t find it yet. Chronicle can fix that.</div>
+                </div>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-error);white-space:nowrap;flex-shrink:0"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-error);flex-shrink:0"></span>needs you</span>
+                <button style="height:33px;padding:0 14px;background:transparent;color:var(--text-primary);border:1px solid var(--border-strong);border-radius:8px;font-size:12.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer;white-space:nowrap;flex-shrink:0" style-hover="background:var(--fill-hover)">Fix it</button>
+              </div>
+              <!-- row: installing (GitHub) -->
+              <div style="display:flex;align-items:center;gap:15px;padding:15px 4px;border-top:1px solid var(--divider)">
+                <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4.4 12.2a3 3 0 0 1-.4-5.97A3.4 3.4 0 0 1 10.6 5.4a2.8 2.8 0 0 1 1.2 5.4"></path><path d="M8 8v4.8M6.2 10.4 8 12.4l1.8-2"></path></svg></span>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+                  <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Your projects’ online home</div>
+                  <div style="font-size:12px;line-height:1.45;color:var(--text-dim)">Where your projects live online, so you can publish and share them.</div>
+                  <div style="display:flex;align-items:center;gap:10px;margin-top:1px"><span style="flex:1;height:3px;border-radius:2px;background:var(--fill-hover);overflow:hidden;display:block"><span style="display:block;width:34%;height:100%;background:var(--state-neutral);border-radius:2px"></span></span><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums">12.1 of 34 MB</span></div>
+                </div>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-neutral);white-space:nowrap;flex-shrink:0"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-neutral);flex-shrink:0;animation:wv-pulse 1.4s ease-in-out infinite"></span>installing · 34%</span>
+                <button style="height:33px;padding:0 13px;background:transparent;color:var(--text-muted);border:1px solid var(--border-hairline);border-radius:8px;font-size:12.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer;white-space:nowrap;flex-shrink:0" style-hover="background:var(--fill-hover);color:var(--text-primary)">Cancel</button>
+              </div>
+              <!-- row: checking (superpowers) -->
+              <div style="display:flex;align-items:center;gap:15px;padding:15px 4px;border-top:1px solid var(--divider)">
+                <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4.6 2.5h4.2l3.6 3.6v7.4H4.6z"></path><path d="M8.6 2.5v3.8h3.6"></path><path d="M6.3 9.3 7.4 10.4 9.7 8.1"></path></svg></span>
+                <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Extra skills for the AI</div>
+                  <div style="font-size:12px;line-height:1.45;color:var(--text-dim)">Extra abilities that make the AI better at bigger jobs.</div>
+                </div>
+                <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-muted);white-space:nowrap;flex-shrink:0"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-neutral);flex-shrink:0;animation:wv-pulse 1.4s ease-in-out infinite"></span>checking</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- G1b · states column: celebration + set-all running + StateWord legend -->
+      <div style="display:flex;flex-direction:column;gap:22px;width:400px">
+
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">All green — “You’re all set” (quiet celebration)</span>
+          <div data-screen-label="G1 all set" style="background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:11px;overflow:hidden;box-shadow:var(--shadow-overlay)">
+            <div style="height:44px;display:flex;align-items:center;padding:0 16px;gap:8px;border-bottom:1px solid var(--divider)"><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span></div>
+            <div style="padding:40px 34px 38px;display:flex;flex-direction:column;align-items:center;gap:13px;text-align:center">
+              <span style="width:42px;height:42px;border-radius:50%;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;color:var(--state-success)"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 10.5 8.2 15 16 5.5"></path></svg></span>
+              <div style="font-size:20px;font-weight:600;color:var(--text-primary)">You’re all set</div>
+              <div style="font-size:13px;line-height:1.6;color:var(--text-muted);max-width:34ch;text-wrap:pretty">Everything Chronicle needs is installed and signed in. You can start building.</div>
+              <button style="height:36px;padding:0 18px;margin-top:4px;background:var(--primary);color:var(--primary-fg);border:none;border-radius:8px;font-size:13px;font-weight:600;font-family:var(--font-sans);cursor:pointer" style-hover="background:var(--primary-hover)">Open a project</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">“Set everything up for me” running — one row works, the rest wait</span>
+          <div data-screen-label="G1 set-all running" style="background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:10px;padding:8px 14px;display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 2px;opacity:.5"><span style="font-size:12.5px;font-weight:500;color:var(--text-primary);flex:1">The AI that does the work</span><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--state-success)"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 6.5 5 9.5 10 3"></path></svg>ready</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:12.5px;font-weight:500;color:var(--text-primary);flex:1">The engine the AI runs on</span><span style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--state-neutral)"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-neutral);animation:wv-pulse 1.4s ease-in-out infinite"></span>installing · 61%</span></div>
+            <div style="height:3px;background:var(--fill-hover);border-radius:2px;overflow:hidden;margin:0 2px 4px"><span style="display:block;width:61%;height:100%;background:var(--state-neutral);border-radius:2px"></span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:12.5px;font-weight:500;color:var(--text-dim);flex:1">Your projects’ online home</span><span style="font-size:12px;color:var(--text-dimmer)">waiting</span></div>
+            <div style="display:flex;align-items:center;gap:12px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:12.5px;font-weight:500;color:var(--text-dim);flex:1">Extra skills for the AI</span><span style="font-size:12px;color:var(--text-dimmer)">waiting</span></div>
+          </div>
+          <span style="font-size:11px;color:var(--text-dim);line-height:1.5">The active row shows its live progress; queued rows read a quiet “waiting”. Cancel stops the chain, not just the current step.</span>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:7px">
+          <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">StateWord — every state (dot pinned, word carries meaning)</span>
+          <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-muted);white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-neutral);animation:wv-pulse 1.4s ease-in-out infinite"></span>checking</span><span style="font-size:11.5px;color:var(--text-dim)">looking for it now</span></div>
+            <div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-success);white-space:nowrap"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 6.5 5 9.5 10 3"></path></svg>ready</span><span style="font-size:11.5px;color:var(--text-dim)">installed and good to go</span></div>
+            <div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-error);white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-error)"></span>needs you</span><span style="font-size:11.5px;color:var(--text-dim)">one action to continue</span></div>
+            <div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-neutral);white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-neutral);animation:wv-pulse 1.4s ease-in-out infinite"></span>installing · 34%</span><span style="font-size:11.5px;color:var(--text-dim)">a % and a thin bar</span></div>
+            <div style="display:flex;align-items:center;gap:10px"><span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-error);white-space:nowrap"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="5"></circle><path d="M6 3.4v3M6 8.4v.1"></path></svg>couldn’t finish</span><span style="font-size:11.5px;color:var(--text-dim)">a plain reason + try again</span></div>
+            <div style="font-size:11px;color:var(--text-dimmer);line-height:1.5;border-top:1px solid var(--divider);padding-top:10px">Under reduced motion the word alone carries the state — the pulse and bar animation freeze.</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+  <!-- ============ G2 · Mid-install + honest failure ============ -->
+  <div id="g2" style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <a href="#g2" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);background:var(--fill-subtle);border-radius:6px;padding:2px 7px">G2</a>
+      <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">A row mid-install, and the honest failure</span>
+      <span style="font-size:11.5px;color:var(--text-dim);max-width:620px">The download size is the only mono/technical thing shown, and it’s a small secondary. Failure names what happened and the one thing to do — no error code in the sentence; any code stays small mono below.</span>
+    </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Installing — thin bar, mono size, quiet Cancel</span>
+        <div data-screen-label="G2 installing row" style="width:560px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:10px;padding:4px 16px">
+          <div style="display:flex;align-items:center;gap:15px;padding:16px 4px">
+            <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 1.6 13.4 4.6v6.8L8 14.4 2.6 11.4V4.6z"></path><circle cx="8" cy="8" r="2.1"></circle></svg></span>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+              <div style="font-size:13px;font-weight:500;color:var(--text-primary)">The engine the AI runs on</div>
+              <div style="font-size:12px;line-height:1.45;color:var(--text-dim)">One-time download. Nothing in your project is touched.</div>
+              <div style="display:flex;align-items:center;gap:10px;margin-top:1px"><span style="flex:1;height:3px;border-radius:2px;background:var(--fill-hover);overflow:hidden;display:block"><span style="display:block;width:52%;height:100%;background:var(--state-neutral);border-radius:2px"></span></span><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums">3.1 of 42 MB</span></div>
+            </div>
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-neutral);white-space:nowrap;flex-shrink:0"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-neutral);flex-shrink:0;animation:wv-pulse 1.4s ease-in-out infinite"></span>installing · 52%</span>
+            <button style="height:33px;padding:0 13px;background:transparent;color:var(--text-muted);border:1px solid var(--border-hairline);border-radius:8px;font-size:12.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer;white-space:nowrap;flex-shrink:0" style-hover="background:var(--fill-hover);color:var(--text-primary)">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Couldn’t finish — plain reason, one action</span>
+        <div data-screen-label="G2 failure row" style="width:560px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:10px;padding:4px 16px">
+          <div style="display:flex;align-items:flex-start;gap:15px;padding:16px 4px">
+            <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M8 1.6 13.4 4.6v6.8L8 14.4 2.6 11.4V4.6z"></path><circle cx="8" cy="8" r="2.1"></circle></svg></span>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px">
+              <div style="font-size:13px;font-weight:500;color:var(--text-primary)">The engine the AI runs on</div>
+              <div style="font-size:12.5px;line-height:1.5;color:var(--text-secondary)">Couldn’t download it — check your internet connection and try again.</div>
+              <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim)">network timeout · code ENET-408</span>
+            </div>
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-error);white-space:nowrap;flex-shrink:0;margin-top:2px"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="6" r="5"></circle><path d="M6 3.4v3M6 8.4v.1"></path></svg>couldn’t finish</span>
+            <button style="height:33px;padding:0 14px;background:transparent;color:var(--text-primary);border:1px solid var(--border-strong);border-radius:8px;font-size:12.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer;white-space:nowrap;flex-shrink:0;margin-top:1px" style-hover="background:var(--fill-hover)">Try again</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ G3 · The PATH repair ============ -->
+  <div id="g3" style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <a href="#g3" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);background:var(--fill-subtle);border-radius:6px;padding:2px 7px">G3</a>
+      <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">Make the AI work in the terminal — the star fix</span>
+      <span style="font-size:11.5px;color:var(--text-dim);max-width:620px">The problem stated in the user’s words, one button to fix it. The after-state is honest that it takes effect in a NEW terminal, and offers to open one that’s ready. Never the word “PATH”.</span>
+    </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Needs you — the problem in plain words</span>
+        <div data-screen-label="G3 PATH needs you" style="width:560px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:10px;padding:4px 16px">
+          <div style="display:flex;align-items:center;gap:15px;padding:16px 4px">
+            <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="10" rx="1.6"></rect><path d="m4.6 6.4 2 1.6-2 1.6M8.4 9.8h3"></path></svg></span>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+              <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Make the AI work in the terminal</div>
+              <div style="font-size:12px;line-height:1.5;color:var(--text-dim)">The AI is installed, but the terminal can’t find it yet. Chronicle can fix that.</div>
+            </div>
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-error);white-space:nowrap;flex-shrink:0"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-error);flex-shrink:0"></span>needs you</span>
+            <button style="height:33px;padding:0 14px;background:transparent;color:var(--text-primary);border:1px solid var(--border-strong);border-radius:8px;font-size:12.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer;white-space:nowrap;flex-shrink:0" style-hover="background:var(--fill-hover)">Fix it</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">After — honest that it needs a new terminal</span>
+        <div data-screen-label="G3 PATH fixed" style="width:560px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:10px;padding:4px 16px">
+          <div style="display:flex;align-items:center;gap:15px;padding:16px 4px">
+            <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="10" rx="1.6"></rect><path d="m4.6 6.4 2 1.6-2 1.6M8.4 9.8h3"></path></svg></span>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+              <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Make the AI work in the terminal</div>
+              <div style="font-size:12px;line-height:1.5;color:var(--text-dim)">Fixed. Open a new terminal and it’ll work. Want me to open one that’s ready?</div>
+            </div>
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-success);white-space:nowrap;flex-shrink:0"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 6.5 5 9.5 10 3"></path></svg>fixed</span>
+            <button style="height:33px;padding:0 14px;background:transparent;color:var(--text-primary);border:1px solid var(--border-strong);border-radius:8px;font-size:12.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer;white-space:nowrap;flex-shrink:0" style-hover="background:var(--fill-hover)">Open a terminal</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ============ G4 · The two sign-in hand-offs ============ -->
+  <div id="g4" style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <a href="#g4" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);background:var(--fill-subtle);border-radius:6px;padding:2px 7px">G4</a>
+      <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">The two sign-in hand-offs</span>
+      <span style="font-size:11.5px;color:var(--text-dim);max-width:640px">The row action opens a terminal tab; while it runs, the row shows the agent pane’s needs-login waiting treatment — spinner (1.5px ring) + “Waiting…” + the mono tab chip — matched 1:1 to Deck 7 F32. The row flips to <em style="color:var(--text-secondary);font-style:normal">ready</em> on its own when sign-in finishes.</span>
+    </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Sign in to Claude — the action, then waiting</span>
+        <div data-screen-label="G4 Claude sign-in action" style="width:560px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:10px;padding:4px 16px;margin-bottom:14px">
+          <div style="display:flex;align-items:center;gap:15px;padding:16px 4px">
+            <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 16 16" fill="#D97757"><path d="M8 0.8 9.4 5 13.8 3.2 10.9 6.9 15.2 8.6 10.6 9.2 12.3 13.6 8.6 10.7 6.9 15 6.3 10.4 1.9 12.1 4.8 8.4 0.5 6.7 5.1 6.1 3.4 1.7 7.1 4.6z"></path></svg></span>
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+              <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Sign in to Claude</div>
+              <div style="font-size:12px;line-height:1.45;color:var(--text-dim)">So the AI can start working on your behalf.</div>
+            </div>
+            <span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-error);white-space:nowrap;flex-shrink:0"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-error);flex-shrink:0"></span>needs you</span>
+            <button style="height:33px;padding:0 14px;background:transparent;color:var(--text-primary);border:1px solid var(--border-strong);border-radius:8px;font-size:12.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer;white-space:nowrap;flex-shrink:0" style-hover="background:var(--fill-hover)">Sign in</button>
+          </div>
+        </div>
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Waiting — matches the agent pane 1:1</span>
+        <div data-screen-label="G4 Claude waiting" style="width:560px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:10px;padding:4px 16px">
+          <div style="display:flex;flex-direction:column;gap:9px;padding:14px 4px">
+            <div style="display:flex;align-items:center;gap:15px">
+              <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 16 16" fill="#D97757"><path d="M8 0.8 9.4 5 13.8 3.2 10.9 6.9 15.2 8.6 10.6 9.2 12.3 13.6 8.6 10.7 6.9 15 6.3 10.4 1.9 12.1 4.8 8.4 0.5 6.7 5.1 6.1 3.4 1.7 7.1 4.6z"></path></svg></span>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Sign in to Claude</div>
+                <div style="font-size:12px;line-height:1.45;color:var(--text-dim)">Finish signing in in the terminal tab that just opened.</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;padding:2px 1px;margin-left:45px">
+              <span style="width:11px;height:11px;border:1.5px solid var(--state-neutral);border-top-color:transparent;border-radius:50%;animation:wv-spin .7s linear infinite;display:inline-block;flex-shrink:0"></span>
+              <span style="font-size:11.5px;color:var(--text-muted)">Waiting for you to finish signing in…</span>
+              <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-subtle);background:var(--fill-subtle);border-radius:5px;padding:1px 6px">claude · sign-in</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Sign in to GitHub — the same treatment, its own tab</span>
+        <div data-screen-label="G4 GitHub waiting" style="width:560px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:10px;padding:4px 16px">
+          <div style="display:flex;flex-direction:column;gap:9px;padding:14px 4px">
+            <div style="display:flex;align-items:center;gap:15px">
+              <span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4.4 12.2a3 3 0 0 1-.4-5.97A3.4 3.4 0 0 1 10.6 5.4a2.8 2.8 0 0 1 1.2 5.4"></path><path d="M8 8v4.8M6.2 10.4 8 12.4l1.8-2"></path></svg></span>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                <div style="font-size:13px;font-weight:500;color:var(--text-primary)">Sign in to GitHub</div>
+                <div style="font-size:12px;line-height:1.45;color:var(--text-dim)">Finish signing in in the terminal tab that just opened.</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;padding:2px 1px;margin-left:45px">
+              <span style="width:11px;height:11px;border:1.5px solid var(--state-neutral);border-top-color:transparent;border-radius:50%;animation:wv-spin .7s linear infinite;display:inline-block;flex-shrink:0"></span>
+              <span style="font-size:11.5px;color:var(--text-muted)">Waiting for you to finish signing in…</span>
+              <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-subtle);background:var(--fill-subtle);border-radius:5px;padding:1px 6px">github · sign-in</span>
+            </div>
+          </div>
+        </div>
+        <span style="font-size:11px;color:var(--text-dim);line-height:1.5;margin-top:6px">The row polls; no “done” button to press. Under reduced motion the spinner freezes and the words carry the waiting state.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ G5 · Gate vs health console ============ -->
+  <div id="g5" style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <a href="#g5" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);background:var(--fill-subtle);border-radius:6px;padding:2px 7px">G5</a>
+      <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">The smart gate vs. the health console — same body, two headers</span>
+      <span style="font-size:11.5px;color:var(--text-dim);max-width:640px">Both open the shared G1 checklist. The gate is first-launch, warm, appears over the picker. The console is always reachable from the rail — a re-check / repair tool for when something breaks later.</span>
+    </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">(a) First-launch gate — warm, over the picker</span>
+        <div data-screen-label="G5 gate" style="width:560px;position:relative;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:11px;overflow:hidden;box-shadow:var(--shadow-overlay)">
+          <div style="position:absolute;inset:0;background:radial-gradient(ellipse 70% 55% at 50% 0%, rgba(255,255,255,.03), transparent);pointer-events:none"></div>
+          <div style="height:44px;display:flex;align-items:center;padding:0 16px;gap:8px;border-bottom:1px solid var(--divider);position:relative"><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span></div>
+          <div style="padding:38px 34px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;position:relative">
+            <span style="width:44px;height:44px;border-radius:12px;background:var(--surface-card-raised);border:1px solid var(--border-strong);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"><path d="M4 10a6 6 0 0 1 12 0M10 4v12"></path><circle cx="10" cy="10" r="8"></circle></svg></span>
+            <div style="font-size:22px;font-weight:600;color:var(--text-primary);letter-spacing:-.01em">Let’s get you set up</div>
+            <div style="font-size:13px;line-height:1.6;color:var(--text-muted);max-width:42ch;text-wrap:pretty">Before your first project, Chronicle needs to set up a few tools. It takes a minute, and you won’t type a single command.</div>
+            <div style="display:flex;flex-direction:column;gap:8px;width:100%;max-width:300px;margin-top:6px">
+              <button style="height:36px;background:var(--primary);color:var(--primary-fg);border:none;border-radius:8px;font-size:13px;font-weight:600;font-family:var(--font-sans);cursor:pointer" style-hover="background:var(--primary-hover)">Set everything up for me</button>
+              <button style="height:33px;background:transparent;color:var(--text-secondary);border:none;border-radius:8px;font-size:12.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer" style-hover="color:var(--text-primary)">I’ll go step by step</button>
+            </div>
+          </div>
+        </div>
+        <span style="font-size:11px;color:var(--text-dim);line-height:1.5">Below the header: the shared checklist (<a href="#g1">G1</a>). No “skip” — a project can’t open until the essentials are ready.</span>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:7px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">(b) Setup &amp; health — the re-check / repair tool</span>
+        <div data-screen-label="G5 health console" style="width:560px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:11px;overflow:hidden;box-shadow:var(--shadow-overlay)">
+          <div style="height:44px;display:flex;align-items:center;padding:0 16px;gap:8px;border-bottom:1px solid var(--divider)"><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span></div>
+          <div style="padding:26px 30px;display:flex;flex-direction:column;gap:18px">
+            <div style="display:flex;align-items:flex-start;gap:16px">
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+                <div style="font-size:18px;font-weight:600;color:var(--text-primary)">Setup &amp; health</div>
+                <div style="font-size:12.5px;line-height:1.55;color:var(--text-muted);max-width:44ch;text-wrap:pretty">Everything Chronicle needs, in one place. Open this any time something stops working and re-check.</div>
+              </div>
+              <button style="height:33px;padding:0 13px;display:inline-flex;align-items:center;gap:7px;background:transparent;color:var(--text-primary);border:1px solid var(--border-strong);border-radius:8px;font-size:12.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer;white-space:nowrap;flex-shrink:0" style-hover="background:var(--fill-hover)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.8v3h-3"></path></svg>Re-check</button>
+            </div>
+            <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:13px 15px;display:flex;align-items:center;gap:12px">
+              <span style="display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:500;color:var(--state-success)"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2.5 7.5 5.5 10.5 11.5 3.5"></path></svg>All 6 healthy</span>
+              <span style="flex:1"></span>
+              <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-dim);font-variant-numeric:tabular-nums">last checked 20:14</span>
+            </div>
+            <div style="display:flex;flex-direction:column;font-size:12.5px">
+              <div style="display:flex;align-items:center;gap:10px;padding:9px 2px"><span style="color:var(--text-secondary);flex:1">The AI that does the work</span><span style="display:inline-flex;align-items:center;gap:5px;color:var(--state-success);white-space:nowrap"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 6.5 5 9.5 10 3"></path></svg>ready</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:9px 2px;border-top:1px solid var(--divider)"><span style="color:var(--text-secondary);flex:1">The engine the AI runs on</span><span style="display:inline-flex;align-items:center;gap:5px;color:var(--state-success);white-space:nowrap"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 6.5 5 9.5 10 3"></path></svg>ready</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:9px 2px;border-top:1px solid var(--divider)"><span style="color:var(--text-secondary);flex:1">Terminal access, sign-ins &amp; extra skills</span><span style="display:inline-flex;align-items:center;gap:5px;color:var(--state-success);white-space:nowrap"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 6.5 5 9.5 10 3"></path></svg>ready</span></div>
+            </div>
+          </div>
+        </div>
+        <span style="font-size:11px;color:var(--text-dim);line-height:1.5">Same rows as the gate, framed as maintenance. A broken item flips its StateWord to <span style="color:var(--state-error)">needs you</span> and surfaces the same Fix / Try again actions.</span>
+      </div>
+    </div>
+  </div>
+  <!-- ============ G6 · Reaching setup + help from the shell ============ -->
+  <div id="g6" style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <a href="#g6" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);background:var(--fill-subtle);border-radius:6px;padding:2px 7px">G6</a>
+      <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">Reaching Setup &amp; Help from the shell rail</span>
+      <span style="font-size:11.5px;color:var(--text-dim);max-width:640px">The rail’s bottom cluster gains a <strong style="color:var(--text-secondary);font-weight:600">Help</strong> destination and a <strong style="color:var(--text-secondary);font-weight:600">Setup &amp; health</strong> entry, beside the existing “check again” refresh. Same radius-8 icon buttons; one selected signal at a time. Destinations sit at the bottom; the top group stays Roadmap / Repo / Kanban.</span>
+    </div>
+    <div style="display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap">
+      <div data-screen-label="G6 rail" style="width:52px;height:520px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:11px;display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:6px;box-shadow:var(--shadow-overlay);flex-shrink:0">
+        <button aria-label="Roadmap" title="Roadmap" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-strong);border-radius:8px;background:transparent;color:var(--text-subtle);cursor:pointer" style-hover="background:var(--fill-hover);color:var(--text-secondary)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3v7.5M3 3c1.5 0 2 1 4 1s2.5-1 4-1 2 1 2 1v7.5s-.5-1-2-1-2.5 1-4 1-2.5-1-4-1"></path><path d="M3 13.5v-3"></path></svg></button>
+        <button aria-label="Repo" title="Repo" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-strong);border-radius:8px;background:transparent;color:var(--text-subtle);cursor:pointer" style-hover="background:var(--fill-hover);color:var(--text-secondary)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="4" r="1.8"></circle><circle cx="5" cy="12" r="1.8"></circle><circle cx="11" cy="8" r="1.8"></circle><path d="M5 5.8v4.4M6.8 11.3c2.4-.4 4.2-1.1 4.2-3.3v-.2"></path></svg></button>
+        <button aria-label="Kanban" title="Kanban" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-strong);border-radius:8px;background:transparent;color:var(--text-subtle);cursor:pointer" style-hover="background:var(--fill-hover);color:var(--text-secondary)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.2" y="2.5" width="3.4" height="11" rx="1"></rect><rect x="6.9" y="2.5" width="3.4" height="7" rx="1"></rect><rect x="11.6" y="2.5" width="3.4" height="4.5" rx="1"></rect></svg></button>
+        <span style="flex:1"></span>
+        <button aria-label="Setup and health" title="Setup &amp; health" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-strong);border-radius:8px;background:transparent;color:var(--text-dim);cursor:pointer" style-hover="background:var(--fill-hover);color:var(--text-secondary)"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.8 8h2.4l1.3 3.4 2.4-7 1.3 3.6h3"></path></svg></button>
+        <button aria-label="Help" title="Help" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--selected-bg);border-radius:8px;background:var(--selected-bg);color:var(--selected-fg);cursor:pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"></circle><path d="M6.2 6.2c.2-1 1-1.6 1.9-1.6 1 0 1.9.7 1.9 1.7 0 1.3-1.9 1.4-1.9 2.7M8 11.4v.1"></path></svg></button>
+        <button aria-label="Check again now" title="Check again now" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-strong);border-radius:8px;background:transparent;color:var(--text-dim);cursor:pointer" style-hover="background:var(--fill-hover);color:var(--text-secondary)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.8v3h-3"></path></svg></button>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px;padding-top:6px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Bottom cluster, top to bottom</span>
+        <div style="display:flex;flex-direction:column;gap:14px;font-size:12.5px">
+          <div style="display:flex;align-items:center;gap:12px"><span style="width:28px;height:28px;border-radius:8px;border:1px solid var(--border-strong);display:flex;align-items:center;justify-content:center;color:var(--text-dim);flex-shrink:0"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M1.8 8h2.4l1.3 3.4 2.4-7 1.3 3.6h3"></path></svg></span><div style="display:flex;flex-direction:column;gap:2px"><span style="color:var(--text-primary);font-weight:500">Setup &amp; health</span><span style="color:var(--text-dim);font-size:11.5px">opens the checklist as a repair tool (<a href="#g5">G5b</a>)</span></div></div>
+          <div style="display:flex;align-items:center;gap:12px"><span style="width:28px;height:28px;border-radius:8px;border:1px solid var(--selected-bg);background:var(--selected-bg);display:flex;align-items:center;justify-content:center;color:var(--selected-fg);flex-shrink:0"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"></circle><path d="M6.2 6.2c.2-1 1-1.6 1.9-1.6 1 0 1.9.7 1.9 1.7 0 1.3-1.9 1.4-1.9 2.7M8 11.4v.1"></path></svg></span><div style="display:flex;flex-direction:column;gap:2px"><span style="color:var(--text-primary);font-weight:500">Help <span style="color:var(--text-dim);font-weight:400">— selected</span></span><span style="color:var(--text-dim);font-size:11.5px">recipes, glossary &amp; shortcuts (<a href="#g7">G7</a>, <a href="#g8">G8</a>)</span></div></div>
+          <div style="display:flex;align-items:center;gap:12px"><span style="width:28px;height:28px;border-radius:8px;border:1px solid var(--border-strong);display:flex;align-items:center;justify-content:center;color:var(--text-dim);flex-shrink:0"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.8v3h-3"></path></svg></span><div style="display:flex;flex-direction:column;gap:2px"><span style="color:var(--text-primary);font-weight:500">Check again</span><span style="color:var(--text-dim);font-size:11.5px">re-runs the health check in place (unchanged)</span></div></div>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);line-height:1.55;max-width:340px;border-top:1px solid var(--divider);padding-top:10px;margin-top:2px">NOTE — supersedes Deck 2: the lone “?” glyph is retired. Help is now a real destination with the selected signal; the old ⌘/ shortcuts overlay is folded into it (<a href="#g8">G8</a>). Setup &amp; health and Help both open centered to the app window.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ G7 · Help — task recipes ============ -->
+  <div id="g7" style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <a href="#g7" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);background:var(--fill-subtle);border-radius:6px;padding:2px 7px">G7</a>
+      <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">The Help screen — “How do I…” task recipes</span>
+      <span style="font-size:11.5px;color:var(--text-dim);max-width:640px">Search at the top, then plain-word recipe cards. Each is a short titled walkthrough — 2–4 numbered steps in the user’s language — that ends by pointing at the real UI with a “Show me” link. Flat cards on the divider grid.</span>
+    </div>
+    <div data-screen-label="G7 Help recipes" style="width:1060px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:11px;overflow:hidden;box-shadow:var(--shadow-overlay)">
+      <div style="height:44px;display:flex;align-items:center;padding:0 16px;gap:8px;border-bottom:1px solid var(--divider)">
+        <span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span>
+        <span style="flex:1"></span>
+        <span style="font-size:12.5px;font-weight:500;color:var(--text-secondary)">Help</span>
+        <span style="flex:1"></span>
+        <button aria-label="Close help" style="width:24px;height:24px;display:flex;align-items:center;justify-content:center;background:transparent;border:none;border-radius:6px;color:var(--text-dim);cursor:pointer" style-hover="background:var(--fill-hover);color:var(--text-secondary)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m1.5 1.5 7 7M8.5 1.5l-7 7"></path></svg></button>
+      </div>
+      <div style="padding:26px 30px 32px;display:flex;flex-direction:column;gap:22px">
+        <div style="display:flex;align-items:center;gap:11px;height:40px;background:var(--surface-input);border:1px solid var(--border-field);border-radius:9px;padding:0 13px">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="var(--text-subtle)" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3 3"></path></svg>
+          <span style="font-size:13px;color:var(--text-dimmer)">Search help…</span>
+          <span style="flex:1"></span>
+          <span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-subtle);background:var(--fill-subtle);border-radius:5px;padding:2px 6px">⌘/</span>
+        </div>
+
+        <div style="display:flex;align-items:baseline;justify-content:space-between">
+          <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">How do I…</span>
+          <span style="font-size:11.5px;color:var(--text-dim)">7 recipes</span>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px">
+          <!-- recipe card template -->
+          <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:16px 17px;display:flex;flex-direction:column;gap:11px">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Publish my project online</div>
+            <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px;counter-reset:s">
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">1</span>Open the project you want to share.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">2</span>In the Repo view, press <strong style="color:var(--text-secondary);font-weight:600">Publish</strong>.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">3</span>Pick who can see it, then confirm.</li>
+            </ol>
+            <a href="#g6" style="font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px">Show me<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h6M6.5 3.5 9 6 6.5 8.5"></path></svg></a>
+          </div>
+
+          <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:16px 17px;display:flex;flex-direction:column;gap:11px">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Undo what the agent changed</div>
+            <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px">
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">1</span>Find the checkpoint from just before the change.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">2</span>Press <strong style="color:var(--text-secondary);font-weight:600">Undo to here</strong>.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">3</span>Your files go back to how they were.</li>
+            </ol>
+            <a href="#g8" style="font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px">Show me<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h6M6.5 3.5 9 6 6.5 8.5"></path></svg></a>
+          </div>
+
+          <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:16px 17px;display:flex;flex-direction:column;gap:11px">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Start a phase with the agent</div>
+            <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px">
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">1</span>Open the phase in the Roadmap.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">2</span>Press <strong style="color:var(--text-secondary);font-weight:600">Start with the agent</strong>.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">3</span>Answer its questions; it works while you watch.</li>
+            </ol>
+            <a href="#g6" style="font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px">Show me<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h6M6.5 3.5 9 6 6.5 8.5"></path></svg></a>
+          </div>
+
+          <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:16px 17px;display:flex;flex-direction:column;gap:11px">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Understand a red mark in “what needs you”</div>
+            <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px">
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">1</span>A red dot means one thing is waiting on you.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">2</span>Click it to read what happened, in plain words.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">3</span>Do the one action it suggests.</li>
+            </ol>
+            <a href="#g8" style="font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px">Show me<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h6M6.5 3.5 9 6 6.5 8.5"></path></svg></a>
+          </div>
+
+          <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:16px 17px;display:flex;flex-direction:column;gap:11px">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Bring down changes from another computer</div>
+            <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px">
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">1</span>Open the project in the Repo view.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">2</span>Press <strong style="color:var(--text-secondary);font-weight:600">Bring down</strong>.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">3</span>The newest version lands on this computer.</li>
+            </ol>
+            <a href="#g6" style="font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px">Show me<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h6M6.5 3.5 9 6 6.5 8.5"></path></svg></a>
+          </div>
+
+          <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:16px 17px;display:flex;flex-direction:column;gap:11px">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Start a fresh project</div>
+            <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px">
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">1</span>From the picker, press <strong style="color:var(--text-secondary);font-weight:600">New project</strong>.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">2</span>Give it a name and pick a folder.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">3</span>Chronicle opens it, ready to go.</li>
+            </ol>
+            <a href="#g5" style="font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px">Show me<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h6M6.5 3.5 9 6 6.5 8.5"></path></svg></a>
+          </div>
+
+          <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:16px 17px;display:flex;flex-direction:column;gap:11px">
+            <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Sign back in when the agent needs a login</div>
+            <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px">
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">1</span>The agent shows “isn’t signed in”.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">2</span>Press <strong style="color:var(--text-secondary);font-weight:600">Sign in</strong> — a terminal opens.</li>
+              <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-variant-numeric:tabular-nums">3</span>Finish there; the agent picks up on its own.</li>
+            </ol>
+            <a href="#g4" style="font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px">Show me<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h6M6.5 3.5 9 6 6.5 8.5"></path></svg></a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:7px;margin-top:6px">
+      <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">“Show me” landing — Help closes, the app takes you there and rings the control</span>
+      <div data-screen-label="G7 show-me landing" style="width:820px;position:relative;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:11px;overflow:hidden;box-shadow:var(--shadow-overlay)">
+        <div style="height:44px;display:flex;align-items:center;padding:0 14px;gap:12px;border-bottom:1px solid var(--divider)">
+          <div style="display:flex;gap:8px"><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span></div>
+          <div style="display:flex;align-items:center;gap:8px;height:30px;padding:0 12px;background:var(--fill-hover);border:1px solid var(--border-strong);border-radius:8px"><span style="width:8px;height:8px;border-radius:3px;background:var(--mark-3)"></span><span style="font-size:12.5px;font-weight:500;color:var(--text-primary)">lumen-site</span></div>
+          <span style="flex:1"></span>
+        </div>
+        <div style="display:flex;height:360px">
+          <div style="width:52px;border-right:1px solid var(--divider);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:6px;flex-shrink:0">
+            <button aria-label="Roadmap" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-strong);border-radius:8px;background:transparent;color:var(--text-subtle);cursor:pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3v7.5M3 3c1.5 0 2 1 4 1s2.5-1 4-1 2 1 2 1v7.5s-.5-1-2-1-2.5 1-4 1-2.5-1-4-1"></path><path d="M3 13.5v-3"></path></svg></button>
+            <button aria-label="Repo" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--selected-bg);border-radius:8px;background:var(--selected-bg);color:var(--selected-fg);cursor:pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="5" cy="4" r="1.8"></circle><circle cx="5" cy="12" r="1.8"></circle><circle cx="11" cy="8" r="1.8"></circle><path d="M5 5.8v4.4M6.8 11.3c2.4-.4 4.2-1.1 4.2-3.3v-.2"></path></svg></button>
+            <button aria-label="Kanban" style="width:30px;height:30px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border-strong);border-radius:8px;background:transparent;color:var(--text-subtle);cursor:pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.2" y="2.5" width="3.4" height="11" rx="1"></rect><rect x="6.9" y="2.5" width="3.4" height="7" rx="1"></rect><rect x="11.6" y="2.5" width="3.4" height="4.5" rx="1"></rect></svg></button>
+          </div>
+          <div style="flex:1;padding:22px 26px;display:flex;flex-direction:column;gap:16px;min-width:0">
+            <div style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Repo</div>
+            <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:16px 18px;display:flex;align-items:center;gap:16px">
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+                <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Ready to publish</div>
+                <div style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">Everything is saved. Put this project online so others can see it.</div>
+              </div>
+              <div style="position:relative;flex-shrink:0">
+                <button style="height:33px;padding:0 16px;background:var(--primary);color:var(--primary-fg);border:none;border-radius:8px;font-size:12.5px;font-weight:600;font-family:var(--font-sans);cursor:pointer;box-shadow:0 0 0 3px var(--surface-app), 0 0 0 5px var(--text-secondary)">Publish</button>
+              </div>
+            </div>
+            <div style="opacity:.4;display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:center;gap:10px;font-size:12.5px"><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-subtle);background:var(--fill-subtle);border-radius:5px;padding:1px 6px">R-1</span><span style="color:var(--text-secondary)">Missing screens get drawn</span><span style="display:inline-flex;align-items:center;gap:5px;color:var(--state-success)"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 6.5 5 9.5 10 3"></path></svg>done</span></div>
+              <div style="display:flex;align-items:center;gap:10px;font-size:12.5px"><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-subtle);background:var(--fill-subtle);border-radius:5px;padding:1px 6px">R-2</span><span style="color:var(--text-secondary)">The beauty pass</span><span style="display:inline-flex;align-items:center;gap:5px;color:var(--state-success)"><svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 6.5 5 9.5 10 3"></path></svg>done</span></div>
+            </div>
+          </div>
+        </div>
+        <div style="position:absolute;top:150px;right:26px;width:224px;display:flex;flex-direction:column;gap:0;filter:drop-shadow(var(--shadow-overlay))">
+          <div style="background:var(--surface-overlay);border:1px solid var(--border-strong);border-radius:10px;padding:12px 13px;display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;align-items:center;gap:7px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"><circle cx="8" cy="8" r="6"></circle><path d="M6.2 6.2c.2-1 1-1.6 1.9-1.6 1 0 1.9.7 1.9 1.7 0 1.3-1.9 1.4-1.9 2.7M8 11.4v.1"></path></svg><span style="font-size:12px;font-weight:600;color:var(--text-primary)">Here it is</span><span style="flex:1"></span><span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">1 of 1</span></div>
+            <div style="font-size:12px;line-height:1.5;color:var(--text-muted)">Press <strong style="color:var(--text-secondary);font-weight:600">Publish</strong> to put your project online.</div>
+            <div style="display:flex;justify-content:flex-end;padding-top:2px"><button style="height:26px;padding:0 10px;background:transparent;color:var(--text-secondary);border:none;font-size:11.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer;border-radius:6px" style-hover="background:var(--fill-hover);color:var(--text-primary)">Got it</button></div>
+          </div>
+          <span style="width:12px;height:12px;background:var(--surface-overlay);border-right:1px solid var(--border-strong);border-bottom:1px solid var(--border-strong);transform:rotate(45deg);margin:-7px 0 0 26px"></span>
+        </div>
+      </div>
+      <span style="font-size:11px;color:var(--text-dim);line-height:1.5;max-width:820px">Help dismisses; the rail switches to the surface that owns the step (here Repo) and the exact control gets a soft ring, with a one-line bubble echoing the recipe’s last step. Nothing is auto-pressed. If a prerequisite is missing, it routes to that step first. Ring is a 2px <span style="font-family:var(--font-mono)">--text-secondary</span> halo — no new colour.</span>
+    </div>
+  </div>
+  <!-- ============ G8 · Help — glossary + shortcuts + search ============ -->
+  <div id="g8" style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <a href="#g8" style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);background:var(--fill-subtle);border-radius:6px;padding:2px 7px">G8</a>
+      <span style="font-size:13px;font-weight:500;color:var(--text-secondary)">The Help screen — the plain glossary, shortcuts &amp; search matching</span>
+      <span style="font-size:11.5px;color:var(--text-dim);max-width:640px">Every term the app uses, translated to one plain line (with its technical name in small mono, if there is one). The old ⌘/ overlay is folded in as a shortcuts section. Search matches across recipes and glossary — one result list, both kinds.</span>
+    </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+
+      <div data-screen-label="G8 glossary and shortcuts" style="width:700px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:11px;overflow:hidden;box-shadow:var(--shadow-overlay)">
+        <div style="padding:24px 28px 28px;display:flex;flex-direction:column;gap:24px">
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:baseline;justify-content:space-between"><span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">In plain words</span><span style="font-size:11.5px;color:var(--text-dim)">10 terms</span></div>
+            <div style="display:flex;flex-direction:column">
+              <div style="display:grid;grid-template-columns:130px 1fr;gap:16px;padding:11px 2px"><span style="font-size:13px;font-weight:600;color:var(--text-primary)">save</span><div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">Record where your project is right now, so you can come back to it.</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim)">commit</span></div></div>
+              <div style="display:grid;grid-template-columns:130px 1fr;gap:16px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:13px;font-weight:600;color:var(--text-primary)">publish</span><div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">Put your project online so others can see it.</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim)">push</span></div></div>
+              <div style="display:grid;grid-template-columns:130px 1fr;gap:16px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:13px;font-weight:600;color:var(--text-primary)">bring down</span><div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">Get the newest version of your project onto this computer.</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim)">pull</span></div></div>
+              <div style="display:grid;grid-template-columns:130px 1fr;gap:16px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:13px;font-weight:600;color:var(--text-primary)">the agent</span><span style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">The AI that writes and edits your project for you.</span></div>
+              <div style="display:grid;grid-template-columns:130px 1fr;gap:16px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:13px;font-weight:600;color:var(--text-primary)">a phase</span><span style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">A chunk of work with a goal — like “add the sign-up page”.</span></div>
+              <div style="display:grid;grid-template-columns:130px 1fr;gap:16px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:13px;font-weight:600;color:var(--text-primary)">a round</span><span style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">One back-and-forth with the agent inside a phase.</span></div>
+              <div style="display:grid;grid-template-columns:130px 1fr;gap:16px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:13px;font-weight:600;color:var(--text-primary)">a checkpoint</span><span style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">A saved moment you can go back to if something goes wrong.</span></div>
+              <div style="display:grid;grid-template-columns:130px 1fr;gap:16px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:13px;font-weight:600;color:var(--text-primary)">works freely</span><span style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">The agent edits files without asking each time. Commands still ask.</span></div>
+              <div style="display:grid;grid-template-columns:130px 1fr;gap:16px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:13px;font-weight:600;color:var(--text-primary)">what needs you</span><span style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">The list of things waiting on a decision or action from you.</span></div>
+              <div style="display:grid;grid-template-columns:130px 1fr;gap:16px;padding:11px 2px;border-top:1px solid var(--divider)"><span style="font-size:13px;font-weight:600;color:var(--text-primary)">a workspace</span><div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:12.5px;line-height:1.5;color:var(--text-muted)">The folder on your computer where one project lives.</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-dim)">working directory</span></div></div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:12px;border-top:1px solid var(--divider);padding-top:22px">
+            <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Keyboard shortcuts</span>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:9px 26px">
+              <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);background:var(--fill-subtle);border:1px solid var(--border-hairline);border-radius:5px;padding:2px 7px;min-width:44px;text-align:center">⌘K</span><span style="font-size:12.5px;color:var(--text-muted)">Open another project</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);background:var(--fill-subtle);border:1px solid var(--border-hairline);border-radius:5px;padding:2px 7px;min-width:44px;text-align:center">⌘J</span><span style="font-size:12.5px;color:var(--text-muted)">Show or hide the terminal</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);background:var(--fill-subtle);border:1px solid var(--border-hairline);border-radius:5px;padding:2px 7px;min-width:44px;text-align:center">⌥⌘1</span><span style="font-size:12.5px;color:var(--text-muted)">Show or hide the content pane</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);background:var(--fill-subtle);border:1px solid var(--border-hairline);border-radius:5px;padding:2px 7px;min-width:44px;text-align:center">⌥⌘2</span><span style="font-size:12.5px;color:var(--text-muted)">Show or hide the agent</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);background:var(--fill-subtle);border:1px solid var(--border-hairline);border-radius:5px;padding:2px 7px;min-width:44px;text-align:center">⌥⌘3</span><span style="font-size:12.5px;color:var(--text-muted)">Show or hide the terminal pane</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);background:var(--fill-subtle);border:1px solid var(--border-hairline);border-radius:5px;padding:2px 7px;min-width:44px;text-align:center">⌘↩</span><span style="font-size:12.5px;color:var(--text-muted)">Send a message to the agent</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);background:var(--fill-subtle);border:1px solid var(--border-hairline);border-radius:5px;padding:2px 7px;min-width:44px;text-align:center">⌘R</span><span style="font-size:12.5px;color:var(--text-muted)">Check again now</span></div>
+              <div style="display:flex;align-items:center;gap:10px"><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-secondary);background:var(--fill-subtle);border:1px solid var(--border-hairline);border-radius:5px;padding:2px 7px;min-width:44px;text-align:center">⌘/</span><span style="font-size:12.5px;color:var(--text-muted)">Open Help</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:7px;width:340px">
+        <span style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer)">Search — one list, both kinds</span>
+        <div data-screen-label="G8 search results" style="background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:11px;overflow:hidden;box-shadow:var(--shadow-overlay)">
+          <div style="padding:14px 16px 8px">
+            <div style="display:flex;align-items:center;gap:10px;height:38px;background:var(--surface-input);border:1px solid var(--border-field-focus);border-radius:9px;padding:0 12px">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--text-subtle)" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3 3"></path></svg>
+              <span style="font-size:13px;color:var(--text-primary)">undo</span>
+              <span style="width:1px;height:15px;background:var(--text-dim);animation:wv-pulse 1.1s step-end infinite"></span>
+            </div>
+          </div>
+          <div style="padding:4px 8px 12px;display:flex;flex-direction:column">
+            <div style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer);padding:8px 8px 5px">Recipes</div>
+            <a href="#g7" style="display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;color:inherit" style-hover="background:var(--fill-hover)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--text-subtle)" stroke-width="1.4" style="flex-shrink:0"><path d="M4 2.5h5l3 3v8H4z"></path><path d="M9 2.5v3h3M6 8.5h4M6 10.8h4"></path></svg><span style="font-size:12.5px;color:var(--text-secondary);flex:1">Undo what the agent changed</span></a>
+            <div style="font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-dimmer);padding:10px 8px 5px;border-top:1px solid var(--divider);margin-top:4px">Glossary</div>
+            <a href="#g8" style="display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;color:inherit" style-hover="background:var(--fill-hover)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--text-subtle)" stroke-width="1.4" style="flex-shrink:0"><path d="M3 3.5h7a1.5 1.5 0 0 1 1.5 1.5v7.5H4.5A1.5 1.5 0 0 1 3 12z"></path><path d="M3 3.5v9"></path></svg><div style="display:flex;flex-direction:column;gap:1px;flex:1"><span style="font-size:12.5px;color:var(--text-secondary)">a checkpoint</span><span style="font-size:11px;color:var(--text-dim)">a saved moment you can go back to</span></div></a>
+            <a href="#g8" style="display:flex;align-items:center;gap:10px;padding:9px 8px;border-radius:8px;color:inherit" style-hover="background:var(--fill-hover)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="var(--text-subtle)" stroke-width="1.4" style="flex-shrink:0"><path d="M3 3.5h7a1.5 1.5 0 0 1 1.5 1.5v7.5H4.5A1.5 1.5 0 0 1 3 12z"></path><path d="M3 3.5v9"></path></svg><div style="display:flex;flex-direction:column;gap:1px;flex:1"><span style="font-size:12.5px;color:var(--text-secondary)">save</span><span style="font-size:11px;color:var(--text-dim)">record where your project is right now</span></div></a>
+          </div>
+        </div>
+        <span style="font-size:11px;color:var(--text-dim);line-height:1.5">Results are grouped by kind and ranked by match. Selecting a recipe scrolls to it; a glossary hit expands its row. Empty search shows the full glossary + recipes.</span>
+      </div>
+    </div>
+  </div>
+  <!-- ============ Light proof ============ -->
+  <div id="g-light" data-theme="light" style="display:flex;flex-direction:column;gap:12px">
+    <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+      <a href="#g-light" style="font-family:var(--font-mono);font-size:11px;color:#6e6e6e;background:rgba(0,0,0,.03);border-radius:6px;padding:2px 7px">G1 + G4 + G7 · light</a>
+      <span style="font-size:13px;font-weight:500;color:#363636">Same tokens, data-theme=&quot;light&quot; — no per-frame overrides</span>
+    </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start">
+
+      <div data-screen-label="G1 light" style="width:600px;background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:11px;overflow:hidden;box-shadow:var(--shadow-panel)">
+        <div style="height:44px;display:flex;align-items:center;padding:0 16px;gap:8px;border-bottom:1px solid var(--divider)"><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span><span style="width:12px;height:12px;border-radius:50%;background:var(--fill-hover);border:1px solid var(--border-strong)"></span></div>
+        <div style="padding:28px 30px 30px;display:flex;flex-direction:column;gap:20px">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:21px;font-weight:600;color:var(--text-primary);letter-spacing:-.01em">Let’s get Chronicle ready</div>
+            <div style="font-size:13px;line-height:1.6;color:var(--text-muted);max-width:52ch">This sets up the tools Chronicle needs. It won’t touch anything else, and you won’t need to type any commands.</div>
+          </div>
+          <div style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:15px 17px;display:flex;align-items:center;gap:18px;box-shadow:var(--shadow-panel)">
+            <div style="display:flex;flex-direction:column;gap:8px;flex:1;min-width:0"><div style="display:flex;align-items:baseline;gap:10px"><span style="font-size:15px;font-weight:600;color:var(--text-primary)">3 of 6 ready</span><span style="font-size:12.5px;color:var(--text-dim)">a few things need you</span></div><span style="height:4px;border-radius:2px;background:var(--fill-hover);overflow:hidden;display:block"><span style="display:block;width:50%;height:100%;background:var(--text-secondary);border-radius:2px"></span></span></div>
+            <button style="height:33px;padding:0 15px;background:var(--primary);color:var(--primary-fg);border:none;border-radius:8px;font-size:12.5px;font-weight:600;font-family:var(--font-sans);cursor:pointer;white-space:nowrap" style-hover="background:var(--primary-hover)">Set everything up for me</button>
+          </div>
+          <div style="display:flex;flex-direction:column">
+            <div style="display:flex;align-items:center;gap:15px;padding:14px 4px"><span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="15" height="15" viewBox="0 0 16 16" fill="#D97757"><path d="M8 0.8 9.4 5 13.8 3.2 10.9 6.9 15.2 8.6 10.6 9.2 12.3 13.6 8.6 10.7 6.9 15 6.3 10.4 1.9 12.1 4.8 8.4 0.5 6.7 5.1 6.1 3.4 1.7 7.1 4.6z"></path></svg></span><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><div style="font-size:13px;font-weight:500;color:var(--text-primary)">The AI that does the work</div><div style="font-size:12px;color:var(--text-dim)">Claude Code — the assistant that writes and edits your project.</div></div><span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-success);white-space:nowrap"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2 6.5 5 9.5 10 3"></path></svg>ready</span></div>
+            <div style="display:flex;align-items:center;gap:15px;padding:14px 4px;border-top:1px solid var(--divider)"><span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="3" width="12" height="10" rx="1.6"></rect><path d="m4.6 6.4 2 1.6-2 1.6M8.4 9.8h3"></path></svg></span><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><div style="font-size:13px;font-weight:500;color:var(--text-primary)">Make the AI work in the terminal</div><div style="font-size:12px;color:var(--text-dim)">The AI is installed, but the terminal can’t find it yet.</div></div><span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-error);white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-error)"></span>needs you</span><button style="height:33px;padding:0 14px;background:transparent;color:var(--text-primary);border:1px solid var(--border-strong);border-radius:8px;font-size:12.5px;font-weight:500;font-family:var(--font-sans);cursor:pointer;white-space:nowrap" style-hover="background:var(--fill-hover)">Fix it</button></div>
+            <div style="display:flex;align-items:center;gap:15px;padding:14px 4px;border-top:1px solid var(--divider)"><span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--text-subtle)"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4.4 12.2a3 3 0 0 1-.4-5.97A3.4 3.4 0 0 1 10.6 5.4a2.8 2.8 0 0 1 1.2 5.4"></path><path d="M8 8v4.8M6.2 10.4 8 12.4l1.8-2"></path></svg></span><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px"><div style="font-size:13px;font-weight:500;color:var(--text-primary)">Your projects’ online home</div><div style="display:flex;align-items:center;gap:10px"><span style="flex:1;height:3px;border-radius:2px;background:var(--fill-hover);overflow:hidden;display:block"><span style="display:block;width:34%;height:100%;background:var(--state-neutral);border-radius:2px"></span></span><span style="font-family:var(--font-mono);font-size:11px;color:var(--text-subtle);font-variant-numeric:tabular-nums">12.1 of 34 MB</span></div></div><span style="display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:var(--state-neutral);white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:var(--state-neutral);animation:wv-pulse 1.4s ease-in-out infinite"></span>installing · 34%</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:16px;width:420px">
+        <div data-screen-label="G4 light waiting" style="background:var(--surface-app);border:1px solid var(--border-hairline);border-radius:10px;padding:4px 16px;box-shadow:var(--shadow-panel)">
+          <div style="display:flex;flex-direction:column;gap:9px;padding:14px 4px">
+            <div style="display:flex;align-items:center;gap:15px"><span style="width:30px;height:30px;border-radius:8px;background:var(--fill-subtle);border:1px solid var(--border-hairline);display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="14" height="14" viewBox="0 0 16 16" fill="#D97757"><path d="M8 0.8 9.4 5 13.8 3.2 10.9 6.9 15.2 8.6 10.6 9.2 12.3 13.6 8.6 10.7 6.9 15 6.3 10.4 1.9 12.1 4.8 8.4 0.5 6.7 5.1 6.1 3.4 1.7 7.1 4.6z"></path></svg></span><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><div style="font-size:13px;font-weight:500;color:var(--text-primary)">Sign in to Claude</div><div style="font-size:12px;color:var(--text-dim)">Finish signing in in the terminal tab that just opened.</div></div></div>
+            <div style="display:flex;align-items:center;gap:8px;padding:2px 1px;margin-left:45px"><span style="width:11px;height:11px;border:1.5px solid var(--state-neutral);border-top-color:transparent;border-radius:50%;animation:wv-spin .7s linear infinite;display:inline-block;flex-shrink:0"></span><span style="font-size:11.5px;color:var(--text-muted)">Waiting for you to finish signing in…</span><span style="font-family:var(--font-mono);font-size:10.5px;color:var(--text-subtle);background:var(--fill-subtle);border-radius:5px;padding:1px 6px">claude · sign-in</span></div>
+          </div>
+        </div>
+        <div data-screen-label="G7 light recipe" style="background:var(--surface-card);border:1px solid var(--border-hairline);border-radius:10px;padding:16px 17px;display:flex;flex-direction:column;gap:11px;box-shadow:var(--shadow-panel)">
+          <div style="font-size:14px;font-weight:600;color:var(--text-primary)">Publish my project online</div>
+          <ol style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:7px">
+            <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0">1</span>Open the project you want to share.</li>
+            <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0">2</span>In the Repo view, press <strong style="color:var(--text-secondary);font-weight:600">Publish</strong>.</li>
+            <li style="display:flex;gap:9px;font-size:12.5px;line-height:1.5;color:var(--text-muted)"><span style="width:17px;height:17px;border-radius:50%;background:var(--fill-hover);color:var(--text-secondary);font-size:10.5px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0">3</span>Pick who can see it, then confirm.</li>
+          </ol>
+          <a href="#g7" style="font-size:12px;color:var(--text-secondary);display:inline-flex;align-items:center;gap:5px">Show me<svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h6M6.5 3.5 9 6 6.5 8.5"></path></svg></a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="border-top:1px solid var(--divider);padding-top:20px;display:flex;flex-direction:column;gap:6px;max-width:820px">
+    <div style="font-size:11.5px;color:var(--text-dim);line-height:1.6;text-wrap:pretty">Deck 8 conventions honored from the shipped app (v0.3): one button size scale (sm 28 · md 33 · lg 36), primary + secondary default md; disabled primary is the quiet filled state; StateWord keeps its dot pinned and truncates its label, working/waiting dots pulse, spinners are the 1.5px ring; the two sign-in hand-offs match the agent pane’s needs-login waiting treatment 1:1; overlays center to the app window; the setup gate sits under the same 44px title-bar row as the picker; scrollbars are 2px; mono only for download sizes / technical secondaries. Divergence flagged: the rail’s lone “?” glyph (Deck 2) is retired in favour of a real Help destination (<a href="#g6">G6</a>).</div>
+    <div style="font-size:11px;color:var(--text-dimmer)">Chronicle v2 · Weave DS · Deck 8 of 8</div>
+  </div>
+</section>
+</x-dc>
+</body>
+</html>
