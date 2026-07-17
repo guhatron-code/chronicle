@@ -7,7 +7,7 @@
  * Works freely is confirmed once per session, with copy that states exactly
  * what it covers.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   agentSessionFor,
   cancelAgentTurn,
@@ -119,6 +119,14 @@ export function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s.draft, dir]);
 
+  /* the input grows with its content up to a cap, then scrolls */
+  useLayoutEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${ta.scrollHeight}px`;
+  }, [text]);
+
   const send = () => {
     const body = text.trim();
     if (!body || disabled || sending || s.turnActive) return;
@@ -194,17 +202,17 @@ export function Composer({
           if (s.draft && e.target.value !== s.draft.text) setAgentDraft(dir, null);
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" && e.metaKey) {
+          // Enter sends; Shift+Enter (and IME composition) inserts a newline
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             send();
           }
         }}
         className={cn(
-          "min-h-14 resize-none rounded-md border border-border-field bg-surface-input px-[11px] py-[9px] text-[13px] leading-normal text-text-primary outline-none placeholder:text-text-dimmer",
+          "max-h-[200px] min-h-14 resize-none overflow-y-auto rounded-md border border-border-field bg-surface-input px-[11px] py-[9px] text-[13px] leading-normal text-text-primary outline-none placeholder:text-text-dimmer",
           "focus:border-border-field-focus focus:[box-shadow:var(--focus-ring)]",
           disabled && "opacity-60",
         )}
-        rows={2}
       />
       <div className="flex items-center gap-[9px]">
         {asksFirst && worksFreely && (
@@ -274,7 +282,7 @@ export function Composer({
           </button>
         ) : (
           <>
-            <Kbd>⌘↩</Kbd>
+            <Kbd>↩</Kbd>
             <button
               data-agent-send
               disabled={disabled || sending || !text.trim()}
