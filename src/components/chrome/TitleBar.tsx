@@ -14,6 +14,16 @@ import type { MarkIndex } from "./atoms";
 
 const MARK_BG = ["", "bg-mark-1", "bg-mark-2", "bg-mark-3", "bg-mark-4", "bg-mark-5", "bg-mark-6"];
 
+/** I — the update line's state machine (F40.3). */
+export type UpdateLineProps = {
+  version: string;
+  phase: "available" | "checking" | "downloading" | "installing" | "restart";
+  pct: number | null;
+  onInstall: () => void;
+  onDismiss: () => void;
+  onRestart: () => void;
+};
+
 export type ProjectTab = {
   dir: string;
   name: string;
@@ -81,7 +91,7 @@ export function TitleBar({
   activeDir: string;
   checkedAt: string | null;
   /** A newer Chronicle is ready — the quiet right-side affordance. */
-  update?: { version: string; busy: boolean; onInstall: () => void; onDismiss: () => void } | null;
+  update?: UpdateLineProps | null;
   degraded: string | null;
   /** F31 — the visibility cluster, leftmost of the right-side items. */
   panes?: PaneVisibility;
@@ -207,23 +217,47 @@ export function TitleBar({
         </span>
       )}
       {update && (
-        <span className="mr-3 inline-flex shrink-0 items-center gap-2 text-[11.5px]">
-          <span className="text-text-secondary">Chronicle {update.version} is ready</span>
-          <button
-            disabled={update.busy}
-            onClick={update.onInstall}
-            className="font-medium text-text-primary underline underline-offset-2 hover:text-text-secondary disabled:opacity-55"
-          >
-            {update.busy ? "Updating…" : "Update"}
-          </button>
-          {!update.busy && (
-            <button
-              aria-label="Dismiss the update notice"
-              onClick={update.onDismiss}
-              className="flex size-4 items-center justify-center rounded-[4px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
-            >
-              <XGlyph size={8} />
-            </button>
+        <span data-update-line={update.phase} className="mr-3 inline-flex shrink-0 items-center gap-2 text-[11.5px]">
+          {update.phase === "checking" ? (
+            <span className="text-text-subtle">Checking…</span>
+          ) : update.phase === "downloading" ? (
+            <span className="inline-flex items-center gap-2 text-text-subtle">
+              <span
+                aria-hidden
+                className="inline-block size-2.5 shrink-0 rounded-full border-[1.5px] border-state-neutral"
+                style={{ borderTopColor: "transparent", animation: "wv-spin 0.7s linear infinite" }}
+              />
+              Downloading{update.pct != null && <span className="font-mono tabular-nums">{update.pct}%</span>}
+            </span>
+          ) : update.phase === "installing" ? (
+            <span className="text-text-subtle">Installing…</span>
+          ) : update.phase === "restart" ? (
+            <>
+              <span className="text-text-subtle">Restart to finish ·</span>
+              <button
+                onClick={update.onRestart}
+                className="font-medium text-text-primary underline underline-offset-2 hover:text-text-secondary"
+              >
+                Restart
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="text-text-secondary">Chronicle {update.version} is ready</span>
+              <button
+                onClick={update.onInstall}
+                className="font-medium text-text-primary underline underline-offset-2 hover:text-text-secondary"
+              >
+                Update
+              </button>
+              <button
+                aria-label="Dismiss the update notice"
+                onClick={update.onDismiss}
+                className="flex size-4 items-center justify-center rounded-[4px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+              >
+                <XGlyph size={8} />
+              </button>
+            </>
           )}
         </span>
       )}

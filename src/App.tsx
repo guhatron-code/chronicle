@@ -54,7 +54,7 @@ import { KanbanPane } from "@/screens/kanban/KanbanPane";
 import { evictKanban, kanbanFor, openTaskInKanban, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { announce } from "@/lib/journal";
 import { listen } from "@tauri-apps/api/event";
-import { checkForUpdate, dismissUpdate, installUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
+import { checkForUpdate, dismissUpdate, installUpdate, restartUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
 import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, subscribeAgent } from "@/lib/agent-session";
@@ -543,12 +543,15 @@ export default function App() {
   const updateProps = updateAvailable()
     ? {
         version: updateAvailable()!.version,
-        busy: updateAvailable()!.busy,
+        phase: updateAvailable()!.phase,
+        pct: updateAvailable()!.pct,
         onInstall: () =>
           void installUpdate().catch((e) =>
             toastError("The update didn't finish", String(e).slice(0, 90)),
           ),
         onDismiss: dismissUpdate,
+        onRestart: () =>
+          void restartUpdate().catch((e) => toastError("Couldn't restart", String(e).slice(0, 90))),
       }
     : null;
 

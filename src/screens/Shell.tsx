@@ -13,7 +13,7 @@
 import { useCallback, useRef } from "react";
 import type { ReactNode } from "react";
 import { Rail, type Pane } from "@/components/chrome/Rail";
-import { TitleBar, type ProjectTab } from "@/components/chrome/TitleBar";
+import { TitleBar, type ProjectTab, type UpdateLineProps } from "@/components/chrome/TitleBar";
 import type { PaneUnit, PaneVisibility } from "@/components/chrome/PaneCluster";
 import {
   TerminalColumn,
@@ -67,7 +67,7 @@ export function Shell({
   pane: Pane;
   onPane: (p: Pane) => void;
   checkedAt: string | null;
-  update?: { version: string; busy: boolean; onInstall: () => void; onDismiss: () => void } | null;
+  update?: UpdateLineProps | null;
   degraded: string | null;
   queuedCount: number;
   checking?: boolean;
