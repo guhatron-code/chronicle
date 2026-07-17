@@ -21,6 +21,7 @@ import {
   type TerminalTab,
 } from "@/components/chrome/TerminalColumn";
 import { AgentSection } from "@/screens/agent/AgentSection";
+import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
 export function Shell({
   tabs,
@@ -43,8 +44,7 @@ export function Shell({
   hSplitPct,
   onHSplitPct,
   agentBody,
-  agentStateWord,
-  agentStateKind,
+  onConfirm,
   onSwitch,
   onClose,
   onAdd,
@@ -83,10 +83,10 @@ export function Shell({
   /** The agent section's height as % of the right column (both expanded). */
   hSplitPct: number;
   onHSplitPct: (pct: number) => void;
-  /** Z-2b fills this with the real thread + composer. */
+  /** The agent pane body — thread + composer (Z-2b). */
   agentBody?: ReactNode;
-  agentStateWord?: string;
-  agentStateKind?: "dim" | "neutral" | "error";
+  /** confirm sheet dispatcher (End session mid-turn, Works freely, …) */
+  onConfirm: (spec: ConfirmSpec) => void;
   onSwitch: (dir: string) => void;
   onClose: (dir: string) => void;
   onAdd: () => void;
@@ -238,10 +238,10 @@ export function Shell({
             {panes.agent &&
               (agentCollapsed ? (
                 <AgentSection
+                  dir={activeDir}
                   collapsed
                   onToggleCollapsed={onToggleAgentCollapsed}
-                  stateWord={agentStateWord}
-                  stateKind={agentStateKind}
+                  onConfirm={onConfirm}
                 />
               ) : (
                 <div
@@ -254,10 +254,10 @@ export function Shell({
                   }}
                 >
                   <AgentSection
+                    dir={activeDir}
                     collapsed={false}
                     onToggleCollapsed={onToggleAgentCollapsed}
-                    stateWord={agentStateWord}
-                    stateKind={agentStateKind}
+                    onConfirm={onConfirm}
                   >
                     {agentBody}
                   </AgentSection>

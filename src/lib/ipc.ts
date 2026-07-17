@@ -350,6 +350,30 @@ export const onPtyExit = (cb: (id: number) => void): Promise<UnlistenFn> =>
 export const decodePtyChunk = (b64: string): Uint8Array =>
   Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
+/* ---------- the agent pane (ACP — src-tauri/src/acp.rs) ---------- */
+
+/** One `acp-update` event: the raw agent→client JSON plus our session key.
+ *  Chronicle lifecycle events ride the same channel as `_chronicle/*` methods. */
+export interface AcpUpdate {
+  dir: string;
+  message: {
+    id?: unknown;
+    method?: string;
+    params?: Record<string, unknown>;
+    [k: string]: unknown;
+  };
+}
+export const agentSessionStart = (dir: string) => invoke("agent_session_start", { dir });
+export const agentSessionState = (dir: string) => invoke<Record<string, unknown>>("agent_session_state", { dir });
+export const agentPrompt = (dir: string, message: string) => invoke("agent_prompt", { dir, message });
+export const agentCancel = (dir: string) => invoke("agent_cancel", { dir });
+export const agentSetMode = (dir: string, mode: string) => invoke("agent_set_mode", { dir, mode });
+export const agentRespondPermission = (dir: string, requestId: string, option: string | null) =>
+  invoke("agent_respond_permission", { dir, requestId, option });
+export const agentSessionStop = (dir: string) => invoke("agent_session_stop", { dir });
+export const onAcpUpdate = (cb: (u: AcpUpdate) => void): Promise<UnlistenFn> =>
+  listen<AcpUpdate>("acp-update", (e) => cb(e.payload));
+
 /* ---------- window chrome + dialogs (frameless window) ---------- */
 export const pickFolder = () => openDialog({ directory: true });
 

@@ -74,3 +74,36 @@ reload; hidden terminal keeps its session (no `pty_kill` in the stub log);
 rail auto-reveal; horizontal splitter drag + persistence.
 
 **Commit** — 9fb1e96
+
+## Z-2b · The agent pane (F32–F35 + F37 header)
+
+**What landed** — the pane built to the Deck 7 comps and wired to the Z-1
+seam. `src/lib/agent-session.ts`: a framework-free per-project store (the
+term-sessions pattern) that reduces the ONE `acp-update` stream into a
+renderable thread — chunks, tool calls/updates (with an honest multiset-line
+± stat from ACP diff content), permission asks keyed by the wire request id,
+mode/usage updates, `_chronicle/*` lifecycle. Components under
+`src/screens/agent/`: `AgentPane` (state banners: disconnected · installing
+the bridge · needs login with the sign-in-in-a-terminal flow + retry-on-exit ·
+honest bridge error + Try again · session ended), `Composer` (⌘Enter sends,
+Stop replaces Send while working, the Asks-first/Works-freely control built
+from the AGENT'S advertised modes with the once-per-session confirm, usage
+meter hidden without data), `ToolCard` (edit/run/read anatomies, all four
+statuses, rejected "You said no — skipped", middle truncation, capped
+output), `PermissionCard` (agent-supplied options mapped to the canonical
+labels — options not offered are absent; answered/cancelled collapse to
+one-line records). `AgentSection` header is store-aware: colored Claude mark,
+live state word (working / waiting on you / idle / ended / needs login),
+End session (confirm only mid-turn). ipc.ts gained the agent command
+wrappers + `onAcpUpdate`.
+
+**How it was verified** — `npx tsc --noEmit` + `npx vite build` green. Probe
+suite (stubbed `acp-update` events end-to-end): 6 new probes covering the
+full card taxonomy — lifecycle + streaming-then-settle + usage meter
+appearing only with data; every tool-card kind/status; permission answered
+both ways incl. the denied-call skip treatment; cancelled-while-pending
+resolving (never hanging); needs-login with the terminal sign-in + retry
+after exit; bridge error + turn error + session end + the works-freely
+confirm. Full suite: 12/12 passed (Z-2a probes stay green).
+
+**Commit** — recorded in the following docs commit

@@ -52,6 +52,8 @@ import { announce } from "@/lib/journal";
 import { listen } from "@tauri-apps/api/event";
 import { checkForUpdate, dismissUpdate, installUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
+import { AgentPane } from "@/screens/agent/AgentPane";
+import { subscribeAgent } from "@/lib/agent-session";
 import { copyText, fixesStatus, githubClone, githubRepos, initStatus, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
 
@@ -338,6 +340,7 @@ export default function App() {
   /* ---- terminal sessions (C6) ---- */
   const [, termBump] = useState(0);
   useEffect(() => subscribeTerms(() => termBump((n) => n + 1)), []);
+  useEffect(() => subscribeAgent(() => termBump((n) => n + 1)), []);
   useEffect(() => subscribeKanban(() => termBump((n) => n + 1)), []);
   useEffect(() => subscribeRunFlags(() => termBump((n) => n + 1)), []);
   const setActiveTerm = useCallback((dir: string, id: number) => {
@@ -748,6 +751,15 @@ export default function App() {
         onToggleTerminalCollapsed={() => patchLayout({ terminalCollapsed: !paneLayout.terminalCollapsed })}
         hSplitPct={paneLayout.hSplit}
         onHSplitPct={(pct) => patchLayout({ hSplit: pct })}
+        agentBody={
+          <AgentPane
+            key={active.dir}
+            dir={active.dir}
+            onConfirm={setConfirm}
+            onRevealTerminal={() => patchLayout({ terminal: true, terminalCollapsed: false })}
+          />
+        }
+        onConfirm={setConfirm}
         onSwitch={activate}
         onClose={closeProject}
         onAdd={() => setPaletteOpen(true)}
