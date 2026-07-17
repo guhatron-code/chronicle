@@ -1,0 +1,940 @@
+// The ACP seam — Chronicle drives Claude Code as a child process speaking the
+// Agent Client Protocol (newline-delimited JSON-RPC over stdio), instead of
+// scraping a pty. Plain threads + channels, mirroring the pty reader pattern:
+// no async runtime. Types come from agent-client-protocol-schema (never
+// hand-written); anything unstable-only (usage updates) is optional-consume.
+//
+// Every agent→client message is forwarded to the webview as an `acp-update`
+// event (payload = the raw JSON + our session key). Chronicle-synthesized
+// lifecycle events travel on the same channel under `_chronicle/*` methods so
+// the frontend has ONE stream to consume (and probes can stub it wholesale).
+
+use agent_client_protocol_schema::v1 as proto;
+use agent_client_protocol_schema::ProtocolVersion;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::io::{BufRead, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{mpsc, Arc, Mutex};
+
+/// The pinned adapter. Zed resolves its claude adapter from the ACP registry
+/// (id `claude-acp`) and deliberately uses a version ceiling; Chronicle skips
+/// the registry and pins the npm package directly.
+/// VERIFIED on the npm registry 2026-07-17: `@zed-industries/claude-code-acp`
+/// is DEPRECATED ("renamed to @agentclientprotocol/claude-agent-acp") — the
+/// rename is the pin: `@agentclientprotocol/claude-agent-acp`, latest 0.59.0,
+/// installed and exercised end-to-end by the gated integration test below.
+/// Exact pin first; loosen to a bounded range only if exact-pin installs prove
+/// flaky under npm min-release-age.
+pub const ADAPTER_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp";
+pub const ADAPTER_VERSION: &str = "0.59.0";
+
+const INIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180); // first npx run downloads the bridge
+const NEW_SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const AUTH_REQUIRED_CODE: i64 = -32000;
+
+/// The mode deliberately NOT exposed in the pane: an unconfirmed irreversible
+/// non-repo action has no undo (checkpoints only cover the worktree).
+const FORBIDDEN_MODE: &str = "bypassPermissions";
+
+pub type Emit = Arc<dyn Fn(Value) + Send + Sync>;
+
+pub struct AcpState {
+    sessions: Arc<Mutex<HashMap<String, Arc<AcpSession>>>>,
+}
+
+impl AcpState {
+    pub fn new() -> Self {
+        AcpState { sessions: Arc::new(Mutex::new(HashMap::new())) }
+    }
+
+    pub fn get(&self, key: &str) -> Option<Arc<AcpSession>> {
+        self.sessions.lock().ok()?.get(key).cloned()
+    }
+
+    /// App exit: every adapter child dies through the same kill-and-reap path.
+    pub fn drain(&self) {
+        let all: Vec<Arc<AcpSession>> = match self.sessions.lock() {
+            Ok(mut g) => g.drain().map(|(_, s)| s).collect(),
+            Err(_) => return,
+        };
+        for s in all {
+            s.shutdown(None);
+        }
+    }
+}
+
+/// What a response arriving for one of OUR request ids should do.
+enum Pending {
+    /// A blocking caller (handshake, set_mode) waits on the channel.
+    Waiter(mpsc::Sender<Result<Value, Value>>),
+    /// A prompt turn — nobody blocks; the reader emits `_chronicle/turn_end`.
+    TurnEnd,
+}
+
+/// path → the file's content before the agent's FIRST write this session
+/// (None = the file didn't exist — undo DELETES it). Z-1 keeps this in memory;
+/// Z-3 persists bases under .chronicle/agent/<session>/bases/ and adds diffs+undo.
+pub struct LedgerEntry {
+    pub base: Option<String>,
+}
+
+pub struct AcpSession {
+    key: String,
+    /// The jail: fs/read + fs/write must resolve inside these roots.
+    roots: Vec<PathBuf>,
+    child: Mutex<Option<std::process::Child>>,
+    writer: Mutex<Option<std::process::ChildStdin>>,
+    next_id: AtomicU64,
+    pending: Mutex<HashMap<u64, Pending>>,
+    /// Outstanding permission asks: our stringified request id → the raw wire id.
+    /// Cancel and stop RESOLVE every one of these — a pending ask must never
+    /// hang the adapter.
+    perms: Mutex<HashMap<String, Value>>,
+    session_id: Mutex<Option<String>>,
+    /// The SessionModeState from the session response, raw. Modes are agent-
+    /// defined ids READ from this — never assumed.
+    modes: Mutex<Value>,
+    agent_caps: Mutex<Value>,
+    turn_active: AtomicBool,
+    pub ledger: Mutex<HashMap<String, LedgerEntry>>,
+    emit: Emit,
+    sessions: Arc<Mutex<HashMap<String, Arc<AcpSession>>>>,
+}
+
+/// Build the pinned adapter spawn: `npx --yes -- <package>@<version>`.
+/// ANTHROPIC_API_KEY is blanked so the adapter uses the user's Claude Code
+/// login (verified: Zed does exactly this).
+pub fn adapter_command(npx: &str) -> std::process::Command {
+    let mut cmd = std::process::Command::new(npx);
+    cmd.arg("--yes")
+        .arg("--")
+        .arg(format!("{ADAPTER_PACKAGE}@{ADAPTER_VERSION}"))
+        .env("ANTHROPIC_API_KEY", "")
+        // the adapter's inner claude refuses to launch when it thinks it's
+        // nested in another Claude Code session — Chronicle's session is a
+        // deliberate, independent child, not a nested one
+        .env_remove("CLAUDECODE");
+    cmd
+}
+
+/// Start (or return) the one live session for a project. `cmd` is the adapter
+/// spawn (tests inject a mock agent); cwd/stdio/process_group are set HERE so
+/// no caller can skip them. Returns false when a live session already exists.
+pub fn start(
+    state: &AcpState,
+    emit: Emit,
+    key: String,
+    cwd: PathBuf,
+    roots: Vec<PathBuf>,
+    mut cmd: std::process::Command,
+) -> Result<bool, String> {
+    use std::os::unix::process::CommandExt;
+    let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
+    if let Some(existing) = sessions.get(&key) {
+        if existing.is_alive() {
+            return Ok(false); // single-flight: one live session per project
+        }
+        sessions.remove(&key);
+    }
+
+    let log = session_log_path(&key);
+    let errf = std::fs::File::create(&log).map_err(|e| e.to_string())?;
+    let mut child = cmd
+        .current_dir(&cwd)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(errf)
+        .process_group(0)
+        .spawn()
+        .map_err(|e| format!("couldn't start the agent bridge: {e}"))?;
+
+    let stdin = child.stdin.take().ok_or("no stdin pipe")?;
+    let stdout = child.stdout.take().ok_or("no stdout pipe")?;
+
+    let session = Arc::new(AcpSession {
+        key: key.clone(),
+        roots,
+        child: Mutex::new(Some(child)),
+        writer: Mutex::new(Some(stdin)),
+        next_id: AtomicU64::new(1),
+        pending: Mutex::new(HashMap::new()),
+        perms: Mutex::new(HashMap::new()),
+        session_id: Mutex::new(None),
+        modes: Mutex::new(Value::Null),
+        agent_caps: Mutex::new(Value::Null),
+        turn_active: AtomicBool::new(false),
+        ledger: Mutex::new(HashMap::new()),
+        emit,
+        sessions: state.sessions.clone(),
+    });
+    sessions.insert(key, session.clone());
+    drop(sessions);
+
+    // the reader owns the stdout pipe for the child's whole life
+    let rs = session.clone();
+    std::thread::spawn(move || rs.reader_loop(stdout));
+
+    // the handshake runs off-thread: npx may download the bridge first
+    session.emit_state(json!({ "state": "installing" }));
+    let hs = session.clone();
+    let hcwd = cwd;
+    std::thread::spawn(move || hs.handshake(&hcwd));
+    Ok(true)
+}
+
+fn session_log_path(key: &str) -> PathBuf {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(key.as_bytes());
+    let hex = format!("{:x}", h.finalize());
+    std::env::temp_dir().join(format!("chronicle-acp-{}.log", &hex[..16]))
+}
+
+impl AcpSession {
+    fn is_alive(&self) -> bool {
+        match self.child.lock() {
+            Ok(mut g) => match g.as_mut() {
+                Some(c) => matches!(c.try_wait(), Ok(None)),
+                None => false,
+            },
+            Err(_) => false,
+        }
+    }
+
+    fn emit_msg(&self, message: Value) {
+        (self.emit)(json!({ "dir": self.key, "message": message }));
+    }
+
+    fn emit_state(&self, params: Value) {
+        self.emit_msg(json!({ "method": "_chronicle/session_state", "params": params }));
+    }
+
+    /* ---------- wire primitives ---------- */
+
+    fn send_raw(&self, v: &Value) -> Result<(), String> {
+        let mut guard = self.writer.lock().map_err(|e| e.to_string())?;
+        let w = guard.as_mut().ok_or("the session has ended")?;
+        let line = serde_json::to_string(v).map_err(|e| e.to_string())?;
+        w.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+        w.write_all(b"\n").map_err(|e| e.to_string())?;
+        w.flush().map_err(|e| e.to_string())
+    }
+
+    fn notify(&self, method: &str, params: Value) -> Result<(), String> {
+        self.send_raw(&json!({ "jsonrpc": "2.0", "method": method, "params": params }))
+    }
+
+    fn respond_ok(&self, id: &Value, result: Value) {
+        let _ = self.send_raw(&json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+    }
+
+    fn respond_err(&self, id: &Value, code: i64, message: &str) {
+        let _ = self.send_raw(&json!({
+            "jsonrpc": "2.0", "id": id,
+            "error": { "code": code, "message": message }
+        }));
+    }
+
+    /// Send a request and block THIS thread for the response (handshake and
+    /// short calls only — prompt turns use Pending::TurnEnd instead).
+    fn request_blocking(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: std::time::Duration,
+    ) -> Result<Value, String> {
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = mpsc::channel();
+        self.pending.lock().map_err(|e| e.to_string())?.insert(id, Pending::Waiter(tx));
+        if let Err(e) = self.send_raw(&json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })) {
+            if let Ok(mut p) = self.pending.lock() { p.remove(&id); }
+            return Err(e);
+        }
+        match rx.recv_timeout(timeout) {
+            Ok(Ok(result)) => Ok(result),
+            Ok(Err(err)) => Err(serde_json::to_string(&err).unwrap_or_else(|_| "agent error".into())),
+            Err(_) => {
+                if let Ok(mut p) = self.pending.lock() { p.remove(&id); }
+                Err(format!("the agent didn't answer {method} in time"))
+            }
+        }
+    }
+
+    /* ---------- lifecycle ---------- */
+
+    fn handshake(self: &Arc<Self>, cwd: &Path) {
+        let init = proto::InitializeRequest::new(ProtocolVersion::V1)
+            .client_capabilities(
+                proto::ClientCapabilities::default().fs(
+                    proto::FileSystemCapabilities::default()
+                        .read_text_file(true)
+                        .write_text_file(true),
+                ),
+            )
+            .client_info(proto::Implementation::new("Chronicle", env!("CARGO_PKG_VERSION")));
+        let init_params = match serde_json::to_value(&init) {
+            Ok(v) => v,
+            Err(e) => return self.fail_handshake(&e.to_string()),
+        };
+        let caps = match self.request_blocking("initialize", init_params, INIT_TIMEOUT) {
+            Ok(v) => v,
+            Err(e) => return self.fail_handshake(&e),
+        };
+        if let Ok(mut g) = self.agent_caps.lock() { *g = caps.clone(); }
+
+        self.emit_state(json!({ "state": "starting" }));
+        let new_req = proto::NewSessionRequest::new(cwd);
+        let new_params = match serde_json::to_value(&new_req) {
+            Ok(v) => v,
+            Err(e) => return self.fail_handshake(&e.to_string()),
+        };
+        match self.request_blocking("session/new", new_params, NEW_SESSION_TIMEOUT) {
+            Ok(resp) => {
+                let sid = resp.get("sessionId").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if sid.is_empty() { return self.fail_handshake("the agent returned no session id"); }
+                if let Ok(mut g) = self.session_id.lock() { *g = Some(sid.clone()); }
+                if let Ok(mut g) = self.modes.lock() { *g = resp.get("modes").cloned().unwrap_or(Value::Null); }
+                self.emit_state(json!({
+                    "state": "ready",
+                    "sessionId": sid,
+                    "modes": resp.get("modes").cloned().unwrap_or(Value::Null),
+                    "agentCaps": caps,
+                }));
+            }
+            Err(e) => {
+                // auth_required (-32000): the adapter wants a login run in a
+                // terminal — surface needs-login and end; the frontend opens
+                // `claude /login` in a terminal tab and restarts after it exits.
+                let is_auth = serde_json::from_str::<Value>(&e).ok()
+                    .and_then(|v| v.get("code").and_then(|c| c.as_i64()))
+                    == Some(AUTH_REQUIRED_CODE);
+                if is_auth {
+                    let methods = self.agent_caps.lock().ok()
+                        .and_then(|g| g.get("authMethods").cloned())
+                        .unwrap_or(Value::Null);
+                    self.emit_state(json!({ "state": "needs-login", "authMethods": methods }));
+                    self.shutdown(None);
+                } else {
+                    self.fail_handshake(&e);
+                }
+            }
+        }
+    }
+
+    fn fail_handshake(self: &Arc<Self>, err: &str) {
+        self.emit_state(json!({ "state": "error", "message": err }));
+        self.shutdown(None);
+    }
+
+    /// Resolve every outstanding permission oneshot as cancelled, kill the
+    /// child (SIGTERM → grace → SIGKILL, whole process group), reap, remove
+    /// this session from the map, emit ended. Idempotent.
+    fn shutdown(&self, exit_code: Option<i32>) {
+        self.cancel_all_perms();
+        let child = self.child.lock().ok().and_then(|mut g| g.take());
+        if let Ok(mut w) = self.writer.lock() { *w = None; }
+        if let Some(mut c) = child {
+            let code = match c.try_wait() {
+                Ok(Some(status)) => status.code(),
+                _ => { crate::term_then_kill(&mut c); exit_code }
+            };
+            self.emit_state(json!({ "state": "ended", "code": code }));
+        }
+        if let Ok(mut g) = self.sessions.lock() {
+            if g.get(&self.key).map(|s| std::ptr::eq(s.as_ref(), self)).unwrap_or(false) {
+                g.remove(&self.key);
+            }
+        }
+    }
+
+    /* ---------- the reader (owns stdout for the child's life) ---------- */
+
+    fn reader_loop(self: Arc<Self>, stdout: std::process::ChildStdout) {
+        let reader = std::io::BufReader::new(stdout);
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            if line.trim().is_empty() { continue; }
+            let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+            let has_id = msg.get("id").is_some();
+            let has_method = msg.get("method").is_some();
+            if has_method && has_id {
+                self.handle_agent_request(&msg);
+            } else if has_method {
+                // notification (session/update et al) — raw passthrough
+                self.emit_msg(msg);
+            } else if has_id {
+                self.handle_response(&msg);
+            }
+        }
+        // EOF: the adapter exited (or was killed) — settle everything
+        self.turn_active.store(false, Ordering::SeqCst);
+        self.shutdown(None);
+    }
+
+    fn handle_response(&self, msg: &Value) {
+        let Some(id) = msg.get("id").and_then(|v| v.as_u64()) else { return };
+        let entry = self.pending.lock().ok().and_then(|mut p| p.remove(&id));
+        let outcome: Result<Value, Value> = if let Some(err) = msg.get("error") {
+            Err(err.clone())
+        } else {
+            Ok(msg.get("result").cloned().unwrap_or(Value::Null))
+        };
+        match entry {
+            Some(Pending::Waiter(tx)) => { let _ = tx.send(outcome); }
+            Some(Pending::TurnEnd) => {
+                self.turn_active.store(false, Ordering::SeqCst);
+                // a turn ending always resolves any ask still on screen
+                self.cancel_all_perms();
+                match outcome {
+                    Ok(result) => self.emit_msg(json!({
+                        "method": "_chronicle/turn_end",
+                        "params": { "stopReason": result.get("stopReason").cloned().unwrap_or(Value::Null),
+                                     "usage": result.get("usage").cloned().unwrap_or(Value::Null) }
+                    })),
+                    Err(err) => self.emit_msg(json!({
+                        "method": "_chronicle/turn_end",
+                        "params": { "error": err }
+                    })),
+                }
+            }
+            None => {}
+        }
+    }
+
+    /* ---------- agent → client requests ---------- */
+
+    fn handle_agent_request(self: &Arc<Self>, msg: &Value) {
+        let id = msg.get("id").cloned().unwrap_or(Value::Null);
+        let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("");
+        let params = msg.get("params").cloned().unwrap_or(Value::Null);
+        match method {
+            "fs/read_text_file" => self.handle_fs_read(&id, params),
+            "fs/write_text_file" => self.handle_fs_write(&id, params),
+            "session/request_permission" => {
+                // register the oneshot BEFORE the frontend hears about it —
+                // an instant answer must find its entry
+                if let Ok(mut g) = self.perms.lock() {
+                    g.insert(id.to_string(), id.clone());
+                }
+                self.emit_msg(msg.clone());
+            }
+            _ => self.respond_err(&id, -32601, "method not supported by this client"),
+        }
+    }
+
+    /// The jail for the adapter's ABSOLUTE paths: no relative paths, no `..`,
+    /// and the nearest existing ancestor (symlinks followed) must sit inside a
+    /// project root — so a not-yet-existing file can still be created, but
+    /// never outside the project.
+    fn jail_abs(&self, path: &str) -> Result<PathBuf, String> {
+        let p = Path::new(path);
+        if !p.is_absolute() {
+            return Err("the agent used a relative path — refused".into());
+        }
+        if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            return Err("the path climbs out of the project — refused".into());
+        }
+        // canonicalize the deepest EXISTING ancestor; append the remainder
+        let mut existing = p.to_path_buf();
+        let mut tail: Vec<std::ffi::OsString> = Vec::new();
+        loop {
+            if existing.exists() { break; }
+            let Some(name) = existing.file_name().map(|n| n.to_os_string()) else {
+                return Err("the path can't be resolved".into());
+            };
+            tail.push(name);
+            if !existing.pop() {
+                return Err("the path can't be resolved".into());
+            }
+        }
+        let mut canon = existing.canonicalize().map_err(|e| e.to_string())?;
+        for part in tail.iter().rev() {
+            canon.push(part);
+        }
+        for root in &self.roots {
+            if let Ok(cr) = root.canonicalize() {
+                if canon.starts_with(&cr) {
+                    return Ok(canon);
+                }
+            }
+        }
+        Err("the path is outside this project — refused".into())
+    }
+
+    fn handle_fs_read(&self, id: &Value, params: Value) {
+        let req: proto::ReadTextFileRequest = match serde_json::from_value(params) {
+            Ok(r) => r,
+            Err(e) => return self.respond_err(id, -32602, &e.to_string()),
+        };
+        let full = match self.jail_abs(&req.path.to_string_lossy()) {
+            Ok(f) => f,
+            Err(e) => return self.respond_err(id, -32602, &e),
+        };
+        let content = match std::fs::read_to_string(&full) {
+            Ok(c) => c,
+            Err(e) => return self.respond_err(id, -32603, &e.to_string()),
+        };
+        let content = match (req.line, req.limit) {
+            (None, None) => content,
+            (line, limit) => {
+                let start = line.map(|l| (l as usize).saturating_sub(1)).unwrap_or(0);
+                let it = content.lines().skip(start);
+                let sliced: Vec<&str> = match limit {
+                    Some(n) => it.take(n as usize).collect(),
+                    None => it.collect(),
+                };
+                sliced.join("\n")
+            }
+        };
+        self.respond_ok(id, json!({ "content": content }));
+    }
+
+    fn handle_fs_write(&self, id: &Value, params: Value) {
+        let req: proto::WriteTextFileRequest = match serde_json::from_value(params) {
+            Ok(r) => r,
+            Err(e) => return self.respond_err(id, -32602, &e.to_string()),
+        };
+        // jailed AND ledgered BEFORE the write lands — law 5
+        let full = match self.jail_abs(&req.path.to_string_lossy()) {
+            Ok(f) => f,
+            Err(e) => return self.respond_err(id, -32602, &e),
+        };
+        let key = full.to_string_lossy().to_string();
+        let created = {
+            let mut ledger = match self.ledger.lock() {
+                Ok(g) => g,
+                Err(_) => return self.respond_err(id, -32603, "internal state poisoned"),
+            };
+            let entry = ledger.entry(key.clone()).or_insert_with(|| LedgerEntry {
+                base: std::fs::read_to_string(&full).ok(),
+            });
+            entry.base.is_none()
+        };
+        if let Some(parent) = full.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                return self.respond_err(id, -32603, &e.to_string());
+            }
+        }
+        if let Err(e) = std::fs::write(&full, &req.content) {
+            return self.respond_err(id, -32603, &e.to_string());
+        }
+        self.respond_ok(id, json!({}));
+        self.emit_msg(json!({
+            "method": "_chronicle/write",
+            "params": { "path": key, "kind": if created { "created" } else { "modified" } }
+        }));
+    }
+
+    /* ---------- client → agent operations ---------- */
+
+    pub fn prompt(&self, message: String) -> Result<(), String> {
+        let sid = self.session_id.lock().map_err(|e| e.to_string())?
+            .clone().ok_or("the session isn't ready yet")?;
+        if self.turn_active.swap(true, Ordering::SeqCst) {
+            return Err("the agent is still working — stop it first".into());
+        }
+        let req = proto::PromptRequest::new(
+            sid,
+            vec![proto::ContentBlock::Text(proto::TextContent::new(message))],
+        );
+        let params = serde_json::to_value(&req).map_err(|e| e.to_string())?;
+        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        self.pending.lock().map_err(|e| e.to_string())?.insert(id, Pending::TurnEnd);
+        if let Err(e) = self.send_raw(&json!({ "jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": params })) {
+            self.turn_active.store(false, Ordering::SeqCst);
+            if let Ok(mut p) = self.pending.lock() { p.remove(&id); }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// session/cancel + resolve every outstanding permission oneshot as
+    /// cancelled. The turn's prompt response (stop reason `cancelled`) still
+    /// arrives and emits `_chronicle/turn_end` normally.
+    pub fn cancel(&self) -> Result<(), String> {
+        let sid = self.session_id.lock().map_err(|e| e.to_string())?
+            .clone().ok_or("the session isn't ready yet")?;
+        self.notify("session/cancel", json!({ "sessionId": sid }))?;
+        self.cancel_all_perms();
+        Ok(())
+    }
+
+    fn cancel_all_perms(&self) {
+        let drained: Vec<(String, Value)> = match self.perms.lock() {
+            Ok(mut g) => g.drain().collect(),
+            Err(_) => return,
+        };
+        for (key, id) in drained {
+            self.respond_ok(&id, json!({ "outcome": { "outcome": "cancelled" } }));
+            self.emit_msg(json!({
+                "method": "_chronicle/permission_resolved",
+                "params": { "requestId": key, "outcome": "cancelled" }
+            }));
+        }
+    }
+
+    /// Answer one permission ask. `option_id: None` = cancelled. The oneshot
+    /// is removed first, so a second answer (or a cancel racing an answer)
+    /// can't double-respond.
+    pub fn respond_permission(&self, request_id: &str, option_id: Option<String>) -> Result<(), String> {
+        let id = self.perms.lock().map_err(|e| e.to_string())?.remove(request_id)
+            .ok_or("that request was already answered")?;
+        let outcome = match &option_id {
+            Some(opt) => json!({ "outcome": "selected", "optionId": opt }),
+            None => json!({ "outcome": "cancelled" }),
+        };
+        self.respond_ok(&id, json!({ "outcome": outcome }));
+        self.emit_msg(json!({
+            "method": "_chronicle/permission_resolved",
+            "params": { "requestId": request_id,
+                         "outcome": option_id.map(Value::String).unwrap_or(json!("cancelled")) }
+        }));
+        Ok(())
+    }
+
+    /// Switch session mode — only to a mode the agent itself advertised, and
+    /// never to bypassPermissions (deliberately not exposed in the pane).
+    pub fn set_mode(&self, mode_id: &str) -> Result<(), String> {
+        if mode_id == FORBIDDEN_MODE {
+            return Err("that mode isn't available in Chronicle".into());
+        }
+        let advertised = self.modes.lock().map_err(|e| e.to_string())?
+            .get("availableModes").and_then(|v| v.as_array())
+            .map(|a| a.iter().any(|m| m.get("id").and_then(|i| i.as_str()) == Some(mode_id)))
+            .unwrap_or(false);
+        if !advertised {
+            return Err("the agent doesn't offer that mode".into());
+        }
+        let sid = self.session_id.lock().map_err(|e| e.to_string())?
+            .clone().ok_or("the session isn't ready yet")?;
+        self.request_blocking(
+            "session/set_mode",
+            json!({ "sessionId": sid, "modeId": mode_id }),
+            std::time::Duration::from_secs(30),
+        )?;
+        if let Ok(mut g) = self.modes.lock() {
+            if let Some(obj) = g.as_object_mut() {
+                obj.insert("currentModeId".into(), json!(mode_id));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn stop(&self) {
+        self.shutdown(None);
+    }
+
+    pub fn current_state(&self) -> Value {
+        json!({
+            "alive": self.is_alive(),
+            "sessionId": self.session_id.lock().ok().and_then(|g| g.clone()),
+            "modes": self.modes.lock().map(|g| g.clone()).unwrap_or(Value::Null),
+            "agentCaps": self.agent_caps.lock().map(|g| g.clone()).unwrap_or(Value::Null),
+            "turnActive": self.turn_active.load(Ordering::SeqCst),
+        })
+    }
+}
+
+/* ================= Z-1 tests: the loop against a mock agent, the jail, and
+   (env-gated) the real adapter ================= */
+
+#[cfg(test)]
+mod acp_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("chronicle-acp-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    /// A tiny agent speaking just enough ACP to exercise every seam:
+    /// initialize → session/new → prompt (chunk + in-jail write + out-of-jail
+    /// write + permission ask) → turn end once both writes and the permission
+    /// answer arrive. A second prompt asks permission and waits forever —
+    /// only a cancel resolves it.
+    const MOCK_AGENT: &str = r#"
+import sys, json
+def send(o):
+    sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
+project = sys.argv[1]
+turn = 0
+state = {}
+for line in sys.stdin:
+    msg = json.loads(line)
+    m = msg.get("method")
+    if m == "initialize":
+        send({"jsonrpc":"2.0","id":msg["id"],"result":{"protocolVersion":1,
+            "agentCapabilities":{"loadSession":False},"authMethods":[]}})
+    elif m == "session/new":
+        send({"jsonrpc":"2.0","id":msg["id"],"result":{"sessionId":"sess-1",
+            "modes":{"currentModeId":"default","availableModes":[
+                {"id":"default","name":"Always Ask"},
+                {"id":"acceptEdits","name":"Accept Edits"},
+                {"id":"bypassPermissions","name":"Bypass"}]}}})
+    elif m == "session/prompt":
+        turn += 1
+        sid = msg["params"]["sessionId"]
+        state["prompt_id"] = msg["id"]
+        if turn == 1:
+            send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":sid,
+                "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello "}}}})
+            send({"jsonrpc":"2.0","id":100,"method":"fs/write_text_file","params":{
+                "sessionId":sid,"path":project+"/agent-made.txt","content":"agent wrote this"}})
+            send({"jsonrpc":"2.0","id":101,"method":"fs/write_text_file","params":{
+                "sessionId":sid,"path":"/tmp/chronicle-acp-escape.txt","content":"jailbreak"}})
+            send({"jsonrpc":"2.0","id":102,"method":"session/request_permission","params":{
+                "sessionId":sid,"toolCall":{"toolCallId":"t1","title":"Run a command"},
+                "options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},
+                           {"optionId":"reject","name":"Don't allow","kind":"reject_once"}]}})
+            state["waiting"] = {"100","101","102"}
+        else:
+            send({"jsonrpc":"2.0","id":200,"method":"session/request_permission","params":{
+                "sessionId":sid,"toolCall":{"toolCallId":"t2","title":"Delete everything"},
+                "options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}})
+            state["waiting"] = {"200"}
+    elif m == "session/set_mode":
+        send({"jsonrpc":"2.0","id":msg["id"],"result":{}})
+    elif m == "session/cancel":
+        state["cancelled"] = True
+    elif m is None and "id" in msg:
+        rid = str(msg["id"])
+        w = state.get("waiting", set())
+        if rid in w:
+            if rid == "102":
+                state["perm_outcome"] = msg.get("result", {}).get("outcome", {})
+            if rid == "200":
+                oc = msg.get("result", {}).get("outcome", {})
+                # a cancelled oneshot ends the hung turn honestly
+                reason = "cancelled" if oc.get("outcome") == "cancelled" else "end_turn"
+                send({"jsonrpc":"2.0","id":state["prompt_id"],"result":{"stopReason":reason}})
+                w.clear()
+                continue
+            w.discard(rid)
+            if not w:
+                send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1",
+                    "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text",
+                    "text":"perm=" + state.get("perm_outcome",{}).get("outcome","?")}}}})
+                send({"jsonrpc":"2.0","id":state["prompt_id"],"result":{"stopReason":"end_turn"}})
+"#;
+
+    struct Harness {
+        state: AcpState,
+        rx: mpsc::Receiver<Value>,
+        key: String,
+        dir: PathBuf,
+    }
+
+    fn python3() -> Option<String> {
+        ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
+            .iter().find(|p| Path::new(p).exists()).map(|s| s.to_string())
+    }
+
+    fn start_mock(name: &str) -> Option<Harness> {
+        let py = python3()?;
+        let dir = tmp(name);
+        let script = dir.join(".mock-agent.py");
+        std::fs::write(&script, MOCK_AGENT).unwrap();
+        let mut cmd = std::process::Command::new(py);
+        cmd.arg(&script).arg(&dir);
+        let (tx, rx) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let state = AcpState::new();
+        let key = dir.to_string_lossy().to_string();
+        assert!(start(&state, emit, key.clone(), dir.clone(), vec![dir.clone()], cmd).unwrap());
+        Some(Harness { state, rx, key, dir })
+    }
+
+    /// Pull events until `pred` matches (or fail loudly after `secs`).
+    fn wait_for(rx: &mpsc::Receiver<Value>, secs: u64, pred: impl Fn(&Value) -> bool) -> Value {
+        let deadline = std::time::Instant::now() + Duration::from_secs(secs);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() { panic!("timed out waiting for an acp-update event"); }
+            let v = rx.recv_timeout(left).expect("timed out waiting for an acp-update event");
+            if pred(&v) { return v; }
+        }
+    }
+
+    fn method_is(v: &Value, m: &str) -> bool {
+        v.pointer("/message/method").and_then(|x| x.as_str()) == Some(m)
+    }
+    fn state_is(v: &Value, s: &str) -> bool {
+        method_is(v, "_chronicle/session_state")
+            && v.pointer("/message/params/state").and_then(|x| x.as_str()) == Some(s)
+    }
+
+    #[test]
+    fn full_round_against_the_mock_agent() {
+        let Some(h) = start_mock("round") else { eprintln!("skipped: no python3"); return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        let s = h.state.get(&h.key).unwrap();
+
+        // modes came from the session response, never assumed
+        let st = s.current_state();
+        assert_eq!(st.pointer("/modes/currentModeId").and_then(|v| v.as_str()), Some("default"));
+
+        s.prompt("do the round".into()).unwrap();
+        // a second prompt while the turn runs is refused (single-flight)
+        assert!(s.prompt("again".into()).is_err());
+
+        wait_for(&h.rx, 20, |v| {
+            v.pointer("/message/params/update/content/text").and_then(|x| x.as_str()) == Some("hello ")
+        });
+        // the in-jail write landed AND was ledgered as created
+        wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/write"));
+        assert_eq!(std::fs::read_to_string(h.dir.join("agent-made.txt")).unwrap(), "agent wrote this");
+        assert!(s.ledger.lock().unwrap().values().any(|e| e.base.is_none()), "created file ledgered with an empty base");
+        // the out-of-jail write must NOT land
+        assert!(!Path::new("/tmp/chronicle-acp-escape.txt").exists(), "the jail must refuse writes outside the project");
+
+        // answer the permission ask
+        let ask = wait_for(&h.rx, 20, |v| method_is(v, "session/request_permission"));
+        let req_id = ask.pointer("/message/id").unwrap().to_string();
+        s.respond_permission(&req_id, Some("allow".into())).unwrap();
+        // answering twice is refused
+        assert!(s.respond_permission(&req_id, Some("allow".into())).is_err());
+        // the mock echoes the outcome it received back as a chunk
+        wait_for(&h.rx, 20, |v| {
+            v.pointer("/message/params/update/content/text").and_then(|x| x.as_str()) == Some("perm=selected")
+        });
+        let end = wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/turn_end"));
+        assert_eq!(end.pointer("/message/params/stopReason").and_then(|v| v.as_str()), Some("end_turn"));
+
+        // mode guard: bypassPermissions is advertised by the mock but still refused
+        assert!(s.set_mode("bypassPermissions").is_err());
+        assert!(s.set_mode("madeUpMode").is_err());
+        s.set_mode("acceptEdits").unwrap();
+        assert_eq!(s.current_state().pointer("/modes/currentModeId").and_then(|v| v.as_str()), Some("acceptEdits"));
+
+        s.stop();
+        wait_for(&h.rx, 20, |v| state_is(v, "ended"));
+        assert!(h.state.get(&h.key).is_none(), "a stopped session leaves the map");
+        let _ = std::fs::remove_dir_all(&h.dir);
+    }
+
+    #[test]
+    fn cancel_resolves_a_pending_permission_and_never_hangs_the_adapter() {
+        let Some(h) = start_mock("cancel") else { eprintln!("skipped: no python3"); return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        let s = h.state.get(&h.key).unwrap();
+
+        // first turn completes normally (answer its ask)
+        s.prompt("turn one".into()).unwrap();
+        let ask = wait_for(&h.rx, 20, |v| method_is(v, "session/request_permission"));
+        s.respond_permission(&ask.pointer("/message/id").unwrap().to_string(), Some("allow".into())).unwrap();
+        wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/turn_end"));
+
+        // second turn: the mock asks permission and waits FOREVER — only the
+        // cancelled oneshot lets it finish. If cancel didn't resolve the ask,
+        // this test times out (= the adapter would hang).
+        s.prompt("turn two".into()).unwrap();
+        let ask = wait_for(&h.rx, 20, |v| method_is(v, "session/request_permission"));
+        let req_id = ask.pointer("/message/id").unwrap().to_string();
+        s.cancel().unwrap();
+        let resolved = wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/permission_resolved"));
+        assert_eq!(resolved.pointer("/message/params/requestId").and_then(|v| v.as_str()), Some(req_id.as_str()));
+        assert_eq!(resolved.pointer("/message/params/outcome").and_then(|v| v.as_str()), Some("cancelled"));
+        let end = wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/turn_end"));
+        assert_eq!(end.pointer("/message/params/stopReason").and_then(|v| v.as_str()), Some("cancelled"));
+
+        // after the cancelled turn a new prompt is accepted again
+        s.prompt("turn three".into()).unwrap();
+        s.stop();
+        wait_for(&h.rx, 20, |v| state_is(v, "ended"));
+        let _ = std::fs::remove_dir_all(&h.dir);
+    }
+
+    #[test]
+    fn jail_refuses_relative_traversal_and_outside_paths() {
+        let dir = tmp("jail");
+        let s = AcpSession {
+            key: "k".into(),
+            roots: vec![dir.clone()],
+            child: Mutex::new(None),
+            writer: Mutex::new(None),
+            next_id: AtomicU64::new(1),
+            pending: Mutex::new(HashMap::new()),
+            perms: Mutex::new(HashMap::new()),
+            session_id: Mutex::new(None),
+            modes: Mutex::new(Value::Null),
+            agent_caps: Mutex::new(Value::Null),
+            turn_active: AtomicBool::new(false),
+            ledger: Mutex::new(HashMap::new()),
+            emit: Arc::new(|_| {}),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        assert!(s.jail_abs("relative/path.txt").is_err(), "relative paths are refused");
+        assert!(s.jail_abs(&format!("{}/../escape.txt", dir.display())).is_err(), "`..` is refused");
+        assert!(s.jail_abs("/etc/passwd").is_err(), "outside paths are refused");
+        assert!(s.jail_abs(&format!("{}/ok.txt", dir.display())).is_ok(), "a new in-root file resolves");
+        assert!(s.jail_abs(&format!("{}/new/nested/ok.txt", dir.display())).is_ok(), "new nested dirs resolve");
+        // a symlinked dir inside the root pointing outside must be refused
+        let outside = tmp("jail-outside");
+        std::os::unix::fs::symlink(&outside, dir.join("sneaky")).unwrap();
+        assert!(s.jail_abs(&format!("{}/sneaky/x.txt", dir.display())).is_err(), "symlink escapes are refused");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// The real adapter, end to end: gated behind CHRONICLE_ACP_TEST=1 (needs
+    /// npx + a logged-in Claude Code). Run with:
+    ///   CHRONICLE_ACP_TEST=1 cargo test acp_real_adapter -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn acp_real_adapter_round_trip() {
+        if std::env::var("CHRONICLE_ACP_TEST").ok().as_deref() != Some("1") {
+            eprintln!("skipped: set CHRONICLE_ACP_TEST=1 to run against the real adapter");
+            return;
+        }
+        let Some(npx) = crate::find_tool("npx") else {
+            eprintln!("skipped: npx not found");
+            return;
+        };
+        let dir = tmp("real");
+        let _ = std::process::Command::new("git").arg("-C").arg(&dir).arg("init").output();
+        let (tx, rx) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let state = AcpState::new();
+        let key = dir.to_string_lossy().to_string();
+        start(&state, emit, key.clone(), dir.clone(), vec![dir.clone()], adapter_command(&npx)).unwrap();
+
+        let ready = wait_for(&rx, 300, |v| state_is(v, "ready") || state_is(v, "needs-login") || state_is(v, "error"));
+        if !state_is(&ready, "ready") {
+            panic!("the adapter didn't reach ready: {ready}");
+        }
+        assert!(ready.pointer("/message/params/modes/availableModes").and_then(|v| v.as_array()).map(|a| !a.is_empty()).unwrap_or(false),
+            "the session response must carry the agent's own modes");
+
+        let s = state.get(&key).unwrap();
+        s.prompt("Reply with exactly the word: pong".into()).unwrap();
+        let mut saw_chunk = false;
+        let deadline = std::time::Instant::now() + Duration::from_secs(180);
+        loop {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() { panic!("no turn_end from the real adapter"); }
+            let v = rx.recv_timeout(left).expect("no event from the real adapter");
+            if v.pointer("/message/params/update/sessionUpdate").and_then(|x| x.as_str()) == Some("agent_message_chunk") {
+                saw_chunk = true;
+            }
+            if method_is(&v, "session/request_permission") {
+                // answer with the first rejecting option so the turn can end
+                let id = v.pointer("/message/id").unwrap().to_string();
+                let opts = v.pointer("/message/params/options").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+                let reject = opts.iter().find(|o| o.get("kind").and_then(|k| k.as_str()).map(|k| k.starts_with("reject")).unwrap_or(false))
+                    .or(opts.first())
+                    .and_then(|o| o.get("optionId")).and_then(|x| x.as_str()).unwrap_or("").to_string();
+                s.respond_permission(&id, Some(reject)).unwrap();
+            }
+            if method_is(&v, "_chronicle/turn_end") { break; }
+        }
+        assert!(saw_chunk, "streamed message chunks must arrive");
+        s.stop();
+        wait_for(&rx, 30, |v| state_is(v, "ended"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

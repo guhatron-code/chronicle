@@ -5,6 +5,8 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod acp;
+
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use regex::Regex;
@@ -2328,6 +2330,70 @@ fn pty_kill(pty: State<PtyState>, id: u32) -> Result<(), String> {
     Ok(())
 }
 
+/* ================= the agent pane (ACP — see acp.rs for the seam) ================= */
+
+/// Start (or reuse) the project's one live agent session. Progress arrives as
+/// `acp-update` events (installing → starting → ready | needs-login | error).
+#[tauri::command]
+async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let (key, _) = canon_key(&dir)?;
+    let npx = find_tool("npx")
+        .ok_or("the agent needs Node.js — install it from nodejs.org, then try again")?;
+    let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
+    jail_roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
+    let emit: acp::Emit = {
+        let app = app.clone();
+        Arc::new(move |v| { let _ = app.emit("acp-update", v); })
+    };
+    let started = acp::start(&agents, emit, key, p.repo.clone(), jail_roots, acp::adapter_command(&npx))?;
+    Ok(json!({ "started": started }))
+}
+
+/// The session's current snapshot — lets the pane re-sync after a reload
+/// without replaying events.
+#[tauri::command]
+async fn agent_session_state(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String) -> Result<Value, String> {
+    let _ = project_for(&roots, &dir)?;
+    let (key, _) = canon_key(&dir)?;
+    Ok(agents.get(&key).map(|s| s.current_state()).unwrap_or(json!({ "alive": false })))
+}
+
+fn agent_for(roots: &OpenRoots, agents: &acp::AcpState, dir: &str) -> Result<Arc<acp::AcpSession>, String> {
+    let _ = project_for(roots, dir)?;
+    let (key, _) = canon_key(dir)?;
+    agents.get(&key).ok_or_else(|| "there's no agent session running for this project".into())
+}
+
+#[tauri::command]
+async fn agent_prompt(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, message: String) -> Result<(), String> {
+    if message.trim().is_empty() { return Err("write a message first".into()); }
+    agent_for(&roots, &agents, &dir)?.prompt(message)
+}
+
+#[tauri::command]
+async fn agent_cancel(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String) -> Result<(), String> {
+    agent_for(&roots, &agents, &dir)?.cancel()
+}
+
+#[tauri::command]
+async fn agent_set_mode(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, mode: String) -> Result<(), String> {
+    agent_for(&roots, &agents, &dir)?.set_mode(&mode)
+}
+
+/// Answer a permission ask. `option` is one of the agent's own offered option
+/// ids; None answers "cancelled".
+#[tauri::command]
+async fn agent_respond_permission(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, request_id: String, option: Option<String>) -> Result<(), String> {
+    agent_for(&roots, &agents, &dir)?.respond_permission(&request_id, option)
+}
+
+#[tauri::command]
+async fn agent_session_stop(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String) -> Result<(), String> {
+    agent_for(&roots, &agents, &dir)?.stop();
+    Ok(())
+}
+
 /* ================= main (with --derive CLI for the golden test) ================= */
 
 fn main() {
@@ -2381,6 +2447,7 @@ fn main() {
             sessions: Arc::new(Mutex::new(std::collections::HashMap::new())),
             next_id: std::sync::atomic::AtomicU32::new(1),
         })
+        .manage(acp::AcpState::new())
         .on_window_event(|window, event| {
             // the window is gone: no orphaned children, ever — kill + reap every PTY
             // shell and every background roadmap session.
@@ -2396,6 +2463,9 @@ fn main() {
                         for (_, (mut child, _, _)) in g.drain() { term_then_kill(&mut child); }
                     }
                 }
+                if let Some(agents) = app.try_state::<acp::AcpState>() {
+                    agents.drain(); // adapter children die through the same kill-and-reap path
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -2410,6 +2480,8 @@ fn main() {
             pty_spawn, init_log_path,
             pty_write, pty_resize, pty_kill,
             round_execute, round_exec_status, round_exec_cancel, round_retro, exec_log_path,
+            agent_session_start, agent_session_state, agent_prompt, agent_cancel,
+            agent_set_mode, agent_respond_permission, agent_session_stop,
             journal_append, journal_read, notify, draft_save_message,
             global_search, status_report,
             github_repos, github_clone, github_create,
