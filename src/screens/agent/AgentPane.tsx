@@ -558,7 +558,7 @@ export function AgentPane({
     <div className="flex min-h-0 flex-1 flex-col">
       {empty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[9px] p-5 text-center">
-          <Chrongirl size={30} />
+          <span className="mb-1.5"><Chrongirl size={48} /></span>
           <span className="text-[15px] font-semibold text-text-primary">Ask for anything.</span>
           <span className="max-w-[34ch] text-[12.5px] leading-[1.55] text-text-muted [text-wrap:pretty]">
             Chronicle asks before the agent touches your project.
