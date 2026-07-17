@@ -12,6 +12,7 @@ import {
   startRoundInPane,
   adoptAgentSession,
   closeAgentViewing,
+  dequeueAgentMessage,
   subscribeAgent,
   type AgentEntry,
   type AgentSessionState,
@@ -23,7 +24,7 @@ import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { toastError } from "@/overlays/toasts";
 import { MiniMd } from "@/lib/mini-md";
-import { Chronigirl, ErrorGlyph } from "@/components/chrome/icons";
+import { Chronigirl, ErrorGlyph, XGlyph } from "@/components/chrome/icons";
 import { BtnPrimary, BtnSecondary, Spinner } from "@/components/chrome/atoms";
 import { Composer } from "./Composer";
 import { ToolCard } from "./ToolCard";
@@ -369,6 +370,32 @@ function Entry({
   );
 }
 
+/** #4 — messages waiting for the current turn to end; each cancellable. */
+function QueuedMessages({ dir, queue }: { dir: string; queue: string[] }) {
+  if (queue.length === 0) return null;
+  return (
+    <div className="mx-3 mb-2 flex flex-col gap-1.5">
+      {queue.map((text, i) => (
+        <div
+          key={i}
+          data-queued-message
+          className="flex items-start gap-2 rounded-md border border-border-hairline bg-fill-subtle px-[11px] py-2"
+        >
+          <span className="mt-[1px] shrink-0 rounded-[5px] bg-surface-card px-1.5 text-[10.5px] text-text-dim">queued</span>
+          <span className="min-w-0 flex-1 whitespace-pre-wrap text-[12.5px] text-text-secondary [overflow-wrap:anywhere]">{text}</span>
+          <button
+            aria-label="Remove this queued message"
+            onClick={() => dequeueAgentMessage(dir, i)}
+            className="mt-[1px] flex shrink-0 text-text-dim hover:text-text-secondary"
+          >
+            <XGlyph size={9} />
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function AgentPane({
   dir,
   onConfirm,
@@ -599,6 +626,7 @@ export function AgentPane({
       )}
       <ReviewStrip dir={dir} s={s} onOpenReview={onOpenReview} onConfirm={onConfirm} />
       {banner}
+      <QueuedMessages dir={dir} queue={s.queue} />
       <Composer dir={dir} disabled={s.phase !== "ready"} onConfirm={onConfirm} />
     </div>
   );

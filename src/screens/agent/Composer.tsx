@@ -12,6 +12,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   agentSessionFor,
   cancelAgentTurn,
+  enqueueAgentMessage,
   mirrorComposerText,
   sendAgentMessage,
   setAgentConfigOption,
@@ -168,6 +169,14 @@ export function Composer({
       .finally(() => setSending(false));
   };
 
+  const queue = () => {
+    const body = text.trim();
+    if (!body) return;
+    enqueueAgentMessage(dir, body);
+    setText("");
+    mirrorComposerText(dir, "");
+  };
+
   const stop = () => {
     void cancelAgentTurn(dir).catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)));
   };
@@ -272,10 +281,11 @@ export function Composer({
           if (s.draft && e.target.value !== s.draft.text) setAgentDraft(dir, null);
         }}
         onKeyDown={(e) => {
-          // Enter sends; Shift+Enter (and IME composition) inserts a newline
+          // Enter sends; while a turn is active it queues; Shift+Enter / IME = newline
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
-            send();
+            if (s.turnActive) queue();
+            else send();
           }
         }}
         onPaste={(e) => {
@@ -367,14 +377,25 @@ export function Composer({
         )}
         <span className="flex-1" />
         {s.turnActive ? (
-          <button
-            data-agent-stop
-            onClick={stop}
-            className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border-strong px-3 text-xs font-medium text-text-primary hover:bg-fill-hover"
-          >
-            <span className="size-2 shrink-0 rounded-[1.5px] bg-current" />
-            Stop
-          </button>
+          <>
+            {text.trim() && (
+              <button
+                data-agent-queue
+                onClick={queue}
+                className="h-7 rounded-md border border-border-strong px-3 text-xs font-medium text-text-primary hover:bg-fill-hover"
+              >
+                Queue
+              </button>
+            )}
+            <button
+              data-agent-stop
+              onClick={stop}
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border-strong px-3 text-xs font-medium text-text-primary hover:bg-fill-hover"
+            >
+              <span className="size-2 shrink-0 rounded-[1.5px] bg-current" />
+              Stop
+            </button>
+          </>
         ) : (
           <>
             <Kbd>↩</Kbd>

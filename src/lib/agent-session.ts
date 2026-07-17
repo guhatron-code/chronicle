@@ -106,6 +106,8 @@ export interface AgentSessionState {
   draft: { label: string; text: string } | null;
   /** a mirror of the composer's current text — preload checks read it */
   composerText: string;
+  /** messages typed while a turn was active — auto-sent FIFO on turn end (#4) */
+  queue: string[];
   /** F37 — a read-only view of an earlier session's transcript */
   viewing: { id: string; entries: AgentEntry[] } | null;
   /** the review strip's ground truth — refetched on _chronicle/edits_changed */
@@ -130,6 +132,7 @@ const blank = (): AgentSessionState => ({
   configOptions: [],
   draft: null,
   composerText: "",
+  queue: [],
   viewing: null,
   editFiles: [],
   editsResolved: false,
@@ -370,6 +373,12 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
         message: str(err.message) || "The agent stopped with an error.",
       });
     }
+    // #4 — a clean turn end releases the next queued message (FIFO, one/turn);
+    // on error we keep the queue so a broken session doesn't fire into the void
+    if (params.error == null && s.queue.length > 0) {
+      const next = s.queue.shift()!;
+      void sendAgentMessage(dir, next).catch(() => {});
+    }
     notify();
     return;
   }
@@ -588,6 +597,23 @@ export function setAgentDraft(dir: string, draft: { label: string; text: string 
  *  draft without owning the input. No notify — this is a read-side mirror. */
 export function mirrorComposerText(dir: string, text: string) {
   agentSessionFor(dir).composerText = text;
+}
+
+/** Queue a message typed during an active turn (#4). */
+export function enqueueAgentMessage(dir: string, text: string) {
+  const body = text.trim();
+  if (!body) return;
+  agentSessionFor(dir).queue.push(body);
+  notify();
+}
+
+/** Drop one queued message by index (the cancel ✕). */
+export function dequeueAgentMessage(dir: string, index: number) {
+  const s = agentSessionFor(dir);
+  if (index >= 0 && index < s.queue.length) {
+    s.queue.splice(index, 1);
+    notify();
+  }
 }
 
 /* ---------- history (F37) — the transcript store is the source ---------- */
