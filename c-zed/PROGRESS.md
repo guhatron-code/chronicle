@@ -43,4 +43,4 @@ jail-refusal tests incl. symlink escape). Plus the `#[ignore]`
 initialize → session/new (agent's own modes asserted) → prompt → streamed
 chunks → turn_end → stop, passed in 32s.
 
-**Commit** — 6f995e8
+**Commit** — 343e5ad
