@@ -124,3 +124,23 @@ words; search matches across BOTH kinds in one list (plus a no-match state);
 green.
 
 **Commit** — db17a40
+
+## S-4 · Ship (0.4.0)
+
+**What landed** — the whole setup + help update ships as v0.4.0, together with
+the agent chat redesign and the fixes surfaced during testing:
+- Setup screen + doctor (S-1/S-2), Help screen (S-3).
+- The invisible-primary-button fix (`text-primary-fg` → `text-primary-foreground`
+  — the agent Send + repo Keep buttons were white-on-white in 0.3.x).
+- The "Sign in to Claude" false-negative fix (detect the macOS Keychain
+  credentials item, not a nonexistent file).
+- The agent pane reshaped into a chat: speaker avatars + You/Chrongirl labels
+  (single column), a real typing indicator (no gradient-clipped shimmer),
+  markdown that formats AS IT STREAMS, and the Chrongirl identity mark.
+
+**How it was verified** — final gate before release: `npx tsc --noEmit` +
+`npx vite build` green; `cargo test` 41 passed + the gated real-adapter and
+real-Node-install tests; full Playwright probe suite green (setup · help ·
+agent · the whole surface). README carries "Getting set up" + "Help".
+
+**Commit** — v0.4.0 (`./release.sh 0.4.0`)
