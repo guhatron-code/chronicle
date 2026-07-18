@@ -8,7 +8,7 @@
  * while running. Presentational only.
  */
 import { BtnPrimary, BtnSecondary, MonoMeta, Spinner, StateWord } from "@/components/chrome/atoms";
-import { CheckGlyph } from "@/components/chrome/icons";
+import { ArrowRightGlyph, CheckGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 import { PasteChip } from "@/screens/roadmap/bits";
 
@@ -180,8 +180,10 @@ export function ExecuteFlow(p: ExecuteFlowProps) {
     >
       <div className="flex items-center gap-[9px]">
         <CheckGlyph size={14} className="shrink-0 text-state-success" />
-        <span className="text-sm font-medium text-text-primary">
-          Round {p.round} · {p.taskCount} {p.taskCount === 1 ? "task" : "tasks"} → {p.outcome}
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-text-primary">
+          <span>Round {p.round} · {p.taskCount} {p.taskCount === 1 ? "task" : "tasks"}</span>
+          <ArrowRightGlyph size={11} className="shrink-0 text-text-dim" />
+          <span>{p.outcome}</span>
         </span>
       </div>
       <div className="text-[12.5px] leading-[1.55] text-text-muted">

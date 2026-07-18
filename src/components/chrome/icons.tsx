@@ -255,6 +255,28 @@ export const ImageGlyph = ({ size = 22, dot = true, ...p }: P & { dot?: boolean 
   </svg>
 );
 
+/** Right arrow — the decorative "→ destination" connector (paste chips, CTAs, flow rows). */
+export const ArrowRightGlyph = ({ size = 11, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
+    <path d="M2 6h7M6 3l3 3-3 3" />
+  </svg>
+);
+
+/** Paperclip — the composer attach affordance (button + non-image chips). */
+export const PaperclipGlyph = ({ size = 14, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </svg>
+);
+
+/** Lightbulb — the help-screen "tip" marker. */
+export const BulbGlyph = ({ size = 14, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" {...p}>
+    <path d="M8 1.5a4 4 0 0 0-2.5 7.1c.5.4.8 1 .9 1.6l.1.8h3l.1-.8c.1-.6.4-1.2.9-1.6A4 4 0 0 0 8 1.5Z" />
+    <path d="M6.5 13h3M7 14.5h2" />
+  </svg>
+);
+
 /* ---- Deck-5 glyphs (kanban F27–F30) — paths transcribed from the comps ---- */
 
 /** Chain link (F27/F29 design-link chips). */

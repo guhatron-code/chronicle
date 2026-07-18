@@ -425,7 +425,9 @@ function QueuedMessages({ dir, queue }: { dir: string; queue: string[] }) {
           <button
             aria-label="Remove this queued message"
             onClick={() => dequeueAgentMessage(dir, i)}
-            className="mt-[1px] flex shrink-0 text-text-dim hover:text-text-secondary"
+            // one text-line tall + centered glyph: centers on a single-line message,
+            // stays pinned to the first line when the text wraps (row is items-start)
+            className="flex h-[1lh] shrink-0 items-center text-[12.5px] text-text-dim hover:text-text-secondary"
           >
             <XGlyph size={9} />
           </button>

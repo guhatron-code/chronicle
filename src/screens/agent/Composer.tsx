@@ -19,7 +19,7 @@ import {
   setAgentDraft,
   setAgentMode,
 } from "@/lib/agent-session";
-import { XGlyph } from "@/components/chrome/icons";
+import { XGlyph, PaperclipGlyph, ImageGlyph, ArrowRightGlyph } from "@/components/chrome/icons";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { Kbd } from "@/components/chrome/atoms";
 import { toastError } from "@/overlays/toasts";
@@ -187,20 +187,20 @@ export function Composer({
       void setAgentMode(dir, modeId).catch((e) => toastError("Couldn't switch the mode", String(e).slice(0, 90)));
     if (modeId === "acceptEdits" && !s.worksFreelyConfirmed) {
       onConfirm({
-        title: "Let the agent work freely?",
+        title: "Switch to Execute?",
         body:
-          "File edits happen without asking, for the rest of this session. Commands still ask every time. Every change stays reviewable and undoable. This lasts for this session only — the next session asks first again.",
-        cancelLabel: "Keep asking first",
-        confirmLabel: "Work freely this session",
+          "File edits happen without asking, for the rest of this session. Commands still ask every time. Every change stays reviewable and undoable. This lasts for this session only — the next session starts in Plan again.",
+        cancelLabel: "Stay in Plan",
+        confirmLabel: "Execute this session",
         onConfirm: apply,
       });
     } else if (modeId === "bypassPermissions" && !s.fullAutoConfirmed) {
       onConfirm({
-        title: "Turn on Full auto?",
+        title: "Turn on Auto?",
         body:
-          "Edits and commands both run without asking — nothing is confirmed. Every change still stays reviewable and undoable. This lasts for this session only — the next session asks first again.",
+          "Edits and commands both run without asking — nothing is confirmed. Every change still stays reviewable and undoable. This lasts for this session only — the next session starts in Plan again.",
         cancelLabel: "Keep confirming",
-        confirmLabel: "Turn on Full auto",
+        confirmLabel: "Turn on Auto",
         onConfirm: apply,
       });
     } else apply();
@@ -228,7 +228,10 @@ export function Composer({
         <div className="flex flex-wrap items-center gap-2">
           <span data-draft-chip className="inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-fill-subtle px-2.5 text-[11px] text-text-subtle">
             {s.draft.label}
-            <span className="text-text-dim">→ composer</span>
+            <span className="inline-flex items-center gap-1 text-text-dim">
+              <ArrowRightGlyph size={9} className="shrink-0" />
+              composer
+            </span>
             <button
               aria-label="Clear the loaded prompt"
               onClick={() => { setAgentDraft(dir, null); setText(""); mirrorComposerText(dir, ""); }}
@@ -255,7 +258,11 @@ export function Composer({
               className="inline-flex h-6 max-w-[180px] cursor-grab items-center gap-1.5 rounded-full bg-fill-subtle px-2.5 text-[11px] text-text-subtle active:cursor-grabbing"
               title={`${a.absPath} — drag onto a terminal (hold Shift) to insert the path`}
             >
-              <span className="text-text-dim">{a.isImage ? "🖼" : "📎"}</span>
+              {a.isImage ? (
+                <ImageGlyph size={12} dot={false} className="shrink-0 text-text-dim" />
+              ) : (
+                <PaperclipGlyph size={11} className="shrink-0 text-text-dim" />
+              )}
               <span className="truncate">{a.name}</span>
               <button
                 aria-label={`Remove ${a.name}`}
@@ -302,6 +309,16 @@ export function Composer({
         )}
       />
       <div className="flex items-center gap-[9px]">
+        {!disabled && (
+          <button
+            data-agent-attach
+            title="Attach a file"
+            onClick={() => fileInput.current?.click()}
+            className="inline-flex h-[26px] items-center rounded-md border border-border-hairline px-2 text-text-muted hover:bg-fill-hover hover:text-text-primary"
+          >
+            <PaperclipGlyph size={13} />
+          </button>
+        )}
         {asksFirst && worksFreely && (
           <div className="flex overflow-hidden rounded-md border border-border-hairline" data-mode-control>
             <button
@@ -313,7 +330,7 @@ export function Composer({
                 current === "default" ? "bg-fill-hover font-medium text-text-primary" : "text-text-muted hover:text-text-primary",
               )}
             >
-              Asks first
+              Plan
             </button>
             <button
               title="File edits happen without asking. Commands still ask."
@@ -324,7 +341,7 @@ export function Composer({
                 current === "acceptEdits" ? "bg-fill-hover font-medium text-text-primary" : "text-text-muted hover:text-text-primary",
               )}
             >
-              Works freely
+              Execute
             </button>
             {fullAuto && (
               <button
@@ -336,20 +353,10 @@ export function Composer({
                   current === "bypassPermissions" ? "bg-fill-hover font-medium text-text-primary" : "text-text-muted hover:text-text-primary",
                 )}
               >
-                Full auto
+                Auto
               </button>
             )}
           </div>
-        )}
-        {!disabled && (
-          <button
-            data-agent-attach
-            title="Attach a file"
-            onClick={() => fileInput.current?.click()}
-            className="inline-flex h-[26px] items-center rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
-          >
-            📎
-          </button>
         )}
         {!disabled && <ConfigSelect dir={dir} optionId="model" title="The model the agent uses" />}
         {!disabled && <ConfigSelect dir={dir} optionId="effort" title="How hard the model thinks" />}

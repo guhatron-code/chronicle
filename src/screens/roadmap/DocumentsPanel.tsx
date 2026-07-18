@@ -3,7 +3,7 @@
  * chip says so; the flash confirms, then a toast (F8). Five chip states: default ·
  * flash-on-copy · missing · paste · ghost. Presentational only.
  */
-import { CheckGlyph, DocGlyph } from "@/components/chrome/icons";
+import { ArrowRightGlyph, CheckGlyph, DocGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 
 export type DocChipProps =
@@ -46,7 +46,10 @@ export function DocChip(p: DocChipProps) {
       {p.kind === "default" && <DocGlyph size={12} />}
       {p.name}
       {p.kind === "paste" && (
-        <span className="font-sans text-[11px] text-text-subtle">{p.hint}</span>
+        <span className="inline-flex items-center gap-1 font-sans text-[11px] text-text-subtle">
+          <ArrowRightGlyph size={9} className="shrink-0 text-text-dim" />
+          {p.hint.replace(/^→\s*/, "")}
+        </span>
       )}
     </button>
   );

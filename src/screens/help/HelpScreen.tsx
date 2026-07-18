@@ -19,6 +19,7 @@ import {
   type Recipe,
 } from "@/lib/help-content";
 import { TrafficLights } from "@/components/chrome/TitleBar";
+import { BulbGlyph, CheckGlyph, XGlyph } from "@/components/chrome/icons";
 
 const ShowMeArrow = () => (
   <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -56,7 +57,7 @@ function GuideBlockView({ block }: { block: GuideBlock }) {
     case "tip":
       return (
         <div className="flex max-w-[64ch] gap-2.5 rounded-[10px] border border-border-hairline bg-surface-card px-3.5 py-3">
-          <span className="mt-px shrink-0 text-[13px]">💡</span>
+          <BulbGlyph size={15} className="mt-px shrink-0 text-text-muted" />
           <p className="text-[13px] leading-[1.6] text-text-muted">{block.text}</p>
         </div>
       );
@@ -65,13 +66,13 @@ function GuideBlockView({ block }: { block: GuideBlock }) {
         <div className="flex max-w-[64ch] flex-col gap-2 sm:flex-row">
           <div className="flex-1 rounded-[10px] border border-border-hairline bg-surface-card p-3.5">
             <div className="mb-1.5 flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.08em] text-text-dim">
-              <span className="text-danger-fg">✕</span> Too vague
+              <XGlyph size={10} className="text-danger-fg" /> Too vague
             </div>
             <p className="text-[12.5px] italic leading-[1.5] text-text-muted">“{block.bad}”</p>
           </div>
           <div className="flex-1 rounded-[10px] border border-[color-mix(in_srgb,#D97757_45%,var(--border-hairline))] bg-surface-card p-3.5">
             <div className="mb-1.5 flex items-center gap-1.5 text-[10.5px] uppercase tracking-[0.08em] text-text-dim">
-              <span style={{ color: "#D97757" }}>✓</span> Clear brief
+              <CheckGlyph size={11} style={{ color: "#D97757" }} /> Clear brief
             </div>
             <p className="text-[12.5px] leading-[1.5] text-text-primary">“{block.good}”</p>
           </div>

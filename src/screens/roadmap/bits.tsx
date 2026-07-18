@@ -3,7 +3,7 @@
  * (F15 / F18 / F19 / F21 / F22). Values transcribed 1:1 from the decks; tokens only.
  */
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDownGlyph, ChevronUpGlyph } from "@/components/chrome/icons";
+import { ArrowRightGlyph, ChevronDownGlyph, ChevronUpGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 
 /** Passive 15px-line badge chip — fill-subtle, radius 5, NO border (de-boxing law).
@@ -55,7 +55,12 @@ export function PasteChip({
       style={{ height }}
     >
       {name}
-      {hint && <span className="font-sans text-[10.5px] text-text-subtle">{hint}</span>}
+      {hint && (
+        <span className="inline-flex items-center gap-1 font-sans text-[10.5px] text-text-subtle">
+          <ArrowRightGlyph size={9} className="shrink-0 text-text-dim" />
+          {hint.replace(/^→\s*/, "")}
+        </span>
+      )}
     </button>
   );
 }

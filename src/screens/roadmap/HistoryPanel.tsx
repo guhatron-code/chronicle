@@ -4,7 +4,7 @@
  * surface on the tokens. The arrow dash animates ONLY while saving/publishing is
  * active; frozen = the words carry the state. Presentational only.
  */
-import { CheckGlyph } from "@/components/chrome/icons";
+import { ArrowRightGlyph, CheckGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 import { TinyBadge } from "./bits";
 
@@ -98,9 +98,10 @@ export function HistoryPanel(p: HistoryPanelProps) {
         </div>
         <button
           onClick={p.onStartHistory}
-          className="self-start text-[12.5px] font-medium text-text-primary underline underline-offset-2"
+          className="inline-flex items-center gap-1.5 self-start text-[12.5px] font-medium text-text-primary"
         >
-          Start keeping history →
+          <span className="underline underline-offset-2">Start keeping history</span>
+          <ArrowRightGlyph size={11} className="shrink-0" />
         </button>
       </div>
     );
