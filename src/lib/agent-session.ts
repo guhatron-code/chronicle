@@ -48,6 +48,17 @@ export interface AgentConfigOption {
   options: { value: string; name: string; description?: string }[];
 }
 
+/** A slash command the agent advertised. Skills arrive here too — a project
+ *  skill is just a command whose description names its plugin. */
+export interface AgentCommand {
+  name: string;
+  description: string;
+  /** the agent's own argument hint, e.g. "[pr number]" — shown, never parsed */
+  hint?: string;
+  /** parsed out of a "(plugin) …" description, for grouping the menu */
+  group?: string;
+}
+
 export type PermOutcome = { type: "selected"; optionId: string } | { type: "cancelled" };
 
 export type AgentEntry =
@@ -97,6 +108,8 @@ export interface AgentSessionState {
   modes: { currentModeId: string; availableModes: AgentMode[] } | null;
   /** the agent's config options — the model picker reads the "model" one */
   configOptions: AgentConfigOption[];
+  /** the agent's slash commands, including every skill — the composer's / menu */
+  commands: AgentCommand[];
   loadSession: boolean; // adapter capability — Z-4 resume gating
   turnActive: boolean;
   usage: { used: number; size: number } | null;
@@ -134,6 +147,7 @@ const blank = (): AgentSessionState => ({
   worksFreelyConfirmed: false,
   fullAutoConfirmed: false,
   configOptions: [],
+  commands: [],
   draft: null,
   composerText: "",
   queue: [],
@@ -182,6 +196,26 @@ export function agentStateWord(s: AgentSessionState): { word: string; kind: "dim
 }
 
 /* ---------- wire reduction ---------- */
+
+/** available_commands_update → the / menu's agent half. The adapter already
+ *  filters what it can't run, so whatever arrives here is offerable as-is. */
+function parseCommands(raw: unknown): AgentCommand[] {
+  if (!Array.isArray(raw)) return [];
+  return (raw as Raw[])
+    .map((c) => {
+      const description = str(c.description);
+      // both adapters name the owning plugin as a "(name) " description prefix
+      const plugin = /^\(([^)]+)\)\s*/.exec(description);
+      const input = (c.input ?? null) as Raw | null;
+      return {
+        name: str(c.name),
+        description: plugin ? description.slice(plugin[0].length) : description,
+        hint: input && input.hint != null ? str(input.hint) : undefined,
+        group: plugin ? plugin[1] : undefined,
+      };
+    })
+    .filter((c) => c.name.length > 0);
+}
 
 function parseConfigOptions(raw: unknown): AgentConfigOption[] {
   if (!Array.isArray(raw)) return [];
@@ -493,9 +527,10 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       const last = [...s.entries].reverse().find((e) => e.kind === "plan");
       if (last && last.kind === "plan") last.items = items;
       else s.entries.push({ kind: "plan", items });
+    } else if (kind === "available_commands_update") {
+      s.commands = parseCommands(update.availableCommands);
     }
-    // user_message_chunk (we already pushed the sent text), thoughts,
-    // available_commands: not rendered in v0.3
+    // user_message_chunk (we already pushed the sent text) and thoughts stay unrendered
     notify();
     return;
   }
@@ -566,11 +601,18 @@ export async function adoptAgentSession(dir: string): Promise<void> {
   }
 }
 
-export async function sendAgentMessage(dir: string, text: string): Promise<void> {
+/**
+ * Send a turn. `text` is what the thread shows; `blocks` is what goes on the
+ * wire when the composer built something richer than plain text (file links,
+ * inlined board/roadmap context). Omit it and the message is one text block —
+ * which is what every non-composer caller wants.
+ */
+export async function sendAgentMessage(dir: string, text: string, blocks?: unknown[]): Promise<void> {
   const s = agentSessionFor(dir);
   const body = text.trim();
   if (!body) return;
-  await agentPrompt(dir, body); // throws before anything is shown, honest to the wire
+  // throws before anything is shown, honest to the wire
+  await agentPrompt(dir, blocks ?? [{ type: "text", text: body }], body);
   s.entries.push({ kind: "user", text: body, checkpoint: s.pendingCheckpoint ?? undefined });
   s.pendingCheckpoint = null;
   s.turnActive = true;

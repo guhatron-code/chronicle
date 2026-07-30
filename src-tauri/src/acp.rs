@@ -1114,9 +1114,16 @@ impl AcpSession {
 
     /* ---------- client → agent operations ---------- */
 
-    pub fn prompt(&self, message: String) -> Result<(), String> {
+    /// Send a turn. `blocks` is the ACP prompt array (text / resource_link /
+    /// resource / image); `display` is the flat text the thread and transcript
+    /// show, which is what the user typed rather than what the agent receives.
+    pub fn prompt(&self, blocks: Vec<Value>, display: String) -> Result<(), String> {
         let sid = self.session_id.lock().map_err(|e| e.to_string())?
             .clone().ok_or("the session isn't ready yet")?;
+        if blocks.is_empty() {
+            return Err("write a message first".into());
+        }
+        let blocks = self.downgrade_blocks(blocks);
         if self.turn_active.swap(true, Ordering::SeqCst) {
             return Err("the agent is still working — stop it first".into());
         }
@@ -1133,13 +1140,9 @@ impl AcpSession {
         }
         self.append_transcript(&json!({
             "method": "_chronicle/user_message",
-            "params": { "text": message, "ts": crate::epoch_ms() }
+            "params": { "text": display, "ts": crate::epoch_ms() }
         }));
-        let req = proto::PromptRequest::new(
-            sid,
-            vec![proto::ContentBlock::Text(proto::TextContent::new(message))],
-        );
-        let params = serde_json::to_value(&req).map_err(|e| e.to_string())?;
+        let params = json!({ "sessionId": sid, "prompt": blocks });
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         self.pending.lock().map_err(|e| e.to_string())?.insert(id, Pending::TurnEnd);
         if let Err(e) = self.send_raw(&json!({ "jsonrpc": "2.0", "id": id, "method": "session/prompt", "params": params })) {
@@ -1148,6 +1151,36 @@ impl AcpSession {
             return Err(e);
         }
         Ok(())
+    }
+
+    /// Reduce blocks the agent didn't advertise support for, rather than
+    /// sending something it will reject. `embeddedContext` gates `resource`
+    /// (inline text) and `image` gates image blocks — both are read from the
+    /// initialize response, never assumed. A downgraded block keeps its
+    /// meaning as plain text so the turn still says what it meant to say.
+    fn downgrade_blocks(&self, blocks: Vec<Value>) -> Vec<Value> {
+        let caps = self.agent_caps.lock().ok().map(|g| g.clone()).unwrap_or(Value::Null);
+        let cap = |name: &str| {
+            caps.pointer(&format!("/agentCapabilities/promptCapabilities/{name}"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        };
+        let (embedded, image) = (cap("embeddedContext"), cap("image"));
+        blocks
+            .into_iter()
+            .map(|b| match b.get("type").and_then(|v| v.as_str()) {
+                Some("resource") if !embedded => {
+                    let uri = b.pointer("/resource/uri").and_then(|v| v.as_str()).unwrap_or("");
+                    let text = b.pointer("/resource/text").and_then(|v| v.as_str()).unwrap_or("");
+                    json!({ "type": "text", "text": format!("<context ref=\"{uri}\">\n{text}\n</context>") })
+                }
+                Some("image") if !image => {
+                    let uri = b.get("uri").and_then(|v| v.as_str()).unwrap_or("an image");
+                    json!({ "type": "text", "text": format!("[image: {uri}]") })
+                }
+                _ => b,
+            })
+            .collect()
     }
 
     /// session/cancel + resolve every outstanding permission oneshot as
@@ -1443,9 +1476,9 @@ for line in sys.stdin:
         let st = s.current_state();
         assert_eq!(st.pointer("/modes/currentModeId").and_then(|v| v.as_str()), Some("default"));
 
-        s.prompt("do the round".into()).unwrap();
+        s.prompt(vec![json!({ "type": "text", "text": "do the round" })], "do the round".into()).unwrap();
         // a second prompt while the turn runs is refused (single-flight)
-        assert!(s.prompt("again".into()).is_err());
+        assert!(s.prompt(vec![json!({ "type": "text", "text": "again" })], "again".into()).is_err());
 
         wait_for(&h.rx, 20, |v| {
             v.pointer("/message/params/update/content/text").and_then(|x| x.as_str()) == Some("hello ")
@@ -1494,7 +1527,7 @@ for line in sys.stdin:
         let s = h.state.get(&h.key).unwrap();
 
         // first turn completes normally (answer its ask)
-        s.prompt("turn one".into()).unwrap();
+        s.prompt(vec![json!({ "type": "text", "text": "turn one" })], "turn one".into()).unwrap();
         let ask = wait_for(&h.rx, 20, |v| method_is(v, "session/request_permission"));
         s.respond_permission(&ask.pointer("/message/id").unwrap().to_string(), Some("allow".into())).unwrap();
         wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/turn_end"));
@@ -1502,7 +1535,7 @@ for line in sys.stdin:
         // second turn: the mock asks permission and waits FOREVER — only the
         // cancelled oneshot lets it finish. If cancel didn't resolve the ask,
         // this test times out (= the adapter would hang).
-        s.prompt("turn two".into()).unwrap();
+        s.prompt(vec![json!({ "type": "text", "text": "turn two" })], "turn two".into()).unwrap();
         let ask = wait_for(&h.rx, 20, |v| method_is(v, "session/request_permission"));
         let req_id = ask.pointer("/message/id").unwrap().to_string();
         s.cancel().unwrap();
@@ -1513,9 +1546,36 @@ for line in sys.stdin:
         assert_eq!(end.pointer("/message/params/stopReason").and_then(|v| v.as_str()), Some("cancelled"));
 
         // after the cancelled turn a new prompt is accepted again
-        s.prompt("turn three".into()).unwrap();
+        s.prompt(vec![json!({ "type": "text", "text": "turn three" })], "turn three".into()).unwrap();
         s.stop(true);
         wait_for(&h.rx, 20, |v| state_is(v, "ended"));
+        let _ = std::fs::remove_dir_all(&h.dir);
+    }
+
+    #[test]
+    fn blocks_the_agent_cant_take_degrade_to_text_instead_of_being_sent() {
+        let Some(h) = start_mock("downgrade") else { eprintln!("skipped: no python3"); return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        let s = h.state.get(&h.key).unwrap();
+
+        // the mock advertises no promptCapabilities at all, so BOTH gates are off
+        let out = s.downgrade_blocks(vec![
+            json!({ "type": "text", "text": "look at this" }),
+            json!({ "type": "resource_link", "uri": "file:///x/y.rs" }),
+            json!({ "type": "resource", "resource": { "uri": "chronicle://task/T-1", "text": "the body" } }),
+        ]);
+
+        assert_eq!(out[0]["type"], "text", "plain text is never touched");
+        assert_eq!(
+            out[1]["type"], "resource_link",
+            "resource_link has no capability gate — it must pass through"
+        );
+        assert_eq!(out[2]["type"], "text", "resource degrades when embeddedContext is absent");
+        let flattened = out[2]["text"].as_str().unwrap();
+        assert!(flattened.contains("chronicle://task/T-1"), "the ref survives: {flattened}");
+        assert!(flattened.contains("the body"), "the content survives: {flattened}");
+
+        s.stop(true);
         let _ = std::fs::remove_dir_all(&h.dir);
     }
 
@@ -1874,7 +1934,7 @@ for line in sys.stdin:
             "the session response must carry the agent's own modes");
 
         let s = state.get(&key).unwrap();
-        s.prompt("Reply with exactly the word: pong".into()).unwrap();
+        s.prompt(vec![json!({ "type": "text", "text": "Reply with exactly the word: pong" })], "Reply with exactly the word: pong".into()).unwrap();
         let mut saw_chunk = false;
         let deadline = std::time::Instant::now() + Duration::from_secs(180);
         loop {

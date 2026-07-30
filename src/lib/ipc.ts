@@ -216,6 +216,8 @@ export const runCommand = (dir: string, cmd: string) =>
   invoke<string>("run_command", { dir, cmd });
 export const listDir = (dir: string, path: string) =>
   invoke<DirEntry[]>("list_dir", { dir, path });
+/** Every file in the project, repo-relative — the composer's `@` menu. */
+export const fileIndex = (dir: string) => invoke<string[]>("file_index", { dir });
 export const readFile = (dir: string, path: string) =>
   invoke<string>("read_file", { dir, path });
 export const copyFile = (dir: string, path: string) =>
@@ -409,7 +411,10 @@ export interface AcpUpdate {
 }
 export const agentSessionStart = (dir: string) => invoke("agent_session_start", { dir });
 export const agentSessionState = (dir: string) => invoke<Record<string, unknown>>("agent_session_state", { dir });
-export const agentPrompt = (dir: string, message: string) => invoke("agent_prompt", { dir, message });
+/** `blocks` is the ACP prompt array; `display` is the flat text the thread and
+ *  transcript show — what the user typed, not what the agent receives. */
+export const agentPrompt = (dir: string, blocks: unknown[], display: string) =>
+  invoke("agent_prompt", { dir, blocks, display });
 export const agentCancel = (dir: string) => invoke("agent_cancel", { dir });
 export const agentSetMode = (dir: string, mode: string) => invoke("agent_set_mode", { dir, mode });
 export const agentSetConfigOption = (dir: string, configId: string, value: string) =>

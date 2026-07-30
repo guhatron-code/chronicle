@@ -25,6 +25,16 @@ import { Kbd } from "@/components/chrome/atoms";
 import { toastError } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
 import { agentAttach, IMG_MIME } from "@/lib/ipc";
+import { Autocomplete, findTrigger, handleKey, type PickerItem } from "./Autocomplete";
+import { commandRows, LOCAL_COMMANDS } from "@/lib/composer-commands";
+import {
+  buildBlocks,
+  ensureFileIndex,
+  ensurePhases,
+  flattenMentions,
+  mentionRows,
+  type Mention,
+} from "@/lib/composer-mentions";
 
 const fmtTokens = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
@@ -135,6 +145,105 @@ export function Composer({
 
   const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id));
 
+  /* ---------- the / and @ menus ---------- */
+  const [trigger, setTrigger] = useState<{ kind: "slash" | "at"; start: number; query: string } | null>(null);
+  const [active, setActive] = useState(0);
+
+  /** tokens the user actually picked → what they mean. Survives edits; a token
+   *  that stops matching just stops being a mention. */
+  const mentions = useRef(new Map<string, Mention>());
+  const [, bumpMenu] = useState(0);
+  const rerender = () => bumpMenu((n) => n + 1);
+
+  const GROUP: Record<Mention["kind"], string> = {
+    attachment: "Attached",
+    task: "Board",
+    phase: "Roadmap",
+    file: "Files",
+  };
+
+  const items: PickerItem[] =
+    trigger?.kind === "slash"
+      ? commandRows(dir, trigger.query).map((r) => ({
+          id: `${r.kind}:${r.name}`,
+          label: `/${r.name}`,
+          detail: r.description,
+          hint: r.kind === "agent" ? r.hint : undefined,
+          group: r.kind === "local" ? "Chronicle — runs here, never sent" : (r.group ?? "Agent"),
+        }))
+      : trigger?.kind === "at"
+        ? mentionRows(
+            dir,
+            trigger.query,
+            attachments.map((a) => ({ name: a.name, relPath: a.relPath })),
+          ).map((m) => ({
+            id: `${m.kind}:${m.token}`,
+            label: m.label,
+            detail: m.detail,
+            group: GROUP[m.kind],
+          }))
+        : [];
+
+  const closeMenu = () => { setTrigger(null); setActive(0); };
+
+  /** Recompute the trigger after any edit or caret move. The `@` sources load
+   *  lazily — the first `@` pays for the index, not every session start. */
+  const syncTrigger = (value: string, caret: number) => {
+    const t = findTrigger(value, caret);
+    if (t?.kind === "at") {
+      ensureFileIndex(dir, rerender);
+      ensurePhases(dir, rerender);
+    }
+    setTrigger(t);
+    setActive(0);
+  };
+
+  const pick = (item: PickerItem) => {
+    if (!trigger) return;
+    const ta = taRef.current;
+    if (trigger.kind === "slash") {
+      const local = LOCAL_COMMANDS.find((c) => `local:${c.name}` === item.id);
+      if (local) {
+        // Chronicle's own — run it and clear; nothing goes to the agent
+        closeMenu();
+        setText("");
+        mirrorComposerText(dir, "");
+        void local.run(dir).catch((e) => toastError(`Couldn't run /${local.name}`, String(e).slice(0, 90)));
+        return;
+      }
+      // the agent's own — insert the text and let the user add arguments
+      const next = `${item.label} `;
+      closeMenu();
+      setText(next);
+      mirrorComposerText(dir, next);
+      requestAnimationFrame(() => {
+        ta?.focus();
+        ta?.setSelectionRange(next.length, next.length);
+      });
+      return;
+    }
+
+    // @ — swap the typed query for the token and remember what it points at
+    const row = mentionRows(
+      dir,
+      trigger.query,
+      attachments.map((a) => ({ name: a.name, relPath: a.relPath })),
+    ).find((m) => `${m.kind}:${m.token}` === item.id);
+    if (!row) return;
+    mentions.current.set(row.token, row);
+    const caret = ta?.selectionStart ?? text.length;
+    const inserted = `@${row.token} `;
+    const next = text.slice(0, trigger.start) + inserted + text.slice(caret);
+    const at = trigger.start + inserted.length;
+    closeMenu();
+    setText(next);
+    mirrorComposerText(dir, next);
+    requestAnimationFrame(() => {
+      ta?.focus();
+      ta?.setSelectionRange(at, at);
+    });
+  };
+
   /* F38 — a preloaded draft lands in the input, unsent */
   const lastDraft = useRef<string | null>(null);
   useEffect(() => {
@@ -159,22 +268,32 @@ export function Composer({
   const send = () => {
     const typed = text.trim();
     if ((!typed && attachments.length === 0) || disabled || sending || s.turnActive) return;
-    const refs = attachments.length
+    const withRefs = attachments.length
       ? `${typed ? `${typed}\n\n` : ""}Attached files:\n${attachments.map((a) => `- ${a.relPath}`).join("\n")}`
       : typed;
+    // files become links the agent follows itself; a task or phase has no file
+    // to read, so its text rides along inline
     setSending(true);
-    sendAgentMessage(dir, refs)
-      .then(() => { setText(""); mirrorComposerText(dir, ""); setAttachments([]); })
+    sendAgentMessage(dir, withRefs, buildBlocks(withRefs, mentions.current, dir))
+      .then(() => {
+        setText("");
+        mirrorComposerText(dir, "");
+        setAttachments([]);
+        mentions.current.clear();
+      })
       .catch((e) => toastError("Couldn't send it", String(e).slice(0, 90)))
       .finally(() => setSending(false));
   };
 
   const queue = () => {
-    const body = text.trim();
-    if (!body) return;
-    enqueueAgentMessage(dir, body);
+    const typed = text.trim();
+    if (!typed) return;
+    // a queued message goes out unattended later — expand its mentions now,
+    // while the table still holds what they pointed at
+    enqueueAgentMessage(dir, flattenMentions(typed, mentions.current));
     setText("");
     mirrorComposerText(dir, "");
+    mentions.current.clear();
   };
 
   const stop = () => {
@@ -275,6 +394,16 @@ export function Composer({
           ))}
         </div>
       )}
+      <div className="relative flex flex-col">
+      {trigger && (
+        <Autocomplete
+          items={items}
+          active={active}
+          onActive={setActive}
+          onPick={pick}
+          emptyLabel={trigger.kind === "slash" ? "No command matches" : "No match"}
+        />
+      )}
       <textarea
         ref={taRef}
         data-agent-input
@@ -284,10 +413,23 @@ export function Composer({
         onChange={(e) => {
           setText(e.target.value);
           mirrorComposerText(dir, e.target.value);
+          syncTrigger(e.target.value, e.target.selectionStart ?? e.target.value.length);
           // hand-editing the preload keeps the text but drops the chip's claim
           if (s.draft && e.target.value !== s.draft.text) setAgentDraft(dir, null);
         }}
+        onBlur={closeMenu}
+        onClick={(e) => {
+          const t = e.currentTarget;
+          syncTrigger(t.value, t.selectionStart ?? t.value.length);
+        }}
         onKeyDown={(e) => {
+          // an open menu owns the keys it needs — crucially Enter, which must
+          // accept the highlighted row rather than send the message
+          if (
+            trigger &&
+            handleKey(e, items.length, active, setActive, () => pick(items[active]), closeMenu)
+          )
+            return;
           // Enter sends; while a turn is active it queues; Shift+Enter / IME = newline
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
@@ -308,6 +450,7 @@ export function Composer({
           disabled && "opacity-60",
         )}
       />
+      </div>
       <div className="flex items-center gap-[9px]">
         {!disabled && (
           <button

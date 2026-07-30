@@ -2311,6 +2311,50 @@ async fn list_dir(roots: State<'_, OpenRoots>, dir: String, path: String) -> Res
     Ok(out)
 }
 
+/// A flat list of the project's files, repo-relative, for the composer's `@`
+/// menu. `git ls-files` is the source of truth: it already respects
+/// .gitignore, it's fast on big repos, and it lists exactly the files worth
+/// pointing an agent at. A project that isn't a git repo falls back to a
+/// bounded walk so the menu degrades instead of coming back empty.
+#[tauri::command]
+async fn file_index(roots: State<'_, OpenRoots>, dir: String) -> Result<Vec<String>, String> {
+    const SKIP: &[&str] = &[".git", "node_modules", ".DS_Store", "target", ".turbo", ".chronicle-blank"];
+    const CAP: usize = 20_000;
+
+    let p = project_for(&roots, &dir)?;
+    // -c: tracked, -o: untracked, --exclude-standard: honour .gitignore
+    let tracked = git_in(&p.repo, &["ls-files", "-co", "--exclude-standard"]);
+    if !tracked.is_empty() {
+        return Ok(tracked.lines().map(str::to_string).take(CAP).collect());
+    }
+
+    // not a git repo (or an empty one) — walk it, breadth-first and capped
+    let mut out: Vec<String> = Vec::new();
+    let mut queue: Vec<PathBuf> = vec![p.repo.clone()];
+    while let Some(current) = queue.pop() {
+        if out.len() >= CAP {
+            break;
+        }
+        let Ok(entries) = std::fs::read_dir(&current) else { continue };
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if SKIP.contains(&name.as_str()) || name.starts_with('.') {
+                continue;
+            }
+            let path = e.path();
+            let Ok(md) = std::fs::metadata(&path) else { continue };
+            if md.is_dir() {
+                queue.push(path);
+            } else if let Ok(rel) = path.strip_prefix(&p.repo) {
+                out.push(rel.to_string_lossy().to_string());
+            }
+        }
+    }
+    out.sort();
+    out.truncate(CAP);
+    Ok(out)
+}
+
 #[tauri::command]
 async fn read_file(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<String, String> {
     let p = project_for(&roots, &dir)?;
@@ -2645,9 +2689,9 @@ fn agent_for(roots: &OpenRoots, agents: &acp::AcpState, dir: &str) -> Result<Arc
 }
 
 #[tauri::command]
-async fn agent_prompt(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, message: String) -> Result<(), String> {
-    if message.trim().is_empty() { return Err("write a message first".into()); }
-    agent_for(&roots, &agents, &dir)?.prompt(message)
+async fn agent_prompt(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, blocks: Vec<Value>, display: String) -> Result<(), String> {
+    if blocks.is_empty() { return Err("write a message first".into()); }
+    agent_for(&roots, &agents, &dir)?.prompt(blocks, display)
 }
 
 #[tauri::command]
@@ -2841,7 +2885,7 @@ fn main() {
             fixes_log_path, fixes_generate, fixes_status, fixes_cancel,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
-            list_dir, read_file, copy_file, copy_text,
+            list_dir, file_index, read_file, copy_file, copy_text,
             pty_spawn, init_log_path,
             pty_write, pty_resize, pty_kill, pty_info,
             round_execute, round_exec_status, round_exec_cancel, round_retro, exec_log_path,
