@@ -49,7 +49,7 @@ export function Autocomplete({
     return (
       <div
         data-composer-menu
-        className="absolute bottom-full left-0 z-30 mb-1.5 w-[340px] rounded-[10px] border border-border-strong bg-surface-overlay px-3 py-2.5 [box-shadow:var(--shadow-overlay)]"
+        className="absolute bottom-full left-0 z-30 mb-1.5 w-[340px] max-w-[calc(100%-8px)] rounded-[10px] border border-border-strong bg-surface-overlay px-3 py-2.5 [box-shadow:var(--shadow-overlay)]"
       >
         <span className="text-[12px] text-text-subtle">{emptyLabel}</span>
       </div>
@@ -61,7 +61,10 @@ export function Autocomplete({
     <div
       ref={listRef}
       data-composer-menu
-      className="absolute bottom-full left-0 z-30 mb-1.5 flex max-h-[280px] w-[340px] flex-col overflow-y-auto rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
+      // overflow-x-hidden is explicit: setting only overflow-y promotes
+      // overflow-x from visible to auto, which is where the sideways
+      // scrollbar came from
+      className="absolute bottom-full left-0 z-30 mb-1.5 flex max-h-[360px] w-[380px] max-w-[calc(100%-8px)] flex-col overflow-y-auto overflow-x-hidden rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
     >
       {items.map((it, i) => {
         const heading = it.group !== lastGroup ? it.group : undefined;
@@ -79,20 +82,29 @@ export function Autocomplete({
               onMouseDown={(e) => { e.preventDefault(); onPick(it); }}
               onMouseEnter={() => onActive(i)}
               className={cn(
-                "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-left",
+                "flex w-full min-w-0 flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left",
                 i === active && "bg-fill-hover",
               )}
             >
-              <span className="shrink-0 text-[12.5px] text-text-primary">{it.label}</span>
-              {it.hint && (
-                <span className="shrink-0 font-mono text-[10.5px] text-text-dimmer">{it.hint}</span>
-              )}
+              {/* two lines, like the config dropdown: the name can't be
+                  squeezed by a long description, and the description gets the
+                  full width instead of a few truncated words */}
+              <span className="flex w-full min-w-0 items-center gap-2">
+                <span className="min-w-0 truncate text-[12.5px] text-text-primary">{it.label}</span>
+                {it.hint && (
+                  <span className="min-w-0 shrink truncate font-mono text-[10.5px] text-text-dimmer">
+                    {it.hint}
+                  </span>
+                )}
+                {it.badge && (
+                  <span className="ml-auto shrink-0 rounded-[5px] bg-fill-subtle px-1.5 text-[10px] text-text-subtle">
+                    {it.badge}
+                  </span>
+                )}
+              </span>
               {it.detail && (
-                <span className="min-w-0 flex-1 truncate text-[11px] text-text-dim">{it.detail}</span>
-              )}
-              {it.badge && (
-                <span className="ml-auto shrink-0 rounded-[5px] bg-fill-subtle px-1.5 text-[10px] text-text-subtle">
-                  {it.badge}
+                <span className="line-clamp-2 w-full min-w-0 text-[11px] leading-snug text-text-dim">
+                  {it.detail}
                 </span>
               )}
             </button>
