@@ -24,7 +24,8 @@ import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { Kbd } from "@/components/chrome/atoms";
 import { toastError } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
-import { agentAttach, IMG_MIME } from "@/lib/ipc";
+import { agentAttach, agentAttachPath, IMG_MIME } from "@/lib/ipc";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Autocomplete, findTrigger, handleKey, type PickerItem } from "./Autocomplete";
 import { commandRows, LOCAL_COMMANDS } from "@/lib/composer-commands";
 import {
@@ -142,6 +143,63 @@ export function Composer({
       }
     }
   };
+
+  /** The OS-drag route (Finder → composer). Tauri intercepts native drops, so
+   *  they never surface as HTML drop events and there is no `File` to read —
+   *  we get absolute paths and the copy happens in Rust. */
+  const addPaths = async (paths: string[]) => {
+    for (const abs of paths) {
+      try {
+        const relPath = await agentAttachPath(dir, abs);
+        const name = abs.split("/").pop() || relPath;
+        const ext = relPath.split(".").pop()?.toLowerCase() ?? "";
+        setAttachments((prev) => [
+          ...prev,
+          { id: `${Date.now()}-${attachSeq.current++}`, name, absPath: `${dir}/${relPath}`, relPath, isImage: ext in IMG_MIME },
+        ]);
+      } catch (e) {
+        toastError("Couldn't attach the file", String(e).slice(0, 90));
+      }
+    }
+  };
+
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [osDropping, setOsDropping] = useState(false);
+
+  useEffect(() => {
+    /** is an OS cursor over this composer? position is PHYSICAL — to CSS px first */
+    const over = (pos: { x: number; y: number }) => {
+      const el = rootRef.current;
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const x = pos.x / dpr;
+      const y = pos.y / dpr;
+      return x >= r.left && x < r.right && y >= r.top && y < r.bottom;
+    };
+    let unlisten: (() => void) | undefined;
+    let dead = false;
+    void getCurrentWebview()
+      .onDragDropEvent((e) => {
+        const p = e.payload;
+        if (p.type === "enter" || p.type === "over") setOsDropping(over(p.position));
+        else if (p.type === "leave") setOsDropping(false);
+        else if (p.type === "drop") {
+          setOsDropping(false);
+          if (over(p.position) && p.paths.length) void addPaths(p.paths);
+        }
+      })
+      .then((fn) => {
+        if (dead) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      dead = true;
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dir]);
 
   const removeAttachment = (id: string) => setAttachments((prev) => prev.filter((a) => a.id !== id));
 
@@ -332,15 +390,19 @@ export function Composer({
 
   return (
     <div
-      className="flex shrink-0 flex-col gap-2 border-t border-divider px-3 py-2.5"
+      ref={rootRef}
+      className={cn(
+        "flex shrink-0 flex-col gap-2 border-t border-divider px-3 py-2.5",
+        osDropping && "bg-fill-subtle",
+      )}
+      /* Files arrive via the OS route (see addPaths) — these handlers exist only
+       * to swallow a chip dropped back on the composer, which IS an in-webview
+       * drag and so does reach React. */
       onDragOver={(e) => {
-        // accept Finder file drops; ignore a chip being dragged (Task 5)
-        if (Array.from(e.dataTransfer.types).includes("Files")) e.preventDefault();
+        if (e.dataTransfer.types.includes("application/x-chronicle-path")) e.preventDefault();
       }}
       onDrop={(e) => {
-        if (e.dataTransfer.types.includes("application/x-chronicle-path")) { e.preventDefault(); return; } // a chip, not a file
-        const files = Array.from(e.dataTransfer.files);
-        if (files.length) { e.preventDefault(); void addFiles(files); }
+        if (e.dataTransfer.types.includes("application/x-chronicle-path")) e.preventDefault();
       }}
     >
       {s.draft && text === s.draft.text && (

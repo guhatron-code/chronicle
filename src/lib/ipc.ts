@@ -270,6 +270,9 @@ export const kanbanAttach = (dir: string, taskId: string, name: string, b64: str
  *  returns its repo-relative path to reference in the agent prompt. */
 export const agentAttach = (dir: string, name: string, b64: string) =>
   invoke<string>("agent_attach", { dir, name, b64 });
+/** Attach by absolute path — the OS-drag route, where we get a path, not bytes. */
+export const agentAttachPath = (dir: string, path: string) =>
+  invoke<string>("agent_attach_path", { dir, path });
 /** Remove one attachment file (jailed to .chronicle/attachments). */
 export const kanbanDetach = (dir: string, path: string) =>
   invoke<void>("kanban_detach", { dir, path });

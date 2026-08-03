@@ -1209,6 +1209,29 @@ async fn agent_attach(roots: State<'_, OpenRoots>, dir: String, name: String, b6
     save_agent_attachment(&p.dir, &name, &bytes)
 }
 
+/// Composer attachment from an OS drag (Finder → composer): the webview hands
+/// us a real path, not bytes, so the copy happens here. Same jail, same
+/// no-clobber naming as `agent_attach` — only the source differs.
+fn attach_from_path(root: &Path, src: &Path) -> Result<String, String> {
+    let md = std::fs::metadata(src).map_err(|e| e.to_string())?;
+    if md.is_dir() {
+        return Err("that's a folder — attach a file".into());
+    }
+    // check the size BEFORE reading, so a huge drop can't balloon memory first
+    if md.len() > 10_000_000 {
+        return Err("attachment is over 10 MB".into());
+    }
+    let name = src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let bytes = std::fs::read(src).map_err(|e| e.to_string())?;
+    save_agent_attachment(root, &name, &bytes)
+}
+
+#[tauri::command]
+async fn agent_attach_path(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    attach_from_path(&p.dir, &PathBuf::from(&path))
+}
+
 const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written tasks (bugs, issues, ideas — with optional screenshots and design links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every task below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its task id. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the tasks' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly. The prompt MUST also instruct the executor: after each item is completed AND verified, edit .chronicle/kanban.json and set that task's \"column\" to \"completed\" (match by task id; touch \"updated_at\" with epoch ms; change nothing else in the file) — this is how the board and the roadmap track the round live.\n\nDo not change any other file except the two above (and the kanban column updates the executor makes later). The tasks are in `{TASKS}` — read that file (a JSON array) before writing anything.\n";
 
 fn fixes_run_key(dir: &str) -> Result<(String, PathBuf), String> {
@@ -2881,7 +2904,7 @@ fn main() {
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
             init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
             kanban_get, kanban_save, kanban_attach,
-            kanban_detach, agent_attach,
+            kanban_detach, agent_attach, agent_attach_path,
             fixes_log_path, fixes_generate, fixes_status, fixes_cancel,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
@@ -3087,6 +3110,25 @@ mod r1_tests {
         assert!(!p3.contains('/') || p3.matches('/').count() == 2, "no nested dirs");
         // an empty/invalid name is rejected
         assert!(save_agent_attachment(&repo, "", b"x").is_err());
+    }
+
+    #[test]
+    fn attach_from_path_copies_and_refuses_folders() {
+        let repo = tmp("attach-path");
+        let src = tmp("attach-path-src");
+        std::fs::write(src.join("notes.md"), b"hello").unwrap();
+        // a dropped file lands in the jail under its basename, contents intact
+        let rel = attach_from_path(&repo, &src.join("notes.md")).unwrap();
+        assert_eq!(rel, ".chronicle/attachments/notes.md");
+        assert_eq!(std::fs::read(repo.join(&rel)).unwrap(), b"hello");
+        // dropping the same name again disambiguates rather than clobbering
+        let rel2 = attach_from_path(&repo, &src.join("notes.md")).unwrap();
+        assert_eq!(rel2, ".chronicle/attachments/notes-2.md");
+        assert_eq!(std::fs::read(repo.join(&rel)).unwrap(), b"hello", "first file untouched");
+        // a folder drop is refused, not silently half-handled
+        assert!(attach_from_path(&repo, &src).is_err());
+        // a path that isn't there is an error, not a panic
+        assert!(attach_from_path(&repo, &src.join("nope.txt")).is_err());
     }
 }
 

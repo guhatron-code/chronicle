@@ -14,6 +14,19 @@
  * switches. With no tabs the surface shows the START state instead
  * (onStartAgent / onNewTerminal).
  *
+ * Dropping a path onto the surface types it into that tab's pty — two routes,
+ * because they are two different event systems:
+ *   · Finder (and any OS drag) — the webview swallows HTML5 file drops when
+ *     Tauri's dragDropEnabled is on (it is, by default), and an HTML `File`
+ *     has no path anyway. So OS drops come from `onDragDropEvent`, which hands
+ *     us real absolute paths plus a PHYSICAL cursor position we hit-test
+ *     against the active host. No modifier — this matches Terminal.app/iTerm.
+ *   · A composer attachment chip — an in-webview drag, so it stays on the
+ *     React handlers, Shift-gated (an unmodified chip drag is a re-drop on the
+ *     composer, not a terminal insert).
+ * Both funnel through shellPath(): quoted only if needed, trailing space,
+ * never a newline — a drop inserts a path, it never runs a command.
+ *
  * Renaming is component-local: double-click a tab → inline input replaces the
  * label (onRenameStart fires); Enter or blur commits via
  * onRenameCommit(id, name); Escape cancels; an empty draft cancels. A dead
@@ -21,6 +34,7 @@
  * scrollback until closed.
  */
 import { useEffect, useRef, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ptyWrite } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { ClaudeStar, CodexTile, PlusGlyph, XGlyph } from "./icons";
@@ -134,6 +148,76 @@ export function TerminalColumn({
   onToggleCollapsed?: () => void;
 }) {
   const [renamingId, setRenamingId] = useState<number | null>(null);
+  /** the tab an OS drag is currently hovering — drives the drop ring */
+  const [osDropId, setOsDropId] = useState<number | null>(null);
+
+  /* --- OS drag-drop (Finder → terminal) -----------------------------------
+   * The listener is window-wide and mounts once, so it reads activeId and the
+   * host elements through refs rather than re-subscribing on every change. */
+  const hosts = useRef(new Map<number, HTMLDivElement>());
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
+  /** Which tab (if any) sits under an OS cursor. The payload position is
+   *  PHYSICAL — divide by DPR to land in the CSS pixels a rect speaks. Only
+   *  the active host is visible, so it is the only candidate. */
+  const tabAtPoint = (pos: { x: number; y: number }): number | null => {
+    const id = activeIdRef.current;
+    const el = id == null ? undefined : hosts.current.get(id);
+    if (id == null || !el) return null;
+    const r = el.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const x = pos.x / dpr;
+    const y = pos.y / dpr;
+    return x >= r.left && x < r.right && y >= r.top && y < r.bottom ? id : null;
+  };
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let dead = false;
+    void getCurrentWebview()
+      .onDragDropEvent((e) => {
+        const p = e.payload;
+        if (p.type === "enter" || p.type === "over") setOsDropId(tabAtPoint(p.position));
+        else if (p.type === "leave") setOsDropId(null);
+        else if (p.type === "drop") {
+          setOsDropId(null);
+          const id = tabAtPoint(p.position);
+          if (id == null || p.paths.length === 0) return;
+          // several files land as several space-separated paths, one write
+          void ptyWrite(id, p.paths.map(shellPath).join("")).catch(() => {});
+        }
+      })
+      .then((fn) => {
+        if (dead) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {});
+    return () => {
+      dead = true;
+      unlisten?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* The host ref seam: we need the element for hit-testing AND the parent
+   * needs its xterm mount. Compose once per tab and cache — handing React a
+   * fresh callback each render would detach/remount xterm (see the header). */
+  const hostForRef = useRef(hostFor);
+  hostForRef.current = hostFor;
+  const composedHostRefs = useRef(new Map<number, (el: HTMLDivElement | null) => void>());
+  const hostRefFor = (id: number) => {
+    let fn = composedHostRefs.current.get(id);
+    if (!fn) {
+      fn = (el: HTMLDivElement | null) => {
+        if (el) hosts.current.set(id, el);
+        else hosts.current.delete(id);
+        hostForRef.current?.(id)(el);
+      };
+      composedHostRefs.current.set(id, fn);
+    }
+    return fn;
+  };
 
   if (collapsed) {
     return (
@@ -310,7 +394,7 @@ export function TerminalColumn({
           {tabs.map((t) => (
             <div
               key={t.id}
-              ref={hostFor?.(t.id)}
+              ref={hostRefFor(t.id)}
               onDragOver={(e) => {
                 // Shift-gated: only accept our attachment path while Shift is held
                 if (e.shiftKey && e.dataTransfer.types.includes("application/x-chronicle-path")) {
@@ -327,6 +411,8 @@ export function TerminalColumn({
               className={cn(
                 "h-full w-full min-w-0 overflow-hidden px-4 py-3.5 font-mono text-xs leading-[1.7] text-text-secondary",
                 t.id !== activeId && "hidden",
+                // transient only — the surface is flush at rest (see the header)
+                osDropId === t.id && "[box-shadow:inset_0_0_0_2px_var(--border-field-focus)]",
               )}
             />
           ))}
