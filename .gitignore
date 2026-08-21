@@ -4,3 +4,6 @@ src-tauri/target/
 src-tauri/gen/schemas/
 .DS_Store
 .sign.env
+
+# tsc -b buildinfo (emit is redirected to node_modules/.tmp — see tsconfig.node.json)
+*.tsbuildinfo

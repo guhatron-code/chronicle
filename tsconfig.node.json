@@ -1,6 +1,12 @@
 {
   "compilerOptions": {
     "composite": true,
+    // A referenced composite project cannot set noEmit (TS6310), so the emit is
+    // aimed away from the repo root: tsc would otherwise drop vite.config.js
+    // beside vite.config.ts, and Vite resolves .js BEFORE .ts — a stale emit
+    // would silently win over the source it was built from.
+    "outDir": "./node_modules/.tmp/vite-config",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "target": "ES2023",
     "lib": ["ES2023"],
     "module": "ESNext",
