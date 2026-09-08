@@ -35,30 +35,18 @@ wait "$gitcount"
 
 # the tasks table: Name  ID  CPU ms/s  User%  Deadlines(<2ms,2-5ms)  Wakeups(Intr,PkgIdle)  GPU ms/s  Energy Impact
 # Fields are indexed right-to-left (from $NF backwards) because the Name column (first, may contain spaces) has variable width.
-# Energy Impact ($NF), GPU ms/s $(NF-1), Wakeups Pkg idle $(NF-2), Wakeups Intr $(NF-3),
-# Deadlines 2-5ms $(NF-4), Deadlines <2ms $(NF-5), User% $(NF-6), CPU ms/s $(NF-7), ID $(NF-8)
+# A single-word name (like "Chronicle" or "git") means NF is consistent; multi-word names (like "Chronicle Helper") have more fields.
+# Energy Impact ($NF), GPU ms/s $(NF-1), Wakeups Intr $(NF-3), CPU ms/s $(NF-7)
 echo "powermetrics columns (check the layout once):" >&2
 grep -m1 -E '^Name\s+ID\s+CPU ms/s' "$tmp" >&2 || true
 
-# Parse powermetrics output using right-anchored fields
-# cpu = sum of Chronicle's CPU ms/s and all git children's CPU ms/s
-cpu="$(awk '
-  /^Chronicle[[:space:]]/ { cpu_chronicle = $(NF-7) }
-  /^git[[:space:]]/ { cpu_git += $(NF-7) }
-  END {
-    printf "%.2f", (cpu_chronicle + cpu_git)
-  }
-' "$tmp")"
-
-# wake = Chronicle's interrupt wakeups per second
-wake="$(awk '/^Chronicle[[:space:]]/ { print $(NF-3); exit }' "$tmp")"
-
-# energy = Chronicle's energy impact
-energy="$(awk '/^Chronicle[[:space:]]/ { print $NF; exit }' "$tmp")"
-
-if [ -z "$cpu" ] || [ -z "$wake" ] || [ -z "$energy" ]; then
-  echo "couldn't find Chronicle in the powermetrics table — is the app running under the name 'Chronicle'?" >&2
-  exit 1
-fi
+# Parse powermetrics output using one awk pass for all three values
+# Matches app row with case-insensitive first field "chronicle" and single token name (NF==9)
+# Sums git children's CPU, handles error if no app row found
+read -r cpu wake energy < <(awk '
+  tolower($1) == "chronicle" && NF == 9 && !seen { app_cpu = $(NF-7); wake = $(NF-3); energy = $NF; seen = 1 }
+  $1 == "git" && NF == 9 { git_cpu += $(NF-7) }
+  END { if (!seen) { exit 1 } printf "%.2f %s %s\n", app_cpu + git_cpu, wake, energy }
+' "$tmp") || { echo "couldn't find Chronicle in the powermetrics table — is the app running under the name 'Chronicle'?" >&2; exit 1; }
 
 printf '%s\t%s\t%s\t%s\t%s\n' "$label" "$cpu" "$wake" "$energy" "$(cat "$tmp.git")"
