@@ -3044,6 +3044,8 @@ fn main() {
             watch_project, unwatch_project, launch_open_dir,
             power::get_power_source, power::set_ui_visible,
             web::web_open_file, web::web_tabs_load, web::web_tabs_save,
+            web::web_tab_open, web::web_tab_close, web::web_tab_show, web::web_hide_all,
+            web::web_set_bounds, web::web_tab_navigate, web::web_tab_back, web::web_tab_forward, web::web_tab_reload,
             blocklists::web_blocklists_prepare, blocklists::web_blocklists_info
         ])
         .run(tauri::generate_context!())

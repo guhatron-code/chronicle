@@ -225,7 +225,6 @@ pub fn web_blocklists_info(st: State<BlockState>) -> Value { info_json(&st) }
 
 /// Add every compiled list to this webview. Must run on the main thread —
 /// `Webview::with_webview` guarantees that.
-#[allow(dead_code)] // used from Task 5 (the browser child webviews)
 pub fn attach(webview: &tauri::Webview) {
     let _ = webview.with_webview(|pw| {
         let wk: &WKWebView = unsafe { &*(pw.inner() as *const WKWebView) };

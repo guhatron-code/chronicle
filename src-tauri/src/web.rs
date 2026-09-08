@@ -2,12 +2,14 @@
 //! events, the jailed `chronicle-file://` protocol that serves a project's own
 //! files to those webviews, and per-project tab persistence in app data.
 
+use objc2_web_kit::WKWebView;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, State, Webview, WebviewBuilder, WebviewUrl};
 
 /// 16 hex chars of sha256(canonical root) — the host part of chronicle-file URLs
 /// and the per-project tabs file name.
@@ -57,11 +59,10 @@ pub fn mime_for(p: &Path) -> &'static str {
 pub struct SavedTab { pub url: String, pub title: String }
 
 /// Everything the Web pane's backend keeps between commands.
-#[allow(dead_code)] // used from Task 5
 pub struct WebState {
     /// project hash -> canonical root, for the chronicle-file protocol
     pub roots: Mutex<HashMap<String, PathBuf>>,
-    /// tab label -> live tab (Task 5 fills this)
+    /// tab label -> live tab
     pub tabs: Mutex<HashMap<String, WebTab>>,
     pub next_id: std::sync::atomic::AtomicU32,
     /// last bounds pushed by the frontend, physical pixels
@@ -76,9 +77,12 @@ impl WebState {
     }
 }
 
-/// A live tab. Task 5 gives it a webview; until then only the label and dir exist.
-#[allow(dead_code)] // used from Task 5
+/// A live tab: the project it belongs to, its native child webview, and whether
+/// its last page-load event said "started".
 pub struct WebTab {
+    /// the project this tab belongs to — recorded at open, read when Task 7
+    /// saves and restores a project's tabs
+    #[allow(dead_code)]
     pub dir: String,
     pub webview: Option<tauri::Webview>,
     pub loading: bool,
@@ -133,6 +137,180 @@ pub fn serve_project_file(web: &WebState, url: &str) -> (u16, &'static str, Vec<
         None => (404, "text/plain", b"not found".to_vec()),
     }
 }
+
+/* ================= tabs: native child webviews ================= */
+
+fn profile_dir() -> PathBuf { crate::config_dir().join("web-profile") }
+
+/// The only schemes a tab may sit on: the open web, project files, and the
+/// blank page a fresh tab starts at.
+const ALLOWED: [&str; 4] = ["http", "https", "chronicle-file", "about"];
+
+/// Read the live status straight from WKWebView on the main thread and emit it.
+fn emit_status(app: &AppHandle, label: &str, loading: bool) {
+    let Some(wv) = app.get_webview(label) else { return };
+    let app2 = app.clone();
+    let label = label.to_string();
+    let _ = wv.with_webview(move |pw| {
+        let wk: &WKWebView = unsafe { &*(pw.inner() as *const WKWebView) };
+        let title = unsafe { wk.title() }.map(|t| t.to_string()).unwrap_or_default();
+        let url = unsafe { wk.URL() }.and_then(|u| u.absoluteString()).map(|s| s.to_string()).unwrap_or_default();
+        let (back, fwd) = unsafe { (wk.canGoBack(), wk.canGoForward()) };
+        let _ = app2.emit("web-tab-changed", json!({
+            "label": label, "url": url, "title": title, "loading": loading, "can_back": back, "can_forward": fwd,
+        }));
+    });
+}
+
+fn current_bounds(web: &WebState) -> tauri::Rect {
+    web.bounds.lock().ok().and_then(|b| *b).unwrap_or(tauri::Rect {
+        position: Position::Physical(PhysicalPosition { x: 0, y: 0 }),
+        size: Size::Physical(PhysicalSize { width: 10, height: 10 }),
+    })
+}
+
+/// Remember a tab's last page-load state, so showing it later reports the truth
+/// rather than a hopeful `false`. Never holds the lock across a WebKit call.
+fn set_loading(app: &AppHandle, label: &str, loading: bool) {
+    if let Some(web) = app.try_state::<WebState>() {
+        if let Ok(mut tabs) = web.tabs.lock() {
+            if let Some(t) = tabs.get_mut(label) { t.loading = loading; }
+        }
+    }
+}
+
+fn is_loading(web: &WebState, label: &str) -> bool {
+    web.tabs.lock().ok().and_then(|t| t.get(label).map(|t| t.loading)).unwrap_or(false)
+}
+
+#[tauri::command]
+pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<WebState>, block: State<crate::blocklists::BlockState>, dir: String, url: Option<String>) -> Result<String, String> {
+    let _ = crate::project_for(&roots, &dir)?;
+    {
+        let s = block.status.lock().map_err(|e| e.to_string())?;
+        if *s == "idle" || *s == "compiling" { return Err("blocking isn't ready yet".into()); }
+    }
+    // vet the first address before a webview exists, so a bad one strands nothing
+    let first: Option<url::Url> = match url {
+        Some(u) => {
+            let parsed: url::Url = u.parse().map_err(|_| "that address isn't valid".to_string())?;
+            if !ALLOWED.contains(&parsed.scheme()) { return Err("only web pages and project files open here".into()); }
+            Some(parsed)
+        }
+        None => None,
+    };
+    let n = web.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let label = format!("web-{n}");
+    let window = app.get_window("main").ok_or("no main window")?;
+    let app_new = app.clone(); let label_new = label.clone();
+    let app_dl = app.clone();
+    let app_title = app.clone(); let label_title = label.clone();
+    let app_load = app.clone(); let label_load = label.clone();
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External("about:blank".parse().unwrap()))
+        .data_directory(profile_dir())
+        .zoom_hotkeys_enabled(false)
+        .on_navigation(move |u| ALLOWED.contains(&u.scheme()))
+        .on_new_window(move |u, _features| {
+            let _ = app_new.emit("web-open-tab", json!({ "from_label": label_new, "url": u.to_string() }));
+            tauri::webview::NewWindowResponse::Deny
+        })
+        .on_download(move |_wv, ev| {
+            match ev {
+                tauri::webview::DownloadEvent::Requested { url, destination } => {
+                    let name = url.path_segments().and_then(|s| s.last()).filter(|s| !s.is_empty()).unwrap_or("download").to_string();
+                    let dir = app_dl.path().download_dir().unwrap_or_else(|_| std::env::temp_dir());
+                    *destination = dir.join(name);
+                    true
+                }
+                tauri::webview::DownloadEvent::Finished { url, success, .. } => {
+                    let _ = app_dl.emit("web-download", json!({ "url": url.to_string(), "ok": success }));
+                    true
+                }
+                _ => true,
+            }
+        })
+        .on_document_title_changed(move |_wv, _t| emit_status(&app_title, &label_title, false))
+        .on_page_load(move |_wv, payload| {
+            let loading = matches!(payload.event(), tauri::webview::PageLoadEvent::Started);
+            set_loading(&app_load, &label_load, loading);
+            emit_status(&app_load, &label_load, loading);
+        });
+    let bounds = current_bounds(&web);
+    let wv = window.add_child(builder, bounds.position, bounds.size).map_err(|e| e.to_string())?;
+    crate::blocklists::attach(&wv);                // rules go in before the first real load
+    let _ = wv.hide();                             // shown only by web_tab_show
+    web.tabs.lock().map_err(|e| e.to_string())?.insert(label.clone(), WebTab { dir, webview: Some(wv.clone()), loading: false });
+    if let Some(u) = first { wv.navigate(u).map_err(|e| e.to_string())?; }
+    Ok(label)
+}
+
+fn tab_webview(web: &WebState, label: &str) -> Result<Webview, String> {
+    web.tabs.lock().map_err(|e| e.to_string())?.get(label).and_then(|t| t.webview.clone()).ok_or_else(|| "no such tab".into())
+}
+
+#[tauri::command]
+pub fn web_tab_close(web: State<WebState>, label: String) -> Result<(), String> {
+    let t = web.tabs.lock().map_err(|e| e.to_string())?.remove(&label);
+    if let Some(WebTab { webview: Some(wv), .. }) = t { let _ = wv.close(); }
+    let mut shown = web.shown.lock().map_err(|e| e.to_string())?;
+    if shown.as_deref() == Some(&label) { *shown = None; }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn web_hide_all(web: State<WebState>) -> Result<(), String> {
+    let label = web.shown.lock().map_err(|e| e.to_string())?.take();
+    if let Some(label) = label {
+        if let Ok(wv) = tab_webview(&web, &label) { let _ = wv.hide(); }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn web_tab_show(app: AppHandle, web: State<WebState>, label: String) -> Result<(), String> {
+    let wv = tab_webview(&web, &label)?;
+    let prev = {
+        let mut shown = web.shown.lock().map_err(|e| e.to_string())?;
+        let prev = shown.take();
+        *shown = Some(label.clone());
+        prev
+    };
+    if let Some(prev) = prev {
+        if prev != label { if let Ok(p) = tab_webview(&web, &prev) { let _ = p.hide(); } }
+    }
+    wv.set_bounds(current_bounds(&web)).map_err(|e| e.to_string())?;
+    wv.show().map_err(|e| e.to_string())?;
+    emit_status(&app, &label, is_loading(&web, &label));
+    Ok(())
+}
+
+#[tauri::command]
+pub fn web_set_bounds(web: State<WebState>, x: i32, y: i32, width: u32, height: u32) -> Result<(), String> {
+    let rect = tauri::Rect { position: Position::Physical(PhysicalPosition { x, y }), size: Size::Physical(PhysicalSize { width: width.max(1), height: height.max(1) }) };
+    *web.bounds.lock().map_err(|e| e.to_string())? = Some(rect);
+    let shown = web.shown.lock().map_err(|e| e.to_string())?.clone();
+    if let Some(label) = shown {
+        if let Ok(wv) = tab_webview(&web, &label) { let _ = wv.set_bounds(rect); }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn web_tab_navigate(web: State<WebState>, label: String, url: String) -> Result<(), String> {
+    let parsed: url::Url = url.parse().map_err(|_| "that address isn't valid".to_string())?;
+    if !ALLOWED.contains(&parsed.scheme()) { return Err("only web pages and project files open here".into()); }
+    tab_webview(&web, &label)?.navigate(parsed).map_err(|e| e.to_string())
+}
+
+fn with_wk(web: &WebState, label: &str, f: impl FnOnce(&WKWebView) + Send + 'static) -> Result<(), String> {
+    tab_webview(web, label)?.with_webview(move |pw| f(unsafe { &*(pw.inner() as *const WKWebView) })).map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn web_tab_back(web: State<WebState>, label: String) -> Result<(), String> { with_wk(&web, &label, |wk| { unsafe { wk.goBack() }; }) }
+#[tauri::command]
+pub fn web_tab_forward(web: State<WebState>, label: String) -> Result<(), String> { with_wk(&web, &label, |wk| { unsafe { wk.goForward() }; }) }
+#[tauri::command]
+pub fn web_tab_reload(web: State<WebState>, label: String) -> Result<(), String> { tab_webview(&web, &label)?.reload().map_err(|e| e.to_string()) }
 
 #[cfg(test)]
 mod tests {
