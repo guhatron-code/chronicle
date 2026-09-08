@@ -7,9 +7,14 @@
  * tells Rust when the UI is visible.
  */
 import { getPowerSource, onPowerSourceChanged, setUiVisible } from "./ipc";
-import { cadenceFor, setActivity, subscribeActivity } from "./scheduler";
+import { cadenceFor, getActivity, setActivity, subscribeActivity, type Activity } from "./scheduler";
 
 let started = false;
+
+const apply = (a: Activity) => {
+  document.documentElement.dataset.idle = cadenceFor(a) === "normal" ? "false" : "true";
+  void setUiVisible(a.visible).catch(() => {});
+};
 
 export function initActivity(): void {
   if (started) return;
@@ -19,12 +24,10 @@ export function initActivity(): void {
   document.addEventListener("visibilitychange", sync);
   window.addEventListener("focus", sync);
   window.addEventListener("blur", sync);
+  subscribeActivity(apply);
   sync();
+  apply(getActivity());
   void getPowerSource().then((p) => setActivity({ onBattery: p.on_battery })).catch(() => {});
+  // lives for the app's lifetime — no teardown, so the unlisten handle is dropped on purpose
   void onPowerSourceChanged((onBattery) => setActivity({ onBattery }));
-  subscribeActivity((a) => {
-    document.documentElement.dataset.idle = cadenceFor(a) === "normal" ? "false" : "true";
-    void setUiVisible(a.visible).catch(() => {});
-  });
-  document.documentElement.dataset.idle = "false";
 }
