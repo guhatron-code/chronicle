@@ -367,6 +367,15 @@ export const onPtyExit = (cb: (id: number) => void): Promise<UnlistenFn> =>
 export const ptyInfo = (id: number) =>
   invoke<{ name: string | null; agent: "claude" | "codex" | null }>("pty_info", { id });
 
+/* ---------- activity (src-tauri/src/power.rs) ---------- */
+
+/** Battery vs mains — the one activity input the DOM can't see. */
+export const getPowerSource = () => invoke<{ on_battery: boolean }>("get_power_source");
+export const onPowerSourceChanged = (cb: (onBattery: boolean) => void): Promise<UnlistenFn> =>
+  listen<{ on_battery: boolean }>("power-source-changed", (e) => cb(e.payload.on_battery));
+/** Tell Rust whether anyone can see the window (the session waiter goes quiet while false). */
+export const setUiVisible = (visible: boolean) => invoke<void>("set_ui_visible", { visible });
+
 /* ---------- the doctor (setup & health — src-tauri/src/setup.rs) ---------- */
 
 /** One check's detected state. */
