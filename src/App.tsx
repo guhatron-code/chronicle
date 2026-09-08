@@ -96,7 +96,7 @@ interface PaneLayout {
 }
 const DEFAULT_LAYOUT: PaneLayout = {
   content: true,
-  agent: true,
+  agent: false, // hidden by default: no ACP bridge spins up until the pane is shown (⌥⌘2)
   terminal: true,
   agentCollapsed: false,
   terminalCollapsed: false,

@@ -76,7 +76,7 @@ export const GUIDES: Guide[] = [
         "New project — from the welcome screen, press New project, give it a name, and Chronicle makes a fresh folder ready to build in.",
         "Open a folder — already have work somewhere? Press Open and pick its folder. Chronicle reads it and shows you where things stand.",
       ] },
-      { kind: "para", text: "Once a project is open, the agent starts on its own so Chronigirl is ready the moment you want her. If you'd rather she wait, just don't type anything." },
+      { kind: "para", text: "The agent pane stays hidden until you ask for it — press ⌥⌘2 or use the pane toggles in the title bar. The moment it opens, the agent starts on its own so Chronigirl is ready when you want her. Keep it closed and nothing runs in the background." },
     ],
   },
   {
