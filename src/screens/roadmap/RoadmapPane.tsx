@@ -207,6 +207,8 @@ export function RoadmapPane({
 
   /* the init session, pushed: one seed read, then session-status events */
   const initSt = useSessionStatus(dir, "init", !!initRun?.running, initStatus);
+  // dir is omitted from these deps on purpose: a dir change re-activates the hook, which
+  // emits a fresh status object, which re-runs the effect
   useEffect(() => {
     if (!initRun?.running || !initSt) return;
     if (dirRef.current !== dir) return; // a late event must not cross projects
@@ -293,13 +295,15 @@ export function RoadmapPane({
   /* a kanban round is generating → mirror its session on the roadmap */
   const generating = kanbanFor(dir).rounds.some((r) => r.state === "generating");
   const fixesSt = useSessionStatus(dir, "fixes", generating, fixesStatus);
+  const fixesSettled = useRef(false);
   useEffect(() => {
-    if (!generating) { setFixesRun(null); return; }
+    if (!generating) { setFixesRun(null); fixesSettled.current = false; return; }
     if (!fixesSt || dirRef.current !== dir) return;
     const st = fixesSt;
     const tail = st.log_tail ?? "";
     const lines = logLinesFrom(tail);
     if (st.running === true) {
+      fixesSettled.current = false;
       const began = st.started_at || Date.now();
       setFixesRun({
         running: true,
@@ -312,6 +316,8 @@ export function RoadmapPane({
       });
       return;
     }
+    if (fixesSettled.current) return; // a duplicate terminal delivery must not double-toast
+    fixesSettled.current = true;
     setFixesRun(null);
     void refreshKanban(dir).then(() => {
       if (!st.cancelled && (st.code ?? 1) === 0) {

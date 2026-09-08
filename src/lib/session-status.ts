@@ -3,7 +3,8 @@
  * `session-status`, routed by project + kind. Screens subscribe through
  * useSessionStatus, which also does ONE seed read on activation (a reload
  * mid-run must recover the state the event stream already told a previous
- * webview about). Replaces four 3s pollers.
+ * webview about). Replaces the 3s status pollers (roadmap here; kanban's in
+ * the next task).
  */
 import { useEffect, useState } from "react";
 import { onSessionStatus, type InitStatusData, type SessionKind, type SessionStatusEvent } from "./ipc";
@@ -46,9 +47,12 @@ export function useSessionStatus(
   useEffect(() => {
     if (!active) { setSt(null); return; }
     let live = true;
-    const un = subscribeSessionStatus(dir, kind, (e) => { if (live) setSt({ ...e }); });
+    let gotLive = false;
+    const un = subscribeSessionStatus(dir, kind, (e) => { gotLive = true; if (live) setSt({ ...e }); });
     seed(dir)
-      .then((s) => { if (live) setSt({ ...s, dir, kind }); })
+      // a live event is always at least as new as an in-flight seed snapshot,
+      // so once one has arrived the seed's (possibly stale) read must not win
+      .then((s) => { if (live && !gotLive) setSt({ ...s, dir, kind }); })
       .catch(() => {});
     return () => { live = false; un(); };
   }, [dir, kind, active, seed]);
