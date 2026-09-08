@@ -874,7 +874,7 @@ async fn get_state(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, St
 /* ================= background /chronicle-init ================= */
 
 #[tauri::command]
-async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>, fresh: Option<bool>) -> Result<(), String> {
+async fn init_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>, fresh: Option<bool>) -> Result<(), String> {
     let dirp = project_for(&roots, &dir)?.dir; // only an OPENED project may run a session
     let (key, log) = canon_key(&dir)?; // canonical path key + hashed log name — no collisions
     let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
@@ -924,7 +924,9 @@ async fn init_start(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir
             .spawn()
             .map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
-    runs.insert(key, (child, log, epoch_ms()));
+    runs.insert(key.clone(), (child, log, epoch_ms()));
+    drop(runs);
+    watch_run(app, key, "init", dir.clone(), dirp.clone());
     Ok(())
 }
 
@@ -967,6 +969,70 @@ fn init_consent_for(dir: &Path) -> Value {
     load_config().get("initConsent")
         .and_then(|m| m.get(dir.to_string_lossy().as_ref()))
         .cloned().unwrap_or(Value::Null)
+}
+
+/// What one 1 Hz waiter tick decided (pure — the thread around it is trivial).
+#[derive(Debug, PartialEq)]
+enum ProbeOutcome { Quiet, Grew, Exited(Option<i32>) }
+
+/// `exit` is Some once the child has exited. `last_len` is the log length the
+/// UI last heard about. Growth is only announced while the UI is visible;
+/// an exit always is.
+fn probe_step(exit: Option<i32>, log: &Path, last_len: &mut u64, ui_visible: bool) -> ProbeOutcome {
+    if let Some(code) = exit { return ProbeOutcome::Exited(Some(code)); }
+    let len = std::fs::metadata(log).map(|m| m.len()).unwrap_or(0);
+    if len != *last_len && ui_visible {
+        *last_len = len;
+        return ProbeOutcome::Grew;
+    }
+    ProbeOutcome::Quiet
+}
+
+/// One thread per live background session (init · fixes · exec). It replaces
+/// four 3s IPC pollers in the webview with a 1 Hz stat in Rust that emits
+/// `session-status` only on CHANGE: the log grew (and someone can see the
+/// window), or the child exited (or was cancelled — its entry vanished).
+fn watch_run(app: tauri::AppHandle, key: String, kind: &'static str, dir: String, dir_path: PathBuf) {
+    std::thread::spawn(move || {
+        let mut last_len = 0u64;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let ui_visible = app.try_state::<power::UiVisible>()
+                .map(|v| v.0.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(true);
+            let probed = {
+                let init = app.state::<InitState>();
+                let Ok(mut runs) = init.runs.lock() else { return };
+                match runs.get_mut(&key) {
+                    None => None, // cancelled: the entry was removed under us
+                    Some((child, log, started)) => {
+                        let st = child.try_wait().ok().flatten();
+                        Some((st.is_some(), st.and_then(|s| s.code()), log.clone(), *started))
+                    }
+                }
+            };
+            let Some((exited, code, log, started)) = probed else {
+                let _ = app.emit("session-status", json!({ "dir": dir, "kind": kind, "running": false, "started": true, "cancelled": true }));
+                return;
+            };
+            match probe_step(if exited { Some(code.unwrap_or(-1)) } else { None }, &log, &mut last_len, ui_visible) {
+                ProbeOutcome::Quiet => {}
+                ProbeOutcome::Grew => {
+                    let _ = app.emit("session-status", json!({
+                        "dir": dir, "kind": kind, "running": true, "started": true,
+                        "started_at": started, "code": Value::Null, "log_tail": read_tail(&log, 30000),
+                    }));
+                }
+                ProbeOutcome::Exited(_) => {
+                    if kind == "fixes" { settle_round(&dir_path); } // what fixes_status did on completion
+                    let _ = app.emit("session-status", json!({
+                        "dir": dir, "kind": kind, "running": false, "started": true,
+                        "started_at": started, "code": code, "log_tail": read_tail(&log, 30000),
+                    }));
+                    return;
+                }
+            }
+        }
+    });
 }
 
 /// Read at most `max` bytes from the END of the log — never the whole file, and never
@@ -1284,7 +1350,7 @@ async fn kanban_detach(roots: State<'_, OpenRoots>, dir: String, path: String) -
 }
 
 #[tauri::command]
-async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>) -> Result<u64, String> {
+async fn fixes_generate(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>) -> Result<u64, String> {
     let p = project_for(&roots, &dir)?;
     let mut store = load_kanban_checked(&p.dir)
         .ok_or("the board file couldn't be read — fix .chronicle/kanban.json first")?;
@@ -1366,7 +1432,9 @@ async fn fixes_generate(roots: State<'_, OpenRoots>, init: State<'_, InitState>,
             .process_group(0)
             .spawn().map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
-    runs.insert(key, (child, log, epoch_ms()));
+    runs.insert(key.clone(), (child, log, epoch_ms()));
+    drop(runs);
+    watch_run(app, key, "fixes", dir.clone(), p.dir.clone());
     Ok(round_n)
 }
 
@@ -1691,7 +1759,7 @@ fn exec_run_key(dir: &str) -> Result<(String, PathBuf), String> {
 /// .chronicle/kanban.json itself (the prompt file carries that contract), so
 /// the board and roadmap tick live off the ordinary poll.
 #[tauri::command]
-async fn round_execute(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, n: u64, agent: Option<String>) -> Result<(), String> {
+async fn round_execute(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, n: u64, agent: Option<String>) -> Result<(), String> {
     let p = project_for(&roots, &dir)?;
     let prompt_rel = format!("fixes/phase_{n}_fixes_prompt.md");
     if !p.dir.join(&prompt_rel).exists() {
@@ -1733,7 +1801,9 @@ async fn round_execute(roots: State<'_, OpenRoots>, init: State<'_, InitState>, 
             .process_group(0)
             .spawn().map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
-    runs.insert(key, (child, log, epoch_ms()));
+    runs.insert(key.clone(), (child, log, epoch_ms()));
+    drop(runs);
+    watch_run(app, key, "exec", dir.clone(), p.dir.clone());
     Ok(())
 }
 
@@ -3143,6 +3213,22 @@ mod r1_tests {
         assert!(attach_from_path(&repo, &src).is_err());
         // a path that isn't there is an error, not a panic
         assert!(attach_from_path(&repo, &src.join("nope.txt")).is_err());
+    }
+
+    #[test]
+    fn session_probe_reports_growth_then_exit() {
+        // the waiter's decision function, isolated from threads and Tauri
+        let d = tmp("session-probe");
+        let log = d.join("run.log");
+        std::fs::write(&log, "").unwrap();
+        let mut last = 0u64;
+        assert_eq!(probe_step(None, &log, &mut last, true), ProbeOutcome::Quiet);
+        std::fs::write(&log, "line 1\n").unwrap();
+        assert_eq!(probe_step(None, &log, &mut last, true), ProbeOutcome::Grew);
+        assert_eq!(probe_step(None, &log, &mut last, true), ProbeOutcome::Quiet, "same length = quiet");
+        std::fs::write(&log, "line 1\nline 2\n").unwrap();
+        assert_eq!(probe_step(None, &log, &mut last, false), ProbeOutcome::Quiet, "hidden UI: growth is not announced");
+        assert_eq!(probe_step(Some(0), &log, &mut last, false), ProbeOutcome::Exited(Some(0)), "exit is always announced");
     }
 }
 
