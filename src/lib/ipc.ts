@@ -389,6 +389,29 @@ export const onPowerSourceChanged = (cb: (onBattery: boolean) => void): Promise<
 /** Tell Rust whether anyone can see the window (the session waiter goes quiet while false). */
 export const setUiVisible = (visible: boolean) => invoke<void>("set_ui_visible", { visible });
 
+/* ---------- the Web pane (src-tauri/src/web.rs, blocklists.rs) ---------- */
+export interface WebTabStatus { label: string; url: string; title: string; loading: boolean; can_back: boolean; can_forward: boolean }
+export interface BlockInfo { status: "idle" | "compiling" | "ready" | "partial" | "missing"; lists: number; total: number; fetched_at: string; failed: string[] }
+export interface SavedWebTab { url: string; title: string }
+export const webTabOpen = (dir: string, url?: string) => invoke<string>("web_tab_open", { dir, url: url ?? null });
+export const webTabClose = (label: string) => invoke<void>("web_tab_close", { label });
+export const webTabShow = (label: string) => invoke<void>("web_tab_show", { label });
+export const webHideAll = () => invoke<void>("web_hide_all");
+export const webSetBounds = (x: number, y: number, width: number, height: number) => invoke<void>("web_set_bounds", { x, y, width, height });
+export const webTabNavigate = (label: string, url: string) => invoke<void>("web_tab_navigate", { label, url });
+export const webTabBack = (label: string) => invoke<void>("web_tab_back", { label });
+export const webTabForward = (label: string) => invoke<void>("web_tab_forward", { label });
+export const webTabReload = (label: string) => invoke<void>("web_tab_reload", { label });
+export const webOpenFile = (dir: string, path: string) => invoke<string>("web_open_file", { dir, path });
+export const webTabsLoad = (dir: string) => invoke<SavedWebTab[]>("web_tabs_load", { dir });
+export const webTabsSave = (dir: string, tabs: SavedWebTab[]) => invoke<void>("web_tabs_save", { dir, tabs });
+export const webBlocklistsPrepare = () => invoke<void>("web_blocklists_prepare");
+export const webBlocklistsInfo = () => invoke<BlockInfo>("web_blocklists_info");
+export const onWebTabChanged = (cb: (s: WebTabStatus) => void): Promise<UnlistenFn> => listen<WebTabStatus>("web-tab-changed", (e) => cb(e.payload));
+export const onWebOpenTab = (cb: (p: { from_label: string; url: string }) => void): Promise<UnlistenFn> => listen<{ from_label: string; url: string }>("web-open-tab", (e) => cb(e.payload));
+export const onWebDownload = (cb: (p: { url: string; ok: boolean }) => void): Promise<UnlistenFn> => listen<{ url: string; ok: boolean }>("web-download", (e) => cb(e.payload));
+export const onWebBlocklistsChanged = (cb: (i: BlockInfo) => void): Promise<UnlistenFn> => listen<BlockInfo>("web-blocklists-changed", (e) => cb(e.payload));
+
 /* ---------- the doctor (setup & health — src-tauri/src/setup.rs) ---------- */
 
 /** One check's detected state. */
