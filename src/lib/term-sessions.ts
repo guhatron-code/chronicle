@@ -21,6 +21,7 @@ import {
   ptySpawn,
   ptyWrite,
 } from "./ipc";
+import { getActivity, subscribeActivity } from "./scheduler";
 
 export interface TermSession {
   id: number; // pty id
@@ -58,7 +59,9 @@ const fgAgents = new Map<number, "claude" | "codex" | null>();
 /** sessions that had an agent in the foreground at some point — after it
  *  exits, the tab honestly says "idle" instead of saying nothing */
 const everAgent = new Set<number>();
-let fgPoller: ReturnType<typeof setInterval> | null = null;
+/** per-session trailing debounce: probe 300ms after the last output chunk */
+const fgTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const FG_SETTLE_MS = 300;
 
 export function fgAgentFor(id: number): "claude" | "codex" | null {
   return fgAgents.get(id) ?? null;
@@ -79,28 +82,33 @@ export function agentRunningFor(dir: string): "claude" | "codex" | null {
   return null;
 }
 
-function pollForeground() {
-  for (const s of sessions.values()) {
-    if (s.dead) continue;
-    void ptyInfo(s.id)
-      .then((info) => {
-        const agent = info?.agent ?? null;
-        if (agent) everAgent.add(s.id);
-        if (fgAgents.get(s.id) !== agent) {
-          fgAgents.set(s.id, agent);
-          notify();
-        }
-      })
-      .catch(() => {});
-  }
+function probeForeground(id: number) {
+  const s = sessions.get(id);
+  if (!s || s.dead) return;
+  void ptyInfo(id)
+    .then((info) => {
+      const agent = info?.agent ?? null;
+      if (agent) everAgent.add(id);
+      if (fgAgents.get(id) !== agent) {
+        fgAgents.set(id, agent);
+        notify();
+      }
+    })
+    .catch(() => {});
+}
+
+function scheduleForegroundProbe(id: number) {
+  const prev = fgTimers.get(id);
+  if (prev) clearTimeout(prev);
+  fgTimers.set(id, setTimeout(() => { fgTimers.delete(id); probeForeground(id); }, FG_SETTLE_MS));
 }
 
 function ensureListeners() {
   if (listenersReady) return;
   listenersReady = true;
-  if (!fgPoller) fgPoller = setInterval(pollForeground, 2000);
   void onPtyOut((id, b64) => {
     sessions.get(id)?.term.write(decodePtyChunk(b64));
+    scheduleForegroundProbe(id); // the foreground truth, asked only when something happened
   });
   void onPtyExit((id) => {
     const s = sessions.get(id);
@@ -110,8 +118,19 @@ function ensureListeners() {
       s.term.options.cursorBlink = false;
       s.term.write("\x1b[?25l");
       s.term.write("\r\n\x1b[2m[session ended]\x1b[0m\r\n");
+      const t = fgTimers.get(id);
+      if (t) { clearTimeout(t); fgTimers.delete(id); }
+      if (fgAgents.get(id) !== null) fgAgents.set(id, null);
       notify();
     }
+  });
+  // a blinking cursor is two repaints a second per terminal — only while
+  // someone is looking (focused AND visible)
+  // module-scope subscription, never unsubscribed (see file header: listeners
+  // register once and live for the app's lifetime)
+  subscribeActivity((a) => {
+    const blink = a.focused && a.visible;
+    for (const s of sessions.values()) if (!s.dead) s.term.options.cursorBlink = blink;
   });
 }
 
@@ -238,7 +257,7 @@ export async function spawnTerm(dir: string, opts: SpawnOpts = {}): Promise<Term
   const term = new Terminal({
     fontFamily: '"Geist Mono", ui-monospace, Menlo, monospace',
     fontSize: 13,
-    cursorBlink: true,
+    cursorBlink: getActivity().focused && getActivity().visible,
     scrollback: 4000,
     macOptionIsMeta: true,
     theme: themeFromTokens(),
@@ -307,6 +326,8 @@ export function renameTerm(id: number, title: string) {
 export function closeTerm(id: number) {
   const s = sessions.get(id);
   if (!s) return;
+  const t = fgTimers.get(id);
+  if (t) { clearTimeout(t); fgTimers.delete(id); }
   if (!s.dead) void ptyKill(id).catch(() => {});
   s.term.dispose();
   s.host.remove();
