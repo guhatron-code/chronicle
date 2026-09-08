@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Chronicle main window",
-  "windows": [
+  "description": "Chronicle's own UI. Scoped to the main webview by label: the Web pane's child webviews get no capability, so no page loaded in a tab can reach an app command.",
+  "webviews": [
     "main"
   ],
   "permissions": [
+    "default",
     "core:default",
     "core:window:allow-set-title",
     "core:window:allow-close",

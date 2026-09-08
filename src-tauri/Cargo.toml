@@ -5,6 +5,7 @@ edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+regex = "1" # build.rs reads the command list out of generate_handler![…] for the app ACL manifest
 
 [dependencies]
 tauri = { version = "2", features = ["macos-private-api", "unstable"] } # unstable: child webviews for the Web pane

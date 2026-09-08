@@ -84,7 +84,7 @@ pub struct WebTab {
     /// saves and restores a project's tabs
     #[allow(dead_code)]
     pub dir: String,
-    pub webview: Option<tauri::Webview>,
+    pub webview: tauri::Webview,
     pub loading: bool,
 }
 
@@ -140,23 +140,33 @@ pub fn serve_project_file(web: &WebState, url: &str) -> (u16, &'static str, Vec<
 
 /* ================= tabs: native child webviews ================= */
 
-fn profile_dir() -> PathBuf { crate::config_dir().join("web-profile") }
+/// A fixed UUID naming the browser tabs' own `WKWebsiteDataStore` on macOS 14+,
+/// so their cookies and caches live apart from Chronicle's own webview. On
+/// older macOS the identifier is ignored and the tabs share the app's store.
+/// (`data_directory` looks like the knob for this but is a no-op on macOS.)
+const WEB_PROFILE_ID: [u8; 16] = [0x7c, 0x1e, 0x02, 0x9a, 0x5d, 0x44, 0x4f, 0xa1, 0x9b, 0x3c, 0x2e, 0x61, 0x8f, 0x0d, 0xc7, 0x55];
+
+/// Every event this module emits goes to Chronicle's own UI only — never to the
+/// browser tabs, which are untrusted pages sharing the same window.
+fn ui() -> tauri::EventTarget { tauri::EventTarget::webview("main") }
 
 /// The only schemes a tab may sit on: the open web, project files, and the
 /// blank page a fresh tab starts at.
 const ALLOWED: [&str; 4] = ["http", "https", "chronicle-file", "about"];
 
 /// Read the live status straight from WKWebView on the main thread and emit it.
-fn emit_status(app: &AppHandle, label: &str, loading: bool) {
+/// `title` overrides what WKWebView reports — the title-changed callback is
+/// handed the new title before the view itself answers with it.
+fn emit_status(app: &AppHandle, label: &str, loading: bool, title: Option<String>) {
     let Some(wv) = app.get_webview(label) else { return };
     let app2 = app.clone();
     let label = label.to_string();
     let _ = wv.with_webview(move |pw| {
         let wk: &WKWebView = unsafe { &*(pw.inner() as *const WKWebView) };
-        let title = unsafe { wk.title() }.map(|t| t.to_string()).unwrap_or_default();
+        let title = title.unwrap_or_else(|| unsafe { wk.title() }.map(|t| t.to_string()).unwrap_or_default());
         let url = unsafe { wk.URL() }.and_then(|u| u.absoluteString()).map(|s| s.to_string()).unwrap_or_default();
         let (back, fwd) = unsafe { (wk.canGoBack(), wk.canGoForward()) };
-        let _ = app2.emit("web-tab-changed", json!({
+        let _ = app2.emit_to(ui(), "web-tab-changed", json!({
             "label": label, "url": url, "title": title, "loading": loading, "can_back": back, "can_forward": fwd,
         }));
     });
@@ -183,6 +193,10 @@ fn is_loading(web: &WebState, label: &str) -> bool {
     web.tabs.lock().ok().and_then(|t| t.get(label).map(|t| t.loading)).unwrap_or(false)
 }
 
+fn is_loading_of(app: &AppHandle, label: &str) -> bool {
+    app.try_state::<WebState>().map(|web| is_loading(&web, label)).unwrap_or(false)
+}
+
 #[tauri::command]
 pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<WebState>, block: State<crate::blocklists::BlockState>, dir: String, url: Option<String>) -> Result<String, String> {
     let _ = crate::project_for(&roots, &dir)?;
@@ -207,11 +221,11 @@ pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<W
     let app_title = app.clone(); let label_title = label.clone();
     let app_load = app.clone(); let label_load = label.clone();
     let builder = WebviewBuilder::new(&label, WebviewUrl::External("about:blank".parse().unwrap()))
-        .data_directory(profile_dir())
+        .data_store_identifier(WEB_PROFILE_ID)
         .zoom_hotkeys_enabled(false)
         .on_navigation(move |u| ALLOWED.contains(&u.scheme()))
         .on_new_window(move |u, _features| {
-            let _ = app_new.emit("web-open-tab", json!({ "from_label": label_new, "url": u.to_string() }));
+            let _ = app_new.emit_to(ui(), "web-open-tab", json!({ "from_label": label_new, "url": u.to_string() }));
             tauri::webview::NewWindowResponse::Deny
         })
         .on_download(move |_wv, ev| {
@@ -223,35 +237,41 @@ pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<W
                     true
                 }
                 tauri::webview::DownloadEvent::Finished { url, success, .. } => {
-                    let _ = app_dl.emit("web-download", json!({ "url": url.to_string(), "ok": success }));
+                    let _ = app_dl.emit_to(ui(), "web-download", json!({ "url": url.to_string(), "ok": success }));
                     true
                 }
                 _ => true,
             }
         })
-        .on_document_title_changed(move |_wv, _t| emit_status(&app_title, &label_title, false))
+        .on_document_title_changed(move |_wv, t| {
+            let loading = is_loading_of(&app_title, &label_title);
+            emit_status(&app_title, &label_title, loading, Some(t));
+        })
         .on_page_load(move |_wv, payload| {
             let loading = matches!(payload.event(), tauri::webview::PageLoadEvent::Started);
             set_loading(&app_load, &label_load, loading);
-            emit_status(&app_load, &label_load, loading);
+            emit_status(&app_load, &label_load, loading, None);
         });
     let bounds = current_bounds(&web);
     let wv = window.add_child(builder, bounds.position, bounds.size).map_err(|e| e.to_string())?;
+    // add_child reports a *dispatch* failure, not a build one: confirm the
+    // manager really knows this label before anyone can be handed it
+    if app.get_webview(&label).is_none() { return Err("the page view couldn't be created".into()); }
     crate::blocklists::attach(&wv);                // rules go in before the first real load
     let _ = wv.hide();                             // shown only by web_tab_show
-    web.tabs.lock().map_err(|e| e.to_string())?.insert(label.clone(), WebTab { dir, webview: Some(wv.clone()), loading: false });
+    web.tabs.lock().map_err(|e| e.to_string())?.insert(label.clone(), WebTab { dir, webview: wv.clone(), loading: false });
     if let Some(u) = first { wv.navigate(u).map_err(|e| e.to_string())?; }
     Ok(label)
 }
 
 fn tab_webview(web: &WebState, label: &str) -> Result<Webview, String> {
-    web.tabs.lock().map_err(|e| e.to_string())?.get(label).and_then(|t| t.webview.clone()).ok_or_else(|| "no such tab".into())
+    web.tabs.lock().map_err(|e| e.to_string())?.get(label).map(|t| t.webview.clone()).ok_or_else(|| "no such tab".into())
 }
 
 #[tauri::command]
 pub fn web_tab_close(web: State<WebState>, label: String) -> Result<(), String> {
     let t = web.tabs.lock().map_err(|e| e.to_string())?.remove(&label);
-    if let Some(WebTab { webview: Some(wv), .. }) = t { let _ = wv.close(); }
+    if let Some(t) = t { let _ = t.webview.close(); }
     let mut shown = web.shown.lock().map_err(|e| e.to_string())?;
     if shown.as_deref() == Some(&label) { *shown = None; }
     Ok(())
@@ -269,18 +289,16 @@ pub fn web_hide_all(web: State<WebState>) -> Result<(), String> {
 #[tauri::command]
 pub fn web_tab_show(app: AppHandle, web: State<WebState>, label: String) -> Result<(), String> {
     let wv = tab_webview(&web, &label)?;
+    wv.set_bounds(current_bounds(&web)).map_err(|e| e.to_string())?;
+    wv.show().map_err(|e| e.to_string())?;   // only a shown tab becomes `shown`
     let prev = {
         let mut shown = web.shown.lock().map_err(|e| e.to_string())?;
-        let prev = shown.take();
-        *shown = Some(label.clone());
-        prev
+        shown.replace(label.clone())
     };
     if let Some(prev) = prev {
         if prev != label { if let Ok(p) = tab_webview(&web, &prev) { let _ = p.hide(); } }
     }
-    wv.set_bounds(current_bounds(&web)).map_err(|e| e.to_string())?;
-    wv.show().map_err(|e| e.to_string())?;
-    emit_status(&app, &label, is_loading(&web, &label));
+    emit_status(&app, &label, is_loading(&web, &label), None);
     Ok(())
 }
 
@@ -351,6 +369,50 @@ mod tests {
         assert_eq!(mime_for(Path::new("a.png")), "image/png");
         assert_eq!(mime_for(Path::new("a.woff2")), "font/woff2");
         assert_eq!(mime_for(Path::new("a.unknownext")), "application/octet-stream");
+    }
+
+    /// The Web pane's tabs are only safe because app commands sit behind the ACL:
+    /// build.rs turns `generate_handler![…]` into the `__app-acl__` manifest, and
+    /// `capabilities/default.json` grants its `default` set to the `main` webview
+    /// alone. If a command ever escapes that pipeline it would be callable from a
+    /// page loaded in a tab, so check every registered name arrives.
+    #[test]
+    fn every_registered_command_is_in_the_app_acl() {
+        // exactly the list build.rs extracted and fed to the manifest
+        let commands: Vec<&str> = include_str!(concat!(env!("OUT_DIR"), "/commands.txt"))
+            .lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        assert!(commands.len() > 50, "suspiciously few commands: {}", commands.len());
+        assert!(commands.contains(&"web_tab_open"), "the tab commands must be registered");
+
+        let manifests: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/gen/schemas/acl-manifests.json"))
+                .expect("gen/schemas/acl-manifests.json (written by build.rs)"),
+        ).unwrap();
+        let app = &manifests["__app-acl__"];
+        assert!(!app.is_null(), "no __app-acl__ manifest: local pages would bypass the ACL entirely");
+        let default: Vec<&str> = app["default_permission"]["permissions"].as_array()
+            .expect("__app-acl__ has no default permission set")
+            .iter().map(|v| v.as_str().unwrap()).collect();
+
+        for c in &commands {
+            let id = format!("allow-{}", c.replace('_', "-"));
+            assert!(app["permissions"].get(&id).is_some(), "{c}: no `{id}` permission in __app-acl__");
+            assert!(default.contains(&id.as_str()), "{c}: `{id}` missing from the default set");
+        }
+    }
+
+    /// The capability that carries those permissions must be pinned to the `main`
+    /// webview by label. `windows: ["main"]` would hand the same IPC to every
+    /// child webview of that window — i.e. to every browser tab.
+    #[test]
+    fn the_capability_is_scoped_to_the_main_webview() {
+        let cap: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/capabilities/default.json")).unwrap(),
+        ).unwrap();
+        assert!(cap.get("windows").is_none(), "`windows` covers child webviews too — use `webviews`");
+        assert_eq!(cap["webviews"], serde_json::json!(["main"]));
+        let perms: Vec<&str> = cap["permissions"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert!(perms.contains(&"default"), "the app's own commands are not granted");
     }
 
     #[test]
