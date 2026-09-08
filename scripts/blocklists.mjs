@@ -9,7 +9,7 @@
 // compiling it. Run this before a release. `--check` validates the
 // committed output instead.
 import { createRequire } from "node:module";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { gzipSync, gunzipSync } from "node:zlib";
 import path from "node:path";
@@ -46,10 +46,13 @@ async function check() {
     const gz = await readFile(path.join(OUT, c.file));
     const text = gunzipSync(gz).toString("utf8");
     const rules = JSON.parse(text);
+    const bytes = Buffer.byteLength(text, "utf8");
     const problems = [];
     if (!Array.isArray(rules)) problems.push("not an array");
     if (rules.length !== c.rules) problems.push(`rules ${rules.length} != manifest ${c.rules}`);
     if (rules.length > CAP) problems.push(`over the ${CAP} cap`);
+    if (bytes !== c.bytes) problems.push(`bytes ${bytes} != manifest ${c.bytes}`);
+    if (bytes > MAX_CHUNK_BYTES) problems.push(`over the ${MAX_CHUNK_BYTES} byte cap`);
     if (sha(text) !== c.sha256) problems.push("sha256 mismatch");
     if (problems.length) { ok = false; console.error(`${c.file}: ${problems.join(", ")}`); }
   }
@@ -83,14 +86,15 @@ async function build() {
   const flush = async () => {
     if (!current.length) return;
     const text = JSON.stringify(current);
+    const bytes = Buffer.byteLength(text, "utf8");
     const file = `${chunks.length}.json.gz`;
     await writeFile(path.join(OUT, file), gzipSync(text, { level: 9 }));
-    chunks.push({ file, rules: current.length, sha256: sha(text), bytes: text.length });
+    chunks.push({ file, rules: current.length, sha256: sha(text), bytes });
     current = [];
     currentBytes = 2;
   };
   for (const rule of rules) {
-    const added = JSON.stringify(rule).length + 1; // +1 for the separating comma
+    const added = Buffer.byteLength(JSON.stringify(rule), "utf8") + 1; // +1 for the separating comma
     if (current.length && (current.length >= CAP || currentBytes + added > MAX_CHUNK_BYTES)) {
       await flush();
     }
