@@ -35,6 +35,7 @@ import {
   type KanbanTask,
 } from "@/lib/ipc";
 import { initProgress, logLinesFrom } from "@/lib/roadmap-data";
+import { useSessionStatus } from "@/lib/session-status";
 import { toastError, toastSuccess } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
@@ -176,51 +177,54 @@ export function KanbanPane({
       });
   }, [dir, agent, fail]);
 
+  /** a round that just failed client-side — never auto-resume it, even if the
+   *  backend's settle is delayed (defense against a toast storm) */
+  const failedRound = useRef<number | null>(null);
+  /** a duplicate terminal delivery must not double-settle (refresh + toast) */
+  const genSettled = useRef(false);
+  const genSt = useSessionStatus(dir, "fixes", flow.kind === "generating", fixesStatus);
   useEffect(() => {
-    if (flow.kind !== "generating") return;
+    if (flow.kind !== "generating" || !genSt) return;
     const startedAt = flow.startedAt;
-    const tick = async () => {
-      try {
-        const st = (await fixesStatus(dir)) as { running?: boolean; code?: number | null; log_tail?: string; started_at?: number };
-        const tail = st.log_tail ?? "";
-        const lines = logLinesFrom(tail);
-        if (st.running !== false) {
-          setFlow({
-            kind: "generating",
-            startedAt: st.started_at || startedAt,
-            logLines: lines.slice(0, -1),
-            activeLine: lines[lines.length - 1] ?? "Starting the session…",
-            progress: initProgress(tail),
-          });
-          return;
-        }
-        if ((st.code ?? 1) === 0) {
-          await refreshKanban(dir);
-          const rounds = kanbanFor(dir).rounds;
-          const latest = rounds.reduce((m, r) => Math.max(m, r.n), 0);
-          setFlow({ kind: "done", round: latest }); // the done card announces it — no twin toast
-        } else {
-          // refresh FIRST: the resume effect must not see a stale generating
-          // round and re-open the flow (that looped a toast per tick)
-          await refreshKanban(dir);
-          failedRound.current = [...kanbanFor(dir).rounds].reverse().find((r) => r.state === "generating")?.n ?? null;
-          setFlow({ kind: "idle" });
-          toastError("The session didn't finish", `Exited with code ${st.code ?? "?"} — your tasks are untouched`);
-        }
-      } catch { /* keep the last shown state */ }
-    };
-    const id = setInterval(tick, 3000);
-    void tick();
-    return () => clearInterval(id);
-  }, [dir, flow.kind, flow.kind === "generating" ? flow.startedAt : 0]);
+    const st = genSt;
+    const tail = st.log_tail ?? "";
+    const lines = logLinesFrom(tail);
+    if (st.running !== false) {
+      genSettled.current = false;
+      setFlow({
+        kind: "generating",
+        startedAt: st.started_at || startedAt,
+        logLines: lines.slice(0, -1),
+        activeLine: lines[lines.length - 1] ?? "Starting the session…",
+        progress: initProgress(tail),
+      });
+      return;
+    }
+    if (genSettled.current) return;
+    genSettled.current = true;
+    void (async () => {
+      if (st.cancelled) { await refreshKanban(dir); setFlow({ kind: "idle" }); return; }
+      if ((st.code ?? 1) === 0) {
+        await refreshKanban(dir);
+        const rounds = kanbanFor(dir).rounds;
+        const latest = rounds.reduce((m, r) => Math.max(m, r.n), 0);
+        setFlow({ kind: "done", round: latest }); // the done card announces it — no twin toast
+      } else {
+        // refresh FIRST: the resume effect must not see a stale generating
+        // round and re-open the flow (that looped a toast per tick)
+        await refreshKanban(dir);
+        failedRound.current = [...kanbanFor(dir).rounds].reverse().find((r) => r.state === "generating")?.n ?? null;
+        setFlow({ kind: "idle" });
+        toastError("The session didn't finish", `Exited with code ${st.code ?? "?"} — your tasks are untouched`);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genSt]);
 
   /* resume: a round generating in the store while the flow is idle means we
      lost the overlay (pane switch, reload) — pick it back up (T-006) */
   const genRoundOpen = store.rounds.some((r) => r.state === "generating");
   const prevGenOpen = useRef(false);
-  /** a round that just failed client-side — never auto-resume it, even if the
-   *  backend's settle is delayed (defense against a toast storm) */
-  const failedRound = useRef<number | null>(null);
   useEffect(() => {
     const openGen = [...store.rounds].reverse().find((r) => r.state === "generating")?.n ?? null;
     if (openGen === null || openGen !== failedRound.current) {
@@ -262,20 +266,10 @@ export function KanbanPane({
   const [execLive, setExecLive] = useState(false);
   const execCandidate = executingRound(store) != null &&
     store.rounds.find((x) => x.n === executingRound(store))?.state === "ready";
+  const execSt = useSessionStatus(dir, "exec", execCandidate, roundExecStatus);
   useEffect(() => {
-    if (!execCandidate) { setExecLive(false); return; }
-    let stop = false;
-    const tick = async () => {
-      try {
-        const st = await roundExecStatus(dir);
-        if (stop || dirRef.current !== dir) return;
-        setExecLive(st?.running === true);
-      } catch { /* keep the last known */ }
-    };
-    const id = setInterval(tick, 3000);
-    void tick();
-    return () => { stop = true; clearInterval(id); };
-  }, [dir, execCandidate]);
+    setExecLive(execCandidate && execSt?.running === true);
+  }, [execCandidate, execSt]);
 
   const runHeadless = useCallback((n: number) => {
     onConfirm({
