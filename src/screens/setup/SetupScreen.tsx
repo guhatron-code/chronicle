@@ -10,6 +10,7 @@ import {
   CHECK_META,
   allReady,
   cancelCheck,
+  cancelSignins,
   checkFor,
   doctorState,
   fixTerminalPath,
@@ -92,6 +93,7 @@ export function SetupScreen({
   const [, bump] = useState(0);
   useEffect(() => subscribeDoctor(() => bump((n) => n + 1)), []);
   useEffect(() => { void refreshDoctor(); }, []);
+  useEffect(() => () => cancelSignins(), []);
   const done = allReady();
 
   return (

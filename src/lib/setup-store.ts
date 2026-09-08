@@ -14,6 +14,7 @@ import {
   setupStatus,
   type SetupCheck,
 } from "./ipc";
+import { every } from "./scheduler";
 
 /** The row order + plain-language identity the screen renders. Names live here
  *  so the store, not the JSX, is the source of truth for what each check is. */
@@ -145,6 +146,8 @@ export async function runEverything(): Promise<void> {
   }
 }
 
+const signinStops = new Map<string, () => void>();
+
 /** Open a real Terminal window for the sign-in and poll the doctor until the
  *  check flips to ready (the user finishes the login in Terminal). */
 export async function startSignin(_dir: string | null, id: string): Promise<void> {
@@ -153,17 +156,25 @@ export async function startSignin(_dir: string | null, id: string): Promise<void
   state.waitingSignins.add(id);
   notify();
   const started = Date.now();
-  const poll = setInterval(() => {
+  signinStops.get(id)?.();
+  const stop = every(3500, async () => {
     // give up after 5 minutes; a manual "Re-check" still works
-    if (Date.now() - started > 5 * 60_000) { clearInterval(poll); state.waitingSignins.delete(id); notify(); return; }
-    void refreshDoctor().then(() => {
-      if (state.checks.get(id)?.state === "ready") {
-        clearInterval(poll);
-        state.waitingSignins.delete(id);
-        notify();
-      }
-    });
-  }, 2500);
+    if (Date.now() - started > 5 * 60_000) { finish(); return; }
+    await refreshDoctor();
+    if (state.checks.get(id)?.state === "ready") finish();
+  });
+  const finish = () => {
+    stop();
+    signinStops.delete(id);
+    state.waitingSignins.delete(id);
+    notify();
+  };
+  signinStops.set(id, finish);
+}
+
+/** The setup screen is gone — nobody is waiting for a sign-in anymore. */
+export function cancelSignins(): void {
+  for (const finish of [...signinStops.values()]) finish();
 }
 
 export function waitingSignin(id: string): boolean {
