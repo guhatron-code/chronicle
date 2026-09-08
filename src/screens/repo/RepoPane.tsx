@@ -51,6 +51,7 @@ import {
   type DirLoad,
   type GitStatus,
 } from "@/lib/repo-data";
+import { isHtmlPath } from "@/lib/web-url";
 import { toastError, toastRemoteOutcome, toastSuccess } from "@/overlays/toasts";
 import { listen } from "@tauri-apps/api/event";
 import { humanError, humanGitError } from "@/lib/utils";
@@ -168,6 +169,7 @@ export function RepoPane({
   onConfirm,
   onPollNow,
   onGoRoadmap,
+  onOpenInWeb,
 }: {
   dir: string;
   state: StateData | null;
@@ -175,6 +177,8 @@ export function RepoPane({
   onPollNow: () => void;
   /** History entered from the roadmap returns there on Back/Close. */
   onGoRoadmap?: () => void;
+  /** Open the active file (an HTML document) in the Web pane. */
+  onOpenInWeb?: (path: string) => void;
 }) {
   const rs = stateFor(dir);
   const [, bump] = useState(0);
@@ -744,6 +748,7 @@ export function RepoPane({
             (active.sizeBytes ?? 0) > HUGE_CAP
               ? undefined
               : () => { active.body = null; rerender(); loadContents(active.path, true); },
+          onOpenInWeb: isHtmlPath(active.path) && onOpenInWeb ? () => onOpenInWeb(active.path) : undefined,
         };
     view = { kind: "files", tree, viewer };
   }

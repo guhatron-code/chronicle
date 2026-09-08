@@ -41,6 +41,7 @@ import {
   renameTerm,
   setActiveTermFor,
   setTermPathHandler,
+  setTermUrlHandler,
   spawnTerm,
   fgAgentFor,
   hadAgentFor,
@@ -53,7 +54,7 @@ import { TrafficLights } from "@/components/chrome/TitleBar";
 import { KanbanPane } from "@/screens/kanban/KanbanPane";
 import { WebPane } from "@/screens/web/WebPane";
 import { openInWeb, reloadProjectFiles } from "@/lib/web-store";
-import { isHtmlPath } from "@/lib/web-url";
+import { isHtmlPath, isClaudeArtifactUrl } from "@/lib/web-url";
 import { evictKanban, kanbanFor, openTaskInKanban, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { announce } from "@/lib/journal";
 import { listen } from "@tauri-apps/api/event";
@@ -68,7 +69,7 @@ import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, subscribeAgent } from "@/lib/agent-session";
 import { agentSessionStop, readFile } from "@/lib/ipc";
 import { openAgentReview } from "@/screens/repo/RepoPane";
-import { copyText, fixesStatus, githubClone, githubRepos, initStatus, launchOpenDir, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
+import { copyText, fixesStatus, githubClone, githubRepos, initStatus, launchOpenDir, openUrl, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -393,6 +394,15 @@ export default function App() {
       if (isHtmlPath(path)) { void openInWeb(dir, { file: path }); goPane("web"); return; }
       openFileInRepo(dir, path);
       goPane("repo");
+    });
+  }, [goPane]);
+
+  /* ⌘-clicked URLs: Claude artifacts land in the Web pane, everything else in the browser */
+  useEffect(() => {
+    setTermUrlHandler((dir, url) => {
+      if (dir !== activeRef.current) return;
+      if (isClaudeArtifactUrl(url)) { void openInWeb(dir, { url }); goPane("web"); return; }
+      void openUrl(url).catch((e) => toastError("Couldn't open the link", String(e).slice(0, 90)));
     });
   }, [goPane]);
 
@@ -980,6 +990,7 @@ export default function App() {
             onConfirm={setConfirm}
             onPollNow={() => void pollOne(active.dir)}
             onGoRoadmap={() => goPane("road")}
+            onOpenInWeb={(path) => { void openInWeb(active.dir, { file: path }); goPane("web"); }}
           />
         ) : pane === "kanban" ? (
           <KanbanPane

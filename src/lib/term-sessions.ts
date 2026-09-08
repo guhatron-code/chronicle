@@ -191,6 +191,10 @@ export function setTermPathHandler(fn: (dir: string, path: string) => void) {
   pathOpenHandler = fn;
 }
 
+let urlOpenHandler: ((dir: string, url: string) => void) | null = null;
+/** ⌘-click on a URL in any terminal. */
+export function setTermUrlHandler(fn: (dir: string, url: string) => void) { urlOpenHandler = fn; }
+
 const PATH_RE = /(?:^|[\s"'`(\[])((?:\.?[A-Za-z0-9_.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,8})(:\d+)?/g;
 const PATH_SCAN_CAP = 20; // links per line — a pathological line must not stall a frame
 
@@ -243,6 +247,31 @@ function registerPathLinks(term: Terminal, dir: string) {
   });
 }
 
+const URL_RE = /https?:\/\/[^\s'"<>()\[\]]+/g;
+function registerUrlLinks(term: Terminal, dir: string) {
+  term.registerLinkProvider({
+    provideLinks(y, callback) {
+      const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+      const links: Parameters<typeof callback>[0] = [];
+      URL_RE.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      let guard = 0;
+      while ((m = URL_RE.exec(line)) !== null && guard++ < PATH_SCAN_CAP) {
+        const url = m[0].replace(/[.,;:!?]+$/, ""); // trailing punctuation isn't part of the link
+        links.push({
+          range: { start: { x: m.index + 1, y }, end: { x: m.index + url.length, y } },
+          text: url,
+          decorations: { underline: true, pointerCursor: true },
+          activate: (event) => { if (!event.metaKey) return; urlOpenHandler?.(dir, url); },
+          hover: (event) => showLinkTip(event.clientX, event.clientY),
+          leave: () => hideLinkTip(),
+        });
+      }
+      callback(links.length > 0 ? links : undefined);
+    },
+  });
+}
+
 export interface SpawnOpts {
   title?: string;
   agent?: "claude" | "codex";
@@ -268,6 +297,7 @@ export async function spawnTerm(dir: string, opts: SpawnOpts = {}): Promise<Term
   term.loadAddon(fit);
   term.open(host);
   registerPathLinks(term, dir); // F — ⌘-click a path to open it in the repo view
+  registerUrlLinks(term, dir); // ⌘-click a URL — Claude artifacts land in the Web pane, others in the browser
   // host is detached — cols/rows are wrong until the frame attaches; spawn with
   // a sane default and let the first attach fit+resize
   let id: number;

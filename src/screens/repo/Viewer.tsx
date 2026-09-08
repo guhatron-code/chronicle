@@ -63,6 +63,7 @@ export type ViewerProps =
       onReload?: () => void;
       onRetry?: () => void;
       onOpenAnyway?: () => void;
+      onOpenInWeb?: () => void;
       className?: string;
     };
 
@@ -239,6 +240,11 @@ export function Viewer(p: ViewerProps) {
               Changes
             </button>
           </div>
+          {p.onOpenInWeb && (
+            <button onClick={p.onOpenInWeb} className="h-[26px] rounded-md border border-border-hairline px-[11px] text-[11.5px] text-text-muted hover:text-text-primary">
+              Open in Web
+            </button>
+          )}
           {p.mode === "contents" && p.meta && (
             <span className="shrink-0 font-mono text-[11px] text-text-dim tabular-nums">
               {p.meta}
