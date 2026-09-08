@@ -7,3 +7,6 @@ src-tauri/gen/schemas/
 
 # tsc -b buildinfo (emit is redirected to node_modules/.tmp — see tsconfig.node.json)
 *.tsbuildinfo
+
+# brainstorm mockups (visual companion)
+.superpowers/
