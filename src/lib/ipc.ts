@@ -101,6 +101,7 @@ export interface StateData {
   blank?: boolean;
   misplaced?: string | null;
   checked_at: string;
+  kanban_mtime?: number; // epoch ms of .chronicle/kanban.json, 0 when absent
 }
 export interface InitStatusData {
   running?: boolean;

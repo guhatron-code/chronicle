@@ -860,6 +860,13 @@ async fn get_state(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, St
         obj.insert("extras".into(), json!(p.extras.iter()
             .map(|(a, pp)| json!({"alias": a, "path": pp.to_string_lossy()})).collect::<Vec<_>>()));
         obj.insert("init_consent".into(), init_consent_for(&p.dir));
+        // the board's mtime lets the UI skip re-reading an unchanged kanban.json
+        // on every heartbeat (energy: no parse, no re-render, unless it moved)
+        let kmt = std::fs::metadata(kanban_path(&p.dir)).ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64).unwrap_or(0);
+        obj.insert("kanban_mtime".into(), json!(kmt));
     }
     Ok(s)
 }

@@ -56,6 +56,7 @@ import { announce } from "@/lib/journal";
 import { listen } from "@tauri-apps/api/event";
 import { checkForUpdate, dismissUpdate, installUpdate, restartUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
+import { every } from "@/lib/scheduler";
 import { SetupScreen } from "@/screens/setup/SetupScreen";
 import { HelpScreen } from "@/screens/help/HelpScreen";
 import type { HelpTarget } from "@/lib/help-content";
@@ -150,8 +151,9 @@ export default function App() {
       .catch(() => {});
   }, []);
 
-  /* ---- the ground-truth poll: every open project, every 8s ---- */
+  /* ---- the ground-truth poll: every open project, on the 60s heartbeat + fs events ---- */
   const pollInFlight = useRef(new Set<string>());
+  const kanbanSeen = useRef(new Map<string, number>());
   const pollOne = useCallback(async (dir: string) => {
     if (pollInFlight.current.has(dir)) return; // a slow getState must not stack
     pollInFlight.current.add(dir);
@@ -162,7 +164,6 @@ export default function App() {
     }
   }, []);
   const pollOneInner = useCallback(async (dir: string) => {
-    void refreshKanban(dir); // the rail badge + round overlays stay live
     // a generating round settles server-side inside fixes_status — poll it even
     // when no pane is watching, so rounds can't stay "generating" forever (T-006)
     if (kanbanFor(dir).rounds.some((r) => r.state === "generating")) {
@@ -177,6 +178,13 @@ export default function App() {
     }
     try {
       const s = await getState(dir);
+      // the rail badge + round overlays stay live — but only re-read the board
+      // when its file actually changed (the fs watcher wakes this poll on writes)
+      const kmt = s.kanban_mtime ?? 0;
+      if (kanbanSeen.current.get(dir) !== kmt) {
+        kanbanSeen.current.set(dir, kmt);
+        void refreshKanban(dir);
+      }
       // transitions observed against the previous ground truth → journal + notify
       const before = projectsRef.current.get(dir);
       if (before?.state) {
@@ -216,11 +224,13 @@ export default function App() {
     }
   }, []);
 
+  /* the ground-truth heartbeat: 60s through the scheduler (hidden pauses it,
+     unfocused slows it, battery doubles it). The fs watcher below wakes an
+     immediate poll on any write, so the heartbeat only catches what the
+     watcher can't see — a remote branch moving. */
   useEffect(() => {
     if (projects.size === 0) return;
-    const tick = () => { for (const dir of projectsRef.current.keys()) void pollOne(dir); };
-    const id = setInterval(tick, 8000);
-    return () => clearInterval(id);
+    return every(60_000, () => { for (const dir of projectsRef.current.keys()) void pollOne(dir); });
   }, [projects.size, pollOne]);
 
   /* fs events → an immediate ground-truth poll (debounced per project: agent
