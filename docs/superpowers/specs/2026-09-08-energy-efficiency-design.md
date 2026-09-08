@@ -62,13 +62,13 @@ Targets:
 
 ### 2. One activity signal
 
-**Rust: `power.rs`.** Tracks three booleans and emits `app-activity` whenever one flips.
+Two of the three inputs are already known to the webview, so Rust only supplies the third.
 
-- `visible`: from the window's occlusion state (`NSWindow.occlusionState`) and minimize/hide events. Tauri's `WindowEvent::Focused` is not enough; occlusion is what says "nobody can see this".
-- `focused`: from `WindowEvent::Focused`.
-- `on_battery`: from IOKit power sources (`IOPSCopyPowerSourcesInfo`), re-read on `kIOPSNotify` and on every `app-activity` emit as a cheap fallback.
+- `visible`: from `document.visibilityState`. WKWebView flips it to `hidden` when the window is occluded, minimized or hidden with ⌘H, which is exactly "nobody can see this". No AppKit observer needed.
+- `focused`: from the window's `focus` / `blur` events.
+- `onBattery`: **Rust `power.rs`** reads IOKit power sources (`IOPSCopyPowerSourcesInfo`), exposes `get_power_source`, and installs an IOKit run-loop notification so a plug or unplug emits `power-source-changed`.
 
-Command `get_activity` returns the current triple for a fresh subscriber.
+`src/lib/activity.ts` wires those into the scheduler, stamps `<html data-idle>` for CSS, and tells Rust whether the UI is visible (`set_ui_visible`) so the session waiter below can go quiet.
 
 **Frontend: `src/lib/scheduler.ts`.** A pure module, no React, no Tauri imports:
 
@@ -89,7 +89,7 @@ Every timer that survives this spec goes through `every()`. There are no bare
 ### 3. Replacing the pollers
 
 - **Project state (8s).** Base becomes 60s. The file watcher already emits `project-fs-changed` with a 450ms debounce, so the heartbeat exists only to catch things the watcher can't see (a remote branch moving). Paused while hidden; a poll fires immediately on show.
-- **Child-session pollers (4 × 3s).** Rust already holds every init, fixes and round-exec child in `InitState`. Each spawn gets a waiter thread that blocks on `child.wait()` and emits `session-status` `{dir, kind, running: false, code}` on exit; the spawn itself emits `{running: true, started_at}`. The four `setInterval` loops in `RoadmapPane.tsx` and `KanbanPane.tsx` become one `useSessionStatus(dir, kind)` hook that subscribes and calls `initStatus` and friends once on mount for the initial value. The `try_wait` polling commands stay for that first read. The `elapsedS` display ticks locally once a second only while a run is live and the window is visible.
+- **Child-session pollers (4 × 3s).** Rust already holds every init, fixes and round-exec child in `InitState`, and the screens show the session's live log tail, so a plain blocking `wait()` isn't enough. Each spawn gets a waiter thread that, once a second, does one `try_wait` and one `stat` of the log file (no subprocess, no IPC) and emits `session-status` `{dir, kind, running, started_at, code, log_tail}` **only on change**: the log grew, or the child exited or was cancelled. Log-growth events are skipped while the UI is not visible; the exit event always goes out. The four `setInterval` loops in `RoadmapPane.tsx` and `KanbanPane.tsx` become one `useSessionStatus(dir, kind)` hook that subscribes and does one seed read through `initStatus` and friends on activation. The `try_wait` status commands stay for that seed read. `elapsedS` is not rendered anywhere today, so it is computed at event time and never ticks on its own.
 - **Terminal foreground (2s).** The interval goes. `pollForeground(id)` runs 300ms after the last `pty-out` chunk for that session (trailing debounce) and once on `pty-exit`. A quiet terminal never polls. `process_info` already narrows to one pid.
 - **Setup sign-in (3.5s).** Runs through `every()` so it pauses while hidden, and is cleared when the setup screen unmounts.
 - **Kanban refresh inside the state poll.** `refreshKanban` runs only when `kanban.json`'s mtime changed since the last read (Rust returns the mtime alongside the state).
@@ -104,7 +104,7 @@ Every timer that survives this spec goes through `every()`. There are no bare
 
 - **Cursor blink.** `term.options.cursorBlink` is `true` only while `focused && visible`; the scheduler's activity subscription flips it for every live terminal.
 - **Looping animations.** The root gets `data-idle="true"` when cadence is not `normal`. `index.css` adds `[data-idle="true"]` rules that set `animation-play-state: paused` on the elements using the four looping keyframes (the spinner, pulse, arrow and indeterminate bar). Transition-driven UI is untouched.
-- **Transparency experiment.** `transparent: true` exists only for the 11px rounded corners. The experiment: set `transparent: false`, and in `setup` apply `contentView.wantsLayer = true`, `layer.cornerRadius = 11`, `layer.masksToBounds = true` on the NSWindow through the private-API access already enabled. Acceptance: corners, shadow and the title-bar drag region look identical in screenshots against today's build at 1x and 2x. If they don't, the change is reverted and the outcome recorded below.
+- **Transparency experiment.** `transparent: true` exists only for the 11px rounded corners. The experiment: a titled window with `titleBarStyle: Overlay`, `hiddenTitle: true`, `transparent: false`, which gives native rounded corners and shadow on an opaque backing; the three native buttons are hidden in `setup` so the React traffic lights stay the only ones. Acceptance: corners, shadow and the title-bar drag region look identical in screenshots against today's build at 1x and 2x, and double-click-to-zoom still works. If they don't, the change is reverted and the outcome recorded below.
 
 ### 6. What stays
 
