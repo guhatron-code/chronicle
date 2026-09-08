@@ -135,4 +135,4 @@ Filled in during implementation.
 | idle-hidden | | |
 | terminal-live | | |
 
-Transparency experiment outcome: _pending_.
+Transparency experiment outcome: reverted. A titled window with an overlay title bar (commit 362278f) renders the OS corner radius and a wider native shadow, visibly different from the 11px rounded container (corner-arc span roughly 1.8× in the 2x screenshots; before/after crops were compared side by side). The radius of a titled window is not configurable, so the transparent window stays. To adopt the native look on purpose, cherry-pick 362278f.
