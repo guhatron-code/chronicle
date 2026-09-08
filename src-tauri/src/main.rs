@@ -8,6 +8,7 @@
 mod acp;
 mod setup;
 mod power;
+mod web;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -26,8 +27,8 @@ use tauri::{Emitter, Manager, State};
 /* ================= project model ================= */
 
 #[derive(Clone)]
-struct Project {
-    dir: PathBuf,                       // the folder that was opened (holds chronicle.json)
+pub(crate) struct Project {
+    pub(crate) dir: PathBuf,            // the folder that was opened (holds chronicle.json)
     repo: PathBuf,                      // git root (manifest roots.repo, relative to dir)
     extras: Vec<(String, PathBuf)>,     // alias -> absolute path
     manifest: Option<Value>,            // None => no/invalid manifest (degraded view)
@@ -59,7 +60,7 @@ struct InitState {
 /// create_project / the recents list). Every path-taking command resolves its `dir`
 /// against this allowlist — an arbitrary `dir` from the webview is rejected, so the
 /// per-project jail can't be relocated by the caller.
-struct OpenRoots(Mutex<HashSet<PathBuf>>);
+pub(crate) struct OpenRoots(Mutex<HashSet<PathBuf>>);
 
 /// Canonical key + a collision-free log path for an init run.
 fn canon_key(dir: &str) -> Result<(String, PathBuf), String> {
@@ -255,7 +256,7 @@ const FRESH_REBUILD_NOTE: &str = "REBUILD FROM SCRATCH: do not use refresh mode.
 
 const CODEX_INIT_PROMPT_HEAD: &str = "You are running the chronicle-init task in the current working directory (the folder the user opened in the Chronicle app). Follow the instructions below exactly. The referenced example files are not available to you; follow the schema strictly instead. Where the instructions mention naming the destination tool for paste rows, use \"Codex\" for terminal prompts if this project is worked with Codex.\n\n";
 
-fn config_dir() -> PathBuf {
+pub(crate) fn config_dir() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_default())
         .join("Library/Application Support/Chronicle")
 }
@@ -2387,7 +2388,7 @@ struct Entry { name: String, is_dir: bool, size: u64 }
 /// never gets to name an arbitrary folder: only projects the user opened (or created,
 /// or that live in the recents list) resolve — everything else is rejected before any
 /// filesystem or git access happens.
-fn project_for(roots: &OpenRoots, dir: &str) -> Result<Project, String> {
+pub(crate) fn project_for(roots: &OpenRoots, dir: &str) -> Result<Project, String> {
     let d = PathBuf::from(dir).canonicalize().map_err(|e| e.to_string())?;
     let allowed = roots.0.lock().map_err(|e| e.to_string())?.contains(&d);
     if !allowed {
@@ -2982,6 +2983,17 @@ fn main() {
         .manage(setup::SetupState::new())
         .manage(power::UiVisible(std::sync::atomic::AtomicBool::new(true)))
         .manage(LaunchOpen(Mutex::new(launch_open)))
+        .manage(web::WebState::new())
+        .register_uri_scheme_protocol("chronicle-file", |ctx, request| {
+            let web = ctx.app_handle().state::<web::WebState>();
+            let (status, mime, body) = web::serve_project_file(&web, &request.uri().to_string());
+            tauri::http::Response::builder()
+                .status(status)
+                .header("Content-Type", mime)
+                .header("Cache-Control", "no-store")
+                .body(body)
+                .unwrap()
+        })
         .setup(|app| {
             power::install(app.handle().clone()); // main thread: the run-loop source lands on the main loop
             Ok(())
@@ -3028,7 +3040,8 @@ fn main() {
             global_search, status_report,
             github_repos, github_clone, github_create,
             watch_project, unwatch_project, launch_open_dir,
-            power::get_power_source, power::set_ui_visible
+            power::get_power_source, power::set_ui_visible,
+            web::web_open_file, web::web_tabs_load, web::web_tabs_save
         ])
         .run(tauri::generate_context!())
         .expect("error while running Chronicle");
