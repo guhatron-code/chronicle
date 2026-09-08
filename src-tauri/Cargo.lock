@@ -519,6 +519,7 @@ dependencies = [
  "block2",
  "core-foundation",
  "core-foundation-sys",
+ "flate2",
  "libc",
  "notify",
  "objc2",

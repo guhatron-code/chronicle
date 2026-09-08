@@ -31,6 +31,7 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSURL", "NSError", "NSObject"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKWebViewConfiguration", "WKUserContentController", "WKContentRuleList", "WKContentRuleListStore", "WKNavigation", "block2"] }
 block2 = "0.6"
+flate2 = "1" # the bundled block-list chunks ship gzipped
 url = "2"
 percent-encoding = "2"
 

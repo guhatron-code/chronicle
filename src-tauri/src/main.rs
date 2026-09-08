@@ -9,6 +9,7 @@ mod acp;
 mod setup;
 mod power;
 mod web;
+mod blocklists;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -2984,6 +2985,7 @@ fn main() {
         .manage(power::UiVisible(std::sync::atomic::AtomicBool::new(true)))
         .manage(LaunchOpen(Mutex::new(launch_open)))
         .manage(web::WebState::new())
+        .manage(blocklists::BlockState::new())
         .register_uri_scheme_protocol("chronicle-file", |ctx, request| {
             let web = ctx.app_handle().state::<web::WebState>();
             let (status, mime, body) = web::serve_project_file(&web, &request.uri().to_string());
@@ -3041,7 +3043,8 @@ fn main() {
             github_repos, github_clone, github_create,
             watch_project, unwatch_project, launch_open_dir,
             power::get_power_source, power::set_ui_visible,
-            web::web_open_file, web::web_tabs_load, web::web_tabs_save
+            web::web_open_file, web::web_tabs_load, web::web_tabs_save,
+            blocklists::web_blocklists_prepare, blocklists::web_blocklists_info
         ])
         .run(tauri::generate_context!())
         .expect("error while running Chronicle");
