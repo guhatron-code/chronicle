@@ -10,6 +10,7 @@ const ALLOWED_SCHEMES = new Set(["http", "https", "chronicle-file", "about"]);
 export function toAddress(input: string): string | null {
   const s = input.trim();
   if (!s) return null;
+  if (/^[a-z0-9.-]+:\d{1,5}(\/|$)/i.test(s)) return `https://${s}`;
   const m = /^([a-z][a-z0-9+.-]*):/i.exec(s);
   if (m) {
     const scheme = m[1].toLowerCase();
@@ -25,7 +26,15 @@ export function toAddress(input: string): string | null {
 export function displayAddress(url: string): string {
   if (url === "about:blank" || url === "") return "";
   const m = /^chronicle-file:\/\/[^/]+\/(.*)$/.exec(url);
-  if (m) return `this project › ${decodeURIComponent(m[1])}`;
+  if (m) {
+    let rel = m[1];
+    try {
+      rel = decodeURIComponent(rel);
+    } catch {
+      /* show it as-is */
+    }
+    return `this project › ${rel}`;
+  }
   return url;
 }
 

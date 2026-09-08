@@ -10,13 +10,19 @@ describe("toAddress", () => {
     expect(toAddress("news.ycombinator.com")).toBe("https://news.ycombinator.com");
     expect(toAddress("  example.com/path ")).toBe("https://example.com/path");
   });
+  it("prepends https to host:port addresses", () => {
+    expect(toAddress("localhost:3000")).toBe("https://localhost:3000");
+    expect(toAddress("staging.example.com:8080/x")).toBe("https://staging.example.com:8080/x");
+  });
   it("searches anything with spaces or no dot", () => {
     expect(toAddress("tauri child webview")).toBe(`${SEARCH_PREFIX}tauri%20child%20webview`);
     expect(toAddress("hello")).toBe(`${SEARCH_PREFIX}hello`);
   });
-  it("rejects javascript: and empty input", () => {
+  it("rejects javascript:, data:, file: and empty input", () => {
     expect(toAddress("javascript:alert(1)")).toBeNull();
     expect(toAddress("JavaScript:alert(1)")).toBeNull();
+    expect(toAddress("data:text/html,hi")).toBeNull();
+    expect(toAddress("file:///etc/passwd")).toBeNull();
     expect(toAddress("   ")).toBeNull();
   });
   it("keeps chronicle-file and about:blank", () => {
@@ -35,6 +41,9 @@ describe("displayAddress", () => {
   it("shows nothing for about:blank and the URL otherwise", () => {
     expect(displayAddress("about:blank")).toBe("");
     expect(displayAddress("https://example.com/")).toBe("https://example.com/");
+  });
+  it("guards the display decode against malformed percent sequences", () => {
+    expect(displayAddress("chronicle-file://abc/100%.html")).toBe("this project › 100%.html");
   });
 });
 
