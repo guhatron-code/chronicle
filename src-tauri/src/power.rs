@@ -54,6 +54,7 @@ extern "C" fn on_change(ctx: *mut c_void) {
 pub fn install(app: tauri::AppHandle) {
     let ctx = Box::into_raw(Box::new(app)) as *mut c_void;
     unsafe {
+        // the source is +1 retained and deliberately never released — it lives for the process, like the AppHandle box above
         let src = IOPSNotificationCreateRunLoopSource(on_change, ctx);
         if src.is_null() {
             eprintln!("[power] no IOKit notification source — battery state is read on demand only");

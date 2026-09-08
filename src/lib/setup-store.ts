@@ -157,18 +157,19 @@ export async function startSignin(_dir: string | null, id: string): Promise<void
   notify();
   const started = Date.now();
   signinStops.get(id)?.();
-  const stop = every(3500, async () => {
-    // give up after 5 minutes; a manual "Re-check" still works
-    if (Date.now() - started > 5 * 60_000) { finish(); return; }
-    await refreshDoctor();
-    if (state.checks.get(id)?.state === "ready") finish();
-  });
+  let stop: () => void = () => {};
   const finish = () => {
     stop();
     signinStops.delete(id);
     state.waitingSignins.delete(id);
     notify();
   };
+  stop = every(3500, async () => {
+    await refreshDoctor();
+    if (state.checks.get(id)?.state === "ready") { finish(); return; }
+    // give up after 5 minutes; a manual "Re-check" still works
+    if (Date.now() - started > 5 * 60_000) finish();
+  });
   signinStops.set(id, finish);
 }
 

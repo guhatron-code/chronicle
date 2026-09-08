@@ -3,8 +3,7 @@
  * `session-status`, routed by project + kind. Screens subscribe through
  * useSessionStatus, which also does ONE seed read on activation (a reload
  * mid-run must recover the state the event stream already told a previous
- * webview about). Replaces the 3s status pollers (roadmap here; kanban's in
- * the next task).
+ * webview about). Replaces the four 3s status pollers (roadmap and kanban).
  */
 import { useEffect, useState } from "react";
 import { onSessionStatus, type InitStatusData, type SessionKind, type SessionStatusEvent } from "./ipc";

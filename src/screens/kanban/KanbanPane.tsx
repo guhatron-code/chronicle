@@ -168,6 +168,7 @@ export function KanbanPane({
 
   const startGenerate = useCallback(() => {
     const startedAt = Date.now();
+    genSettled.current = false; // a new run gets a fresh settle guard
     setFlow({ kind: "generating", startedAt, logLines: [], activeLine: "Starting the session…", progress: 0.06 });
     fixesGenerate(dir, agent)
       .then(() => refreshKanban(dir)) // the board shows the freeze immediately
@@ -231,6 +232,7 @@ export function KanbanPane({
       if (openGen === null) failedRound.current = null;
     }
     if (genRoundOpen && flow.kind === "idle" && openGen !== failedRound.current) {
+      genSettled.current = false; // a new run gets a fresh settle guard
       setFlow({ kind: "generating", startedAt: Date.now(), logLines: [], activeLine: "Starting the session…", progress: 0.06 });
     } else if (!genRoundOpen && prevGenOpen.current && flow.kind === "idle") {
       // it settled while nobody watched — still land on the done card
