@@ -27,6 +27,7 @@ sysinfo = "0.39.6"
 tauri-plugin-notification = "2.3.3"
 core-foundation = "0.10"      # CFString → Rust string for the IOKit power-source type
 core-foundation-sys = "0.8"   # CFRunLoop + CFRelease for the power-source notification
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
 
 [profile.release]
 strip = true
