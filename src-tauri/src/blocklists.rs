@@ -60,23 +60,49 @@ fn info_json(st: &BlockState) -> Value {
     json!({
         "status": st.status.lock().map(|s| s.clone()).unwrap_or_default(),
         "lists": lists,
+        "total": st.total.lock().map(|t| *t).unwrap_or(0),
         "fetched_at": st.fetched_at.lock().map(|s| s.clone()).unwrap_or_default(),
         "failed": st.failed.lock().map(|f| f.clone()).unwrap_or_default(),
     })
 }
 
 /// App-data copy first (a future updater's home), bundled resources otherwise.
+/// A missing resource dir must not hide an app-data copy, so the two resource
+/// candidates are optional rather than short-circuiting the whole search.
 fn locate(app: &AppHandle) -> Option<PathBuf> {
-    let candidates = [
-        crate::config_dir().join("blocklists"),
-        app.path().resource_dir().ok()?.join("resources").join("blocklists"),
-        app.path().resource_dir().ok()?.join("blocklists"),
-    ];
-    candidates.into_iter().find(|d| d.join("manifest.json").is_file())
+    let res = app.path().resource_dir().ok();
+    [
+        Some(crate::config_dir().join("blocklists")),
+        res.as_ref().map(|r| r.join("resources").join("blocklists")),
+        res.as_ref().map(|r| r.join("blocklists")),
+    ]
+    .into_iter()
+    .flatten()
+    .find(|d| d.join("manifest.json").is_file())
+}
+
+/// One chunk has finished, one way or another: record the failure if there was
+/// one, and settle the run when the last one lands. Main thread only.
+fn finish_one(app: &AppHandle, remaining: &std::rc::Rc<RefCell<usize>>, failure: Option<String>) {
+    if let Some(msg) = failure {
+        if let Some(st) = app.try_state::<BlockState>() {
+            if let Ok(mut f) = st.failed.lock() { f.push(msg); }
+        }
+    }
+    let last = { let mut r = remaining.borrow_mut(); *r -= 1; *r == 0 };
+    if last {
+        let failed = app.try_state::<BlockState>().map(|s| s.failed.lock().map(|f| !f.is_empty()).unwrap_or(false)).unwrap_or(false);
+        settle(app, if failed { "partial" } else { "ready" }, None);
+    }
 }
 
 /// Idempotent: the first call compiles (or looks up) every chunk on the main
 /// thread and emits `web-blocklists-changed` when the last one settles.
+///
+/// Once the status flips to `compiling`, the guard below refuses every further
+/// call — so every exit from here on MUST settle, or blocking is wedged off for
+/// the life of the process. `missing` is the retryable resting place for a
+/// failure, so that is what the error paths settle to.
 #[tauri::command]
 pub fn web_blocklists_prepare(app: AppHandle, st: State<BlockState>) -> Result<(), String> {
     {
@@ -84,31 +110,58 @@ pub fn web_blocklists_prepare(app: AppHandle, st: State<BlockState>) -> Result<(
         if *s != "idle" && *s != "missing" { return Ok(()); }
         *s = "compiling".into();
     }
+    // this attempt's failures are its own — a retry after a `missing` must not
+    // inherit the last attempt's notes and land in `partial` on their account
+    if let Ok(mut f) = st.failed.lock() { f.clear(); }
+
     let Some(dir) = locate(&app) else {
-        *st.status.lock().map_err(|e| e.to_string())? = "missing".into();
-        let _ = app.emit("web-blocklists-changed", info_json(&st));
+        settle(&app, "missing", Some("no block lists on disk"));
         return Ok(());
     };
-    let manifest = parse_manifest(&std::fs::read_to_string(dir.join("manifest.json")).map_err(|e| e.to_string())?)?;
-    *st.fetched_at.lock().map_err(|e| e.to_string())? = manifest.fetched_at.clone();
-    *st.total.lock().map_err(|e| e.to_string())? = manifest.chunks.len();
+    let manifest = match std::fs::read_to_string(dir.join("manifest.json")).map_err(|e| e.to_string()).and_then(|t| parse_manifest(&t)) {
+        Ok(m) => m,
+        Err(e) => { settle(&app, "missing", Some(e.as_str())); return Err(e); }
+    };
+    match st.fetched_at.lock() {
+        Ok(mut g) => *g = manifest.fetched_at.clone(),
+        Err(e) => { let e = e.to_string(); settle(&app, "missing", Some(e.as_str())); return Err(e); }
+    }
+    match st.total.lock() {
+        Ok(mut g) => *g = manifest.chunks.len(),
+        Err(e) => { let e = e.to_string(); settle(&app, "missing", Some(e.as_str())); return Err(e); }
+    }
+
+    // Inflate here, on the command thread: each chunk is ~1 MB gzipped and ~20 MB
+    // of JSON, and the main thread has a UI to run. WebKit still needs the
+    // NSString built on the main thread, but the gunzip does not happen there.
+    let chunks: Vec<(usize, Chunk, Result<String, String>)> = manifest
+        .chunks
+        .iter()
+        .enumerate()
+        .map(|(n, c)| { let text = read_chunk(&dir.join(&c.file)); (n, c.clone(), text) })
+        .collect();
+
     let app2 = app.clone();
-    app.run_on_main_thread(move || {
-        let mtm = MainThreadMarker::new().expect("run_on_main_thread");
-        let store = unsafe { WKContentRuleListStore::defaultStore(mtm) };
-        let Some(store) = store else { settle(&app2, "partial", Some("no rule-list store")); return };
-        let remaining = std::rc::Rc::new(RefCell::new(manifest.chunks.len()));
-        if manifest.chunks.is_empty() { settle(&app2, "ready", None); return }
-        for (n, chunk) in manifest.chunks.iter().enumerate() {
-            let id = identifier(chunk, n);
-            let ns_id = NSString::from_str(&id);
-            let app3 = app2.clone();
-            let remaining = remaining.clone();
-            let dir = dir.clone();
-            let file = chunk.file.clone();
+    let hop = app.run_on_main_thread(move || {
+        let Some(mtm) = MainThreadMarker::new() else { settle(&app2, "missing", Some("not on the main thread")); return };
+        let Some(store) = (unsafe { WKContentRuleListStore::defaultStore(mtm) }) else {
+            settle(&app2, "missing", Some("no rule-list store"));
+            return;
+        };
+        if chunks.is_empty() { settle(&app2, "ready", None); return }
+        let remaining = std::rc::Rc::new(RefCell::new(chunks.len()));
+        for (n, chunk, text) in chunks {
             let chunk_name = format!("{} ({} rules)", chunk.file, chunk.rules);
-            // look up first (WebKit caches by identifier); compile on a miss
+            // a chunk we could not even read is done before WebKit sees it
+            let text = match text {
+                Ok(t) => t,
+                Err(e) => { finish_one(&app2, &remaining, Some(format!("{chunk_name}: {e}"))); continue }
+            };
+            let ns_id = NSString::from_str(&identifier(&chunk, n));
+            let app3 = app2.clone();
+            let remaining2 = remaining.clone();
             let on_done: RcBlock<dyn Fn(*mut WKContentRuleList, *mut NSError)> = RcBlock::new(move |list: *mut WKContentRuleList, err: *mut NSError| {
+                let mut failure = None;
                 if !list.is_null() {
                     if let Some(l) = unsafe { Retained::retain(list) } {
                         LISTS.with(|v| v.borrow_mut().push(l));
@@ -116,32 +169,33 @@ pub fn web_blocklists_prepare(app: AppHandle, st: State<BlockState>) -> Result<(
                     }
                 } else {
                     let msg = if err.is_null() { "unknown error".to_string() } else { unsafe { (*err).localizedDescription().to_string() } };
-                    if let Some(st) = app3.try_state::<BlockState>() { if let Ok(mut f) = st.failed.lock() { f.push(format!("{chunk_name}: {msg}")); } }
+                    failure = Some(format!("{chunk_name}: {msg}"));
                 }
-                *remaining.borrow_mut() -= 1;
-                if *remaining.borrow() == 0 {
-                    let failed = app3.try_state::<BlockState>().map(|s| s.failed.lock().map(|f| !f.is_empty()).unwrap_or(false)).unwrap_or(false);
-                    settle(&app3, if failed { "partial" } else { "ready" }, None);
-                }
+                finish_one(&app3, &remaining2, failure);
             });
-            let compile_app = app2.clone();
+            // look up first (WebKit caches compiled lists by identifier, so an
+            // unchanged sha never recompiles); compile the inflated text on a miss
             let ns_id2 = ns_id.clone();
             let on_done2 = on_done.clone();
             let on_lookup: RcBlock<dyn Fn(*mut WKContentRuleList, *mut NSError)> = RcBlock::new(move |list: *mut WKContentRuleList, err: *mut NSError| {
                 if !list.is_null() { on_done2.call((list, err)); return; }
-                match read_chunk(&dir.join(&file)) {
-                    Ok(text) => {
-                        let mtm = MainThreadMarker::new().expect("main");
-                        if let Some(store) = unsafe { WKContentRuleListStore::defaultStore(mtm) } {
-                            unsafe { store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(Some(&ns_id2), Some(&NSString::from_str(&text)), Some(&on_done2)) };
-                        } else { on_done2.call((std::ptr::null_mut(), std::ptr::null_mut())); }
-                    }
-                    Err(_) => { let _ = &compile_app; on_done2.call((std::ptr::null_mut(), std::ptr::null_mut())); }
+                let store = MainThreadMarker::new().and_then(|mtm| unsafe { WKContentRuleListStore::defaultStore(mtm) });
+                match store {
+                    Some(store) => unsafe {
+                        store.compileContentRuleListForIdentifier_encodedContentRuleList_completionHandler(Some(&ns_id2), Some(&NSString::from_str(&text)), Some(&on_done2))
+                    },
+                    None => on_done2.call((std::ptr::null_mut(), std::ptr::null_mut())),
                 }
             });
             unsafe { store.lookUpContentRuleListForIdentifier_completionHandler(Some(&ns_id), Some(&on_lookup)) };
         }
-    }).map_err(|e| e.to_string())
+    });
+    if let Err(e) = hop {
+        let e = e.to_string();
+        settle(&app, "missing", Some(e.as_str()));
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Chunks ship gzipped (`N.json.gz`, ~1 MB each; the raw JSON is ~20 MB). A
@@ -176,7 +230,10 @@ pub fn attach(webview: &tauri::Webview) {
     let _ = webview.with_webview(|pw| {
         let wk: &WKWebView = unsafe { &*(pw.inner() as *const WKWebView) };
         let ucc = unsafe { wk.configuration().userContentController() };
-        LISTS.with(|v| for l in v.borrow().iter() { unsafe { ucc.addContentRuleList(l) } });
+        // clone the handles out first: addContentRuleList re-enters WebKit, and
+        // LISTS must not sit borrowed across a call that could reach back in
+        let lists: Vec<Retained<WKContentRuleList>> = LISTS.with(|v| v.borrow().clone());
+        for l in &lists { unsafe { ucc.addContentRuleList(l) } }
     });
 }
 
