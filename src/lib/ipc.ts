@@ -391,7 +391,7 @@ export const setUiVisible = (visible: boolean) => invoke<void>("set_ui_visible",
 
 /* ---------- the Web pane (src-tauri/src/web.rs, blocklists.rs) ---------- */
 export interface WebTabStatus { label: string; url: string; title: string; loading: boolean; can_back: boolean; can_forward: boolean }
-export interface BlockInfo { status: "idle" | "compiling" | "ready" | "partial" | "missing"; lists: number; total: number; fetched_at: string; failed: string[] }
+export interface BlockInfo { status: "idle" | "compiling" | "ready" | "partial" | "missing"; lists: number; total: number; fetched_at: string; failed: string[]; /** the filter lists behind the blocking, named by the manifest; empty before prepare */ sources?: string[] }
 export interface SavedWebTab { url: string; title: string }
 export const webTabOpen = (dir: string, url?: string) => invoke<string>("web_tab_open", { dir, url: url ?? null });
 export const webTabClose = (label: string) => invoke<void>("web_tab_close", { label });

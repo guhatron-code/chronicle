@@ -1,7 +1,11 @@
 /*
- * F8 — toasts (sonner, bottom-right pills on --surface-overlay). Bottom-center
- * is where the Web pane's native page sits, so toasts land bottom-right instead.
- * Success: glyph + name + mono count. Error: glyph + what happened + how to fix.
+ * F8 — toasts (sonner, top-right pills on --surface-overlay). A native child
+ * webview always paints over the app's DOM, so a toast anywhere above the Web
+ * pane's page region would be invisible. Top-right puts them over the pane's own
+ * DOM chrome — the tab strip and address bar — never over the native page
+ * region, whatever the column layout does. The 44px offset clears the 38px
+ * title bar. Success: glyph + name + mono count. Error: glyph + what happened
+ * + how to fix.
  */
 import { Toaster, toast } from "sonner";
 import { CheckGlyph, ErrorGlyph } from "@/components/chrome/icons";
@@ -12,8 +16,8 @@ export function ChronicleToaster() {
   // margin-left: calc(var(--width) / 2 * -1), and calc() with a keyword is
   // invalid, which shoved every toast right of center. The default numeric
   // width stays; the [data-x-position='center'] centering rule in index.css
-  // simply stops matching now that toasts sit bottom-right.
-  return <Toaster position="bottom-right" gap={8} visibleToasts={3} />;
+  // simply stops matching now that toasts sit top-right.
+  return <Toaster position="top-right" offset={44} gap={8} visibleToasts={2} />;
 }
 
 const pill =

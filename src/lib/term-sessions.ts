@@ -217,20 +217,46 @@ function hideLinkTip() {
   if (linkTip) linkTip.style.display = "none";
 }
 
-function registerPathLinks(term: Terminal, dir: string) {
+const URL_RE = /https?:\/\/[^\s'"<>()\[\]]+/g;
+
+/* ONE provider for both kinds of link. xterm consults link providers in
+   registration order and stops at the first that returns any links, so two
+   providers meant a line carrying both a path and a URL lost the URL entirely.
+   A single pass over the line collects both, URLs first, and a path match that
+   overlaps a URL (the path inside `https://host/a/b.js`) is dropped. */
+function registerTermLinks(term: Terminal, dir: string) {
   term.registerLinkProvider({
     provideLinks(y, callback) {
       const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
       const links: Parameters<typeof callback>[0] = [];
-      PATH_RE.lastIndex = 0;
+      const urlSpans: [number, number][] = []; // [start, endExclusive) in line offsets
+
+      URL_RE.lastIndex = 0;
       let m: RegExpExecArray | null;
       let guard = 0;
+      while ((m = URL_RE.exec(line)) !== null && guard++ < PATH_SCAN_CAP) {
+        const url = m[0].replace(/[.,;:!?]+$/, ""); // trailing punctuation isn't part of the link
+        urlSpans.push([m.index, m.index + m[0].length]);
+        links.push({
+          range: { start: { x: m.index + 1, y }, end: { x: m.index + url.length, y } },
+          text: url,
+          decorations: { underline: true, pointerCursor: true },
+          activate: (event) => { if (!event.metaKey) return; urlOpenHandler?.(dir, url); },
+          hover: (event) => showLinkTip(event.clientX, event.clientY),
+          leave: () => hideLinkTip(),
+        });
+      }
+
+      PATH_RE.lastIndex = 0;
+      guard = 0;
       while ((m = PATH_RE.exec(line)) !== null && guard++ < PATH_SCAN_CAP) {
         const path = m[1];
         const shown = path + (m[2] ?? "");
         const start = m.index + m[0].length - shown.length;
+        const end = start + shown.length;
+        if (urlSpans.some(([a, b]) => start < b && end > a)) continue; // it's part of a URL
         links.push({
-          range: { start: { x: start + 1, y }, end: { x: start + shown.length, y } },
+          range: { start: { x: start + 1, y }, end: { x: end, y } },
           text: shown,
           decorations: { underline: true, pointerCursor: true },
           activate: (event) => {
@@ -242,31 +268,7 @@ function registerPathLinks(term: Terminal, dir: string) {
           leave: () => hideLinkTip(),
         });
       }
-      callback(links.length > 0 ? links : undefined);
-    },
-  });
-}
 
-const URL_RE = /https?:\/\/[^\s'"<>()\[\]]+/g;
-function registerUrlLinks(term: Terminal, dir: string) {
-  term.registerLinkProvider({
-    provideLinks(y, callback) {
-      const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
-      const links: Parameters<typeof callback>[0] = [];
-      URL_RE.lastIndex = 0;
-      let m: RegExpExecArray | null;
-      let guard = 0;
-      while ((m = URL_RE.exec(line)) !== null && guard++ < PATH_SCAN_CAP) {
-        const url = m[0].replace(/[.,;:!?]+$/, ""); // trailing punctuation isn't part of the link
-        links.push({
-          range: { start: { x: m.index + 1, y }, end: { x: m.index + url.length, y } },
-          text: url,
-          decorations: { underline: true, pointerCursor: true },
-          activate: (event) => { if (!event.metaKey) return; urlOpenHandler?.(dir, url); },
-          hover: (event) => showLinkTip(event.clientX, event.clientY),
-          leave: () => hideLinkTip(),
-        });
-      }
       callback(links.length > 0 ? links : undefined);
     },
   });
@@ -296,8 +298,9 @@ export async function spawnTerm(dir: string, opts: SpawnOpts = {}): Promise<Term
   const fit = new FitAddon();
   term.loadAddon(fit);
   term.open(host);
-  registerPathLinks(term, dir); // F — ⌘-click a path to open it in the repo view
-  registerUrlLinks(term, dir); // ⌘-click a URL — Claude artifacts land in the Web pane, others in the browser
+  // F — ⌘-click a path to open it in the repo view; ⌘-click a URL and Claude
+  // artifacts land in the Web pane, others in the browser. One provider: see above.
+  registerTermLinks(term, dir);
   // host is detached — cols/rows are wrong until the frame attaches; spawn with
   // a sane default and let the first attach fit+resize
   let id: number;

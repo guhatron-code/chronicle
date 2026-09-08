@@ -17,11 +17,18 @@ import {
 import { toastError, toastSuccess } from "@/overlays/toasts";
 
 export interface WebTab {
+  /** stable identity for React keys — indexes shift when a tab closes */
+  id: number;
   label: string | null;       // null = evicted or not yet restored; recreated on activation
   url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean;
   hiddenSince: number | null;
+  /** in-flight web_tab_open, so two overlapping callers share one native view */
+  opening?: Promise<string | null>;
 }
 export interface WebProject { tabs: WebTab[]; active: number; restored: boolean }
+
+/** Tab identity, monotonic for the life of the process. */
+let nextTabId = 1;
 
 const projects = new Map<string, WebProject>();
 const subs = new Set<() => void>();
@@ -33,7 +40,7 @@ export function webFor(dir: string): WebProject {
   return p;
 }
 
-let block: BlockInfo = { status: "idle", lists: 0, total: 0, fetched_at: "", failed: [] };
+let block: BlockInfo = { status: "idle", lists: 0, total: 0, fetched_at: "", failed: [], sources: [] };
 const blockSubs = new Set<() => void>();
 export function blockInfo(): BlockInfo { return block; }
 export function subscribeBlock(cb: () => void): () => void { blockSubs.add(cb); return () => { blockSubs.delete(cb); }; }
@@ -103,7 +110,7 @@ export async function prepare(dir: string): Promise<void> {
   if (p.restored) return;
   p.restored = true;
   const saved = await webTabsLoad(dir).catch(() => [] as { url: string; title: string }[]);
-  const restored: WebTab[] = saved.map((s) => ({ label: null, url: s.url, title: s.title, loading: false, canBack: false, canForward: false, hiddenSince: null }));
+  const restored: WebTab[] = saved.map((s) => ({ id: nextTabId++, label: null, url: s.url, title: s.title, loading: false, canBack: false, canForward: false, hiddenSince: null }));
   // a tab opened before the restore finished (e.g. via openInWeb) must survive the merge
   const existing = p.tabs;
   p.tabs = [...restored, ...existing];
@@ -112,10 +119,18 @@ export async function prepare(dir: string): Promise<void> {
   await applyVisibility();
 }
 
+/** In-flight guard: applyVisibility and navigate can both reach a tab that has
+ *  no native view yet, and two web_tab_open calls would strand one of the two
+ *  webviews. Overlapping callers await the same promise. */
 async function materialise(dir: string, t: WebTab): Promise<string | null> {
   if (t.label) return t.label;
-  try { t.label = await webTabOpen(dir, t.url === "about:blank" ? undefined : t.url); return t.label; }
-  catch (e) { toastError("Couldn't open the page", String(e).slice(0, 90)); return null; }
+  if (t.opening) return t.opening;
+  t.opening = (async () => {
+    try { t.label = await webTabOpen(dir, t.url === "about:blank" ? undefined : t.url); return t.label; }
+    catch (e) { toastError("Couldn't open the page", String(e).slice(0, 90)); return null; }
+    finally { t.opening = undefined; }
+  })();
+  return t.opening;
 }
 
 export async function applyVisibility(): Promise<void> {
@@ -153,7 +168,7 @@ export function pushBounds(r: DOMRect): void {
 export async function newTab(dir: string, url = "about:blank"): Promise<void> {
   ensure();
   const p = webFor(dir);
-  p.tabs.push({ label: null, url, title: "", loading: false, canBack: false, canForward: false, hiddenSince: null });
+  p.tabs.push({ id: nextTabId++, label: null, url, title: "", loading: false, canBack: false, canForward: false, hiddenSince: null });
   p.active = p.tabs.length - 1;
   notify(); schedulePersist(dir);
   await applyVisibility();
@@ -202,8 +217,18 @@ export async function openInWeb(dir: string, target: { url: string } | { file: s
   if (i >= 0) activate(dir, i); else await newTab(dir, url);
 }
 
-/** A project file changed: reload any tab showing a file from that project. */
+/** A project file changed: reload any tab showing a file from that project.
+ *  Trailing debounce per project — an agent rewriting a report every 450ms would
+ *  otherwise reload the page under the reader on every write; one reload a
+ *  second after the writes stop is what someone watching a build actually wants. */
+const RELOAD_DEBOUNCE_MS = 1000;
+const reloadTimers = new Map<string, ReturnType<typeof setTimeout>>();
 export function reloadProjectFiles(dir: string): void {
-  const p = projects.get(dir); if (!p) return;
-  for (const t of p.tabs) if (t.label && t.url.startsWith("chronicle-file://")) void webTabReload(t.label).catch(() => {});
+  const existing = reloadTimers.get(dir);
+  if (existing) clearTimeout(existing);
+  reloadTimers.set(dir, setTimeout(() => {
+    reloadTimers.delete(dir);
+    const p = projects.get(dir); if (!p) return;
+    for (const t of p.tabs) if (t.label && t.url.startsWith("chronicle-file://")) void webTabReload(t.label).catch(() => {});
+  }, RELOAD_DEBOUNCE_MS));
 }
