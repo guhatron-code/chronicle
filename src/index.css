@@ -355,6 +355,17 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 @keyframes wv-spin { to { transform: rotate(360deg); } }
 @keyframes wv-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @keyframes wv-arrow { to { background-position: 12px 0; } }
+
+/* Idle (unfocused or hidden — <html data-idle>, set by src/lib/activity.ts):
+   the looping status animations stop repainting. Transitions are untouched. */
+[data-idle="true"] [style*="wv-spin"],
+[data-idle="true"] [style*="wv-pulse"],
+[data-idle="true"] [style*="wv-arrow"],
+[data-idle="true"] [style*="ch-indeterminate"],
+[data-idle="true"] [class*="ch-indeterminate"] {
+  animation-play-state: paused !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.001s !important;
