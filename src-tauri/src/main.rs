@@ -2915,8 +2915,19 @@ async fn setup_open_login(kind: String) -> Result<Value, String> {
 
 /* ================= main (with --derive CLI for the golden test) ================= */
 
+/// `chronicle --open <dir>` opens that project on launch — from a shell,
+/// `open -a Chronicle --args --open ~/proj`, or a scripted check that needs a
+/// project on screen without a click. Taken once; later calls get None.
+struct LaunchOpen(Mutex<Option<String>>);
+
+#[tauri::command]
+fn launch_open_dir(lo: State<LaunchOpen>) -> Option<String> {
+    lo.0.lock().ok().and_then(|mut g| g.take())
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    let launch_open = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1).cloned());
     if let Some(i) = args.iter().position(|a| a == "--derive") {
         let dir = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
         let out = derive_for_dir(&dir);
@@ -2970,6 +2981,7 @@ fn main() {
         .manage(acp::AcpState::new())
         .manage(setup::SetupState::new())
         .manage(power::UiVisible(std::sync::atomic::AtomicBool::new(true)))
+        .manage(LaunchOpen(Mutex::new(launch_open)))
         .setup(|app| {
             power::install(app.handle().clone()); // main thread: the run-loop source lands on the main loop
             Ok(())
@@ -3015,7 +3027,7 @@ fn main() {
             journal_append, journal_read, notify, draft_save_message,
             global_search, status_report,
             github_repos, github_clone, github_create,
-            watch_project, unwatch_project,
+            watch_project, unwatch_project, launch_open_dir,
             power::get_power_source, power::set_ui_visible
         ])
         .run(tauri::generate_context!())

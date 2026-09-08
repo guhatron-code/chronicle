@@ -154,6 +154,8 @@ export const adoptManifest = (dir: string, sub: string) =>
   invoke<void>("adopt_manifest", { dir, sub });
 export const removeRecent = (path: string) =>
   invoke<void>("remove_recent", { path });
+/** `chronicle --open <dir>` — the project to open on launch, handed over once. */
+export const launchOpenDir = () => invoke<string | null>("launch_open_dir");
 export const openProject = (path: string) =>
   invoke<ProjectData>("open_project", { path });
 export const getState = (dir: string) => invoke<StateData>("get_state", { dir });

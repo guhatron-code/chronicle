@@ -65,7 +65,7 @@ import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, subscribeAgent } from "@/lib/agent-session";
 import { agentSessionStop, readFile } from "@/lib/ipc";
 import { openAgentReview } from "@/screens/repo/RepoPane";
-import { copyText, fixesStatus, githubClone, githubRepos, initStatus, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
+import { copyText, fixesStatus, githubClone, githubRepos, initStatus, launchOpenDir, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -339,6 +339,14 @@ export default function App() {
     setPane(p);
     revealContent();
   }, [revealContent]);
+
+  /* `chronicle --open <dir>` lands straight in that project (shell launches,
+     scripted checks). The handle is consumed once, so a dev double-mount is
+     harmless; doOpenProject below is initialised by the time this runs. */
+  useEffect(() => {
+    void launchOpenDir().then((dir) => { if (dir) doOpenProject(dir); }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const doOpenProject = useCallback((path: string) => {
     if (projectsRef.current.has(path)) {
