@@ -166,11 +166,14 @@ fn ui() -> tauri::EventTarget { tauri::EventTarget::webview("main") }
 const ALLOWED: [&str; 4] = ["http", "https", "chronicle-file", "about"];
 
 /// The one gate every entry point uses. `about` is not a blanket pass: only
-/// `about:blank` is the blank page a fresh tab starts at — `about:` anything
-/// else reaches WebKit's own internals.
+/// `about:blank` (the blank page a fresh tab starts at) and `about:srcdoc`
+/// (what an `<iframe srcdoc>` navigates to — wry's navigation policy runs for
+/// subframes too, so a srcdoc iframe is cancelled unless this lets it through)
+/// are inert enough to allow — `about:` anything else reaches WebKit's own
+/// internals.
 fn url_allowed(u: &url::Url) -> bool {
     if !ALLOWED.contains(&u.scheme()) { return false; }
-    if u.scheme() == "about" { return u.as_str() == "about:blank"; }
+    if u.scheme() == "about" { return u.as_str() == "about:blank" || u.as_str() == "about:srcdoc"; }
     true
 }
 

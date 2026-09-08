@@ -29,6 +29,12 @@ describe("toAddress", () => {
     expect(toAddress("chronicle-file://abc/report.html")).toBe("chronicle-file://abc/report.html");
     expect(toAddress("about:blank")).toBe("about:blank");
   });
+  it("keeps about:srcdoc", () => {
+    expect(toAddress("about:srcdoc")).toBe("about:srcdoc");
+  });
+  it("searches other about: pages instead of passing them through", () => {
+    expect(toAddress("about:cache")).toBe(`${SEARCH_PREFIX}${encodeURIComponent("about:cache")}`);
+  });
   it("searches unknown schemes instead of passing them through", () => {
     expect(toAddress("ftp://x.y")).toBe(`${SEARCH_PREFIX}ftp%3A%2F%2Fx.y`);
   });

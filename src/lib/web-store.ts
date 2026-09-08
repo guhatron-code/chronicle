@@ -182,6 +182,7 @@ export function activate(dir: string, index: number): void {
 export async function closeTab(dir: string, index: number): Promise<void> {
   const p = webFor(dir); const t = p.tabs[index]; if (!t) return;
   const wasActive = p.tabs[p.active]; // identity, not index — the index below is about to shift
+  if (t.opening) await t.opening; // don't strand a native view whose open was still in flight
   if (t.label) await webTabClose(t.label).catch(() => {});
   p.tabs.splice(index, 1);
   p.active = wasActive && wasActive !== t ? p.tabs.indexOf(wasActive) : Math.min(index, p.tabs.length - 1);

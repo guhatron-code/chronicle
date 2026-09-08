@@ -15,6 +15,8 @@ export function toAddress(input: string): string | null {
   if (m) {
     const scheme = m[1].toLowerCase();
     if (scheme === "javascript" || scheme === "data" || scheme === "file") return null;
+    // only these two about: pages are inert; anything else (about:cache, …) is a search
+    if (scheme === "about") return s === "about:blank" || s === "about:srcdoc" ? s : SEARCH_PREFIX + encodeURIComponent(s);
     if (ALLOWED_SCHEMES.has(scheme)) return s;
     return SEARCH_PREFIX + encodeURIComponent(s);
   }
