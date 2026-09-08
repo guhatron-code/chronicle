@@ -50,11 +50,14 @@ export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
     setDraft(null); input.current?.blur();
   }, [draft, t, dir, p.active]);
 
-  /* shortcuts while the chrome has focus */
+  /* shortcuts while the chrome has focus. the terminal/agent column keeps its
+     own ⌘T/⌘L while it has focus */
   useEffect(() => {
     if (!onScreen) return;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
+      // the terminal/agent column keeps its own ⌘T/⌘L while it has focus
+      if ((document.activeElement as HTMLElement | null)?.closest?.("[data-right-column]")) return;
       if (e.key === "l") { e.preventDefault(); e.stopPropagation(); input.current?.focus(); input.current?.select(); }
       else if (e.key === "t") { e.preventDefault(); e.stopPropagation(); void newTab(dir); setTimeout(() => input.current?.focus(), 0); }
       else if (e.key === "w" && t) { e.preventDefault(); e.stopPropagation(); void closeTab(dir, p.active); }
