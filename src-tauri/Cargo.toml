@@ -25,6 +25,8 @@ notify = "6"
 agent-client-protocol-schema = { version = "1.4.0", features = ["unstable"] }
 sysinfo = "0.39.6"
 tauri-plugin-notification = "2.3.3"
+core-foundation = "0.10"      # CFString → Rust string for the IOKit power-source type
+core-foundation-sys = "0.8"   # CFRunLoop + CFRelease for the power-source notification
 
 [profile.release]
 strip = true

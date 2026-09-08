@@ -516,6 +516,8 @@ dependencies = [
  "agent-client-protocol-schema",
  "arboard",
  "base64 0.22.1",
+ "core-foundation",
+ "core-foundation-sys",
  "libc",
  "notify",
  "portable-pty",

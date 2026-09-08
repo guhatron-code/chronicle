@@ -7,6 +7,7 @@
 
 mod acp;
 mod setup;
+mod power;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -2880,6 +2881,11 @@ fn main() {
         })
         .manage(acp::AcpState::new())
         .manage(setup::SetupState::new())
+        .manage(power::UiVisible(std::sync::atomic::AtomicBool::new(true)))
+        .setup(|app| {
+            power::install(app.handle().clone()); // main thread: the run-loop source lands on the main loop
+            Ok(())
+        })
         .on_window_event(|window, event| {
             // the window is gone: no orphaned children, ever — kill + reap every PTY
             // shell and every background roadmap session.
@@ -2921,7 +2927,8 @@ fn main() {
             journal_append, journal_read, notify, draft_save_message,
             global_search, status_report,
             github_repos, github_clone, github_create,
-            watch_project, unwatch_project
+            watch_project, unwatch_project,
+            power::get_power_source, power::set_ui_visible
         ])
         .run(tauri::generate_context!())
         .expect("error while running Chronicle");
