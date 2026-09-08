@@ -110,6 +110,13 @@ export interface InitStatusData {
   code?: number | null;
   log_tail?: string;
 }
+export type SessionKind = "init" | "fixes" | "exec";
+/** session-status event (main.rs watch_run): one per CHANGE of a background session. */
+export interface SessionStatusEvent extends InitStatusData {
+  dir: string;
+  kind: SessionKind;
+  cancelled?: boolean;
+}
 export type AgentsData = unknown; // agents_available → { claude, codex, default }
 export interface GitStatusFile {
   path: string;
@@ -363,6 +370,9 @@ export const onPtyOut = (
   listen<[number, string]>("pty-out", (e) => cb(e.payload[0], e.payload[1]));
 export const onPtyExit = (cb: (id: number) => void): Promise<UnlistenFn> =>
   listen<number>("pty-exit", (e) => cb(e.payload));
+
+export const onSessionStatus = (cb: (e: SessionStatusEvent) => void): Promise<UnlistenFn> =>
+  listen<SessionStatusEvent>("session-status", (e) => cb(e.payload));
 
 /** G — what's actually running in the pty's foreground. */
 export const ptyInfo = (id: number) =>

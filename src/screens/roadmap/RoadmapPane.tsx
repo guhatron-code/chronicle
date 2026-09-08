@@ -38,6 +38,7 @@ import {
   type RoadmapCtx,
 } from "@/lib/roadmap-data";
 import { setActiveTermFor, spawnTerm, termsFor } from "@/lib/term-sessions";
+import { useSessionStatus } from "@/lib/session-status";
 import { AWAY_THRESHOLD_MS, announce, lastSeen, markSeen } from "@/lib/journal";
 import { openFileInRepo } from "@/screens/repo/RepoPane";
 import { fixesCancel, fixesLogPath, fixesStatus, initLogPath } from "@/lib/ipc";
@@ -204,48 +205,43 @@ export function RoadmapPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [checkedAt, dir, initRun == null]);
 
-  /* the init session poll (3s while running) */
+  /* the init session, pushed: one seed read, then session-status events */
+  const initSt = useSessionStatus(dir, "init", !!initRun?.running, initStatus);
   useEffect(() => {
-    if (!initRun?.running) return;
-    const startedAt = initRun.startedAt;
-    const tick = async () => {
-      try {
-        const st = (await initStatus(dir)) as { running?: boolean; started?: boolean; code?: number | null; log_tail?: string; started_at?: number };
-        if (dirRef.current !== dir) return; // a late reply must not cross projects
-        const tail = st.log_tail ?? "";
-        const lines = logLinesFrom(tail);
-        const began = st.started_at || startedAt;
-        setInitRun({
-          running: st.running ?? false,
-          startedAt: began,
-          // the last line renders as activeLine — don't repeat it in the scrollback
-          logLines: lines.slice(0, -1),
-          activeLine: lines[lines.length - 1] ?? "Starting the session…",
-          progress: initProgress(tail),
-          code: st.code ?? null,
-          elapsedS: Math.round((Date.now() - began) / 1000),
-        });
-        if (st.running === false) {
-          if ((st.code ?? 1) === 0) {
-            setInitRun(null); // the roadmap appears on the next poll
-            toastSuccess("The roadmap is written");
-            announce(dir, "roadmap", "The roadmap was written", "Chronicle");
-          } else if (stateRef.current?.manifest_present) {
-            // a failed REBUILD has no problem-card home (the old roadmap still shows) —
-            // say so instead of vanishing silently
-            setInitRun(null);
-            toastError("The rebuild didn't finish", `Session exited with code ${st.code ?? "?"} — the existing roadmap is untouched`);
-          }
-          onPollNowRef.current();
-        }
-      } catch { /* keep the last shown state */ }
-    };
-    const id = setInterval(tick, 3000);
-    void tick();
-    return () => clearInterval(id);
-  }, [dir, initRun?.running, initRun?.startedAt]);
+    if (!initRun?.running || !initSt) return;
+    if (dirRef.current !== dir) return; // a late event must not cross projects
+    const st = initSt;
+    const tail = st.log_tail ?? "";
+    const lines = logLinesFrom(tail);
+    const began = st.started_at || initRun.startedAt;
+    setInitRun({
+      running: st.running ?? false,
+      startedAt: began,
+      // the last line renders as activeLine — don't repeat it in the scrollback
+      logLines: lines.slice(0, -1),
+      activeLine: lines[lines.length - 1] ?? "Starting the session…",
+      progress: initProgress(tail),
+      code: st.code ?? null,
+      elapsedS: Math.round((Date.now() - began) / 1000),
+    });
+    if (st.running === false) {
+      if (st.cancelled) { setInitRun(null); return; } // the cancel path already spoke
+      if ((st.code ?? 1) === 0) {
+        setInitRun(null); // the roadmap appears on the next poll
+        toastSuccess("The roadmap is written");
+        announce(dir, "roadmap", "The roadmap was written", "Chronicle");
+      } else if (stateRef.current?.manifest_present) {
+        // a failed REBUILD has no problem-card home (the old roadmap still shows) —
+        // say so instead of vanishing silently
+        setInitRun(null);
+        toastError("The rebuild didn't finish", `Session exited with code ${st.code ?? "?"} — the existing roadmap is untouched`);
+      }
+      onPollNowRef.current();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initSt]);
 
-  /* a headless round execution is live → mirror it on the roadmap (3s poll) */
+  /* a headless round execution is live → mirror it on the roadmap */
   const kb = kanbanFor(dir);
   const execRoundN = (() => {
     for (const r of [...kb.rounds].reverse()) {
@@ -255,88 +251,77 @@ export function RoadmapPane({
     }
     return null;
   })();
+  const execSt = useSessionStatus(dir, "exec", execRoundN != null, roundExecStatus);
+  const sawExecLive = useRef(false);
   useEffect(() => {
-    if (execRoundN == null) { setExecRun(null); return; }
-    const startedAt = Date.now();
-    let sawLive = false;
-    const tick = async () => {
-      try {
-        const st = await roundExecStatus(dir);
-        if (dirRef.current !== dir) return;
-        const tail = st.log_tail ?? "";
-        const lines = logLinesFrom(tail);
-        if (st.running === true) {
-          sawLive = true;
-          const began = st.started_at || startedAt;
-          setExecRun({
-            running: true,
-            startedAt: began,
-            logLines: lines.slice(0, -1),
-            activeLine: lines[lines.length - 1] ?? "Starting the session…",
-            progress: initProgress(tail),
-            code: null,
-            elapsedS: Math.round((Date.now() - began) / 1000),
-          });
-        } else {
-          setExecRun(null);
-          if (sawLive) {
-            sawLive = false;
-            void refreshKanban(dir);
-            if ((st.code ?? 1) === 0) {
-              toastSuccess("The round finished", "Check the board — completed tasks are ticked");
-              announce(dir, "round-done", `Round ${execRoundN} finished`, "Chronicle");
-            } else {
-              toastError("The round session ended", `Exited with code ${st.code ?? "?"} — unfinished tasks stay on the board`);
-              announce(dir, "round-ended", `Round ${execRoundN} ended early`, "Chronicle");
-            }
-            onPollNowRef.current();
-          }
-        }
-      } catch { /* keep the last shown state */ }
-    };
-    const id = setInterval(tick, 3000);
-    void tick();
-    return () => clearInterval(id);
-  }, [dir, execRoundN]);
+    if (execRoundN == null) { setExecRun(null); sawExecLive.current = false; return; }
+    if (!execSt || dirRef.current !== dir) return;
+    const st = execSt;
+    const tail = st.log_tail ?? "";
+    const lines = logLinesFrom(tail);
+    if (st.running === true) {
+      sawExecLive.current = true;
+      const began = st.started_at || Date.now();
+      setExecRun({
+        running: true,
+        startedAt: began,
+        logLines: lines.slice(0, -1),
+        activeLine: lines[lines.length - 1] ?? "Starting the session…",
+        progress: initProgress(tail),
+        code: null,
+        elapsedS: Math.round((Date.now() - began) / 1000),
+      });
+      return;
+    }
+    setExecRun(null);
+    if (sawExecLive.current) {
+      sawExecLive.current = false;
+      void refreshKanban(dir);
+      if (st.cancelled) { onPollNowRef.current(); return; }
+      if ((st.code ?? 1) === 0) {
+        toastSuccess("The round finished", "Check the board — completed tasks are ticked");
+        announce(dir, "round-done", `Round ${execRoundN} finished`, "Chronicle");
+      } else {
+        toastError("The round session ended", `Exited with code ${st.code ?? "?"} — unfinished tasks stay on the board`);
+        announce(dir, "round-ended", `Round ${execRoundN} ended early`, "Chronicle");
+      }
+      onPollNowRef.current();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [execSt, execRoundN]);
 
-  /* a kanban round is generating → mirror its session on the roadmap (3s poll) */
+  /* a kanban round is generating → mirror its session on the roadmap */
   const generating = kanbanFor(dir).rounds.some((r) => r.state === "generating");
+  const fixesSt = useSessionStatus(dir, "fixes", generating, fixesStatus);
   useEffect(() => {
     if (!generating) { setFixesRun(null); return; }
-    const startedAt = Date.now();
-    const tick = async () => {
-      try {
-        const st = (await fixesStatus(dir)) as { running?: boolean; code?: number | null; log_tail?: string; started_at?: number };
-        if (dirRef.current !== dir) return; // a late reply must not cross projects
-        const tail = st.log_tail ?? "";
-        const lines = logLinesFrom(tail);
-        if (st.running === true) {
-          const began = st.started_at || startedAt;
-          setFixesRun(() => ({
-            running: true,
-            startedAt: began,
-            logLines: lines.slice(0, -1),
-            activeLine: lines[lines.length - 1] ?? "Starting the session…",
-            progress: initProgress(tail),
-            code: null,
-            elapsedS: Math.round((Date.now() - began) / 1000),
-          }));
-        } else {
-          setFixesRun(null);
-          await refreshKanban(dir);
-          if ((st.code ?? 1) === 0) {
-            toastSuccess("The fix plan is written", "The round is on your roadmap");
-            announce(dir, "round-plan", "A round's fix plan is ready", "Chronicle");
-          }
-          onPollNowRef.current();
-        }
-      } catch { /* keep the last shown state */ }
-    };
-    const id = setInterval(tick, 3000);
-    void tick();
-    return () => clearInterval(id);
+    if (!fixesSt || dirRef.current !== dir) return;
+    const st = fixesSt;
+    const tail = st.log_tail ?? "";
+    const lines = logLinesFrom(tail);
+    if (st.running === true) {
+      const began = st.started_at || Date.now();
+      setFixesRun({
+        running: true,
+        startedAt: began,
+        logLines: lines.slice(0, -1),
+        activeLine: lines[lines.length - 1] ?? "Starting the session…",
+        progress: initProgress(tail),
+        code: null,
+        elapsedS: Math.round((Date.now() - began) / 1000),
+      });
+      return;
+    }
+    setFixesRun(null);
+    void refreshKanban(dir).then(() => {
+      if (!st.cancelled && (st.code ?? 1) === 0) {
+        toastSuccess("The fix plan is written", "The round is on your roadmap");
+        announce(dir, "round-plan", "A round's fix plan is ready", "Chronicle");
+      }
+      onPollNowRef.current();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dir, generating]);
+  }, [fixesSt, generating]);
 
   /** fresh: an explicit Rebuild re-derives chronicle.json from scratch; a first
    *  build (or a plan-drift refresh) keeps the skill's diff-and-patch mode. */
