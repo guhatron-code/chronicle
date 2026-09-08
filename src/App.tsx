@@ -180,6 +180,8 @@ export default function App() {
       const s = await getState(dir);
       // the rail badge + round overlays stay live — but only re-read the board
       // when its file actually changed (the fs watcher wakes this poll on writes)
+      // a failed getState skips this cycle; the unchanged seen-mtime means the
+      // next good poll catches up
       const kmt = s.kanban_mtime ?? 0;
       if (kanbanSeen.current.get(dir) !== kmt) {
         kanbanSeen.current.set(dir, kmt);
@@ -513,6 +515,7 @@ export default function App() {
       closeTermsFor(dir);
       evictRepo(dir);
       evictKanban(dir);
+      kanbanSeen.current.delete(dir);
       void unwatchProject(dir).catch(() => {});
       setProjects((prev) => {
         const next = new Map(prev);
