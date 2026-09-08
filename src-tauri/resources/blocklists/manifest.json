@@ -1,0 +1,62 @@
+{
+  "fetched_at": "2026-09-08T20:14:57.411Z",
+  "converter": "abp2blocklist@721ec7f",
+  "sources": [
+    {
+      "name": "EasyList",
+      "url": "https://easylist.to/easylist/easylist.txt",
+      "filters": 78371
+    },
+    {
+      "name": "EasyPrivacy",
+      "url": "https://easylist.to/easylist/easyprivacy.txt",
+      "filters": 56030
+    },
+    {
+      "name": "uBlock filters",
+      "url": "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/filters.txt",
+      "filters": 6122
+    },
+    {
+      "name": "uBlock privacy",
+      "url": "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/privacy.txt",
+      "filters": 1752
+    },
+    {
+      "name": "uBlock badware",
+      "url": "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/badware.txt",
+      "filters": 4370
+    },
+    {
+      "name": "uBlock unbreak",
+      "url": "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/unbreak.txt",
+      "filters": 2553
+    },
+    {
+      "name": "uBlock quick fixes",
+      "url": "https://raw.githubusercontent.com/uBlockOrigin/uAssets/master/filters/quick-fixes.txt",
+      "filters": 332
+    },
+    {
+      "name": "Peter Lowe's list",
+      "url": "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=1&mimetype=plaintext",
+      "filters": 3542
+    }
+  ],
+  "filters": 153072,
+  "rules": 124645,
+  "chunks": [
+    {
+      "file": "0.json.gz",
+      "rules": 65805,
+      "sha256": "e7451274497395081c1bd2578e02b02f1bdaecbaf316f4e6517d9dd41bc72957",
+      "bytes": 20971509
+    },
+    {
+      "file": "1.json.gz",
+      "rules": 58840,
+      "sha256": "6bdd36a6aa3b354988d814413695ef701a20cfa997bd5f0a6ed74ea23d4f268b",
+      "bytes": 20591684
+    }
+  ]
+}
