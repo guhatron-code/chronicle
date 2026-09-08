@@ -55,8 +55,8 @@ export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
     if (!onScreen) return;
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key === "l") { e.preventDefault(); input.current?.focus(); input.current?.select(); }
-      else if (e.key === "t") { e.preventDefault(); void newTab(dir); setTimeout(() => input.current?.focus(), 0); }
+      if (e.key === "l") { e.preventDefault(); e.stopPropagation(); input.current?.focus(); input.current?.select(); }
+      else if (e.key === "t") { e.preventDefault(); e.stopPropagation(); void newTab(dir); setTimeout(() => input.current?.focus(), 0); }
       else if (e.key === "w" && t) { e.preventDefault(); e.stopPropagation(); void closeTab(dir, p.active); }
       else if (e.key === "r" && t) { e.preventDefault(); reload(t); }
       else if (e.key === "[" && t) { e.preventDefault(); back(t); }
@@ -75,7 +75,7 @@ export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* tabs */}
-      <div className="flex items-end gap-0.5 border-b border-divider px-2 pt-2">
+      <div className="flex min-w-0 items-end gap-0.5 overflow-x-auto border-b border-divider px-2 pt-2">
         {p.tabs.map((tab, i) => (
           <div key={i}
             onClick={() => activate(dir, i)}
@@ -86,7 +86,7 @@ export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
             <button aria-label="Close tab" onClick={(e) => { e.stopPropagation(); void closeTab(dir, i); }} className="text-text-dimmer hover:text-text-primary"><XGlyph size={8} /></button>
           </div>
         ))}
-        <button aria-label="New tab" onClick={() => { void newTab(dir); setTimeout(() => input.current?.focus(), 0); }} className="px-2.5 pb-1.5 text-text-faint hover:text-text-primary">+</button>
+        <button aria-label="New tab" onClick={() => { void newTab(dir); setTimeout(() => input.current?.focus(), 0); }} className="shrink-0 px-2.5 pb-1.5 text-text-faint hover:text-text-primary">+</button>
       </div>
       {/* address bar */}
       <div className="flex items-center gap-1.5 border-b border-divider bg-surface-sidebar px-2 py-1.5">
