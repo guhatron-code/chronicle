@@ -924,9 +924,10 @@ async fn init_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: St
             .spawn()
             .map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
+    let pid = child.id();
     runs.insert(key.clone(), (child, log, epoch_ms()));
     drop(runs);
-    watch_run(app, key, "init", dir.clone(), dirp.clone());
+    watch_run(app, key, "init", dir.clone(), dirp.clone(), pid);
     Ok(())
 }
 
@@ -992,7 +993,11 @@ fn probe_step(exit: Option<i32>, log: &Path, last_len: &mut u64, ui_visible: boo
 /// four 3s IPC pollers in the webview with a 1 Hz stat in Rust that emits
 /// `session-status` only on CHANGE: the log grew (and someone can see the
 /// window), or the child exited (or was cancelled — its entry vanished).
-fn watch_run(app: tauri::AppHandle, key: String, kind: &'static str, dir: String, dir_path: PathBuf) {
+/// `pid` ties this waiter to the exact run it was spawned for: if `key` gets
+/// reused by a cancel-then-restart before this waiter's next tick, the pid
+/// mismatch is treated as "this run vanished" so the waiter never adopts a
+/// different child.
+fn watch_run(app: tauri::AppHandle, key: String, kind: &'static str, dir: String, dir_path: PathBuf, pid: u32) {
     std::thread::spawn(move || {
         let mut last_len = 0u64;
         loop {
@@ -1001,9 +1006,13 @@ fn watch_run(app: tauri::AppHandle, key: String, kind: &'static str, dir: String
                 .map(|v| v.0.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(true);
             let probed = {
                 let init = app.state::<InitState>();
+                // Poisoned lock means some other thread panicked while holding it — give up
+                // quietly rather than propagate the panic; the frontend's next mount does a
+                // fresh seed read and recovers.
                 let Ok(mut runs) = init.runs.lock() else { return };
                 match runs.get_mut(&key) {
                     None => None, // cancelled: the entry was removed under us
+                    Some((child, _, _)) if child.id() != pid => None, // cancelled + restarted: not our run anymore
                     Some((child, log, started)) => {
                         let st = child.try_wait().ok().flatten();
                         Some((st.is_some(), st.and_then(|s| s.code()), log.clone(), *started))
@@ -1432,9 +1441,10 @@ async fn fixes_generate(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init
             .process_group(0)
             .spawn().map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
+    let pid = child.id();
     runs.insert(key.clone(), (child, log, epoch_ms()));
     drop(runs);
-    watch_run(app, key, "fixes", dir.clone(), p.dir.clone());
+    watch_run(app, key, "fixes", dir.clone(), p.dir.clone(), pid);
     Ok(round_n)
 }
 
@@ -1801,9 +1811,10 @@ async fn round_execute(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init:
             .process_group(0)
             .spawn().map_err(|e| format!("couldn't start a Claude session: {e}"))?
     };
+    let pid = child.id();
     runs.insert(key.clone(), (child, log, epoch_ms()));
     drop(runs);
-    watch_run(app, key, "exec", dir.clone(), p.dir.clone());
+    watch_run(app, key, "exec", dir.clone(), p.dir.clone(), pid);
     Ok(())
 }
 
@@ -3228,6 +3239,9 @@ mod r1_tests {
         assert_eq!(probe_step(None, &log, &mut last, true), ProbeOutcome::Quiet, "same length = quiet");
         std::fs::write(&log, "line 1\nline 2\n").unwrap();
         assert_eq!(probe_step(None, &log, &mut last, false), ProbeOutcome::Quiet, "hidden UI: growth is not announced");
+        // last_len is still stale from before the hidden write, so becoming visible again
+        // must surface that growth on the very next tick.
+        assert_eq!(probe_step(None, &log, &mut last, true), ProbeOutcome::Grew, "UI becomes visible: stale growth is now announced");
         assert_eq!(probe_step(Some(0), &log, &mut last, false), ProbeOutcome::Exited(Some(0)), "exit is always announced");
     }
 }
