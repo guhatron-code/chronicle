@@ -53,8 +53,8 @@ export function subscribeTerms(cb: () => void): () => void {
   return () => subscribers.delete(cb);
 }
 
-/* ---- G — the foreground truth, polled: the tab dot says what's actually
-   running, never what the tab title guesses ---- */
+/* ---- G — the foreground truth, probed after output: the tab dot says what's
+   actually running, never what the tab title guesses ---- */
 const fgAgents = new Map<number, "claude" | "codex" | null>();
 /** sessions that had an agent in the foreground at some point — after it
  *  exits, the tab honestly says "idle" instead of saying nothing */
@@ -97,9 +97,11 @@ function probeForeground(id: number) {
     .catch(() => {});
 }
 
+// leading probe on the first chunk after quiet, trailing probe once output settles
 function scheduleForegroundProbe(id: number) {
   const prev = fgTimers.get(id);
   if (prev) clearTimeout(prev);
+  else probeForeground(id); // was quiet — a stream's first chunk shouldn't wait 300ms
   fgTimers.set(id, setTimeout(() => { fgTimers.delete(id); probeForeground(id); }, FG_SETTLE_MS));
 }
 
