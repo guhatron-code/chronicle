@@ -17,16 +17,15 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Deserialize, Debug, Clone)]
-#[allow(dead_code)] // the manifest's provenance rows — parsed whole; only the chunks drive compilation
+#[allow(dead_code)] // `url` and `filters` round-trip the manifest; only `name` is shown
 pub struct Source { pub name: String, pub url: String, pub filters: u64 }
 #[derive(Deserialize, Debug, Clone)]
 pub struct Chunk { pub file: String, pub rules: u64, pub sha256: String }
 #[derive(Deserialize, Debug, Clone)]
 pub struct Manifest {
     pub fetched_at: String,
-    /// where the filters came from — kept so the manifest round-trips whole;
-    /// compilation only needs `chunks`
-    #[allow(dead_code)]
+    /// where the filters came from — their names reach the ⋯ panel; compilation
+    /// only needs `chunks`
     pub sources: Vec<Source>,
     pub chunks: Vec<Chunk>,
 }
@@ -48,10 +47,13 @@ pub struct BlockState {
     pub total: Mutex<usize>,
     /// how many lists compiled — mirrors LISTS.len() so any thread can report it
     pub compiled: Mutex<usize>,
+    /// the filter lists behind the blocking, named by the manifest — the ⋯ panel
+    /// credits them. Empty until a prepare has read the manifest.
+    pub sources: Mutex<Vec<String>>,
 }
 impl BlockState {
     pub fn new() -> Self {
-        Self { status: Mutex::new("idle".into()), fetched_at: Mutex::new(String::new()), failed: Mutex::new(vec![]), total: Mutex::new(0), compiled: Mutex::new(0) }
+        Self { status: Mutex::new("idle".into()), fetched_at: Mutex::new(String::new()), failed: Mutex::new(vec![]), total: Mutex::new(0), compiled: Mutex::new(0), sources: Mutex::new(vec![]) }
     }
 }
 
@@ -63,6 +65,7 @@ fn info_json(st: &BlockState) -> Value {
         "total": st.total.lock().map(|t| *t).unwrap_or(0),
         "fetched_at": st.fetched_at.lock().map(|s| s.clone()).unwrap_or_default(),
         "failed": st.failed.lock().map(|f| f.clone()).unwrap_or_default(),
+        "sources": st.sources.lock().map(|s| s.clone()).unwrap_or_default(),
     })
 }
 
@@ -103,8 +106,13 @@ fn finish_one(app: &AppHandle, remaining: &std::rc::Rc<RefCell<usize>>, failure:
 /// call — so every exit from here on MUST settle, or blocking is wedged off for
 /// the life of the process. `missing` is the retryable resting place for a
 /// failure, so that is what the error paths settle to.
+///
+/// `async` on purpose: Tauri runs sync commands inline on the main thread, and
+/// this one reads and gunzips ~20 MB of JSON before WebKit ever sees it. Async
+/// commands go to Tauri's worker pool instead, which is where that belongs.
+/// Hopping back with `run_on_main_thread` from a worker is fine.
 #[tauri::command]
-pub fn web_blocklists_prepare(app: AppHandle, st: State<BlockState>) -> Result<(), String> {
+pub async fn web_blocklists_prepare(app: AppHandle, st: State<'_, BlockState>) -> Result<(), String> {
     {
         let mut s = st.status.lock().map_err(|e| e.to_string())?;
         if *s != "idle" && *s != "missing" { return Ok(()); }
@@ -130,10 +138,11 @@ pub fn web_blocklists_prepare(app: AppHandle, st: State<BlockState>) -> Result<(
         Ok(mut g) => *g = manifest.chunks.len(),
         Err(e) => { let e = e.to_string(); settle(&app, "missing", Some(e.as_str())); return Err(e); }
     }
+    if let Ok(mut g) = st.sources.lock() { *g = manifest.sources.iter().map(|s| s.name.clone()).collect(); }
 
-    // Inflate here, on the command thread: each chunk is ~1 MB gzipped and ~20 MB
-    // of JSON, and the main thread has a UI to run. WebKit still needs the
-    // NSString built on the main thread, but the gunzip does not happen there.
+    // Inflate here, on this command's worker thread: each chunk is ~1 MB gzipped
+    // and ~20 MB of JSON, and the main thread has a UI to run. WebKit still needs
+    // the NSString built on the main thread, but the gunzip does not happen there.
     let chunks: Vec<(usize, Chunk, Result<String, String>)> = manifest
         .chunks
         .iter()
@@ -216,7 +225,8 @@ fn settle(app: &AppHandle, status: &str, note: Option<&str>) {
     if let Some(st) = app.try_state::<BlockState>() {
         if let Ok(mut s) = st.status.lock() { *s = status.into(); }
         if let Some(n) = note { if let Ok(mut f) = st.failed.lock() { f.push(n.into()); } }
-        let _ = app.emit("web-blocklists-changed", info_json(&st));
+        // Chronicle's own UI only — never the browser tabs sharing this window
+        let _ = app.emit_to(tauri::EventTarget::webview("main"), "web-blocklists-changed", info_json(&st));
     }
 }
 

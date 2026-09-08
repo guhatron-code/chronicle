@@ -2986,15 +2986,27 @@ fn main() {
         .manage(LaunchOpen(Mutex::new(launch_open)))
         .manage(web::WebState::new())
         .manage(blocklists::BlockState::new())
-        .register_uri_scheme_protocol("chronicle-file", |ctx, request| {
-            let web = ctx.app_handle().state::<web::WebState>();
-            let (status, mime, body) = web::serve_project_file(&web, &request.uri().to_string());
-            tauri::http::Response::builder()
-                .status(status)
-                .header("Content-Type", mime)
-                .header("Cache-Control", "no-store")
-                .body(body)
-                .unwrap()
+        // Asynchronous on purpose: the synchronous form runs on the main thread,
+        // so reading a big artifact off disk would stall the whole UI. Here the
+        // read happens on a spawned thread and the responder answers when it is
+        // done. Files over 64 MiB come back as 413 rather than a huge allocation
+        // (see web::serve_project_file — no range support either, so seeking
+        // inside a long video won't work).
+        .register_asynchronous_uri_scheme_protocol("chronicle-file", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let uri = request.uri().to_string();
+            std::thread::spawn(move || {
+                let web = app.state::<web::WebState>();
+                let (status, mime, body) = web::serve_project_file(&web, &uri);
+                responder.respond(
+                    tauri::http::Response::builder()
+                        .status(status)
+                        .header("Content-Type", mime)
+                        .header("Cache-Control", "no-store")
+                        .body(body)
+                        .unwrap(),
+                );
+            });
         })
         .setup(|app| {
             power::install(app.handle().clone()); // main thread: the run-loop source lands on the main loop

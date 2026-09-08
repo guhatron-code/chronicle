@@ -77,13 +77,10 @@ impl WebState {
     }
 }
 
-/// A live tab: the project it belongs to, its native child webview, and whether
-/// its last page-load event said "started".
+/// A live tab: its native child webview, and whether its last page-load event
+/// said "started". (Tab persistence is per project on the frontend, so the tab
+/// itself has no need to remember which project opened it.)
 pub struct WebTab {
-    /// the project this tab belongs to — recorded at open, read when Task 7
-    /// saves and restores a project's tabs
-    #[allow(dead_code)]
-    pub dir: String,
     pub webview: tauri::Webview,
     pub loading: bool,
 }
@@ -122,18 +119,32 @@ pub fn web_tabs_save(roots: State<crate::OpenRoots>, dir: String, tabs: Vec<Save
     std::fs::rename(&tmp, &file).map_err(|e| e.to_string())
 }
 
+/// Anything larger is refused rather than read whole into memory: the handler
+/// answers with the entire body, so a stray 2 GB file in a project would be a
+/// 2 GB allocation.
+pub const MAX_SERVED_BYTES: u64 = 64 * 1024 * 1024;
+
 /// The protocol handler body: `chronicle-file://<hash>/<rel>` → the file's bytes
 /// with a content type, or 404 for anything outside the jail.
+///
+/// No range support: the whole file goes out as one 200, so `Range:` headers are
+/// ignored and seeking inside a long video won't work. Deferred — it needs the
+/// handler to parse the request headers and answer 206 with a slice.
 pub fn serve_project_file(web: &WebState, url: &str) -> (u16, &'static str, Vec<u8>) {
     let Ok(u) = url::Url::parse(url) else { return (404, "text/plain", b"not found".to_vec()) };
     let hash = u.host_str().unwrap_or("").to_string();
     let rel = percent_encoding::percent_decode_str(u.path().trim_start_matches('/')).decode_utf8_lossy().into_owned();
     let root = web.roots.lock().ok().and_then(|g| g.get(&hash).cloned());
     match root.and_then(|r| resolve_project_file(&r, &rel)) {
-        Some(file) => match std::fs::read(&file) {
-            Ok(bytes) => (200, mime_for(&file), bytes),
-            Err(_) => (404, "text/plain", b"not found".to_vec()),
-        },
+        Some(file) => {
+            if std::fs::metadata(&file).map(|m| m.len() > MAX_SERVED_BYTES).unwrap_or(false) {
+                return (413, "text/plain", b"file too large to show here".to_vec());
+            }
+            match std::fs::read(&file) {
+                Ok(bytes) => (200, mime_for(&file), bytes),
+                Err(_) => (404, "text/plain", b"not found".to_vec()),
+            }
+        }
         None => (404, "text/plain", b"not found".to_vec()),
     }
 }
@@ -153,6 +164,15 @@ fn ui() -> tauri::EventTarget { tauri::EventTarget::webview("main") }
 /// The only schemes a tab may sit on: the open web, project files, and the
 /// blank page a fresh tab starts at.
 const ALLOWED: [&str; 4] = ["http", "https", "chronicle-file", "about"];
+
+/// The one gate every entry point uses. `about` is not a blanket pass: only
+/// `about:blank` is the blank page a fresh tab starts at — `about:` anything
+/// else reaches WebKit's own internals.
+fn url_allowed(u: &url::Url) -> bool {
+    if !ALLOWED.contains(&u.scheme()) { return false; }
+    if u.scheme() == "about" { return u.as_str() == "about:blank"; }
+    true
+}
 
 /// Read the live status straight from WKWebView on the main thread and emit it.
 /// `title` overrides what WKWebView reports — the title-changed callback is
@@ -197,6 +217,16 @@ fn is_loading_of(app: &AppHandle, label: &str) -> bool {
     app.try_state::<WebState>().map(|web| is_loading(&web, label)).unwrap_or(false)
 }
 
+/* The tab commands below are deliberately SYNC.
+ *
+ * Tauri runs a sync command inline on the main thread, in the order its IPC
+ * messages arrive. That ordering is the whole show/hide invariant: the pane
+ * fires web_hide_all and web_tab_show from one frontend sequence, and if these
+ * were async they would land on the worker pool and could complete in either
+ * order — a show reordered behind a hide leaves a native page painted over an
+ * overlay, with no DOM able to cover it. They do no I/O worth moving off the
+ * main thread anyway. Do not make them async.
+ */
 #[tauri::command]
 pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<WebState>, block: State<crate::blocklists::BlockState>, dir: String, url: Option<String>) -> Result<String, String> {
     let _ = crate::project_for(&roots, &dir)?;
@@ -208,7 +238,7 @@ pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<W
     let first: Option<url::Url> = match url {
         Some(u) => {
             let parsed: url::Url = u.parse().map_err(|_| "that address isn't valid".to_string())?;
-            if !ALLOWED.contains(&parsed.scheme()) { return Err("only web pages and project files open here".into()); }
+            if !url_allowed(&parsed) { return Err("only web pages and project files open here".into()); }
             Some(parsed)
         }
         None => None,
@@ -223,7 +253,7 @@ pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<W
     let builder = WebviewBuilder::new(&label, WebviewUrl::External("about:blank".parse().unwrap()))
         .data_store_identifier(WEB_PROFILE_ID)
         .zoom_hotkeys_enabled(false)
-        .on_navigation(move |u| ALLOWED.contains(&u.scheme()))
+        .on_navigation(move |u| url_allowed(u))
         .on_new_window(move |u, _features| {
             let _ = app_new.emit_to(ui(), "web-open-tab", json!({ "from_label": label_new, "url": u.to_string() }));
             tauri::webview::NewWindowResponse::Deny
@@ -254,12 +284,12 @@ pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<W
         });
     let bounds = current_bounds(&web);
     let wv = window.add_child(builder, bounds.position, bounds.size).map_err(|e| e.to_string())?;
-    // add_child reports a *dispatch* failure, not a build one: confirm the
-    // manager really knows this label before anyone can be handed it
+    // add_child already reports the build result; the lookup below is
+    // belt-and-braces — nobody gets handed a label the manager doesn't know
     if app.get_webview(&label).is_none() { return Err("the page view couldn't be created".into()); }
     crate::blocklists::attach(&wv);                // rules go in before the first real load
     let _ = wv.hide();                             // shown only by web_tab_show
-    web.tabs.lock().map_err(|e| e.to_string())?.insert(label.clone(), WebTab { dir, webview: wv.clone(), loading: false });
+    web.tabs.lock().map_err(|e| e.to_string())?.insert(label.clone(), WebTab { webview: wv.clone(), loading: false });
     if let Some(u) = first { wv.navigate(u).map_err(|e| e.to_string())?; }
     Ok(label)
 }
@@ -316,7 +346,7 @@ pub fn web_set_bounds(web: State<WebState>, x: i32, y: i32, width: u32, height: 
 #[tauri::command]
 pub fn web_tab_navigate(web: State<WebState>, label: String, url: String) -> Result<(), String> {
     let parsed: url::Url = url.parse().map_err(|_| "that address isn't valid".to_string())?;
-    if !ALLOWED.contains(&parsed.scheme()) { return Err("only web pages and project files open here".into()); }
+    if !url_allowed(&parsed) { return Err("only web pages and project files open here".into()); }
     tab_webview(&web, &label)?.navigate(parsed).map_err(|e| e.to_string())
 }
 
