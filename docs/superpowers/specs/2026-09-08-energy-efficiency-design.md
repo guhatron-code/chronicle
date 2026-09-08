@@ -116,11 +116,11 @@ Every timer that survives this spec goes through `every()`. There are no bare
 
 - If `power.rs` cannot read power sources, `on_battery` is `false` and a single log line says so. Nothing else degrades.
 - If a `session-status` event is missed (webview reload mid-run), the initial `initStatus` read on mount recovers the truth. That is why the `try_wait` commands stay.
-- `every()` swallows nothing: the callback's promise rejections propagate to the existing per-screen `catch` blocks, which keep last-known state.
+- Callbacks own their errors. `every()` catches whatever escapes a callback (a sync throw or a rejection) so the timer survives; the existing per-screen `catch` blocks keep last-known state.
 
 ## Testing
 
-- **Rust:** unit tests for the `power` state machine (occlusion + focus + battery transitions produce the expected event sequence, no duplicate emits), and for the waiter thread's emit on exit code 0 and non-zero.
+- **Rust:** unit tests for `power::battery_from_type`, and for the waiter's pure `probe_step` (growth only while visible, exit always, hidden growth surfaces on the next visible tick).
 - **TypeScript:** `vitest` is added as a dev dependency for pure modules only. `scheduler.test.ts` covers `cadenceFor`, `intervalFor` (including the battery doubling and the paused null), and `every()`'s re-arm and single-flight behaviour with fake timers.
 - **Energy:** `scripts/energy-baseline.sh` output before and after, recorded below.
 - **Manual:** hide the window with a project open and confirm in Activity Monitor that no `git` process appears for 60s; open a project and confirm no agent bridge process exists until the pane is shown; drag a panel and confirm nothing looks different with the transparency change.
