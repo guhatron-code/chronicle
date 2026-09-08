@@ -135,4 +135,4 @@ Filled in during implementation.
 | idle-hidden | | |
 | terminal-live | | |
 
-Transparency experiment outcome: Kept. `titleBarStyle: Overlay` + `hiddenTitle: true` + `transparent: false` with the three native buttons hidden in `.setup` produced corners, shadow, and a traffic-light-only title bar visually identical to the old frameless/transparent window at both 1x and 2x (screenshots compared top-left and bottom-right corners plus full-window layout); `cargo build` and `npm run typecheck` are clean. Drag and double-click-to-zoom were not exercised by an interactive human in this session — pending user acceptance on those two behaviours specifically.
+Transparency experiment outcome: _pending_.

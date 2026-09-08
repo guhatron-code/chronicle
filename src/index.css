@@ -277,11 +277,11 @@ body,
   margin: 0;
 }
 
-/* Opaque titled Tauri window (native corners + shadow from the OS backing).
-   The page itself is the app surface — no rounding here, the window clips it. */
+/* Frameless transparent Tauri window: the page itself is transparent; #root is the opaque,
+   rounded app container (present from first paint — no white flash before React mounts). */
 html,
 body {
-  background: var(--surface-app);
+  background: transparent;
   overflow: hidden;
 }
 
@@ -290,6 +290,7 @@ body {
   color: var(--text-primary);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  border-radius: 11px;
   overflow: hidden;
 }
 

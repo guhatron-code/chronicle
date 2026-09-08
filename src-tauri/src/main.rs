@@ -2972,20 +2972,6 @@ fn main() {
         .manage(power::UiVisible(std::sync::atomic::AtomicBool::new(true)))
         .setup(|app| {
             power::install(app.handle().clone()); // main thread: the run-loop source lands on the main loop
-
-            #[cfg(target_os = "macos")]
-            if let Some(win) = app.get_webview_window("main") {
-                if let Ok(ptr) = win.ns_window() {
-                    // objc2-app-kit is already in the tree through tao; hide the three
-                    // standard buttons — the title bar is drawn by React
-                    use objc2_app_kit::{NSWindow, NSWindowButton};
-                    let ns: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
-                    for b in [NSWindowButton::CloseButton, NSWindowButton::MiniaturizeButton, NSWindowButton::ZoomButton] {
-                        if let Some(btn) = ns.standardWindowButton(b) { btn.setHidden(true); }
-                    }
-                }
-            }
-
             Ok(())
         })
         .on_window_event(|window, event| {
