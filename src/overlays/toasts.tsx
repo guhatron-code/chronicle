@@ -1,5 +1,6 @@
 /*
- * F8 — toasts (sonner, bottom-center pills on --surface-overlay).
+ * F8 — toasts (sonner, bottom-right pills on --surface-overlay). Bottom-center
+ * is where the Web pane's native page sits, so toasts land bottom-right instead.
  * Success: glyph + name + mono count. Error: glyph + what happened + how to fix.
  */
 import { Toaster, toast } from "sonner";
@@ -10,8 +11,9 @@ export function ChronicleToaster() {
   // NOTE: never set --width to max-content — sonner centers the stack via
   // margin-left: calc(var(--width) / 2 * -1), and calc() with a keyword is
   // invalid, which shoved every toast right of center. The default numeric
-  // width stays; each pill centers itself inside its row (see index.css).
-  return <Toaster position="bottom-center" gap={8} visibleToasts={3} />;
+  // width stays; the [data-x-position='center'] centering rule in index.css
+  // simply stops matching now that toasts sit bottom-right.
+  return <Toaster position="bottom-right" gap={8} visibleToasts={3} />;
 }
 
 const pill =

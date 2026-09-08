@@ -10,10 +10,11 @@ import {
   RefreshGlyph,
   RepoGlyph,
   RoadmapGlyph,
+  WebGlyph,
 } from "./icons";
 import { cn } from "@/lib/utils";
 
-export type Pane = "road" | "repo" | "kanban";
+export type Pane = "road" | "repo" | "kanban" | "web";
 
 function RailButton({
   label,
@@ -103,6 +104,9 @@ export function Rail({
           </span>
         )}
       </div>
+      <RailButton label="Web" tooltip="Web" mono="⌘J to cycle" selected={pane === "web"} onClick={() => onPane("web")}>
+        <WebGlyph />
+      </RailButton>
       <span className="flex-1" />
       {onSetup && (
         <RailButton label="Setup and health" tooltip="Setup & health" onClick={onSetup} dim>

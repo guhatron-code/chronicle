@@ -1,0 +1,124 @@
+/*
+ * The Web pane's chrome. The page itself is a native WebKit view that Rust
+ * positions over the empty content region below; this component only draws
+ * tabs, the address bar and the nav, measures the region, and tells the store
+ * whether the pane is actually on screen.
+ */
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
+import { displayAddress } from "@/lib/web-url";
+import {
+  activate, back, blockInfo, closeTab, forward, navigate, newTab, prepare, pushBounds, reload,
+  setWebVisible, subscribeBlock, subscribeWeb, webFor,
+} from "@/lib/web-store";
+import { XGlyph } from "@/components/chrome/icons";
+
+function fmtDate(iso: string): string {
+  const d = new Date(iso); return isNaN(d.getTime()) ? "unknown" : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
+  const [, bump] = useState(0);
+  useEffect(() => subscribeWeb(() => bump((n) => n + 1)), []);
+  useEffect(() => subscribeBlock(() => bump((n) => n + 1)), []);
+  useEffect(() => { void prepare(dir); }, [dir]);
+  useEffect(() => { setWebVisible(onScreen ? dir : null); return () => setWebVisible(null); }, [dir, onScreen]);
+
+  const p = webFor(dir);
+  const t = p.active >= 0 ? p.tabs[p.active] : null;
+  const block = blockInfo();
+
+  /* the region the native page sits over */
+  const region = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = region.current; if (!el) return;
+    const push = () => pushBounds(el.getBoundingClientRect());
+    push();
+    const ro = new ResizeObserver(push); ro.observe(el);
+    window.addEventListener("resize", push);
+    return () => { ro.disconnect(); window.removeEventListener("resize", push); };
+  }, []);
+
+  const [draft, setDraft] = useState<string | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const shown = draft ?? (t ? displayAddress(t.url) : "");
+
+  const submit = useCallback(() => {
+    if (draft == null) return;
+    if (!t) void newTab(dir).then(() => void navigate(dir, webFor(dir).active, draft));
+    else void navigate(dir, p.active, draft);
+    setDraft(null); input.current?.blur();
+  }, [draft, t, dir, p.active]);
+
+  /* shortcuts while the chrome has focus */
+  useEffect(() => {
+    if (!onScreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "l") { e.preventDefault(); input.current?.focus(); input.current?.select(); }
+      else if (e.key === "t") { e.preventDefault(); void newTab(dir); setTimeout(() => input.current?.focus(), 0); }
+      else if (e.key === "w" && t) { e.preventDefault(); e.stopPropagation(); void closeTab(dir, p.active); }
+      else if (e.key === "r" && t) { e.preventDefault(); reload(t); }
+      else if (e.key === "[" && t) { e.preventDefault(); back(t); }
+      else if (e.key === "]" && t) { e.preventDefault(); forward(t); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [onScreen, dir, t, p.active]);
+
+  const pill = block.status === "ready" ? `Blocking · ${block.lists} list${block.lists === 1 ? "" : "s"}`
+    : block.status === "partial" ? "Blocking · partial"
+    : block.status === "missing" ? "Blocking off — no lists shipped"
+    : "Preparing blocking…";
+  const [menu, setMenu] = useState(false);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {/* tabs */}
+      <div className="flex items-end gap-0.5 border-b border-divider px-2 pt-2">
+        {p.tabs.map((tab, i) => (
+          <div key={i}
+            onClick={() => activate(dir, i)}
+            className={cn("flex h-8 max-w-[220px] cursor-default items-center gap-2 rounded-t-md border border-b-0 px-2.5 text-[11.5px]",
+              i === p.active ? "border-border-hairline bg-surface-sidebar text-text-primary" : "border-transparent text-text-subtle hover:text-text-secondary")}>
+            <span className={cn("size-2 shrink-0 rounded-sm", tab.loading ? "bg-state-neutral" : tab.url.startsWith("chronicle-file") ? "rounded-full bg-text-subtle" : "bg-state-success")} />
+            <span className="min-w-0 truncate">{tab.title || displayAddress(tab.url) || "New tab"}</span>
+            <button aria-label="Close tab" onClick={(e) => { e.stopPropagation(); void closeTab(dir, i); }} className="text-text-dimmer hover:text-text-primary"><XGlyph size={8} /></button>
+          </div>
+        ))}
+        <button aria-label="New tab" onClick={() => { void newTab(dir); setTimeout(() => input.current?.focus(), 0); }} className="px-2.5 pb-1.5 text-text-faint hover:text-text-primary">+</button>
+      </div>
+      {/* address bar */}
+      <div className="flex items-center gap-1.5 border-b border-divider bg-surface-sidebar px-2 py-1.5">
+        <button aria-label="Back" disabled={!t?.canBack} onClick={() => t && back(t)} className="size-6 rounded-md text-text-subtle disabled:text-text-dimmer hover:bg-fill-hover">‹</button>
+        <button aria-label="Forward" disabled={!t?.canForward} onClick={() => t && forward(t)} className="size-6 rounded-md text-text-subtle disabled:text-text-dimmer hover:bg-fill-hover">›</button>
+        <button aria-label="Reload" disabled={!t} onClick={() => t && reload(t)} className="size-6 rounded-md text-text-subtle disabled:text-text-dimmer hover:bg-fill-hover">↻</button>
+        <input ref={input} value={shown} placeholder="Search or enter an address"
+          onChange={(e) => setDraft(e.target.value)} onFocus={(e) => { setDraft(t ? t.url === "about:blank" ? "" : t.url : ""); e.target.select(); }}
+          onBlur={() => setDraft(null)} onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") { setDraft(null); input.current?.blur(); } }}
+          className="h-7 min-w-0 flex-1 rounded-md border border-border-field bg-surface-input px-2.5 font-mono text-[11.5px] text-text-secondary outline-none focus:border-border-field-focus" />
+        <span className="flex h-6 items-center gap-1.5 whitespace-nowrap rounded-md border border-border-hairline px-2 text-[11px] text-text-subtle">
+          <span className={cn("size-1.5 rounded-full", block.status === "ready" ? "bg-state-success" : block.status === "partial" ? "bg-state-error" : "bg-state-neutral")} />{pill}
+        </span>
+        <div className="relative">
+          <button aria-label="More" onClick={() => setMenu((m) => !m)} className="h-6 rounded-md border border-border-hairline px-2 text-[11px] text-text-subtle hover:text-text-primary">⋯</button>
+          {menu && (
+            <div className="absolute right-0 top-7 z-10 w-72 rounded-md border border-border-strong bg-surface-overlay p-3 text-[11.5px] text-text-secondary [box-shadow:var(--shadow-overlay)]" onMouseLeave={() => setMenu(false)}>
+              <div>Lists fetched {block.fetched_at ? fmtDate(block.fetched_at) : "—"}; they refresh with each release.</div>
+              {block.failed.length > 0 && <div className="mt-2 text-state-error">Couldn't load: {block.failed.join("; ")}</div>}
+              <div className="mt-2 text-text-dim">Ads and trackers are blocked at the network level, the way uBlock's lists do it. Scriptlet tricks aren't possible in this engine.</div>
+            </div>
+          )}
+        </div>
+      </div>
+      {/* the region the page covers; the cover shows while the page is hidden */}
+      <div ref={region} className="relative min-h-0 flex-1 bg-surface-app">
+        {(!onScreen || !t) && (
+          <div className="absolute inset-0 flex items-center justify-center text-[12px] text-text-dim">
+            {!t ? "Type an address above, or open an HTML file from the Repo view." : `${t.title || displayAddress(t.url)} — resumes when this comes back on screen`}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

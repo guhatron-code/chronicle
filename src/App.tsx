@@ -51,6 +51,9 @@ import {
 import type { TerminalTab } from "@/components/chrome/TerminalColumn";
 import { TrafficLights } from "@/components/chrome/TitleBar";
 import { KanbanPane } from "@/screens/kanban/KanbanPane";
+import { WebPane } from "@/screens/web/WebPane";
+import { openInWeb, reloadProjectFiles } from "@/lib/web-store";
+import { isHtmlPath } from "@/lib/web-url";
 import { evictKanban, kanbanFor, openTaskInKanban, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { announce } from "@/lib/journal";
 import { listen } from "@tauri-apps/api/event";
@@ -79,7 +82,7 @@ interface ProjectEntry {
   justSwitchedAt?: number; // the ~2s banner emphasis window
 }
 
-const PANES: Pane[] = ["road", "repo", "kanban"];
+const PANES: Pane[] = ["road", "repo", "kanban", "web"];
 const splitKey = (dir: string) => `chronicle.split.${dir}`;
 
 /* F31 — the three-unit layout (content · agent · terminal): visibility,
@@ -250,6 +253,7 @@ export default function App() {
         setTimeout(() => {
           fsTimers.current.delete(dir);
           void pollOne(dir);
+          reloadProjectFiles(dir);
         }, 450),
       );
     }).then((u) => { un = u; });
@@ -386,6 +390,7 @@ export default function App() {
   useEffect(() => {
     setTermPathHandler((dir, path) => {
       if (dir !== activeRef.current) return;
+      if (isHtmlPath(path)) { void openInWeb(dir, { file: path }); goPane("web"); return; }
       openFileInRepo(dir, path);
       goPane("repo");
     });
@@ -808,6 +813,7 @@ export default function App() {
         dir={activeDir}
         onOpenFile={(path) => {
           if (!activeRef.current) return;
+          if (isHtmlPath(path)) { void openInWeb(activeRef.current, { file: path }); goPane("web"); return; }
           openFileInRepo(activeRef.current, path);
           goPane("repo");
         }}
@@ -884,6 +890,8 @@ export default function App() {
 
   const degraded =
     active.state && active.state.manifest_present === false ? "No roadmap yet" : null;
+
+  const overlayOpen = paletteOpen || searchOpen || newProjOpen || shortcutsOpen || confirm != null || helpOpen || setupMode != null;
 
   return (
     <>
@@ -973,7 +981,7 @@ export default function App() {
             onPollNow={() => void pollOne(active.dir)}
             onGoRoadmap={() => goPane("road")}
           />
-        ) : (
+        ) : pane === "kanban" ? (
           <KanbanPane
             key={active.dir}
             dir={active.dir}
@@ -987,6 +995,8 @@ export default function App() {
               );
             }}
           />
+        ) : (
+          <WebPane key={active.dir} dir={active.dir} onScreen={paneLayout.content && !overlayOpen} />
         )}
       </Shell>
       {overlays}
