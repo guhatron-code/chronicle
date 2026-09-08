@@ -50,10 +50,11 @@ fi
 echo "sampling ${secs}s in 5s (mode: $mode) — arrange the window now" >&2
 sleep 5
 
-# count distinct git processes that appear during the window (spawned by the poll).
-# A `git rev-parse` lives for a few milliseconds, so poll as fast as pgrep
-# itself runs (~20ms): the count is a floor, but a 0 vs. many signal is solid.
-( end=$((SECONDS + secs)); while [ $SECONDS -lt $end ]; do pgrep -f '^git -C' || true; sleep 0.02; done ) | sort -u | wc -l | tr -d ' ' > "$tmp.git" &
+# count distinct git processes THIS instance spawns during the window (they are
+# its direct children, so another Chronicle on the machine can't pollute the
+# count). A `git rev-parse` lives for a few milliseconds, so poll as fast as
+# pgrep itself runs (~20ms): the count is a floor, but 0 vs. many is solid.
+( end=$((SECONDS + secs)); while [ $SECONDS -lt $end ]; do pgrep -P "$pid" -x git || true; sleep 0.02; done ) | sort -u | wc -l | tr -d ' ' > "$tmp.git" &
 gitcount=$!
 
 if [ "$mode" = powermetrics ]; then

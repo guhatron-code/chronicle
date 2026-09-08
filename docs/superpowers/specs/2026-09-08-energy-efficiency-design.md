@@ -127,12 +127,27 @@ Every timer that survives this spec goes through `every()`. There are no bare
 
 ## Results
 
-Filled in during implementation.
+Measured 2026-09-08 with `scripts/energy-baseline.sh` in `top` mode (no sudo in the
+session, so no `powermetrics`: CPU comes from `top`'s %CPU over the 60s window at
+0.1% resolution, and the wakeups column is `top`'s idle-wakeup counter, which stayed
+at ~0 for every run on this machine and is not informative here). Both builds are
+`tauri build` bundles launched with `--open` on this repo, one project open, no
+terminal, agent pane hidden, staged and sampled by script (window focused, then
+hidden with the app's hide). "Before" is d6f9575 plus only the `--open` commit.
+`git children` counts git processes spawned by the measured instance in 60s
+(a floor: each lives a few ms).
 
-| State | Before CPU / wakeups | After CPU / wakeups |
+| State | Before CPU / git children | After CPU / git children |
 |---|---|---|
-| idle-focused | | |
-| idle-hidden | | |
-| terminal-live | | |
+| idle-focused | 3 ms/s (0.3%) / 20 | 1 ms/s (0.1%) / 1 (one 60s heartbeat landed) |
+| idle-hidden | 5 ms/s (0.5%) / 18 | 0 ms/s / 0 |
+| terminal-live | 20 ms/s (installed v0.7.0 with Claude mid-turn, sampled read-only) | not staged (needs a live agent turn inside the test instance) |
+
+Against the targets: idle-focused CPU < 0.5% ✓ (0.1%), children 0 unless a file
+changed ✓ (the single heartbeat is by design); idle-hidden ≈ 0 ✓ with 0 children ✓.
+Wakeups/s stays unverified until someone runs the script with sudo (`powermetrics`
+reports interrupt wakeups; `top` does not on this machine). The before build kept
+polling while hidden (18 git spawns in 60s), which is exactly what the scheduler
+removed.
 
 Transparency experiment outcome: reverted. A titled window with an overlay title bar (commit 362278f) renders the OS corner radius and a wider native shadow, visibly different from the 11px rounded container (corner-arc span roughly 1.8× in the 2x screenshots; before/after crops were compared side by side). The radius of a titled window is not configurable, so the transparent window stays. To adopt the native look on purpose, cherry-pick 362278f.
