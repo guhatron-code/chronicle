@@ -35,17 +35,17 @@ wait "$gitcount"
 
 # the tasks table: Name  ID  CPU ms/s  User%  Deadlines(<2ms,2-5ms)  Wakeups(Intr,PkgIdle)  GPU ms/s  Energy Impact
 # Fields are indexed right-to-left (from $NF backwards) because the Name column (first, may contain spaces) has variable width.
-# A single-word name (like "Chronicle" or "git") means NF is consistent; multi-word names (like "Chronicle Helper") have more fields.
-# Energy Impact ($NF), GPU ms/s $(NF-1), Wakeups Intr $(NF-3), CPU ms/s $(NF-7)
+# A one-token name (like "Chronicle" or "git") plus nine numeric fields = NF == 10.
+# Multi-word names have more fields. Energy Impact ($NF), GPU ms/s $(NF-1), Wakeups Intr $(NF-3), CPU ms/s $(NF-7)
 echo "powermetrics columns (check the layout once):" >&2
 grep -m1 -E '^Name\s+ID\s+CPU ms/s' "$tmp" >&2 || true
 
 # Parse powermetrics output using one awk pass for all three values
-# Matches app row with case-insensitive first field "chronicle" and single token name (NF==9)
+# Matches app row with case-insensitive first field "chronicle" and single token name (NF==10)
 # Sums git children's CPU, handles error if no app row found
 read -r cpu wake energy < <(awk '
-  tolower($1) == "chronicle" && NF == 9 && !seen { app_cpu = $(NF-7); wake = $(NF-3); energy = $NF; seen = 1 }
-  $1 == "git" && NF == 9 { git_cpu += $(NF-7) }
+  tolower($1) == "chronicle" && NF == 10 && !seen { app_cpu = $(NF-7); wake = $(NF-3); energy = $NF; seen = 1 }
+  $1 == "git" && NF == 10 { git_cpu += $(NF-7) }
   END { if (!seen) { exit 1 } printf "%.2f %s %s\n", app_cpu + git_cpu, wake, energy }
 ' "$tmp") || { echo "couldn't find Chronicle in the powermetrics table — is the app running under the name 'Chronicle'?" >&2; exit 1; }
 
