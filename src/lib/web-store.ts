@@ -42,6 +42,8 @@ export function subscribeBlock(cb: () => void): () => void { blockSubs.add(cb); 
 let visibleDir: string | null = null;
 let ready = false;
 const EVICT_MS = 30 * 60_000;
+/** Single-flight guard: a stale applyVisibility() call bails once a newer one has started. */
+let visGen = 0;
 
 function findTab(label: string): { dir: string; p: WebProject; t: WebTab; i: number } | null {
   for (const [dir, p] of projects) {
@@ -57,17 +59,24 @@ function ensure() {
   void onWebTabChanged((s) => {
     const f = findTab(s.label); if (!f) return;
     Object.assign(f.t, { url: s.url || f.t.url, title: s.title || f.t.title, loading: s.loading, canBack: s.can_back, canForward: s.can_forward });
-    void persist(f.dir); notify();
+    schedulePersist(f.dir); notify();
   });
   void onWebOpenTab((p) => { const f = findTab(p.from_label); if (f) void newTab(f.dir, p.url); });
   void onWebDownload((p) => { p.ok ? toastSuccess("Saved to Downloads") : toastError("The download didn't finish"); });
-  void onWebBlocklistsChanged((i) => { block = i; for (const cb of blockSubs) cb(); });
+  void onWebBlocklistsChanged((i) => {
+    block = i;
+    for (const cb of blockSubs) cb();
+    // a tab that couldn't materialise while compiling gets another shot now
+    void applyVisibility();
+  });
   void webBlocklistsInfo().then((i) => { block = i; for (const cb of blockSubs) cb(); }).catch(() => {});
   subscribeActivity(() => void applyVisibility());
   // hidden tabs lose their native view after 30 minutes (checked every 5)
   every(5 * 60_000, () => {
     const now = Date.now();
+    const activeProject = visibleDir ? projects.get(visibleDir) : null;
     for (const [, p] of projects) for (const t of p.tabs) {
+      if (p === activeProject && p.tabs[p.active] === t) continue; // never evict what's on screen
       if (t.label && t.hiddenSince && now - t.hiddenSince > EVICT_MS) { void webTabClose(t.label).catch(() => {}); t.label = null; }
     }
   });
@@ -78,6 +87,14 @@ async function persist(dir: string) {
   await webTabsSave(dir, p.tabs.map((t) => ({ url: t.url, title: t.title }))).catch(() => {});
 }
 
+/** Trailing debounce: bursts of tab-changed events (loading, title, URL) collapse to one write. */
+const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+function schedulePersist(dir: string): void {
+  const existing = persistTimers.get(dir);
+  if (existing) clearTimeout(existing);
+  persistTimers.set(dir, setTimeout(() => { persistTimers.delete(dir); void persist(dir); }, 500));
+}
+
 /** Called by the pane on first show for a project: restore saved tabs (lazily — only the active one gets a view). */
 export async function prepare(dir: string): Promise<void> {
   ensure();
@@ -86,8 +103,11 @@ export async function prepare(dir: string): Promise<void> {
   if (p.restored) return;
   p.restored = true;
   const saved = await webTabsLoad(dir).catch(() => [] as { url: string; title: string }[]);
-  p.tabs = saved.map((s) => ({ label: null, url: s.url, title: s.title, loading: false, canBack: false, canForward: false, hiddenSince: null }));
-  p.active = p.tabs.length ? 0 : -1;
+  const restored: WebTab[] = saved.map((s) => ({ label: null, url: s.url, title: s.title, loading: false, canBack: false, canForward: false, hiddenSince: null }));
+  // a tab opened before the restore finished (e.g. via openInWeb) must survive the merge
+  const existing = p.tabs;
+  p.tabs = [...restored, ...existing];
+  p.active = existing.length ? restored.length + Math.max(p.active, 0) : (restored.length ? 0 : -1);
   notify();
   await applyVisibility();
 }
@@ -99,19 +119,23 @@ async function materialise(dir: string, t: WebTab): Promise<string | null> {
 }
 
 export async function applyVisibility(): Promise<void> {
+  const gen = ++visGen;
   const a = getActivity();
   const p = visibleDir ? projects.get(visibleDir) : null;
   const t = p && p.active >= 0 ? p.tabs[p.active] : null;
   if (!visibleDir || !a.visible || !t || block.status === "idle" || block.status === "compiling") {
     await webHideAll().catch(() => {});
+    if (gen !== visGen) return; // a newer call already decided what's visible
     for (const [, pp] of projects) for (const tt of pp.tabs) if (tt.label && !tt.hiddenSince) tt.hiddenSince = Date.now();
     return;
   }
   const label = await materialise(visibleDir, t);
+  if (gen !== visGen) return;
   if (!label) return;
+  await webTabShow(label).catch(() => {});
+  if (gen !== visGen) return;
   for (const [, pp] of projects) for (const tt of pp.tabs) if (tt.label && tt !== t && !tt.hiddenSince) tt.hiddenSince = Date.now();
   t.hiddenSince = null;
-  await webTabShow(label).catch(() => {});
 }
 
 export function setWebVisible(dir: string | null): void { visibleDir = dir; void applyVisibility(); }
@@ -131,7 +155,7 @@ export async function newTab(dir: string, url = "about:blank"): Promise<void> {
   const p = webFor(dir);
   p.tabs.push({ label: null, url, title: "", loading: false, canBack: false, canForward: false, hiddenSince: null });
   p.active = p.tabs.length - 1;
-  notify(); void persist(dir);
+  notify(); schedulePersist(dir);
   await applyVisibility();
 }
 
@@ -142,10 +166,11 @@ export function activate(dir: string, index: number): void {
 
 export async function closeTab(dir: string, index: number): Promise<void> {
   const p = webFor(dir); const t = p.tabs[index]; if (!t) return;
+  const wasActive = p.tabs[p.active]; // identity, not index — the index below is about to shift
   if (t.label) await webTabClose(t.label).catch(() => {});
   p.tabs.splice(index, 1);
-  p.active = Math.min(p.active, p.tabs.length - 1);
-  notify(); void persist(dir);
+  p.active = wasActive && wasActive !== t ? p.tabs.indexOf(wasActive) : Math.min(index, p.tabs.length - 1);
+  notify(); schedulePersist(dir);
   await applyVisibility();
 }
 
@@ -155,6 +180,11 @@ export async function navigate(dir: string, index: number, input: string): Promi
   if (!url) { toastError("That address can't be opened here"); return; }
   const p = webFor(dir); const t = p.tabs[index]; if (!t) return;
   t.url = url; notify();
+  schedulePersist(dir);
+  if (block.status === "idle" || block.status === "compiling") {
+    // parked on the tab — applyVisibility materialises it at this url once blocking is ready
+    return;
+  }
   const label = await materialise(dir, t); if (!label) return;
   await webTabNavigate(label, url).catch((e) => toastError("Couldn't open the page", String(e).slice(0, 90)));
 }
