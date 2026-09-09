@@ -69,9 +69,9 @@ export function CommandPalette({
   const row = (p: PaletteProject, kbd?: string) => (
     <>
       <MarkTile mark={p.mark} label={p.markLabel} size={22} />
-      <span className="text-[13px] font-medium text-text-primary">{p.name}</span>
-      <span data-selectable className="font-mono text-[11px] text-text-dim">{p.tildePath}</span>
-      <span className="flex-1" />
+      <span className="shrink-0 text-[13px] font-medium text-text-primary">{p.name}</span>
+      {/* the path takes what is left and truncates — a row never wraps */}
+      <span data-selectable title={p.tildePath} className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-dim">{p.tildePath}</span>
       <StateWord kind={p.statusKind} dotSize={5} glyphSize={10} className="shrink-0 whitespace-nowrap text-[11.5px]">
         {p.statusWord}
       </StateWord>
