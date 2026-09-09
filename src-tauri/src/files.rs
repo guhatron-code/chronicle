@@ -34,11 +34,16 @@ pub fn refused(rel: &str) -> Option<String> {
 /// The jail for a path that may not exist yet: canonicalise the deepest existing
 /// ancestor, then require it to sit under one of the project's roots. A symlinked
 /// parent that leaves the project is refused even when the leaf is new.
+///
+/// `.chronicle/…` resolves against `p.dir`, not `p.repo`, exactly as `crate::jailed`
+/// does: notes and attachments live beside the manifest, and in a sub-project the
+/// manifest folder is not the repo root.
 pub fn jailed_target(p: &Project, rel: &str) -> Result<PathBuf, String> {
     if rel.is_empty() || rel.starts_with('/') || rel.contains('\0') || rel.split('/').any(|s| s == "..") {
         return Err("that path isn't inside this project".into());
     }
-    let full = p.repo.join(rel);
+    let base = if rel == ".chronicle" || rel.starts_with(".chronicle/") { &p.dir } else { &p.repo };
+    let full = base.join(rel);
     let mut probe = full.clone();
     while !probe.exists() {
         match probe.parent() { Some(par) => probe = par.to_path_buf(), None => break }
@@ -105,18 +110,37 @@ pub(crate) fn write_at(p: &Project, rel: &str, text: &str, expected_mtime_ms: Op
     let parent = full.parent().ok_or("that path has no folder")?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let name = full.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    let tmp = parent.join(format!(".{name}.chronicle-tmp"));
+    let tmp = tmp_beside(parent, &name);
     std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
     if existed {
         if let Ok(md) = std::fs::metadata(&full) {
             let _ = std::fs::set_permissions(&tmp, md.permissions());
         }
     }
+    // check again with the temp already written: the gap between the precondition
+    // and the rename is now one syscall wide instead of one whole file write.
+    if let Some(expected) = expected_mtime_ms {
+        if mtime_ms_of(&full).unwrap_or(0) != expected {
+            let _ = std::fs::remove_file(&tmp);
+            return Err("changed on disk".into());
+        }
+    }
     if let Err(e) = std::fs::rename(&tmp, &full) {
-        let _ = std::fs::remove_file(&tmp); // never leave a stray temp behind
+        let _ = std::fs::remove_file(&tmp); // only OUR temp, never a neighbour's
         return Err(e.to_string());
     }
     mtime_ms_of(&full)
+}
+
+/// A temp name no other save can be holding: the pid plus a per-process counter.
+/// A fixed `.{name}.chronicle-tmp` meant two saves of the same file in flight at
+/// once wrote over each other's temp — and the loser's cleanup deleted the
+/// winner's, or worse, half of one file's bytes landed under the other's name.
+fn tmp_beside(parent: &Path, name: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    parent.join(format!(".{name}.{}-{n}.chronicle-tmp", std::process::id()))
 }
 
 pub(crate) fn create_at(p: &Project, rel: &str, kind: &str) -> Result<(), String> {
@@ -139,9 +163,24 @@ pub(crate) fn rename_at(p: &Project, from: &str, to: &str) -> Result<(), String>
     let src = jailed_target(p, from)?;
     let dst = jailed_target(p, to)?;
     if !src.exists() { return Err("that file isn't there anymore".into()); }
-    if dst.exists() { return Err("something with that name is already there".into()); }
+    // APFS is case-insensitive by default, so `a.txt` and `A.txt` are the SAME file
+    // and `exists()` calls a rename that only changes the case a collision. Same
+    // device + same inode means the "collision" is the file we are moving.
+    if dst.exists() && !same_file(&src, &dst) {
+        return Err("something with that name is already there".into());
+    }
     if let Some(parent) = dst.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
     std::fs::rename(&src, &dst).map_err(|e| e.to_string())
+}
+
+/// Two paths that name one file on disk — the case-only rename above, and any
+/// hard link. Metadata that won't read is not a match; the caller refuses then.
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+        _ => false,
+    }
 }
 
 /// Finder's Trash, restorable with ⌘Z in Finder. If the Trash is unavailable
@@ -185,13 +224,14 @@ pub async fn trash_path(roots: State<'_, OpenRoots>, dir: String, path: String) 
     trash_at(&p, &path)
 }
 
-/// Finder, at the file. Argument vector only — never a shell line.
+/// Finder, at the file. The absolute binary and an argument vector — never a
+/// shell line, and never a bare name resolved through the inherited PATH.
 #[tauri::command]
 pub async fn reveal_path(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<(), String> {
     let p = crate::project_for(&roots, &dir)?;
     let full = jailed_target(&p, &path)?;
     if !full.exists() { return Err("that file isn't there anymore".into()); }
-    std::process::Command::new("open").arg("-R").arg(&full).output().map_err(|e| e.to_string())?;
+    std::process::Command::new("/usr/bin/open").arg("-R").arg(&full).output().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -329,13 +369,84 @@ mod tests {
     #[test]
     fn trash_moves_the_file_out_and_never_unlinks_on_failure() {
         let (root, p) = proj("trash");
-        std::fs::write(root.join("bye.txt"), "bye\n").unwrap();
-        trash_at(&p, "bye.txt").unwrap();
-        assert!(!root.join("bye.txt").exists(), "the file left the project");
-        // the refusals apply here too
+        // the refusals cost nothing and always run
         std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::write(root.join(".git/HEAD"), "ref\n").unwrap();
         assert!(trash_at(&p, ".git/HEAD").is_err());
         assert!(root.join(".git/HEAD").exists(), "a refusal never deletes");
+        std::fs::create_dir_all(root.join("node_modules")).unwrap();
+        std::fs::write(root.join("node_modules/x.js"), "x\n").unwrap();
+        assert!(trash_at(&p, "node_modules/x.js").is_err());
+        assert!(root.join("node_modules/x.js").exists(), "a refusal never deletes");
+        assert!(trash_at(&p, "../outside.txt").is_err(), "the jail applies here too");
+        assert!(trash_at(&p, "never-was.txt").is_err());
+
+        // The move itself puts a file in whoever is running this suite's Trash, so
+        // it is opt-in: CHRONICLE_TRASH_TEST=1 cargo test files::
+        if std::env::var("CHRONICLE_TRASH_TEST").as_deref() != Ok("1") {
+            eprintln!("note: skipping the real Trash move — set CHRONICLE_TRASH_TEST=1 to run it");
+            return;
+        }
+        std::fs::write(root.join("bye.txt"), "bye\n").unwrap();
+        trash_at(&p, "bye.txt").unwrap();
+        assert!(!root.join("bye.txt").exists(), "the file left the project");
+    }
+
+    /// THE BUG: a fixed `.{name}.chronicle-tmp` is the same path for every writer,
+    /// so two saves of one file in flight at once shared a temp — and the loser's
+    /// cleanup deleted the winner's.
+    #[test]
+    fn two_writers_of_one_file_never_share_a_temp() {
+        let (root, p) = proj("tmp");
+        assert_ne!(tmp_beside(&root, "shared.txt"), tmp_beside(&root, "shared.txt"));
+
+        std::fs::write(root.join("shared.txt"), "one\n").unwrap();
+        let other = p.clone();
+        let h = std::thread::spawn(move || {
+            for _ in 0..40 { write_at(&other, "shared.txt", "thread\n", None).unwrap(); }
+        });
+        for _ in 0..40 { write_at(&p, "shared.txt", "main\n", None).unwrap(); }
+        h.join().unwrap();
+
+        let leftovers: Vec<_> = std::fs::read_dir(&root).unwrap().flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains("chronicle-tmp")).collect();
+        assert!(leftovers.is_empty(), "a temp file survived concurrent writes: {leftovers:?}");
+        let body = std::fs::read_to_string(root.join("shared.txt")).unwrap();
+        assert!(body == "thread\n" || body == "main\n", "a torn write: {body:?}");
+    }
+
+    /// APFS is case-insensitive by default, so `A.txt` "exists" the moment `a.txt`
+    /// does. Renaming a file to its own name in another case is not a collision.
+    #[test]
+    fn a_case_only_rename_is_not_a_collision() {
+        let (root, p) = proj("case");
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        rename_at(&p, "a.txt", "A.txt").unwrap();
+        let names: Vec<String> = std::fs::read_dir(&root).unwrap().flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string()).collect();
+        assert!(names.contains(&"A.txt".to_string()), "the new case did not stick: {names:?}");
+        assert_eq!(std::fs::read_to_string(root.join("A.txt")).unwrap(), "a\n");
+        // a real collision is still refused
+        std::fs::write(root.join("b.txt"), "b\n").unwrap();
+        assert!(rename_at(&p, "b.txt", "A.txt").is_err());
+    }
+
+    /// `.chronicle/…` lives beside the MANIFEST, which in a sub-project is not the
+    /// repo root — the same split `crate::jailed` makes.
+    #[test]
+    fn dot_chronicle_resolves_against_the_manifest_folder() {
+        let (root, _) = proj("subproject");
+        let repo = root.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let p = Project {
+            dir: root.clone(), repo: repo.clone(), extras: vec![],
+            manifest: None, manifest_error: None,
+        };
+        assert_eq!(jailed_target(&p, ".chronicle/notes/A.md").unwrap(), root.join(".chronicle/notes/A.md"));
+        assert_eq!(jailed_target(&p, ".chronicle").unwrap(), root.join(".chronicle"));
+        // everything else still resolves against the repo root
+        assert_eq!(jailed_target(&p, "src/main.rs").unwrap(), repo.join("src/main.rs"));
+        // and the lookalike is an ordinary file in the repo
+        assert_eq!(jailed_target(&p, ".chronicled/x").unwrap(), repo.join(".chronicled/x"));
     }
 }

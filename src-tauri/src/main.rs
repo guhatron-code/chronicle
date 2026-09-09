@@ -364,17 +364,41 @@ pub(crate) fn remote_ref(repo: &Path, branch: &str) -> Option<String> {
     None
 }
 
-/// `no-remote` when nothing is configured, `never-published` only when the branch
-/// has no remote ref AND no remote ref anywhere contains HEAD, `ok` otherwise.
+/// `no-remote` when nothing is configured, `never-published` only when NOTHING of
+/// this history is on the remote, `ok` otherwise. Three questions, cheapest first:
 ///
-/// `--contains HEAD` alone called a branch "never published" the moment it had one
-/// local save on top of what was pushed — the commit the remote holds no longer IS
-/// HEAD. A branch that has a remote ref is published and merely ahead.
+/// 1. Does `origin/<branch>` exist? Then this branch is published, however far
+///    ahead it has run since. (`--contains HEAD` alone said "never published" the
+///    moment there was one local save on top of what was pushed.)
+/// 2. Does any remote ref contain HEAD? Then it is published under another name.
+/// 3. Does any remote ref contain where this branch FORKED from published history?
+///    A new branch in a clone is not "never published" — its base is on the remote,
+///    only its new saves are not. Nothing remote at all is what "never" means.
+///
+/// The exact `origin/<branch>` lookup is deliberate: `remote_ref`'s `origin/HEAD`
+/// fallback answers for a branch that was never pushed, which is right for "what do
+/// I measure ahead/behind against" and wrong for "was this published".
 pub(crate) fn publish_kind(repo: &Path, branch: &str, remote_url: &str) -> &'static str {
     if remote_url.is_empty() { return "no-remote"; }
-    if remote_ref(repo, branch).is_some() { return "ok"; }
-    let contains = git_in(repo, &["branch", "-r", "--contains", "HEAD"]);
-    if contains.lines().any(|l| !l.trim().is_empty()) { "ok" } else { "never-published" }
+    let rev = |args: &[&str]| {
+        let out = git_in(repo, args);
+        if out.trim().is_empty() { None } else { Some(out.trim().to_string()) }
+    };
+    let contained = |rev: &str| git_in(repo, &["branch", "-r", "--contains", rev])
+        .lines().any(|l| !l.trim().is_empty());
+
+    if !branch.is_empty()
+        && rev(&["rev-parse", "--verify", "--quiet", &format!("refs/remotes/origin/{branch}")]).is_some() {
+        return "ok";
+    }
+    if contained("HEAD") { return "ok"; }
+    // the fork point: origin/HEAD if the clone set one, else any remote ref at all
+    let anchor = rev(&["rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD"])
+        .or_else(|| rev(&["for-each-ref", "--count=1", "--format=%(objectname)", "refs/remotes/"]));
+    match anchor.and_then(|a| rev(&["merge-base", "HEAD", &a])) {
+        Some(base) if contained(&base) => "ok",
+        _ => "never-published",
+    }
 }
 
 /// `(ahead, behind)` — how many saves are here that the remote ref lacks, and
@@ -3804,6 +3828,45 @@ mod history_tests {
         git(&d, &["push", "-qu", "origin", "main"]);
         assert_eq!(remote_ref(&d, "main").as_deref(), Some("origin/main"));
         assert_eq!(publish_kind(&d, "main", "url"), "ok");
+    }
+
+    /// A branch made in a clone has no `origin/<branch>` and no remote ref contains
+    /// its HEAD — but its history came off the remote. "Never published" would be a
+    /// lie; it is published history with one new save on top.
+    #[test]
+    fn a_fresh_branch_in_a_clone_is_published_history_with_new_saves_on_top() {
+        let origin = tmp("clone-origin");
+        git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+        let seed = repo("clone-seed");
+        git(&seed, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
+        git(&seed, &["push", "-q", "origin", "main"]);
+
+        let work = tmp("clone-work");
+        git(&work, &["clone", "-q", origin.to_string_lossy().as_ref(), "c"]);
+        let d = work.join("c");
+        git(&d, &["config", "user.email", "t@t"]);
+        git(&d, &["config", "user.name", "t"]);
+        git(&d, &["checkout", "-qb", "feature"]);
+        std::fs::write(d.join("a.txt"), "two\n").unwrap();
+        git(&d, &["commit", "-qam", "feat: on a new branch"]);
+
+        // the premise: neither of the first two questions says yes
+        assert!(git_in(&d, &["rev-parse", "--verify", "--quiet", "refs/remotes/origin/feature"]).is_empty());
+        assert!(git_in(&d, &["branch", "-r", "--contains", "HEAD"]).trim().is_empty());
+
+        assert_eq!(publish_kind(&d, "feature", "url"), "ok");
+        assert_eq!(remote_ref(&d, "feature").as_deref(), Some("origin/HEAD"));
+        assert_eq!(ahead_behind(&d, "origin/HEAD"), (1, 0));
+    }
+
+    /// The other side of that rule: a remote is configured but holds nothing of
+    /// this history — no ref, no fork point. That is what "never" means.
+    #[test]
+    fn a_remote_with_no_refs_at_all_is_never_published() {
+        let d = repo("no-refs");
+        git(&d, &["remote", "add", "origin", "https://example.invalid/x.git"]);
+        assert!(git_in(&d, &["for-each-ref", "refs/remotes/"]).trim().is_empty());
+        assert_eq!(publish_kind(&d, "main", "url"), "never-published");
     }
 
     #[test]
