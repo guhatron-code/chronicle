@@ -120,3 +120,22 @@ All wrapped in `src/lib/ipc.ts` per the existing rule that components never impo
 - **Rust:** unit tests for URL classification (URL vs search), the `chronicle-file` jail (normal path, `..`, escaping symlink, missing file, MIME mapping), manifest parsing, and chunk-size splitting.
 - **Script:** `blocklists.mjs` has a `--check` mode that validates every chunk parses and no chunk exceeds the cap; CI can run it against committed output.
 - **Manual checklist:** a known ad-heavy page shows no ad slots; the palette opens over the pane and the page returns on close; dragging the splitter keeps the page glued to the region; a claude.ai login survives a relaunch; an HTML report opened from the Repo tree updates when the file is rewritten; hiding the window with a page playing a timer stops its CPU in Activity Monitor.
+
+## Live test
+
+Run 2026-09-09 on the signed local bundle (`npm run tauri:build && npm run sign-local`), user at the keyboard, project `~/Downloads/chronicle`.
+
+| Step | Result |
+|---|---|
+| Web pane renders; blocking pill reaches "Blocking · 2 lists" (cold compile ~40 s–2 min, then cached by WebKit) | pass |
+| speedtest.net loads in a tab | pass |
+| ⌘L from inside the focused page focuses the address bar (native Go menu) | pass |
+| ⌘K from inside the page hides the page behind the cover and opens the palette; Esc restores it | pass |
+| ⌘T from inside the page opens a new tab with the address bar focused | pass |
+| ⌘[ ⌘] navigate; ⌘W closes the tab and never the window | pass |
+| ⌘J from inside the page cycles panes | pass |
+| Repo → HTML file → "Open in Web" opens a project tab | pass |
+| Terminal ⌘-click: Claude artifact links open in the pane, other links in the system browser | pass |
+| Tabs restored after quit and relaunch | pass |
+
+Found and fixed during the test: ⌘ shortcuts died while the native page had focus (Task 10, native Go menu carrying the whole keyboard map); ad-hoc-signed test builds re-prompted for Downloads access on every rebuild (`sign-local`).
