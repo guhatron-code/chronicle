@@ -73,14 +73,18 @@ export function setNotesOnScreen(dir: string | null): void {
 
 /** A write landed on disk — ours or the agent's. */
 export async function onDiskChanged(dir: string, paths: string[], generation?: number): Promise<void> {
-  if (generation !== undefined && indexFor(dir).generation < generation) await refreshNotes(dir);
-  else await refreshNotes(dir);
+  if (generation === undefined || indexFor(dir).generation < generation) await refreshNotes(dir);
   const open = opens.get(dir);
   if (!open || !paths.includes(open.path)) { notify(); return; }
   let text: string;
   try { text = await notesRead(dir, open.path); } catch { notify(); return; }
   const { front, body } = splitFrontMatter(text);
-  if (open.state === "dirty" || open.state === "error" || open.state === "locked") {
+  if (open.state === "saving") {
+    // a write is in flight for this note: never overwrite the buffer mid-save.
+    // Remember that disk moved under us so the pending save's resolution
+    // lands on "dirty" (and re-arms) instead of a false "saved".
+    if (body !== open.body) racedWhileSaving.add(dir);
+  } else if (open.state === "dirty" || open.state === "error" || open.state === "locked") {
     if (body !== open.body) { open.incoming = text; open.conflict = true; }
   } else if (body !== open.body) {
     open.front = front; open.body = body; open.savedBody = body; open.conflict = false; open.incoming = null;
@@ -132,6 +136,10 @@ export function editBody(dir: string, body: string): void {
 const DEBOUNCE_MS = 600;
 const lastEdit = new Map<string, number>();
 const tickers = new Map<string, () => void>();
+/** Set by onDiskChanged when a disk change arrives while a save is in
+ *  flight for that dir; consumed by save() to force "dirty" on resolve
+ *  rather than a false "saved" over content that's since moved again. */
+const racedWhileSaving = new Set<string>();
 
 function arm(dir: string): void {
   if (tickers.has(dir)) return;
@@ -162,6 +170,7 @@ async function save(dir: string): Promise<void> {
   if (!open || open.state === "saving") return;
   const body = open.body;
   open.state = "saving";
+  racedWhileSaving.delete(dir); // a fresh attempt; only races during THIS flight count
   notify();
   try {
     await notesWrite(dir, open.path, joinFrontMatter(open.front, body));
@@ -169,8 +178,10 @@ async function save(dir: string): Promise<void> {
     if (!now || now.path !== open.path) return;
     now.savedBody = body;
     now.error = null;
-    now.state = now.body === body ? "saved" : "dirty";
+    const raced = racedWhileSaving.delete(dir);
+    now.state = now.body === body && !raced ? "saved" : "dirty";
     now.savedAt = Date.now();
+    if (now.state === "dirty") arm(dir); // same arm path editBody uses — no ghost-dirty note
   } catch (e) {
     const now = opens.get(dir);
     if (!now) return;

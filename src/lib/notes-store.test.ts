@@ -4,6 +4,9 @@ import { setActivity } from "./scheduler";
 const writes: { path: string; text: string }[] = [];
 let writeError: string | null = null;
 let fileText = "---\nstatus: queued\n---\n\nbody\n";
+// let one test hold a write in flight until it explicitly releases it
+let holdWrite = false;
+let releaseWrite: (() => void) | null = null;
 
 vi.mock("./ipc", () => ({
   notesIndex: vi.fn(async () => ({
@@ -15,6 +18,10 @@ vi.mock("./ipc", () => ({
   })),
   notesRead: vi.fn(async () => fileText),
   notesWrite: vi.fn(async (_d: string, path: string, text: string) => {
+    if (holdWrite) {
+      holdWrite = false;
+      await new Promise<void>((resolve) => { releaseWrite = resolve; });
+    }
     if (writeError) throw writeError;
     writes.push({ path, text });
   }),
@@ -38,6 +45,8 @@ describe("the notes store", () => {
     writes.length = 0;
     writeError = null;
     fileText = "---\nstatus: queued\n---\n\nbody\n";
+    holdWrite = false;
+    releaseWrite = null;
     store.evictNotes("/p");
   });
   afterEach(() => { vi.useRealTimers(); });
@@ -142,5 +151,33 @@ describe("the notes store", () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(store.openFor("/p")?.body).toBe("theirs\n");
     expect(store.openFor("/p")?.conflict).toBe(false);
+  });
+
+  it("a disk change during a save never clobbers the buffer, and re-arms once the save settles", async () => {
+    await store.refreshNotes("/p");
+    await store.openNote("/p", "Tasks/A.md");
+    store.editBody("/p", "mine");
+
+    holdWrite = true;
+    const flushing = store.flushSave("/p"); // save() runs synchronously up to the gated write
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.openFor("/p")?.state).toBe("saving");
+
+    // someone else's write lands on disk while ours is still in flight
+    fileText = "---\nstatus: queued\n---\n\nexternal\n";
+    await store.onDiskChanged("/p", ["Tasks/A.md"]);
+    expect(store.openFor("/p")?.body).toBe("mine"); // buffer intact — never overwritten mid-save
+    expect(store.openFor("/p")?.conflict).toBe(false); // not treated as a conflict either
+
+    releaseWrite?.(); // our own write completes
+    await flushing;
+    expect(writes).toHaveLength(1); // the original write did land
+    expect(store.openFor("/p")?.state).toBe("dirty"); // but disk moved again since — not "saved"
+    expect(store.openFor("/p")?.body).toBe("mine");
+
+    await vi.advanceTimersByTimeAsync(700); // the re-armed ticker fires on its own
+    expect(writes).toHaveLength(2);
+    expect(writes[1]).toEqual({ path: "Tasks/A.md", text: "---\nstatus: queued\n---\n\nmine" });
+    expect(store.openFor("/p")?.state).toBe("saved");
   });
 });
