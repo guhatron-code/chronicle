@@ -1,12 +1,23 @@
 /*
  * F11 — the shell title bar: window controls · brand glyph · project tabs (active =
  * fill-hover + strong border + mark dot; background = fill-subtle, close on hover;
- * updated = the word badge, never a colored dot alone; overflow "+N more"; 180px max)
+ * updated = the word badge, never a colored dot alone; 180px max)
  * · "+" (opens the ⌘K switcher) · Checked HH:MM:SS or the degraded status.
  * The whole bar is the drag region.
+ *
+ * The tabs are RESPONSIVE, not capped: they live in a shrinkable strip that
+ * shows as many as the window is wide enough for and scrolls for the rest, with
+ * a gradient at whichever end still has tabs past it and no scrollbar. (This
+ * replaced a hard 4-tab cap plus a "+N more" button that only opened ⌘K — the
+ * same thing the "+" beside it already does.) Everything to the right of the
+ * strip is shrink-0, so the pane cluster, the update line and Need help? keep
+ * their space; the flex-1 drag gutter never falls below min-w-8, so there is
+ * always somewhere to grab the window even with the strip full.
  */
-import { Fragment } from "react";
+import { Fragment, useLayoutEffect, useRef } from "react";
 import { windowControls } from "@/lib/ipc";
+import { useOverflowEdges } from "@/lib/overflow-edges";
+import { EdgeFades } from "./EdgeFades";
 import { BrandGlyph, ErrorGlyph, HelpGlyph, PlusGlyph, XGlyph } from "./icons";
 import { PaneCluster, type PaneUnit, type PaneVisibility } from "./PaneCluster";
 import { cn } from "@/lib/utils";
@@ -31,8 +42,6 @@ export type ProjectTab = {
   updated?: boolean; // finished something while in the background
   updatedHint?: string;
 };
-
-const MAX_VISIBLE_TABS = 4;
 
 /** The window lights — quiet monochrome dots at rest; hovering the cluster
  * shows the real macOS colours and glyphs (close ×, minimize −, zoom ⤢). */
@@ -104,12 +113,17 @@ export function TitleBar({
   /** Opens the Help screen — the primary entry, replacing the rail's. */
   onHelp?: () => void;
 }) {
-  // the active tab must always be visible — swap it over the last slot when it
-  // falls outside the window (T-013)
-  const visible = tabs.slice(0, MAX_VISIBLE_TABS);
-  const activeIdx = tabs.findIndex((t) => t.dir === activeDir);
-  if (activeIdx >= MAX_VISIBLE_TABS) visible[MAX_VISIBLE_TABS - 1] = tabs[activeIdx];
-  const hidden = tabs.length - visible.length;
+  // the active tab must always be visible — no slot to swap it into any more
+  // (T-013), so scroll the strip to it whenever the active project changes
+  const stripRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef<HTMLDivElement>(null);
+  const lastScrolled = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (lastScrolled.current === activeDir) return;
+    lastScrolled.current = activeDir;
+    activeRef.current?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [activeDir]);
+  const edges = useOverflowEdges(stripRef);
 
   return (
     <div
@@ -134,86 +148,91 @@ export function TitleBar({
         <BrandGlyph size={17} />
       </button>
 
+      {/* the strip shrinks before anything else on the bar does — min-w-0 lets
+          it, and shrink-0 on every tab makes the overflow scroll, not squeeze */}
       <div className="flex min-w-0 items-center gap-1">
-        {visible.map((t) => {
-          const active = t.dir === activeDir;
-          return (
-            <Fragment key={t.dir}>
-              {active ? (
-                <div
-                  data-no-zoom
-                  className="flex h-[30px] max-w-[180px] items-center gap-2 rounded-md border border-border-strong bg-fill-hover px-3"
-                  title={t.dir}
-                >
-                  <span className={cn("size-2 shrink-0 rounded-[3px]", MARK_BG[t.mark])} />
-                  <span className="truncate text-[12.5px] font-medium text-text-primary">
-                    {t.name}
-                  </span>
-                </div>
-              ) : (
-                <div
-                  className="group/tab flex h-[30px] max-w-[180px] cursor-pointer items-center gap-2 rounded-md border border-transparent bg-fill-subtle py-0 pl-3 pr-2"
-                  title={t.updated ? (t.updatedHint ?? `${t.name} has updates`) : t.dir}
-                  onClick={() => onSwitch(t.dir)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => e.key === "Enter" && onSwitch(t.dir)}
-                >
-                  <span className={cn("size-2 shrink-0 rounded-[3px]", MARK_BG[t.mark])} />
-                  <span
-                    className={cn(
-                      "truncate text-[12.5px]",
-                      t.updated ? "text-text-secondary" : "text-text-muted",
-                    )}
-                  >
-                    {t.name}
-                  </span>
-                  {t.updated ? (
-                    <>
-                      <span className="rounded-[5px] bg-fill-subtle px-[5px] text-[10.5px] leading-[15px] text-text-subtle group-hover/tab:hidden">
-                        Updated
-                      </span>
-                      <button
-                        aria-label={`Close ${t.name}`}
-                        onClick={(e) => { e.stopPropagation(); onClose(t.dir); }}
-                        className="hidden size-[18px] items-center justify-center rounded-[5px] text-text-dim hover:bg-fill-hover hover:text-text-secondary group-hover/tab:flex"
-                      >
-                        <XGlyph size={8} />
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      aria-label={`Close ${t.name}`}
-                      onClick={(e) => { e.stopPropagation(); onClose(t.dir); }}
-                      className="flex size-[18px] items-center justify-center rounded-[5px] text-text-dim opacity-0 hover:bg-fill-hover hover:text-text-secondary focus-visible:opacity-100 group-hover/tab:opacity-100"
-                    >
-                      <XGlyph />
-                    </button>
-                  )}
-                </div>
-              )}
-            </Fragment>
-          );
-        })}
-        {hidden > 0 && (
-          <button
-            onClick={onAdd}
-            className="h-[30px] rounded-md px-2.5 font-mono text-xs text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+        <div className="relative flex min-w-0 items-center">
+          <div
+            ref={stripRef}
+            className="flex min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden py-1 scrollbar-none"
           >
-            +{hidden} more
-          </button>
-        )}
+            {tabs.map((t) => {
+              const active = t.dir === activeDir;
+              return (
+                <Fragment key={t.dir}>
+                  {active ? (
+                    <div
+                      ref={activeRef}
+                      data-no-zoom
+                      className="flex h-[30px] max-w-[180px] shrink-0 items-center gap-2 rounded-md border border-border-strong bg-fill-hover px-3"
+                      title={t.dir}
+                    >
+                      <span className={cn("size-2 shrink-0 rounded-[3px]", MARK_BG[t.mark])} />
+                      <span className="truncate text-[12.5px] font-medium text-text-primary">
+                        {t.name}
+                      </span>
+                    </div>
+                  ) : (
+                    <div
+                      className="group/tab flex h-[30px] max-w-[180px] shrink-0 cursor-pointer items-center gap-2 rounded-md border border-transparent bg-fill-subtle py-0 pl-3 pr-2"
+                      title={t.updated ? (t.updatedHint ?? `${t.name} has updates`) : t.dir}
+                      onClick={() => onSwitch(t.dir)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => e.key === "Enter" && onSwitch(t.dir)}
+                    >
+                      <span className={cn("size-2 shrink-0 rounded-[3px]", MARK_BG[t.mark])} />
+                      <span
+                        className={cn(
+                          "truncate text-[12.5px]",
+                          t.updated ? "text-text-secondary" : "text-text-muted",
+                        )}
+                      >
+                        {t.name}
+                      </span>
+                      {t.updated ? (
+                        <>
+                          <span className="rounded-[5px] bg-fill-subtle px-[5px] text-[10.5px] leading-[15px] text-text-subtle group-hover/tab:hidden">
+                            Updated
+                          </span>
+                          <button
+                            aria-label={`Close ${t.name}`}
+                            onClick={(e) => { e.stopPropagation(); onClose(t.dir); }}
+                            className="hidden size-[18px] items-center justify-center rounded-[5px] text-text-dim hover:bg-fill-hover hover:text-text-secondary group-hover/tab:flex"
+                          >
+                            <XGlyph size={8} />
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          aria-label={`Close ${t.name}`}
+                          onClick={(e) => { e.stopPropagation(); onClose(t.dir); }}
+                          className="flex size-[18px] items-center justify-center rounded-[5px] text-text-dim opacity-0 hover:bg-fill-hover hover:text-text-secondary focus-visible:opacity-100 group-hover/tab:opacity-100"
+                        >
+                          <XGlyph />
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </Fragment>
+              );
+            })}
+          </div>
+          <EdgeFades edges={edges} className="bottom-0" />
+        </div>
         <button
           aria-label="Open another project"
           title="Open another project — ⌘K"
           onClick={onAdd}
-          className="flex size-7 items-center justify-center rounded-[7px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+          className="flex size-7 shrink-0 items-center justify-center rounded-[7px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
         >
           <PlusGlyph size={11} />
         </button>
       </div>
 
-      <span className="flex-1" data-tauri-drag-region />
+      {/* the drag gutter: it gives up its width to the tabs, but never all of
+          it — the window must stay grabbable however many projects are open */}
+      <span className="min-w-8 flex-1 shrink-0 self-stretch" data-tauri-drag-region />
       {panes && onTogglePane && (
         <span className="mr-3 shrink-0">
           <PaneCluster visibility={panes} onToggle={onTogglePane} />
@@ -265,13 +284,13 @@ export function TitleBar({
         </span>
       )}
       {degraded ? (
-        <span className="inline-flex items-center gap-1.5 text-[11.5px] text-text-subtle">
+        <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11.5px] text-text-subtle">
           <ErrorGlyph size={11} strokeWidth={1.4} />
           {degraded}
         </span>
       ) : (
         checkedAt && (
-          <span className="font-mono text-[11.5px] text-text-dim tabular-nums">
+          <span className="shrink-0 whitespace-nowrap font-mono text-[11.5px] text-text-dim tabular-nums">
             Checked {checkedAt}
           </span>
         )

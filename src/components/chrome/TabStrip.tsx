@@ -9,6 +9,11 @@ import * as React from "react";
  * the underline sits a pixel below the tab, so without it the browser draws a
  * phantom vertical scrollbar in the strip.
  *
+ * The strip carries no scrollbar at all (scrollbar-none) — a bar under a 40px
+ * row of tabs reads as chrome-on-chrome. Overflow is announced by a gradient at
+ * whichever end still has tabs past it; the wheel, the trackpad and the active
+ * tab's scrollIntoView all still scroll it.
+ *
  * Every tab reserves the close button's size-4 slot, so revealing the X on a
  * background tab never re-truncates its label. Middle-click closes a tab too,
  * the way it does in a browser.
@@ -16,7 +21,9 @@ import * as React from "react";
  * Keyboard: the ARIA tab pattern — one stop for the whole strip (the active
  * tab), ←/→ move along it and select as they go, Enter and Space select.
  */
+import { EdgeFades } from "@/components/chrome/EdgeFades";
 import { XGlyph } from "@/components/chrome/icons";
+import { useOverflowEdges } from "@/lib/overflow-edges";
 import { cn } from "@/lib/utils";
 
 /** what the tab's leading dot is saying — each has its own colour */
@@ -57,6 +64,9 @@ export function TabStrip({ tabs, activeId, onSelect, onClose, onNew, trailing, l
   // every render, and scrollIntoView on each one hijacks the tab strip's scroll
   const lastScrolled = React.useRef<string | null>(null);
 
+  const stripRef = React.useRef<HTMLDivElement>(null);
+  const edges = useOverflowEdges(stripRef);
+
   // roving tabIndex: the strip is one tab stop. With nothing active the first
   // tab holds it, so the strip is never unreachable from the keyboard.
   const activeIndex = tabs.findIndex((t) => t.id === activeId);
@@ -74,94 +84,95 @@ export function TabStrip({ tabs, activeId, onSelect, onClose, onNew, trailing, l
   };
 
   return (
-    <div
-      role="tablist"
-      aria-label={label}
-      aria-orientation="horizontal"
-      className={cn(
-        "flex h-10 min-w-0 shrink-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden border-b border-divider px-2.5",
-        className,
-      )}
-    >
-      {tabs.map((tab, i) => {
-        const active = tab.id === activeId;
-        const title = tab.title ?? tab.label;
-        return (
-          <div
-            key={tab.id}
-            role="tab"
-            aria-selected={active}
-            data-tab-id={tab.id}
-            tabIndex={i === stop ? 0 : -1}
-            ref={
-              active
-                ? (el) => {
-                    if (el && lastScrolled.current !== tab.id) {
-                      lastScrolled.current = tab.id;
-                      el.scrollIntoView({ inline: "nearest", block: "nearest" });
+    <div className={cn("relative flex h-10 min-w-0 shrink-0", className)}>
+      <div
+        ref={stripRef}
+        role="tablist"
+        aria-label={label}
+        aria-orientation="horizontal"
+        className="flex h-10 w-full min-w-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden border-b border-divider px-2.5 scrollbar-none"
+      >
+        {tabs.map((tab, i) => {
+          const active = tab.id === activeId;
+          const title = tab.title ?? tab.label;
+          return (
+            <div
+              key={tab.id}
+              role="tab"
+              aria-selected={active}
+              data-tab-id={tab.id}
+              tabIndex={i === stop ? 0 : -1}
+              ref={
+                active
+                  ? (el) => {
+                      if (el && lastScrolled.current !== tab.id) {
+                        lastScrolled.current = tab.id;
+                        el.scrollIntoView({ inline: "nearest", block: "nearest" });
+                      }
                     }
-                  }
-                : undefined
-            }
-            onClick={() => !active && onSelect?.(tab.id)}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowRight") { e.preventDefault(); step(e.currentTarget, 1); }
-              else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.currentTarget, -1); }
-              else if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                if (!active) onSelect?.(tab.id);
+                  : undefined
               }
-              // the close button is not its own tab stop, so the key closes it
-              else if (e.key === "Delete" || e.key === "Backspace") {
+              onClick={() => !active && onSelect?.(tab.id)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowRight") { e.preventDefault(); step(e.currentTarget, 1); }
+                else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.currentTarget, -1); }
+                else if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  if (!active) onSelect?.(tab.id);
+                }
+                // the close button is not its own tab stop, so the key closes it
+                else if (e.key === "Delete" || e.key === "Backspace") {
+                  e.preventDefault();
+                  onClose?.(tab.id);
+                }
+              }}
+              // middle-click closes, as it does in a browser
+              onAuxClick={(e) => {
+                if (e.button !== 1) return;
                 e.preventDefault();
-                onClose?.(tab.id);
-              }
-            }}
-            // middle-click closes, as it does in a browser
-            onAuxClick={(e) => {
-              if (e.button !== 1) return;
-              e.preventDefault();
-              onClose?.(tab.id);
-            }}
-            className={cn(
-              "group/tab relative flex h-8 shrink-0 cursor-default select-none items-center gap-2 px-3 text-[12.5px]",
-              active
-                ? "max-w-[190px] font-medium text-text-primary"
-                : "max-w-[170px] text-text-muted hover:text-text-secondary",
-            )}
-          >
-            {tab.dot && <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", DOT[tab.dot])} />}
-            <span className="min-w-0 truncate" title={title}>{tab.label}</span>
-            {/* the slot is always reserved — only its visibility changes, so a
-                hover never shifts the label's truncation width */}
-            <button
-              aria-label={`Close ${tab.label}`}
-              tabIndex={-1}
-              onClick={(e) => {
-                e.stopPropagation();
                 onClose?.(tab.id);
               }}
               className={cn(
-                "flex size-4 items-center justify-center rounded-[4px] text-text-dim hover:bg-fill-hover",
-                !active && "invisible group-hover/tab:visible group-focus-within/tab:visible",
+                "group/tab relative flex h-8 shrink-0 cursor-default select-none items-center gap-2 px-3 text-[12.5px]",
+                active
+                  ? "max-w-[190px] font-medium text-text-primary"
+                  : "max-w-[170px] text-text-muted hover:text-text-secondary",
               )}
             >
-              <XGlyph size={8} />
-            </button>
-            {active && <span className="absolute -bottom-px left-2 right-2 h-0.5 rounded-[1px] bg-text-primary" />}
-          </div>
-        );
-      })}
-      {onNew && (
-        <button
-          aria-label="New tab"
-          onClick={onNew}
-          className="flex h-8 shrink-0 items-center px-2.5 text-text-faint hover:text-text-primary"
-        >
-          +
-        </button>
-      )}
-      {trailing}
+              {tab.dot && <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", DOT[tab.dot])} />}
+              <span className="min-w-0 truncate" title={title}>{tab.label}</span>
+              {/* the slot is always reserved — only its visibility changes, so a
+                  hover never shifts the label's truncation width */}
+              <button
+                aria-label={`Close ${tab.label}`}
+                tabIndex={-1}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose?.(tab.id);
+                }}
+                className={cn(
+                  "flex size-4 items-center justify-center rounded-[4px] text-text-dim hover:bg-fill-hover",
+                  !active && "invisible group-hover/tab:visible group-focus-within/tab:visible",
+                )}
+              >
+                <XGlyph size={8} />
+              </button>
+              {active && <span className="absolute -bottom-px left-2 right-2 h-0.5 rounded-[1px] bg-text-primary" />}
+            </div>
+          );
+        })}
+        {onNew && (
+          <button
+            aria-label="New tab"
+            onClick={onNew}
+            className="flex h-8 shrink-0 items-center px-2.5 text-text-faint hover:text-text-primary"
+          >
+            +
+          </button>
+        )}
+        {trailing}
+      </div>
+      <EdgeFades edges={edges} />
     </div>
   );
 }

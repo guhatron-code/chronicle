@@ -349,16 +349,33 @@ a:focus-visible,
 
 /* The two motion primitives the comps use. Motion only confirms state — under
    prefers-reduced-motion everything freezes (the status word carries the meaning). */
-/* Scrollbars — literally 2px, everywhere: gutter and thumb (operator rule;
-   previously a 2px-looking thumb sat in a 10px reserved lane). */
-::-webkit-scrollbar { width: 2px; height: 2px; }
+/* Scrollbars — one 4px thumb in a transparent lane, everywhere.
+ *
+ * DO NOT reintroduce `scrollbar-color` here. It is an INHERITED property, and
+ * modern WebKit (the WKWebView we ship in) drops every ::-webkit-scrollbar rule
+ * for any element whose scrollbar-color or scrollbar-width is not `auto`.
+ * Setting it once on <html> therefore inherited to every scroller in the app
+ * and handed each of them a native 15px bar — the fat strip under the file
+ * tabs — while the 2px declared below was silently ignored. The webkit
+ * pseudo-elements are the only way to get an exact width, so they get the
+ * field to themselves.
+ */
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-corner { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background-color: var(--border-strong);
-  border-radius: 1px;
+  background-color: var(--border-hairline);
+  border-radius: 999px;
 }
+/* the thumb only asserts itself once the pointer is over the region it scrolls */
+:hover::-webkit-scrollbar-thumb { background-color: var(--border-strong); }
 ::-webkit-scrollbar-thumb:hover { background-color: var(--text-dimmer); }
+
+/* Strips that say "there is more" with a gradient instead of a bar. */
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}
 
 
 /* Keyboard focus must SNAP — a box-shadow transition makes the ring fade in
@@ -366,7 +383,6 @@ a:focus-visible,
 *:focus-visible {
   transition-property: color, background-color, border-color;
 }
-html { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
 /* Toast pills vs sonner's fixed 356px rows: a wider pill overflowed rightward
    and read as off-center. The stack hugs its widest pill and centers by
