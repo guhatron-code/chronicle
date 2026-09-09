@@ -1342,6 +1342,9 @@ async fn init_status(roots: State<'_, OpenRoots>, init: State<'_, InitState>, di
 /// window teardown (a closed window has nothing left to ask about). Everything else
 /// that asks the app to exit is turned back at `RunEvent::ExitRequested`.
 static REALLY_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// When the last turned-back exit request happened — a second one within four
+/// seconds is the user insisting past a frontend that cannot answer.
+static LAST_EXIT_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
 /// The last step of quitting, and the only one that ends the process. The frontend
 /// calls this after ⌘Q's guard finds nothing unsaved (or the user says go ahead);
@@ -3215,6 +3218,17 @@ fn main() {
         .run(|app, event| {
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
                 if !REALLY_QUIT.load(std::sync::atomic::Ordering::SeqCst) {
+                    // The escape hatch: a dead webview can never answer, so a second
+                    // request inside four seconds (the user insisting) or no window
+                    // at all lets the exit through rather than trapping the process.
+                    let insisted = {
+                        let mut last = LAST_EXIT_REQUEST.lock().unwrap_or_else(|e| e.into_inner());
+                        let now = std::time::Instant::now();
+                        let again = last.map(|t| now.duration_since(t) < std::time::Duration::from_secs(4)).unwrap_or(false);
+                        *last = Some(now);
+                        again
+                    };
+                    if insisted || app.webview_windows().is_empty() { return; }
                     api.prevent_exit();
                     if let Some(k) = menu::key_for("go-quit") {
                         let _ = app.emit_to(tauri::EventTarget::webview("main"), "menu-key", k);

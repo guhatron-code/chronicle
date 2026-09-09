@@ -530,12 +530,14 @@ export function RepoPane({
   const reconcileTab = useCallback((path: string) => {
     const d = dir;
     if (!bufferFor(d, path)) { loadContents(path); return; }
-    readFile(d, path)
-      .then((r) => {
+    // stat first: a remount pays one stat per open tab, and a read only when
+    // the disk actually moved (onFileChanged does that read itself)
+    statFile(d, path)
+      .then((st) => {
         if (dirRef.current !== d) return;
-        if (r.binary || r.too_large) { loadContents(path); return; }
+        if (st.kind !== "text") { loadContents(path); return; }
         const cur = bufferFor(d, path);
-        if (!cur || cur.mtime === r.mtime_ms) return; // still in step with the disk
+        if (!cur || Math.floor(cur.mtime / 1000) === st.mtime) return; // still in step with the disk
         void onFileChanged(d, path);
       })
       .catch(() => { loadContents(path); }); // gone since — the read-error card says so
