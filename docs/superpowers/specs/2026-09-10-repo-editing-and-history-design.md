@@ -107,3 +107,17 @@ Four lines, each a fact with a time, nothing computed by subtraction:
 - Rust: jail refusals for every new command (absolute, `..`, symlink, `.git/`), atomic write + mtime precondition, mode bits preserved, binary sniff, size cap, trash on a temp dir, `git_in` first-line integrity on porcelain output with a leading space, publish-state resolution with and without `@{u}`, dirty-set exclusions and rename splitting, badge mapping.
 - Vitest: the buffer state machine (edit → save → clean; edit → disk change → conflict; Reload; Keep mine; own-write echo ignored; rename follows), `.editorconfig` tab size, the four history lines' formatting from fixture payloads including degraded git and no remote.
 - Live test on a signed local build: edit and save a file, watch a terminal `echo >> file` produce the bar, rename an open file, create and trash a file from the explorer, ⌘N/⌘S from a focused editor, the history lines on this repo (which was wrong in every line before), Check now offline and online.
+
+## Live test
+
+Run 2026-09-10 on a signed local bundle against a throwaway rsync copy of this repo (branch `repo-editing`, no remote branch of its own, 120 commits ahead of `origin/main`, four human uncommitted files once `.chronicle/` runtime paths are excluded).
+
+| Check | Result |
+|---|---|
+| History panel vs `git`: last save with subject; "4 files" uncommitted; "120 ahead · 0 behind" against the resolved remote ref; last publish 2 weeks ago | pass (matched the git facts read beside it) |
+| "checked never" wording on the Remote line before the first Check now | pass after fix (read "checked never checked") |
+| Editing a file in the Contents view: syntax colours, "unsaved" in the header, dirty dot on the tab, ⌘S → "saved · Ns ago" | pass (observed in the window) |
+| Contents/Changes toggle at the right end of the bar; an empty Changes view says "No changes since the last save." | fixed during the test; not re-observed on a modified file |
+| Conflict bar (Reload / Keep mine) on an external write; rename/trash from the explorer; ⌘N per pane; Save / Discard / Cancel on close and quit; Check now online and offline | not exercised by the controller (keyboard steps are the user's); covered by the store, mapper and Rust tests listed under Testing |
+
+Found during the test: the Contents/Changes toggle sat mid-bar; the Changes view rendered nothing for a file git has no diff for (gitignored `.sign.env`); "checked never checked".
