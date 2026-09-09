@@ -373,13 +373,22 @@ export function Composer({
         confirmLabel: "Execute this session",
         onConfirm: apply,
       });
-    } else if (modeId === "bypassPermissions" && !s.fullAutoConfirmed) {
+    } else if (modeId === "auto" && !s.autoConfirmed) {
       onConfirm({
         title: "Turn on Auto?",
         body:
-          "Edits and commands both run without asking — nothing is confirmed. Every change still stays reviewable and undoable. This lasts for this session only — the next session starts in Plan again.",
+          "The agent approves routine edits and commands itself and still asks about anything risky. Every change stays reviewable and undoable. This lasts for this session only — the next session starts in Plan again.",
         cancelLabel: "Keep confirming",
         confirmLabel: "Turn on Auto",
+        onConfirm: apply,
+      });
+    } else if (modeId === "bypassPermissions" && !s.fullAutoConfirmed) {
+      onConfirm({
+        title: "Turn on Unattended?",
+        body:
+          "Edits and commands both run without asking — nothing is confirmed, not even risky commands. Every change still stays reviewable and undoable. This lasts for this session only — the next session starts in Plan again.",
+        cancelLabel: "Keep confirming",
+        confirmLabel: "Turn on Unattended",
         onConfirm: apply,
       });
     } else apply();
@@ -388,6 +397,9 @@ export function Composer({
   const asksFirst = s.modes?.availableModes.find((m) => m.id === "default");
   const worksFreely = s.modes?.availableModes.find((m) => m.id === "acceptEdits");
   const fullAuto = s.modes?.availableModes.find((m) => m.id === "bypassPermissions");
+  // Claude Code's classifier-driven mode: routine actions are approved by the
+  // agent itself, risky ones still ask. Only offered when the adapter lists it.
+  const autoMode = s.modes?.availableModes.find((m) => m.id === "auto");
   const current = s.modes?.currentModeId;
 
   return (
@@ -550,6 +562,19 @@ export function Composer({
             >
               Execute
             </button>
+            {autoMode && (
+              <button
+                title="The agent approves routine edits and commands itself and still asks about risky ones."
+                disabled={disabled}
+                onClick={() => switchMode("auto")}
+                className={cn(
+                  "h-[26px] border-l border-border-hairline px-2.5 text-[11.5px]",
+                  current === "auto" ? "bg-fill-hover font-medium text-text-primary" : "text-text-muted hover:text-text-primary",
+                )}
+              >
+                Auto
+              </button>
+            )}
             {fullAuto && (
               <button
                 title="Edits and commands both run without asking — nothing is confirmed."
@@ -560,7 +585,7 @@ export function Composer({
                   current === "bypassPermissions" ? "bg-fill-hover font-medium text-text-primary" : "text-text-muted hover:text-text-primary",
                 )}
               >
-                Auto
+                Unattended
               </button>
             )}
           </div>

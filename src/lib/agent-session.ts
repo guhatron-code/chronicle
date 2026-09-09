@@ -120,6 +120,8 @@ export interface AgentSessionState {
   worksFreelyConfirmed: boolean;
   /** the Full-auto confirm is per SESSION — reset on every new session */
   fullAutoConfirmed: boolean;
+  /** the one-time "Turn on Auto?" confirm was accepted this session */
+  autoConfirmed: boolean;
   /** composer preload (F38) — a labeled draft the user still has to send */
   draft: { label: string; text: string } | null;
   /** a mirror of the composer's current text — preload checks read it */
@@ -147,6 +149,7 @@ const blank = (): AgentSessionState => ({
   errorMessage: null,
   worksFreelyConfirmed: false,
   fullAutoConfirmed: false,
+  autoConfirmed: false,
   configOptions: [],
   commands: [],
   draft: null,
@@ -640,6 +643,7 @@ export async function setAgentMode(dir: string, modeId: string): Promise<void> {
   if (s.modes) s.modes.currentModeId = modeId;
   if (modeId === "acceptEdits") s.worksFreelyConfirmed = true;
   if (modeId === "bypassPermissions") s.fullAutoConfirmed = true;
+  if (modeId === "auto") s.autoConfirmed = true;
   notify();
 }
 
