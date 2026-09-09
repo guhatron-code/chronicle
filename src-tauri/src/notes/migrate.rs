@@ -1,15 +1,32 @@
 //! One-way, one-time: the kanban board becomes notes. Runs on the first
 //! heartbeat of a project that still has tasks in `.chronicle/kanban.json` and
-//! no `.chronicle/notes/` yet. All-or-nothing: every note and `rounds.json` are
-//! written into a staging directory first, and only once every write has landed
-//! does the vault and the board move — so a failure mid-run leaves no partial
-//! vault and the board intact for the next heartbeat to retry.
+//! no `.chronicle/notes/` yet.
+//!
+//! Every note and the new `rounds.json` are written into a staging directory
+//! (`.chronicle/notes.migrating/`) first. Only once every write has landed does
+//! `run` write an empty `.complete` marker inside staging — that marker is the
+//! single bit of durable state that says "safe to commit" — and then perform
+//! the commit renames in order: (a) the staged `rounds.json` replaces the real
+//! one, (b) `kanban.json` retires to `kanban.json.migrated`, (c) staging
+//! becomes `.chronicle/notes`, (d) the marker (which rode along with (c)) is
+//! deleted. A crash at any point before the marker is written leaves
+//! `kanban.json` untouched and the (discardable) staging dir the only trace —
+//! the next run starts over. A crash at any point AFTER the marker is written
+//! resumes: whichever of (a)-(d) is still outstanding runs, nothing is
+//! re-staged. A process-wide guard keyed by the project dir means only one
+//! `run` is ever mid-flight for a given project at a time; a concurrent caller
+//! gets `Ok(None)` — nothing to report — instead of racing the first one.
 
 use super::{index, parse};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 pub struct MigratedNote { pub path: String, pub front: parse::FrontMatter, pub body: String }
+
+const MARKER: &str = ".complete";
+const ROUNDS_STAGED: &str = ".rounds.json";
 
 pub fn map_status(column: &str) -> (&'static str, Option<&'static str>) {
     match column {
@@ -72,31 +89,107 @@ pub fn map_task(task: &Value) -> MigratedNote {
 }
 
 fn board_path(dir: &Path) -> PathBuf { dir.join(".chronicle/kanban.json") }
+fn migrated_board_path(dir: &Path) -> PathBuf { dir.join(".chronicle/kanban.json.migrated") }
+fn rounds_path(dir: &Path) -> PathBuf { dir.join(".chronicle/rounds.json") }
 fn staging_dir(dir: &Path) -> PathBuf { dir.join(".chronicle/notes.migrating") }
-fn rounds_staging(dir: &Path) -> PathBuf { dir.join(".chronicle/rounds.json.migrating") }
 
+/// True when there's work to do: an unmigrated board, OR a commit that started
+/// (the marker exists — in staging if step (c) hasn't run yet, in the vault if
+/// it has) and needs to finish. The marker check comes first and ignores the
+/// vault's contents on purpose: after (c) the vault legitimately holds the
+/// migrated notes already, but (d) still hasn't run.
 pub fn needs_migration(dir: &Path) -> bool {
+    let vault = index::vault_dir(dir);
+    if staging_dir(dir).join(MARKER).exists() || vault.join(MARKER).exists() { return true; }
     // a vault that exists but holds no notes is not a migrated vault — an
     // ordinary jail check or a stray mkdir must never strand the board
-    if !index::walk(&index::vault_dir(dir)).is_empty() { return false; }
+    if !index::walk(&vault).is_empty() { return false; }
     let Ok(text) = std::fs::read_to_string(board_path(dir)) else { return false };
     let Ok(v) = serde_json::from_str::<Value>(&text) else { return false };
     v.get("tasks").and_then(|t| t.as_array()).map(|a| !a.is_empty()).unwrap_or(false)
 }
 
-/// Move the staged notes into place. Refuses if the vault has notes in it right
-/// now (checked again here, not just by `needs_migration` earlier — something
-/// else may have written into it in the meantime); an empty leftover `notes/`
-/// (e.g. a stray mkdir) is simply replaced.
-fn commit_vault(vault: &Path, staging: &Path) -> Result<(), String> {
-    if vault.exists() {
-        if !index::walk(vault).is_empty() { return Err("the vault already holds notes".into()); }
-        std::fs::remove_dir_all(vault).map_err(|e| e.to_string())?;
+/// Run whichever commit steps are still outstanding, in order, each skipped
+/// when its postcondition already holds — so this is safe to call from a fresh
+/// `run` (nothing done yet) or mid-recovery (some steps already done). Every
+/// step here is a single `rename`, atomic on its own; the only thing that can
+/// leave a step "half done" is the process dying between two of them, which is
+/// exactly the case the next call resumes from.
+fn commit(dir: &Path) -> Result<(), String> {
+    let staging = staging_dir(dir);
+    let vault = index::vault_dir(dir);
+    let board = board_path(dir);
+
+    // (a) the staged rounds.json replaces the real one — derived data, so
+    // overwriting on a resume is correct, not just harmless
+    let staged_rounds = staging.join(ROUNDS_STAGED);
+    if staged_rounds.exists() {
+        std::fs::rename(&staged_rounds, rounds_path(dir)).map_err(|e| e.to_string())?;
     }
-    std::fs::rename(staging, vault).map_err(|e| e.to_string())
+    // (b) the board is retired
+    if board.exists() {
+        std::fs::rename(&board, migrated_board_path(dir)).map_err(|e| e.to_string())?;
+    }
+    // (c) staging becomes the vault — carrying the marker along with it
+    if staging.exists() {
+        if vault.exists() {
+            if !index::walk(&vault).is_empty() {
+                // (a) and (b) already happened and cannot be undone; this is
+                // the one step that can legitimately need a retry rather than
+                // completing here (something else populated the vault)
+                return Err("the vault already holds notes; the migration can't land yet".into());
+            }
+            std::fs::remove_dir_all(&vault).map_err(|e| e.to_string())?;
+        }
+        std::fs::rename(&staging, &vault).map_err(|e| e.to_string())?;
+    }
+    // (d) the marker's job is done — it now lives wherever (c) left it
+    let _ = std::fs::remove_file(vault.join(MARKER));
+    let _ = std::fs::remove_file(staging.join(MARKER));
+    Ok(())
 }
 
-pub fn run(dir: &Path) -> Result<usize, String> {
+/// The process-wide set of project dirs with a `run` in flight right now.
+/// Keyed by the canonical dir so two different-looking paths to the same
+/// project can't both slip through.
+fn migrating() -> &'static Mutex<HashSet<String>> {
+    static MIGRATING: std::sync::LazyLock<Mutex<HashSet<String>>> =
+        std::sync::LazyLock::new(|| Mutex::new(HashSet::new()));
+    &MIGRATING
+}
+
+fn migrating_key(dir: &Path) -> String {
+    dir.canonicalize().map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| dir.to_string_lossy().into_owned())
+}
+
+/// `Ok(None)` means a concurrent call is already migrating this project —
+/// nothing was done, nothing to report, and no error: the caller (a heartbeat)
+/// just tries again next time. Everything else this module does assumes only
+/// one `run` is ever mid-flight per project; this is the one guard that makes
+/// that true, so `run_locked` never has to worry about it.
+pub fn run(dir: &Path) -> Result<Option<usize>, String> {
+    let key = migrating_key(dir);
+    {
+        let mut set = migrating().lock().unwrap_or_else(|e| e.into_inner());
+        if !set.insert(key.clone()) { return Ok(None); }
+    }
+    let result = run_locked(dir);
+    migrating().lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+    result.map(Some)
+}
+
+fn run_locked(dir: &Path) -> Result<usize, String> {
+    let staging = staging_dir(dir);
+    let vault = index::vault_dir(dir);
+
+    // a marker anywhere in the staging→vault lineage means every write from a
+    // previous attempt already landed — resume the renames, never re-stage
+    if staging.join(MARKER).exists() || vault.join(MARKER).exists() {
+        commit(dir)?;
+        return Ok(index::walk(&vault).len());
+    }
+
     if !needs_migration(dir) { return Err("nothing to migrate".into()); }
     let text = std::fs::read_to_string(board_path(dir)).map_err(|e| e.to_string())?;
     let store: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
@@ -104,10 +197,10 @@ pub fn run(dir: &Path) -> Result<usize, String> {
     let rounds_src = store.get("rounds").and_then(|r| r.as_array()).cloned().unwrap_or_default();
     let mapped: Vec<MigratedNote> = tasks.iter().map(map_task).collect();
 
-    let staging = staging_dir(dir);
-    let rounds_tmp = rounds_staging(dir);
-    let cleanup = |s: &Path, r: &Path| { let _ = std::fs::remove_dir_all(s); let _ = std::fs::remove_file(r); };
-    cleanup(&staging, &rounds_tmp); // a stray staging dir from a crashed run never blocks a retry
+    // a staging dir with no marker is a leftover from a run that crashed before
+    // every write landed — discard it and stage fresh. kanban.json is
+    // guaranteed intact: nothing irreversible happens before the marker exists
+    let _ = std::fs::remove_dir_all(&staging);
 
     // ids → new paths, so a round keeps pointing at its work
     let by_id: std::collections::HashMap<&str, &str> = tasks.iter().zip(&mapped)
@@ -122,23 +215,22 @@ pub fn run(dir: &Path) -> Result<usize, String> {
     }).collect();
 
     let staged = (|| -> Result<(), String> {
+        std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
         for n in &mapped {
             let full = staging.join(&n.path);
             std::fs::create_dir_all(full.parent().ok_or("bad note path")?).map_err(|e| e.to_string())?;
             std::fs::write(&full, parse::join_front_matter(&n.front, &n.body)).map_err(|e| e.to_string())?;
         }
-        std::fs::write(&rounds_tmp,
+        std::fs::write(staging.join(ROUNDS_STAGED),
             serde_json::to_string_pretty(&json!({ "version": 1, "rounds": rounds })).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        // written last: everything above landed, so the marker's mere
+        // existence means "safe to commit, however far that gets"
+        std::fs::write(staging.join(MARKER), b"").map_err(|e| e.to_string())
     })();
-    if let Err(e) = staged { cleanup(&staging, &rounds_tmp); return Err(e); }
+    if let Err(e) = staged { let _ = std::fs::remove_dir_all(&staging); return Err(e); }
 
-    // everything landed in staging — commit: the vault, then rounds.json, then
-    // the board rename. Nothing above this line ever touched notes/ or kanban.json.
-    let vault = index::vault_dir(dir);
-    if let Err(e) = commit_vault(&vault, &staging) { cleanup(&staging, &rounds_tmp); return Err(e); }
-    std::fs::rename(&rounds_tmp, dir.join(".chronicle/rounds.json")).map_err(|e| e.to_string())?;
-    std::fs::rename(board_path(dir), dir.join(".chronicle/kanban.json.migrated")).map_err(|e| e.to_string())?;
+    commit(dir)?;
     Ok(mapped.len())
 }
 
@@ -225,7 +317,7 @@ mod tests {
         }).to_string()).unwrap();
 
         assert!(needs_migration(&d));
-        assert_eq!(run(&d).unwrap(), 2);
+        assert_eq!(run(&d).unwrap(), Some(2));
         assert!(d.join(".chronicle/notes/Tasks/T-001 One.md").exists());
         assert!(d.join(".chronicle/notes/Tasks/T-002 Two.md").exists());
         assert!(d.join(".chronicle/kanban.json.migrated").exists());
@@ -260,27 +352,26 @@ mod tests {
         // once the underlying problem is gone, the next heartbeat's retry can succeed
         std::fs::remove_file(d.join(".chronicle/notes.migrating")).unwrap();
         assert!(needs_migration(&d), "the board still has work to do");
-        assert_eq!(run(&d).unwrap(), 1);
+        assert_eq!(run(&d).unwrap(), Some(1));
     }
 
     #[test]
-    fn a_stale_staging_dir_from_a_crashed_run_is_cleaned_up_and_does_not_leak() {
+    fn a_staging_dir_without_the_marker_is_discarded_and_the_board_migrates_fresh() {
         let d = tmp("stale-staging");
         std::fs::write(d.join(".chronicle/kanban.json"), json!({
             "version": 1, "next_id": 2,
             "tasks": [ { "id": "T-001", "title": "One", "column": "queued" } ], "rounds": []
         }).to_string()).unwrap();
-        // simulate a crash mid-run: leftover staging content from an earlier attempt
+        // simulate a crash mid-stage, before the marker was ever written: leftover
+        // staging content from an earlier attempt, no `.complete`
         std::fs::create_dir_all(d.join(".chronicle/notes.migrating/Tasks")).unwrap();
         std::fs::write(d.join(".chronicle/notes.migrating/Tasks/Stale.md"), "leftover").unwrap();
-        std::fs::write(d.join(".chronicle/rounds.json.migrating"), "not valid json").unwrap();
 
-        assert_eq!(run(&d).unwrap(), 1);
+        assert_eq!(run(&d).unwrap(), Some(1));
         assert!(!d.join(".chronicle/notes/Tasks/Stale.md").exists(),
-                 "stale staging content must never leak into the committed vault");
+                 "stale staging content without a marker must never leak into the vault");
         assert!(d.join(".chronicle/notes/Tasks/T-001 One.md").exists());
         assert!(!d.join(".chronicle/notes.migrating").exists(), "staging is gone once committed");
-        assert!(!d.join(".chronicle/rounds.json.migrating").exists());
     }
 
     #[test]
@@ -293,7 +384,7 @@ mod tests {
         // a read-side jail check, or any stray mkdir, must not strand the board
         std::fs::create_dir_all(d.join(".chronicle/notes")).unwrap();
         assert!(needs_migration(&d));
-        assert_eq!(run(&d).unwrap(), 1);
+        assert_eq!(run(&d).unwrap(), Some(1));
     }
 
     #[test]
@@ -303,5 +394,90 @@ mod tests {
         std::fs::write(d.join(".chronicle/kanban.json"),
                        json!({ "version": 1, "next_id": 1, "tasks": [], "rounds": [] }).to_string()).unwrap();
         assert!(!needs_migration(&d), "a board with no tasks is nothing to move");
+    }
+
+    /// Hand-builds the "everything already staged, marker written" state a real
+    /// `run` produces right before it starts renaming — the shared starting
+    /// point for the crash-recovery tests below.
+    fn fully_staged(d: &Path) {
+        std::fs::write(d.join(".chronicle/kanban.json"), json!({
+            "version": 1, "next_id": 2,
+            "tasks": [ { "id": "T-001", "title": "One", "column": "queued" } ], "rounds": []
+        }).to_string()).unwrap();
+        let staging = staging_dir(d);
+        std::fs::create_dir_all(staging.join("Tasks")).unwrap();
+        std::fs::write(staging.join("Tasks/T-001 One.md"), "---\nid: T-001\nstatus: queued\n---\n\n# One\n").unwrap();
+        std::fs::write(staging.join(ROUNDS_STAGED), json!({ "version": 1, "rounds": [] }).to_string()).unwrap();
+        std::fs::write(staging.join(MARKER), b"").unwrap();
+    }
+
+    #[test]
+    fn a_crash_after_step_a_resumes_from_the_board_rename() {
+        let d = tmp("resume-a");
+        fully_staged(&d);
+        // step (a) already happened: rounds.json landed, (b)/(c)/(d) still pending
+        std::fs::rename(staging_dir(&d).join(ROUNDS_STAGED), rounds_path(&d)).unwrap();
+
+        assert!(needs_migration(&d));
+        assert_eq!(run(&d).unwrap(), Some(1));
+        assert!(d.join(".chronicle/notes/Tasks/T-001 One.md").exists());
+        assert!(d.join(".chronicle/kanban.json.migrated").exists());
+        assert!(!d.join(".chronicle/kanban.json").exists());
+        assert!(rounds_path(&d).exists());
+        assert!(!staging_dir(&d).exists());
+        assert!(!needs_migration(&d), "the resumed run left a clean, migrated project");
+    }
+
+    #[test]
+    fn a_crash_after_step_b_resumes_from_the_vault_rename() {
+        let d = tmp("resume-b");
+        fully_staged(&d);
+        std::fs::rename(staging_dir(&d).join(ROUNDS_STAGED), rounds_path(&d)).unwrap();
+        std::fs::rename(board_path(&d), migrated_board_path(&d)).unwrap();
+
+        assert!(needs_migration(&d));
+        assert_eq!(run(&d).unwrap(), Some(1));
+        assert!(d.join(".chronicle/notes/Tasks/T-001 One.md").exists());
+        assert!(migrated_board_path(&d).exists());
+        assert!(!staging_dir(&d).exists());
+        assert!(!needs_migration(&d));
+    }
+
+    #[test]
+    fn a_crash_after_step_c_resumes_by_only_dropping_the_marker() {
+        let d = tmp("resume-c");
+        fully_staged(&d);
+        std::fs::rename(staging_dir(&d).join(ROUNDS_STAGED), rounds_path(&d)).unwrap();
+        std::fs::rename(board_path(&d), migrated_board_path(&d)).unwrap();
+        std::fs::rename(staging_dir(&d), index::vault_dir(&d)).unwrap(); // the marker rides along
+
+        assert!(index::vault_dir(&d).join(MARKER).exists(), "setup: the marker moved with the vault");
+        assert!(needs_migration(&d), "only the marker cleanup is left, but that's still work to do");
+        assert_eq!(run(&d).unwrap(), Some(1));
+        assert!(d.join(".chronicle/notes/Tasks/T-001 One.md").exists());
+        assert!(!index::vault_dir(&d).join(MARKER).exists());
+        assert!(!needs_migration(&d));
+    }
+
+    #[test]
+    fn concurrent_runs_never_race_exactly_one_migration_happens() {
+        let d = tmp("concurrent");
+        std::fs::write(d.join(".chronicle/kanban.json"), json!({
+            "version": 1, "next_id": 2,
+            "tasks": [ { "id": "T-001", "title": "One", "column": "queued" } ], "rounds": []
+        }).to_string()).unwrap();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = (0..2).map(|_| {
+            let d = d.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || { barrier.wait(); run(&d) })
+        }).collect();
+        let results: Vec<Result<Option<usize>, String>> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+
+        let migrated: Vec<usize> = results.iter().filter_map(|r| r.as_ref().ok().and_then(|o| *o)).collect();
+        assert_eq!(migrated, vec![1], "exactly one call performs the migration: {results:?}");
+        assert!(d.join(".chronicle/notes/Tasks/T-001 One.md").exists());
+        assert!(!needs_migration(&d), "a single clean vault, no duplicate or half-written notes");
     }
 }

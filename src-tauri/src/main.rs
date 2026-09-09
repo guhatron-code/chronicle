@@ -873,11 +873,12 @@ async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: St
             .await
             .unwrap_or_else(|e| Err(e.to_string()));
         match outcome {
-            Ok(count) => {
+            Ok(Some(count)) => {
                 notes::index::refresh(&notes, &p.dir);
                 let _ = app.emit_to(tauri::EventTarget::webview("main"), "notes-migrated",
                     json!({ "dir": dir, "count": count }));
             }
+            Ok(None) => {} // a concurrent heartbeat is already migrating this project
             Err(e) => {
                 let _ = app.emit_to(tauri::EventTarget::webview("main"), "notes-migrated",
                     json!({ "dir": dir, "count": 0, "error": e }));
