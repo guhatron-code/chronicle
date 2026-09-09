@@ -12,7 +12,7 @@
  * observers left behind (the energy rule).
  */
 import { useEffect, useRef } from "react";
-import { EditorState, Compartment, type Extension } from "@codemirror/state";
+import { EditorState, Compartment, Annotation, Transaction, type Extension } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, highlightSpecialChars, drawSelection, rectangularSelection, crosshairCursor } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
@@ -127,6 +127,14 @@ function languageExtension(id: LangId): Extension[] {
   }
 }
 
+/* Marks a transaction as the store writing INTO the view (Reload, Keep mine, a
+   silent reload of a clean buffer) rather than the user typing. Two things key
+   off it: the change listener stays quiet, so the text does not echo straight
+   back into the store, and `addToHistory.of(false)` keeps it out of the undo
+   stack — otherwise ⌘Z after a Reload would restore the stale text and the next
+   ⌘S would write it back to disk. */
+const External = Annotation.define<boolean>();
+
 /* ---- the per-buffer state cache ---- */
 
 const states = new Map<string, EditorState>();
@@ -180,7 +188,10 @@ export function CodeEditor({ docKey, text, language, readOnly, tabSize, onChange
         // NOT in this list, and `.cm-scroller { overflow-x: auto }` in the theme
         // gives the editor its own sideways scroll so the page never gets one
         keymap.of([
-          // Cmd-S must beat the browser's Save dialog and reach the store
+          // Cmd-S must beat the browser's Save dialog and reach the store.
+          // `preventDefault` without `stopPropagation`: the keydown still
+          // bubbles to the App keymap, so the App's ⌘S branch must guard on
+          // `e.defaultPrevented` or the save fires twice.
           { key: "Mod-s", preventDefault: true, run: () => { onSaveRef.current?.(); return true; } },
           ...searchKeymap,   // Cmd-F inside the editor
           ...historyKeymap,
@@ -191,11 +202,26 @@ export function CodeEditor({ docKey, text, language, readOnly, tabSize, onChange
         roComp.of(EditorState.readOnly.of(readOnly)),
         tabComp.of([EditorState.tabSize.of(tabSize), indentUnit.of(" ".repeat(tabSize))]),
         EditorView.updateListener.of((u) => {
-          if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());
+          // one update can carry several transactions; nothing but a real doc
+          // change from the user should reach the store, and the whole text is
+          // stringified once per update, not once per transaction
+          if (!u.docChanged) return;
+          if (u.transactions.some((tr) => tr.annotation(External))) return;
+          onChangeRef.current?.(u.state.doc.toString());
         }),
       ],
     });
     const v = new EditorView({ state, parent: el });
+    /* A cached state still carries whatever language, read-only flag and tab
+       size were baked into its compartments when it was last unmounted — the
+       props may have moved since (a rename changes the language, a fresh
+       .editorconfig the tab size). Reconfigure all three now so a remount always
+       matches the props; the per-prop effects below keep it that way after. */
+    v.dispatch({ effects: [
+      langComp.reconfigure(languageExtension(language)),
+      roComp.reconfigure(EditorState.readOnly.of(readOnly)),
+      tabComp.reconfigure([EditorState.tabSize.of(tabSize), indentUnit.of(" ".repeat(tabSize))]),
+    ] });
     view.current = v;
     return () => {
       // keep the state (undo history included) for when this buffer comes back
@@ -224,14 +250,20 @@ export function CodeEditor({ docKey, text, language, readOnly, tabSize, onChange
   /* An outside write (Reload, or a silent reload of a clean buffer) replaces
      the document. Guarded on inequality so a keystroke echo is a no-op — the
      store is the source of truth for what is on disk, the view for what is
-     being typed. */
+     being typed. Annotated `External` so it neither echoes back through the
+     change listener nor lands in the undo history. */
   useEffect(() => {
     const v = view.current;
     if (!v) return;
     const current = v.state.doc.toString();
     if (current === text) return;
-    v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: text } });
+    v.dispatch({
+      changes: { from: 0, to: v.state.doc.length, insert: text },
+      annotations: [Transaction.addToHistory.of(false), External.of(true)],
+    });
   }, [text]);
 
   return <div ref={host} data-selectable className={cn("min-h-0 flex-1 overflow-hidden", className)} />;
 }
+
+export default CodeEditor;
