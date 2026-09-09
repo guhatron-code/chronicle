@@ -10,7 +10,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Eyebrow } from "@/components/chrome/atoms";
-import { DocGlyph, PlusGlyph, SearchGlyph } from "@/components/chrome/icons";
+import { ChevronDownGlyph, ChevronRightGlyph, DocGlyph, PlusGlyph, SearchGlyph } from "@/components/chrome/icons";
 import { buildTree, tagCounts } from "@/lib/notes-model";
 import type { OpenRound } from "@/lib/notes-store";
 import type { NoteEntry } from "@/lib/ipc";
@@ -186,9 +186,9 @@ export const Sidebar = memo(function Sidebar({
               name={node.name}
               indent={node.depth}
               icon={
-                <span className="w-2.5 shrink-0 text-center text-[9px] text-text-dimmer">
-                  {collapsed.has(node.path) ? "▸" : "▾"}
-                </span>
+                collapsed.has(node.path)
+                  ? <ChevronRightGlyph size={10} className="shrink-0 text-text-dim" />
+                  : <ChevronDownGlyph size={10} className="shrink-0 text-text-dim" />
               }
               onClick={() => { toggle(node.path); setActiveFolder(node.path); }}
             />
@@ -238,9 +238,10 @@ export const Sidebar = memo(function Sidebar({
           title={disabledReason ?? undefined}
           disabled={disabledReason !== null}
           onClick={onStartRound}
-          className="inline-flex items-center gap-[6px] rounded-[6px] bg-primary px-[11px] py-[5px] text-[11.5px] font-semibold text-primary-foreground hover:bg-(--primary-hover) disabled:bg-fill-subtle disabled:text-text-dimmer disabled:opacity-100"
+          className="inline-flex items-center gap-[4px] rounded-[6px] bg-primary px-[11px] py-[5px] text-[11.5px] font-semibold text-primary-foreground hover:bg-(--primary-hover) disabled:bg-fill-subtle disabled:text-text-dimmer disabled:opacity-100"
         >
-          Start a round ▸
+          Start a round
+          <ChevronRightGlyph size={11} className="shrink-0" />
         </button>
       </div>
     </div>
