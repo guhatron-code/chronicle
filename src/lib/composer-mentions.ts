@@ -18,6 +18,11 @@ export type MentionKind = "file" | "attachment" | "note" | "phase";
 
 export interface Mention {
   kind: MentionKind;
+  /** the mention's identity — unique across the menu, and the key of the
+   *  lookup table. Namespaced by kind, as the picker's row id always was; for
+   *  a note it names the vault PATH, because two notes in different folders can
+   *  share a title (and so share a `token`). */
+  key: string;
   /** the text inserted into the composer, without the leading @ */
   token: string;
   /** menu label */
@@ -85,6 +90,7 @@ export function ensurePhases(dir: string, onReady: () => void): void {
           const items = (ph.items ?? []).map((i) => `- ${i}`).join("\n");
           out.push({
             kind: "phase",
+            key: `phase:${ph.id}`,
             token: ph.id,
             label: ph.id,
             detail: ph.name,
@@ -122,15 +128,26 @@ export function mentionRows(
 
   for (const a of attachments) {
     if (matches(q, a.name, a.relPath)) {
-      out.push({ kind: "attachment", token: a.relPath, label: a.name, detail: a.relPath });
+      out.push({ kind: "attachment", key: `attachment:${a.relPath}`, token: a.relPath, label: a.name, detail: a.relPath });
     }
   }
 
-  for (const n of indexFor(dir).notes) {
+  const notes = indexFor(dir).notes;
+  const sameTitle = new Map<string, number>();
+  for (const n of notes) sameTitle.set(n.title, (sameTitle.get(n.title) ?? 0) + 1);
+  for (const n of notes) {
     if (matches(q, n.title, n.path)) {
+      const folder = n.folder || "vault";
       // the token carries its own `note:` prefix so the composer reads
-      // `@note:Web pane retro` — the spec's form, and the mock's
-      out.push({ kind: "note", token: `note:${n.title}`, label: n.title, detail: n.folder || "vault", path: n.path, body: undefined });
+      // `@note:Web pane retro` — the spec's form, and the mock's. The token can
+      // only carry the title, so the ROW says which folder when a title repeats
+      // and the key stays the path, or picking the second one would silently
+      // repoint the first.
+      out.push({
+        kind: "note", key: `note:${n.path}`, token: `note:${n.title}`,
+        label: (sameTitle.get(n.title) ?? 0) > 1 ? `${n.title} — ${folder}` : n.title,
+        detail: folder, path: n.path, body: undefined,
+      });
     }
   }
 
@@ -143,7 +160,7 @@ export function mentionRows(
   for (const f of cachedFiles(dir)) {
     if (out.length >= limit) break;
     if (matches(q, f)) {
-      out.push({ kind: "file", token: f, label: f.split("/").pop() ?? f, detail: f });
+      out.push({ kind: "file", key: `file:${f}`, token: f, label: f.split("/").pop() ?? f, detail: f });
     }
   }
 
@@ -158,14 +175,30 @@ export function mentionRows(
  * still holds them. Paths stay inline; a phase appends its text. A note has a
  * file, so it appends the path to read rather than the whole note: the queued
  * message may go out much later, and the note on disk is the honest version.
+ *
+ * A note that has been renamed or deleted since it was picked appends nothing —
+ * `@note:Title` stays in the message as the prose it now looks like, rather
+ * than pointing the agent at a file that isn't there.
  */
-export function flattenMentions(text: string, table: Map<string, Mention>): string {
-  const used = [...table.values()].filter((m) => (m.body || m.path) && text.includes(`@${m.token}`));
+export function flattenMentions(text: string, table: Map<string, Mention>, dir: string): string {
+  const live = new Set(indexFor(dir).notes.map((n) => n.path));
+  const used = firstPerToken(table)
+    .filter((m) => text.includes(`@${m.token}`))
+    .filter((m) => (m.kind === "note" ? live.has(m.path ?? "") : !!m.body));
   if (used.length === 0) return text;
   const context = used
     .map((m) => `<context ref="${uriFor(m)}">\n${m.body ?? `Read .chronicle/notes/${m.path}`}\n</context>`)
     .join("\n\n");
   return `${text}\n\n${context}`;
+}
+
+/** The table is keyed by identity, so two same-titled notes can carry the same
+ *  token. Only one of them can be what a given `@note:Title` in the text means:
+ *  the first one picked, which is the one that was inserted there. */
+function firstPerToken(table: Map<string, Mention>): Mention[] {
+  const byToken = new Map<string, Mention>();
+  for (const m of table.values()) if (!byToken.has(m.token)) byToken.set(m.token, m);
+  return [...byToken.values()];
 }
 
 /* ---------- ACP content blocks ---------- */
@@ -196,7 +229,8 @@ const uriFor = (m: Mention) => `chronicle://${m.kind}/${m.kind === "note" ? m.la
  */
 export async function buildBlocks(text: string, table: Map<string, Mention>, dir: string): Promise<ContentBlock[]> {
   // longest token first: `@src/a.ts` must not be matched by a shorter `@src/a`
-  const tokens = [...table.keys()].sort((a, b) => b.length - a.length);
+  const byToken = new Map(firstPerToken(table).map((m) => [m.token, m] as const));
+  const tokens = [...byToken.keys()].sort((a, b) => b.length - a.length);
 
   type Hit = { at: number; len: number; m: Mention };
   const hits: Hit[] = [];
@@ -208,7 +242,7 @@ export async function buildBlocks(text: string, table: Map<string, Mention>, dir
       if (at === -1) break;
       // skip anything already covered by a longer token
       if (!hits.some((h) => at < h.at + h.len && h.at < at + needle.length)) {
-        hits.push({ at, len: needle.length, m: table.get(token)! });
+        hits.push({ at, len: needle.length, m: byToken.get(token)! });
       }
       from = at + needle.length;
     }
@@ -216,36 +250,43 @@ export async function buildBlocks(text: string, table: Map<string, Mention>, dir
   hits.sort((a, b) => a.at - b.at);
 
   const blocks: ContentBlock[] = [];
-  const pushText = (s: string) => {
-    if (s.length > 0) blocks.push({ type: "text", text: s });
-  };
+  // text accumulates until a mention actually produces a block, so a mention
+  // that resolves to nothing simply stays part of the sentence around it
+  let carry = "";
+  const pushText = (s: string) => { carry += s; };
+  const flush = () => { if (carry.length > 0) { blocks.push({ type: "text", text: carry }); carry = ""; } };
 
   let cursor = 0;
   for (const h of hits) {
     pushText(text.slice(cursor, h.at));
+    cursor = h.at + h.len;
     if (h.m.kind === "note" && h.m.path) {
-      // an unreadable note falls back to its own title: the mention never
-      // fails the send, it just carries less
-      const body = await notesRead(dir, h.m.path).catch(() => h.m.label);
+      // renamed or deleted since it was picked: leave `@note:Title` in the
+      // prose rather than send an empty resource block claiming to be a note
+      const body = await notesRead(dir, h.m.path).catch(() => null);
+      if (body === null) { pushText(`@${h.m.token}`); continue; }
+      flush();
       blocks.push({
         type: "resource",
         resource: { uri: uriFor(h.m), text: body, mimeType: "text/markdown" },
       });
     } else if (h.m.body) {
+      flush();
       blocks.push({
         type: "resource",
         resource: { uri: uriFor(h.m), text: h.m.body, mimeType: "text/plain" },
       });
     } else {
+      flush();
       blocks.push({
         type: "resource_link",
         uri: `file://${dir}/${h.m.token}`,
         name: h.m.token,
       });
     }
-    cursor = h.at + h.len;
   }
   pushText(text.slice(cursor));
+  flush();
 
   return blocks.length > 0 ? blocks : [{ type: "text", text }];
 }

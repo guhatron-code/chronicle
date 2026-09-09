@@ -57,7 +57,10 @@ export function SearchOverlay({
   }, [open]);
 
   useEffect(() => {
-    if (!dir || !repo || q.trim().length < 2) { setResults({ files: [], commits: [], docs: [] }); return; }
+    // bump the guard before bailing out too: closing the overlay clears `q`,
+    // and a request already in flight must not land its answer in the empty
+    // state and be there waiting when the overlay reopens
+    if (!dir || !repo || q.trim().length < 2) { seqRepo.current += 1; setResults({ files: [], commits: [], docs: [] }); return; }
     const my = ++seqRepo.current;
     const t = setTimeout(() => {
       globalSearch(dir, q)
@@ -68,7 +71,7 @@ export function SearchOverlay({
   }, [dir, q, repo]);
 
   useEffect(() => {
-    if (!dir || q.trim().length < 2) { setNotes([]); return; }
+    if (!dir || q.trim().length < 2) { seqNotes.current += 1; setNotes([]); return; }
     // no debounce timer of its own: notes_search is an in-memory index scan
     // plus at most one read per body hit, and the sequence guard already
     // discards the answers to keystrokes the user has moved past
@@ -111,7 +114,7 @@ export function SearchOverlay({
               </CommandEmpty>
             )}
 
-            {repo && results.files.length > 0 && (
+            {repo && needle.length >= 2 && results.files.length > 0 && (
               <CommandGroup heading="Files" className={GROUP_HEAD}>
                 {results.files.map((f) => (
                   <CommandItem key={`f-${f}`} value={`f-${f}`} onSelect={() => go(() => onOpenFile(f))} className={ITEM}>
@@ -122,7 +125,7 @@ export function SearchOverlay({
               </CommandGroup>
             )}
 
-            {repo && results.commits.length > 0 && (
+            {repo && needle.length >= 2 && results.commits.length > 0 && (
               <CommandGroup heading="Saves" className={GROUP_HEAD}>
                 {results.commits.map((c) => (
                   <CommandItem key={`c-${c.hash}`} value={`c-${c.hash}`} onSelect={() => go(onOpenHistory)} className={ITEM}>
@@ -135,7 +138,7 @@ export function SearchOverlay({
               </CommandGroup>
             )}
 
-            {repo && results.docs.length > 0 && (
+            {repo && needle.length >= 2 && results.docs.length > 0 && (
               <CommandGroup heading="Plan documents" className={GROUP_HEAD}>
                 {results.docs.map((d) => (
                   <CommandItem key={`d-${d.path}`} value={`d-${d.path}`} onSelect={() => go(() => onOpenFile(d.path))} className={ITEM}>
@@ -147,7 +150,7 @@ export function SearchOverlay({
               </CommandGroup>
             )}
 
-            {notes.length > 0 && (
+            {needle.length >= 2 && notes.length > 0 && (
               <CommandGroup heading="Notes" className={GROUP_HEAD}>
                 {notes.map((n) => (
                   <CommandItem key={`n-${n.path}`} value={`n-${n.path}`} onSelect={() => go(() => onOpenNote(n.path))} className={ITEM}>

@@ -235,7 +235,7 @@ export function Composer({
             trigger.query,
             attachments.map((a) => ({ name: a.name, relPath: a.relPath })),
           ).map((m) => ({
-            id: `${m.kind}:${m.token}`,
+            id: m.key,
             label: m.label,
             detail: m.detail,
             group: GROUP[m.kind],
@@ -286,9 +286,10 @@ export function Composer({
       dir,
       trigger.query,
       attachments.map((a) => ({ name: a.name, relPath: a.relPath })),
-    ).find((m) => `${m.kind}:${m.token}` === item.id);
+    ).find((m) => m.key === item.id);
     if (!row) return;
-    mentions.current.set(row.token, row);
+    // keyed by identity, not by the inserted text: two notes can share a title
+    mentions.current.set(row.key, row);
     const caret = ta?.selectionStart ?? text.length;
     const inserted = `@${row.token} `;
     const next = text.slice(0, trigger.start) + inserted + text.slice(caret);
@@ -349,7 +350,7 @@ export function Composer({
     if (!typed) return;
     // a queued message goes out unattended later — expand its mentions now,
     // while the table still holds what they pointed at
-    enqueueAgentMessage(dir, flattenMentions(typed, mentions.current));
+    enqueueAgentMessage(dir, flattenMentions(typed, mentions.current, dir));
     setText("");
     mirrorComposerText(dir, "");
     mentions.current.clear();

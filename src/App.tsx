@@ -562,7 +562,9 @@ export default function App() {
       closeTermsFor(dir);
       evictRepo(dir);
       evictNotes(dir);
-      setNotesOnScreen(null); // the vault listener must not outlive the project
+      // only the FOREGROUND project's close drops the vault listener — closing a
+      // background tab must leave the pane on screen still hearing notes-changed
+      if (activeRef.current === dir) setNotesOnScreen(null);
       void unwatchProject(dir).catch(() => {});
       setProjects((prev) => {
         const next = new Map(prev);
