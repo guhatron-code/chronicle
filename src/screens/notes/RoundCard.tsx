@@ -17,7 +17,7 @@ import { memo, useState } from "react";
 import { TreeRow } from "@/components/chrome/Tree";
 import { DocGlyph } from "@/components/chrome/icons";
 import {
-  copyText, fixesCancel, readFile, roundExecCancel, roundExecute, type NoteEntry,
+  copyText, fixesCancel, readFileText, roundExecCancel, roundExecute, type NoteEntry,
 } from "@/lib/ipc";
 import { clearAgentRound, dismissRound, markAgentRound } from "@/lib/round-log";
 import { refreshNotes, setRoundGenerating } from "@/lib/notes-store";
@@ -81,7 +81,7 @@ export const RoundCard = memo(function RoundCard({
   };
 
   const copyPrompt = () => {
-    readFile(dir, `fixes/phase_${n}_fixes_prompt.md`)
+    readFileText(dir, `fixes/phase_${n}_fixes_prompt.md`)
       .then((text) => copyText(text))
       .then(() => toastSuccess("Prompt copied", "Paste it into any agent — it names the plan and the notes."))
       .catch((e) => toastError("Couldn't copy the prompt", String(e).slice(0, 90)));

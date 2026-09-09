@@ -82,7 +82,7 @@ import type { HelpTarget } from "@/lib/help-content";
 import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/lib/setup-store";
 import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, subscribeAgent } from "@/lib/agent-session";
-import { agentSessionStop, readFile } from "@/lib/ipc";
+import { agentSessionStop, readFileText } from "@/lib/ipc";
 import { openAgentReview } from "@/screens/repo/RepoPane";
 import { copyText, githubClone, githubRepos, initStatus, launchOpenDir, openUrl, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
@@ -473,7 +473,7 @@ export default function App() {
       apply(null);
       return;
     }
-    readFile(dir, promptPath)
+    readFileText(dir, promptPath)
       .then((text) => {
         const cur = agentSessionFor(dir).composerText;
         if (cur.trim() && cur !== text) {

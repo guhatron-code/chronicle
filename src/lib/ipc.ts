@@ -94,7 +94,9 @@ export interface StateData {
   last_commit: string;
   tags: string[];
   worktrees: { path: string; branch: string; prunable: boolean }[];
-  dirty: { code: string; path: string }[];
+  dirty: { code: string; path: string; badge: DirtyBadge }[];
+  published: PublishKind;
+  remote_ref: string;
   statuses: PhaseStatus[];
   docs: Record<string, boolean>;
   stale: string[];
@@ -196,6 +198,29 @@ export interface RemoteOutcome {
 }
 export const gitPush = (dir: string) => invoke<RemoteOutcome>("git_push", { dir });
 export const gitPull = (dir: string) => invoke<RemoteOutcome>("git_pull", { dir });
+
+/* ---------- the history section (src-tauri/src/history.rs) ---------- */
+export type DirtyBadge = "new" | "edited" | "deleted" | "renamed";
+export type PublishKind = "no-remote" | "never-published" | "ok";
+export interface HistoryFacts {
+  degraded: boolean;
+  is_git: boolean;
+  last_save: { ts: number; subject: string } | null; // ts = unix SECONDS
+  dirty: { code: string; path: string; badge: DirtyBadge }[];
+  remote: {
+    kind: PublishKind;
+    ref_name: string; // "origin/react-shadcn" — "" when nothing resolved
+    ahead: number;
+    behind: number;
+    checked_ms: number | null; // null = never checked
+    error: string | null; // set only by a failed gitFetch
+  };
+  last_publish: { ts: number; tag: string | null } | null;
+}
+export const historyFacts = (dir: string) => invoke<HistoryFacts>("history_facts", { dir });
+/** The ONLY fetch in the app — "Check now" and nothing else. */
+export const gitFetch = (dir: string) => invoke<HistoryFacts>("git_fetch", { dir });
+
 /** https-only, validated in Rust — the PR-hint toast's action. */
 export const openUrl = (url: string) => invoke<void>("open_url", { url });
 export const gitLogGraph = (dir: string, limit?: number) =>
@@ -232,8 +257,33 @@ export const listDir = (dir: string, path: string) =>
   invoke<DirEntry[]>("list_dir", { dir, path });
 /** Every file in the project, repo-relative — the composer's `@` menu. */
 export const fileIndex = (dir: string) => invoke<string[]>("file_index", { dir });
+/** The editable payload: the text, the mtime the next write must match, and the
+ *  two reasons a file is view-only (a NUL in the first 8 KiB, or past 4 MiB). */
+export interface ReadFileResult {
+  text: string;
+  mtime_ms: number;
+  size: number;
+  binary: boolean;
+  too_large: boolean;
+}
 export const readFile = (dir: string, path: string) =>
-  invoke<string>("read_file", { dir, path });
+  invoke<ReadFileResult>("read_file", { dir, path });
+/** Just the text — for the callers that only ever wanted a string. */
+export const readFileText = (dir: string, path: string) =>
+  readFile(dir, path).then((r) => r.text);
+/** Atomic write. `expectedMtimeMs` makes it refuse with "changed on disk"
+ *  when the file moved under the buffer. Returns the new mtime in ms. */
+export const writeFile = (dir: string, path: string, text: string, expectedMtimeMs?: number) =>
+  invoke<number>("write_file", { dir, path, text, expectedMtimeMs }); // Rust: expected_mtime_ms
+export const createPath = (dir: string, path: string, kind: "file" | "dir") =>
+  invoke<void>("create_path", { dir, path, kind });
+export const renamePath = (dir: string, from: string, to: string) =>
+  invoke<void>("rename_path", { dir, from, to });
+/** The user's Trash, restorable from Finder — never an unlink. */
+export const trashPath = (dir: string, path: string) =>
+  invoke<void>("trash_path", { dir, path });
+export const revealPath = (dir: string, path: string) =>
+  invoke<void>("reveal_path", { dir, path });
 export const copyFile = (dir: string, path: string) =>
   invoke<string>("copy_file", { dir, path }); // returns copied char count (as a string)
 export const copyText = (text: string) => invoke<void>("copy_text", { text });

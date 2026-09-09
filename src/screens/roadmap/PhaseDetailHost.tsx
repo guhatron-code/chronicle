@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { openRoundFor } from "@/lib/notes-store";
 import { PhaseDetail, type DetailDoc, type DetailSaves } from "./PhaseDetail";
 import type { ManifestPhase, PhaseStatus } from "@/lib/ipc";
-import { statFile, gitLogGraph, readFile, roundRetro } from "@/lib/ipc";
+import { statFile, gitLogGraph, readFileText, roundRetro } from "@/lib/ipc";
 import { sentence } from "@/lib/utils";
 
 interface LogRow { hash?: string; subject?: string; author?: string; ago?: string }
@@ -99,7 +99,7 @@ export function PhaseDetailHost({
   }, [dir, id]);
 
   const fetchDoc = useCallback((path: string) => {
-    readFile(dir, path)
+    readFileText(dir, path)
       .then((content) => setDocContent((m) => ({ ...m, [path]: { content } })))
       .catch(() => setDocContent((m) => ({ ...m, [path]: { error: true } })));
   }, [dir]);

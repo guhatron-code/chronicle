@@ -11,7 +11,7 @@
  * table. Edit the text so it no longer matches and it silently becomes what it
  * looks like — ordinary prose. No chip ever claims something isn't attached.
  */
-import { fileIndex, notesRead, readFile } from "./ipc";
+import { fileIndex, notesRead, readFileText } from "./ipc";
 import { indexFor } from "./notes-store";
 
 export type MentionKind = "file" | "attachment" | "note" | "phase";
@@ -78,7 +78,7 @@ export function cachedPhases(dir: string): Mention[] {
 export function ensurePhases(dir: string, onReady: () => void): void {
   if (phaseCache.has(dir)) return;
   phaseCache.set(dir, []); // claim the slot so this runs once
-  void readFile(dir, "chronicle.json")
+  void readFileText(dir, "chronicle.json")
     .then((raw) => {
       const parsed = JSON.parse(raw) as {
         stages?: { phases?: { id?: string; name?: string; desc?: string; items?: string[] }[] }[];
