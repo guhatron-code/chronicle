@@ -8,7 +8,8 @@ import * as React from "react";
  * never cached as content. Presentational only; values transcribed 1:1.
  */
 import { StateWord } from "@/components/chrome/atoms";
-import { ClockGlyph, CopyGlyph, ImageGlyph, XGlyph } from "@/components/chrome/icons";
+import { TabStrip } from "@/components/chrome/TabStrip";
+import { ClockGlyph, CopyGlyph, ImageGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 
 /* ---- body content types ---- */
@@ -158,9 +159,6 @@ function Stage({ children, className }: { children: React.ReactNode; className?:
 }
 
 export function Viewer(p: ViewerProps) {
-  // scroll the active tab into view only when it CHANGES — a ref callback runs
-  // every render, and scrollIntoView on each one hijacks the tab strip's scroll
-  const lastScrolled = React.useRef<string | null>(null);
   if (p.kind === "empty") {
     return (
       <Stage className={p.className}>
@@ -174,40 +172,12 @@ export function Viewer(p: ViewerProps) {
   return (
     <div className={cn("flex h-full min-w-0 flex-col", p.className)}>
       {/* open-file tabs */}
-      <div className="flex h-10 min-w-0 shrink-0 items-end gap-0.5 overflow-x-auto border-b border-divider px-2.5">
-        {p.tabs.map((tab) =>
-          tab.id === p.activeTabId ? (
-            <div
-              key={tab.id}
-              ref={(el) => {
-                if (el && lastScrolled.current !== tab.id) {
-                  lastScrolled.current = tab.id;
-                  el.scrollIntoView({ inline: "nearest", block: "nearest" });
-                }
-              }}
-              className="relative flex h-8 max-w-[190px] shrink-0 items-center gap-2 px-3 text-[12.5px] font-medium text-text-primary"
-            >
-              <span className="min-w-0 truncate" title={tab.name}>{tab.name}</span>
-              <button
-                aria-label={`Close ${tab.name}`}
-                onClick={() => p.onCloseTab?.(tab.id)}
-                className="flex size-4 items-center justify-center rounded-[4px] text-text-dim hover:bg-fill-hover"
-              >
-                <XGlyph size={8} />
-              </button>
-              <span className="absolute -bottom-px left-2 right-2 h-0.5 rounded-[1px] bg-text-primary" />
-            </div>
-          ) : (
-            <button
-              key={tab.id}
-              onClick={() => p.onSelectTab?.(tab.id)}
-              className="flex h-8 max-w-[170px] shrink-0 items-center gap-2 px-3 text-[12.5px] text-text-muted hover:text-text-secondary"
-            >
-              <span className="min-w-0 truncate" title={tab.name}>{tab.name}</span>
-            </button>
-          ),
-        )}
-      </div>
+      <TabStrip
+        tabs={p.tabs.map((tab) => ({ id: tab.id, label: tab.name }))}
+        activeId={p.activeTabId}
+        onSelect={p.onSelectTab}
+        onClose={p.onCloseTab}
+      />
 
       {/* actions bar */}
       {showActions && (

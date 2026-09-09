@@ -11,7 +11,7 @@ import {
   activate, back, blockInfo, closeTab, forward, navigate, newTab, prepare, pushBounds, reload,
   setWebVisible, subscribeBlock, subscribeWeb, webFor,
 } from "@/lib/web-store";
-import { XGlyph } from "@/components/chrome/icons";
+import { TabStrip } from "@/components/chrome/TabStrip";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso); return isNaN(d.getTime()) ? "unknown" : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
@@ -91,20 +91,17 @@ export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* tabs */}
-      <div className="flex min-w-0 items-end gap-0.5 overflow-x-auto border-b border-divider px-2 pt-2">
-        {p.tabs.map((tab, i) => (
-          <div key={tab.id}
-            onClick={() => activate(dir, i)}
-            className={cn("flex h-8 max-w-[220px] cursor-default items-center gap-2 rounded-t-md border border-b-0 px-2.5 text-[11.5px]",
-              i === p.active ? "border-border-hairline bg-surface-sidebar text-text-primary" : "border-transparent text-text-subtle hover:text-text-secondary")}>
-            <span className={cn("size-2 shrink-0 rounded-sm", tab.loading ? "bg-state-neutral" : tab.url.startsWith("chronicle-file") ? "rounded-full bg-text-subtle" : "bg-state-success")} />
-            <span className="min-w-0 truncate">{tab.title || displayAddress(tab.url) || "New tab"}</span>
-            <button aria-label="Close tab" onClick={(e) => { e.stopPropagation(); void closeTab(dir, i); }} className="text-text-dimmer hover:text-text-primary"><XGlyph size={8} /></button>
-          </div>
-        ))}
-        <button aria-label="New tab" onClick={() => { void newTab(dir); setTimeout(() => input.current?.focus(), 0); }} className="shrink-0 px-2.5 pb-1.5 text-text-faint hover:text-text-primary">+</button>
-      </div>
+      {/* tabs — the viewer's strip, so the browser and the repo read the same */}
+      <TabStrip
+        tabs={p.tabs.map((tab) => {
+          const label = tab.title || displayAddress(tab.url) || "New tab";
+          return { id: String(tab.id), label, title: label, dirty: tab.loading };
+        })}
+        activeId={t ? String(t.id) : null}
+        onSelect={(id) => { const i = p.tabs.findIndex((x) => String(x.id) === id); if (i >= 0) activate(dir, i); }}
+        onClose={(id) => { const i = p.tabs.findIndex((x) => String(x.id) === id); if (i >= 0) void closeTab(dir, i); }}
+        onNew={() => { void newTab(dir); setTimeout(() => input.current?.focus(), 0); }}
+      />
       {/* address bar */}
       <div className="flex items-center gap-1.5 border-b border-divider bg-surface-sidebar px-2 py-1.5">
         <button aria-label="Back" disabled={!t?.canBack} onClick={() => t && back(t)} className="size-6 rounded-md text-text-subtle disabled:text-text-dimmer hover:bg-fill-hover">‹</button>
