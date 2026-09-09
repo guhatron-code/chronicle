@@ -163,30 +163,6 @@ export function Viewer(p: ViewerProps) {
             {p.path}
           </span>
           <span className="flex-1" />
-          <div className="flex shrink-0 overflow-hidden rounded-md border border-border-hairline">
-            <button
-              onClick={() => p.onModeChange?.("contents")}
-              className={cn(
-                "h-[26px] px-[11px] text-[11.5px]",
-                p.mode === "contents"
-                  ? "bg-fill-hover font-medium text-text-primary"
-                  : "text-text-muted hover:text-text-primary",
-              )}
-            >
-              Contents
-            </button>
-            <button
-              onClick={() => p.onModeChange?.("diff")}
-              className={cn(
-                "h-[26px] border-l border-border-hairline px-[11px] text-[11.5px]",
-                p.mode === "diff"
-                  ? "bg-fill-hover font-medium text-text-primary"
-                  : "text-text-muted hover:text-text-primary",
-              )}
-            >
-              Changes
-            </button>
-          </div>
           {p.onOpenInWeb && (
             <button onClick={p.onOpenInWeb} className="h-[26px] rounded-md border border-border-hairline px-[11px] text-[11.5px] text-text-muted hover:text-text-primary">
               Open in Web
@@ -214,6 +190,30 @@ export function Viewer(p: ViewerProps) {
               <span className="text-state-error">{"−"}{p.diffStat.removed}</span>
             </span>
           )}
+          <div className="flex shrink-0 overflow-hidden rounded-md border border-border-hairline">
+            <button
+              onClick={() => p.onModeChange?.("contents")}
+              className={cn(
+                "h-[26px] px-[11px] text-[11.5px]",
+                p.mode === "contents"
+                  ? "bg-fill-hover font-medium text-text-primary"
+                  : "text-text-muted hover:text-text-primary",
+              )}
+            >
+              Contents
+            </button>
+            <button
+              onClick={() => p.onModeChange?.("diff")}
+              className={cn(
+                "h-[26px] border-l border-border-hairline px-[11px] text-[11.5px]",
+                p.mode === "diff"
+                  ? "bg-fill-hover font-medium text-text-primary"
+                  : "text-text-muted hover:text-text-primary",
+              )}
+            >
+              Changes
+            </button>
+          </div>
         </div>
       )}
 
@@ -306,7 +306,12 @@ export function Viewer(p: ViewerProps) {
           />
         </React.Suspense>
       )}
-      {p.body.kind === "diff" && <DiffView rows={p.body.rows} />}
+      {p.body.kind === "diff" && p.body.rows.length === 0 && (
+        <div className="flex flex-1 items-center justify-center px-6 text-[12.5px] text-text-dim">
+          No changes since the last save.
+        </div>
+      )}
+      {p.body.kind === "diff" && p.body.rows.length > 0 && <DiffView rows={p.body.rows} />}
       {p.body.kind === "read-error" && (
         <Stage className="gap-[9px] p-4 text-center">
           <StateWord kind="error" glyphSize={12} className="text-[12.5px]">
