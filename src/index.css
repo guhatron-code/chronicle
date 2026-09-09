@@ -381,6 +381,15 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 /* The note editor's two inline atoms (src/screens/notes/editor/nodes.ts). A
    wikilink is dotted while it resolves and dashed while it does not; a tag is a
    small mono chip. Both stay inside the text line — no wrapping, no reflow. */
+/* The editor surface is one big contenteditable; the browser's default focus
+   outline would box the whole document. The caret is the focus indicator here. */
+.note-doc .ProseMirror,
+.note-doc .ProseMirror:focus,
+.note-doc .ProseMirror:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
 .note-doc .wikilink {
   text-decoration: underline dotted;
   text-underline-offset: 2px;
