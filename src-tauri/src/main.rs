@@ -329,10 +329,114 @@ fn git_in(repo: &Path, args: &[&str]) -> String {
 /// Err ONLY when git itself couldn't run (missing binary / spawn failure). A broken
 /// environment must surface as DEGRADED — never silently derive "0 commits / not a
 /// repo" from it. (A normal non-zero git exit, e.g. not-a-repo, is still empty output.)
-fn git_in_checked(repo: &Path, args: &[&str]) -> Result<String, String> {
+///
+/// Only the TRAILING newline goes. `--porcelain`'s first line starts with a
+/// significant space (" M path") and `.trim()` used to eat it, shifting every
+/// field of that one line by one character. Callers trim per line.
+pub(crate) fn git_in_checked(repo: &Path, args: &[&str]) -> Result<String, String> {
     Command::new("git").arg("-C").arg(repo).args(args).output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim_end_matches(['\n', '\r']).to_string())
         .map_err(|e| e.to_string())
+}
+
+/// Which remote ref this branch is measured against, in the spec's order:
+/// the configured upstream, then `origin/<branch>`, then `origin/HEAD`.
+/// Reading `branch.<name>.merge` alone (what this used to do) called a branch
+/// that had been pushed without `-u` "never published".
+pub(crate) fn remote_ref(repo: &Path, branch: &str) -> Option<String> {
+    let ok = |args: &[&str]| {
+        Command::new("git").arg("-C").arg(repo).args(args).output()
+            .map(|o| o.status.success()).unwrap_or(false)
+    };
+    if ok(&["rev-parse", "--verify", "--quiet", "@{u}"]) {
+        let name = git_in(repo, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+        if !name.is_empty() { return Some(name); }
+    }
+    if !branch.is_empty() {
+        let full = format!("refs/remotes/origin/{branch}");
+        if ok(&["rev-parse", "--verify", "--quiet", &full]) { return Some(format!("origin/{branch}")); }
+    }
+    if ok(&["rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD"]) {
+        return Some("origin/HEAD".into());
+    }
+    None
+}
+
+/// `no-remote` when nothing is configured, `never-published` only when no remote
+/// ref anywhere contains HEAD, `ok` otherwise.
+pub(crate) fn publish_kind(repo: &Path, remote_url: &str) -> &'static str {
+    if remote_url.is_empty() { return "no-remote"; }
+    let contains = git_in(repo, &["branch", "-r", "--contains", "HEAD"]);
+    if contains.lines().any(|l| !l.trim().is_empty()) { "ok" } else { "never-published" }
+}
+
+/// `(ahead, behind)` — how many saves are here that the remote ref lacks, and
+/// the other way round. `--left-right --count <ref>...HEAD` prints "behind ahead".
+pub(crate) fn ahead_behind(repo: &Path, remote_ref: &str) -> (u32, u32) {
+    if remote_ref.is_empty() { return (0, 0); }
+    let lr = git_in(repo, &["rev-list", "--left-right", "--count", &format!("{remote_ref}...HEAD")]);
+    let mut it = lr.split_whitespace();
+    let behind = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+    let ahead = it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
+    (ahead, behind)
+}
+
+/// The porcelain XY pair as a word a non-developer reads. The staged column wins
+/// when it says something, because that is what the next save will record.
+pub(crate) fn badge_for(x: char, y: char) -> &'static str {
+    let c = if x != ' ' && x != '?' { x } else { y };
+    match c {
+        '?' => "new",
+        'A' => "new",
+        'D' => "deleted",
+        'R' => "renamed",
+        _ => "edited", // M, C, T, U — "edited" is the honest word for all of them
+    }
+}
+
+/// Chronicle's own runtime scribbles are not the user's edits. Matched on the
+/// `.chronicle/` segment wherever it sits, because the manifest folder is not
+/// always the repo root (a sub-project keeps its own `.chronicle/`).
+pub(crate) fn is_runtime_path(rel: &str) -> bool {
+    const RUNTIME: &[&str] = &[
+        "agent/", "attachments/", "notes/", "trash/",
+        "journal.jsonl", "rounds.json", "kanban.json.migrated",
+    ];
+    let Some(i) = rel.find(".chronicle/") else { return false };
+    // ".chronicle/" must be a whole segment, not the tail of "src/my.chronicle/"
+    if i > 0 && rel.as_bytes()[i - 1] != b'/' { return false; }
+    let tail = &rel[i + ".chronicle/".len()..];
+    RUNTIME.iter().any(|r| if r.ends_with('/') { tail.starts_with(r) } else { tail == *r })
+}
+
+#[derive(Serialize, Debug, Clone, PartialEq)]
+pub(crate) struct DirtyEntry {
+    pub code: String,
+    pub path: String,
+    pub badge: String,
+}
+
+/// One porcelain line → one entry. `R  old -> new` reports the NEW path (that is
+/// the file on disk now); quoting is off at the command, so paths arrive raw.
+pub(crate) fn parse_porcelain(raw: &str) -> Vec<DirtyEntry> {
+    let mut out = Vec::new();
+    for l in raw.lines() {
+        if l.len() < 4 { continue; }
+        let b = l.as_bytes();
+        let (x, y) = (b[0] as char, b[1] as char);
+        let rest = &l[3..];
+        let path = rest.rsplit(" -> ").next().unwrap_or(rest).trim_matches('"').to_string();
+        if is_runtime_path(&path) { continue; }
+        let code = if x != ' ' && x != '?' { x } else { y };
+        out.push(DirtyEntry { code: code.to_string(), path, badge: badge_for(x, y).into() });
+    }
+    out
+}
+
+/// `-uall` so a new folder lists its files instead of one "dir/" row, and
+/// `core.quotePath=false` so a non-ASCII name is not returned as `"\303\251..."`.
+pub(crate) fn dirty_set(repo: &Path) -> Vec<DirtyEntry> {
+    parse_porcelain(&git_in(repo, &["-c", "core.quotePath=false", "status", "--porcelain", "-uall"]))
 }
 
 struct Ctx {
@@ -667,8 +771,6 @@ fn derive_for_dir(dir: &Path) -> Value {
 
 #[derive(Serialize)]
 struct Worktree { path: String, branch: String, prunable: bool }
-#[derive(Serialize)]
-struct DirtyEntry { code: String, path: String }
 
 #[tauri::command]
 async fn get_picker() -> Value {
@@ -1128,19 +1230,11 @@ fn state_for_project(p: &Project) -> Value {
     // does this project have an online home at all? (no network — just the configured remote)
     let remote_url = git_in(&p.repo, &["remote", "get-url", "origin"]);
     let commits: u32 = git_in(&p.repo, &["rev-list", "--count", "HEAD"]).parse().unwrap_or(0);
-    let upstream = Command::new("git").arg("-C").arg(&p.repo)
-        .args(["rev-parse", "--abbrev-ref", "@{u}"]).output()
-        .map(|o| o.status.success()).unwrap_or(false);
-    let (behind, ahead) = if upstream {
-        let lr = git_in(&p.repo, &["rev-list", "--left-right", "--count", "@{u}...HEAD"]);
-        let mut it = lr.split_whitespace();
-        (it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0),
-         it.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0))
-    } else { (0, 0) };
-    let dirty: Vec<DirtyEntry> = git_in(&p.repo, &["status", "--porcelain"]).lines()
-        .filter(|l| l.len() > 3)
-        .map(|l| DirtyEntry { code: l[..2].trim().to_string(), path: l[3..].trim_matches('"').to_string() })
-        .collect();
+    let rref = remote_ref(&p.repo, &branch);
+    let upstream = rref.is_some();
+    let (ahead, behind) = rref.as_deref().map(|r| ahead_behind(&p.repo, r)).unwrap_or((0, 0));
+    let published = publish_kind(&p.repo, &remote_url);
+    let dirty = dirty_set(&p.repo);
     let worktrees: Vec<Worktree> = git_in(&p.repo, &["worktree", "list", "--porcelain"])
         .split("\n\n").filter(|b| !b.trim().is_empty())
         .map(|b| {
@@ -1212,6 +1306,7 @@ fn state_for_project(p: &Project) -> Value {
         "is_git": is_git, "git_degraded": git_degraded,
         "branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind,
         "remote_url": remote_url, "commits": commits,
+        "published": published, "remote_ref": rref.clone().unwrap_or_default(),
         "last_commit": git_in(&p.repo, &["log", "-1", "--format=%h · %s"]),
         "tags": tags_sorted,
         "worktrees": worktrees, "dirty": dirty,
@@ -3501,3 +3596,137 @@ mod r4_tests {
     }
 }
 
+
+/* ================= the history plumbing (2026-09-10 audit) ================= */
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("chronicle-hist-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d.canonicalize().unwrap()
+    }
+
+    fn git(d: &Path, args: &[&str]) {
+        let o = std::process::Command::new("git").arg("-C").arg(d).args(args).output().unwrap();
+        assert!(o.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&o.stderr));
+    }
+
+    /// A repo with one commit, committer identity forced so CI has one too.
+    fn repo(name: &str) -> PathBuf {
+        let d = tmp(name);
+        git(&d, &["init", "-q", "-b", "main"]);
+        git(&d, &["config", "user.email", "t@t"]);
+        git(&d, &["config", "user.name", "t"]);
+        std::fs::write(d.join("a.txt"), "one\n").unwrap();
+        git(&d, &["add", "-A"]);
+        git(&d, &["commit", "-q", "-m", "feat: first save"]);
+        d
+    }
+
+    /// THE BUG: `.trim()` ate the leading space of the first porcelain line, so
+    /// " M a.txt" parsed as code "M" over path "xt". Only the trailing newline goes.
+    #[test]
+    fn git_in_keeps_the_first_lines_leading_space() {
+        let d = repo("trim");
+        std::fs::write(d.join("a.txt"), "two\n").unwrap();
+        let raw = git_in(&d, &["status", "--porcelain"]);
+        assert!(raw.starts_with(" M "), "leading space lost: {raw:?}");
+        assert!(!raw.ends_with('\n'), "trailing newline kept: {raw:?}");
+    }
+
+    #[test]
+    fn the_dirty_set_survives_the_first_line() {
+        let d = repo("dirty");
+        std::fs::write(d.join("a.txt"), "two\n").unwrap();
+        let set = dirty_set(&d);
+        assert_eq!(set.len(), 1);
+        assert_eq!(set[0].path, "a.txt");
+        assert_eq!(set[0].badge, "edited");
+    }
+
+    #[test]
+    fn parse_porcelain_splits_renames_and_maps_every_badge() {
+        let raw = concat!(
+            " M src/edited.rs\n",
+            "?? src/new.rs\n",
+            "A  src/added.rs\n",
+            " D src/gone.rs\n",
+            "R  old/name.rs -> new/name.rs\n",
+        );
+        let got = parse_porcelain(raw);
+        let pairs: Vec<(&str, &str)> = got.iter().map(|d| (d.path.as_str(), d.badge.as_str())).collect();
+        assert_eq!(pairs, vec![
+            ("src/edited.rs", "edited"),
+            ("src/new.rs", "new"),
+            ("src/added.rs", "new"),
+            ("src/gone.rs", "deleted"),
+            ("new/name.rs", "renamed"),
+        ]);
+    }
+
+    #[test]
+    fn the_chronicle_runtime_paths_are_not_edits_of_yours() {
+        for p in [
+            ".chronicle/agent/session.json",
+            ".chronicle/attachments/shot-1.png",
+            ".chronicle/journal.jsonl",
+            ".chronicle/rounds.json",
+            ".chronicle/notes/Tasks/A.md",
+            ".chronicle/trash/1-A.md",
+            ".chronicle/kanban.json.migrated",
+            "sub/project/.chronicle/journal.jsonl",
+        ] {
+            assert!(is_runtime_path(p), "{p} should be excluded");
+        }
+        for p in [".chronicle/kanban.json", "chronicle.json", "src/.chronicled.rs", "notes/A.md"] {
+            assert!(!is_runtime_path(p), "{p} must stay visible");
+        }
+        let raw = " M .chronicle/journal.jsonl\n M src/keep.rs\n";
+        assert_eq!(parse_porcelain(raw).len(), 1);
+    }
+
+    #[test]
+    fn publish_state_resolves_without_an_upstream() {
+        let origin = tmp("pub-origin");
+        git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+        let d = repo("pub");
+        git(&d, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
+
+        // a remote is configured but nothing was ever pushed
+        assert_eq!(publish_kind(&d, "url"), "never-published");
+        assert_eq!(remote_ref(&d, "main"), None);
+
+        // pushed WITHOUT -u: no @{u}, but refs/remotes/origin/main exists
+        git(&d, &["push", "-q", "origin", "main"]);
+        assert_eq!(remote_ref(&d, "main").as_deref(), Some("origin/main"));
+        assert_eq!(publish_kind(&d, "url"), "ok");
+        assert_eq!(ahead_behind(&d, "origin/main"), (0, 0));
+
+        // one local save on top
+        std::fs::write(d.join("a.txt"), "two\n").unwrap();
+        git(&d, &["commit", "-qam", "fix: second save"]);
+        assert_eq!(ahead_behind(&d, "origin/main"), (1, 0));
+    }
+
+    #[test]
+    fn publish_state_prefers_the_upstream_when_there_is_one() {
+        let origin = tmp("up-origin");
+        git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+        let d = repo("up");
+        git(&d, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
+        git(&d, &["push", "-qu", "origin", "main"]);
+        assert_eq!(remote_ref(&d, "main").as_deref(), Some("origin/main"));
+        assert_eq!(publish_kind(&d, "url"), "ok");
+    }
+
+    #[test]
+    fn no_remote_is_not_never_published() {
+        let d = repo("solo");
+        assert_eq!(publish_kind(&d, ""), "no-remote");
+        assert_eq!(remote_ref(&d, "main"), None);
+    }
+}
