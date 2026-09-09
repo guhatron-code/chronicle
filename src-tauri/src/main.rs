@@ -364,10 +364,15 @@ pub(crate) fn remote_ref(repo: &Path, branch: &str) -> Option<String> {
     None
 }
 
-/// `no-remote` when nothing is configured, `never-published` only when no remote
-/// ref anywhere contains HEAD, `ok` otherwise.
-pub(crate) fn publish_kind(repo: &Path, remote_url: &str) -> &'static str {
+/// `no-remote` when nothing is configured, `never-published` only when the branch
+/// has no remote ref AND no remote ref anywhere contains HEAD, `ok` otherwise.
+///
+/// `--contains HEAD` alone called a branch "never published" the moment it had one
+/// local save on top of what was pushed — the commit the remote holds no longer IS
+/// HEAD. A branch that has a remote ref is published and merely ahead.
+pub(crate) fn publish_kind(repo: &Path, branch: &str, remote_url: &str) -> &'static str {
     if remote_url.is_empty() { return "no-remote"; }
+    if remote_ref(repo, branch).is_some() { return "ok"; }
     let contains = git_in(repo, &["branch", "-r", "--contains", "HEAD"]);
     if contains.lines().any(|l| !l.trim().is_empty()) { "ok" } else { "never-published" }
 }
@@ -400,15 +405,20 @@ pub(crate) fn badge_for(x: char, y: char) -> &'static str {
 /// `.chronicle/` segment wherever it sits, because the manifest folder is not
 /// always the repo root (a sub-project keeps its own `.chronicle/`).
 pub(crate) fn is_runtime_path(rel: &str) -> bool {
-    const RUNTIME: &[&str] = &[
-        "agent/", "attachments/", "notes/", "trash/",
-        "journal.jsonl", "rounds.json", "kanban.json.migrated",
-    ];
-    let Some(i) = rel.find(".chronicle/") else { return false };
-    // ".chronicle/" must be a whole segment, not the tail of "src/my.chronicle/"
-    if i > 0 && rel.as_bytes()[i - 1] != b'/' { return false; }
-    let tail = &rel[i + ".chronicle/".len()..];
-    RUNTIME.iter().any(|r| if r.ends_with('/') { tail.starts_with(r) } else { tail == *r })
+    const RUNTIME_DIRS: &[&str] = &["agent", "attachments", "notes", "trash"];
+    const RUNTIME_FILES: &[&str] = &["journal.jsonl", "rounds.json", "kanban.json.migrated"];
+    // walked as SEGMENTS, not as a substring: searching for the first ".chronicle/"
+    // found the tail of "x.chronicle/" and gave up there, so a real ".chronicle/"
+    // deeper in the same path was never reached.
+    let segs: Vec<&str> = rel.split('/').collect();
+    for (i, seg) in segs.iter().enumerate() {
+        if *seg != ".chronicle" { continue; }
+        let Some(next) = segs.get(i + 1) else { continue };
+        // a runtime folder counts only for what is INSIDE it; a runtime file is the leaf
+        if RUNTIME_DIRS.contains(next) && segs.len() > i + 2 { return true; }
+        if RUNTIME_FILES.contains(next) && segs.len() == i + 2 { return true; }
+    }
+    false
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
@@ -418,16 +428,39 @@ pub(crate) struct DirtyEntry {
     pub badge: String,
 }
 
+/// `core.quotePath=false` only turns off the octal escaping of non-ASCII bytes;
+/// git still wraps a path that holds a `"`, a `\` or a control character in quotes
+/// and escapes it inside. Undo that, or the UI shows `a\"b.txt` with its backslash.
+fn unquote_path(s: &str) -> String {
+    if s.len() < 2 || !s.starts_with('"') || !s.ends_with('"') { return s.to_string(); }
+    let mut out = String::with_capacity(s.len());
+    let mut it = s[1..s.len() - 1].chars();
+    while let Some(c) = it.next() {
+        if c != '\\' { out.push(c); continue; }
+        match it.next() {
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some('t') => out.push('\t'),
+            Some('n') => out.push('\n'),
+            // anything else git escaped is not ours to guess at — keep it verbatim
+            Some(other) => { out.push('\\'); out.push(other); }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
 /// One porcelain line → one entry. `R  old -> new` reports the NEW path (that is
-/// the file on disk now); quoting is off at the command, so paths arrive raw.
+/// the file on disk now).
 pub(crate) fn parse_porcelain(raw: &str) -> Vec<DirtyEntry> {
     let mut out = Vec::new();
     for l in raw.lines() {
-        if l.len() < 4 { continue; }
+        // a short or mid-character split would panic on `&l[3..]`
+        if l.len() < 4 || !l.is_char_boundary(3) { continue; }
         let b = l.as_bytes();
         let (x, y) = (b[0] as char, b[1] as char);
         let rest = &l[3..];
-        let path = rest.rsplit(" -> ").next().unwrap_or(rest).trim_matches('"').to_string();
+        let path = unquote_path(rest.rsplit(" -> ").next().unwrap_or(rest));
         if is_runtime_path(&path) { continue; }
         let code = if x != ' ' && x != '?' { x } else { y };
         out.push(DirtyEntry { code: code.to_string(), path, badge: badge_for(x, y).into() });
@@ -1235,7 +1268,7 @@ fn state_for_project(p: &Project) -> Value {
     let rref = remote_ref(&p.repo, &branch);
     let upstream = rref.is_some();
     let (ahead, behind) = rref.as_deref().map(|r| ahead_behind(&p.repo, r)).unwrap_or((0, 0));
-    let published = publish_kind(&p.repo, &remote_url);
+    let published = publish_kind(&p.repo, &branch, &remote_url);
     let dirty = dirty_set(&p.repo);
     let worktrees: Vec<Worktree> = git_in(&p.repo, &["worktree", "list", "--porcelain"])
         .split("\n\n").filter(|b| !b.trim().is_empty())
@@ -3681,6 +3714,44 @@ mod history_tests {
         assert_eq!(parse_porcelain(raw).len(), 1);
     }
 
+    /// THE BUG: the old `rel.find(".chronicle/")` stopped at the tail of
+    /// "x.chronicle/", decided it wasn't a whole segment, and never looked at the
+    /// REAL ".chronicle/" further along.
+    #[test]
+    fn a_runtime_path_is_found_past_a_lookalike_folder() {
+        assert!(is_runtime_path("x.chronicle/a/.chronicle/journal.jsonl"));
+        assert!(is_runtime_path("x.chronicle/a/.chronicle/notes/A.md"));
+        // the lookalike on its own is still the user's file
+        assert!(!is_runtime_path("x.chronicle/journal.jsonl"));
+        assert!(!is_runtime_path("x.chronicle/notes/A.md"));
+    }
+
+    /// git quotes any path holding a `"` or a `\` even with core.quotePath=false.
+    #[test]
+    fn a_quoted_path_comes_back_unescaped() {
+        let raw = concat!(
+            " M \"my \\\"quoted\\\" file.txt\"\n",
+            "?? \"back\\\\slash.txt\"\n",
+            "R  \"old \\\"a\\\".txt\" -> \"new \\\"b\\\".txt\"\n",
+            " M plain name.txt\n",
+        );
+        let paths: Vec<String> = parse_porcelain(raw).into_iter().map(|d| d.path).collect();
+        assert_eq!(paths, vec![
+            "my \"quoted\" file.txt".to_string(),
+            "back\\slash.txt".to_string(),
+            "new \"b\".txt".to_string(),
+            "plain name.txt".to_string(),
+        ]);
+    }
+
+    /// A stray short line, or one whose 4th byte is mid-character, must not panic.
+    #[test]
+    fn a_malformed_porcelain_line_is_skipped_not_a_panic() {
+        assert!(parse_porcelain("\n M\nx\n").is_empty());
+        assert!(parse_porcelain(" Mé.txt\n").is_empty()); // byte 3 is inside "é"
+        assert_eq!(parse_porcelain(" M é.txt\n")[0].path, "é.txt");
+    }
+
     #[test]
     fn publish_state_resolves_without_an_upstream() {
         let origin = tmp("pub-origin");
@@ -3689,18 +3760,38 @@ mod history_tests {
         git(&d, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
 
         // a remote is configured but nothing was ever pushed
-        assert_eq!(publish_kind(&d, "url"), "never-published");
+        assert_eq!(publish_kind(&d, "main", "url"), "never-published");
         assert_eq!(remote_ref(&d, "main"), None);
 
         // pushed WITHOUT -u: no @{u}, but refs/remotes/origin/main exists
         git(&d, &["push", "-q", "origin", "main"]);
         assert_eq!(remote_ref(&d, "main").as_deref(), Some("origin/main"));
-        assert_eq!(publish_kind(&d, "url"), "ok");
+        assert_eq!(publish_kind(&d, "main", "url"), "ok");
         assert_eq!(ahead_behind(&d, "origin/main"), (0, 0));
 
         // one local save on top
         std::fs::write(d.join("a.txt"), "two\n").unwrap();
         git(&d, &["commit", "-qam", "fix: second save"]);
+        assert_eq!(ahead_behind(&d, "origin/main"), (1, 0));
+    }
+
+    /// THE BUG: `branch -r --contains HEAD` is empty the moment there is one local
+    /// save on top of what was pushed, so a published branch reported itself as
+    /// never published. Published and ahead is the honest answer.
+    #[test]
+    fn a_pushed_branch_with_a_new_local_save_is_published_and_ahead() {
+        let origin = tmp("ahead-origin");
+        git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+        let d = repo("ahead");
+        git(&d, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
+        git(&d, &["push", "-qu", "origin", "main"]);
+
+        std::fs::write(d.join("a.txt"), "two\n").unwrap();
+        git(&d, &["commit", "-qam", "fix: second save"]);
+
+        assert!(git_in(&d, &["branch", "-r", "--contains", "HEAD"]).trim().is_empty(),
+                "the premise: no remote ref contains HEAD anymore");
+        assert_eq!(publish_kind(&d, "main", "url"), "ok");
         assert_eq!(ahead_behind(&d, "origin/main"), (1, 0));
     }
 
@@ -3712,13 +3803,13 @@ mod history_tests {
         git(&d, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
         git(&d, &["push", "-qu", "origin", "main"]);
         assert_eq!(remote_ref(&d, "main").as_deref(), Some("origin/main"));
-        assert_eq!(publish_kind(&d, "url"), "ok");
+        assert_eq!(publish_kind(&d, "main", "url"), "ok");
     }
 
     #[test]
     fn no_remote_is_not_never_published() {
         let d = repo("solo");
-        assert_eq!(publish_kind(&d, ""), "no-remote");
+        assert_eq!(publish_kind(&d, "main", ""), "no-remote");
         assert_eq!(remote_ref(&d, "main"), None);
     }
 }

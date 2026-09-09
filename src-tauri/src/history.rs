@@ -99,7 +99,7 @@ pub fn facts(repo: &Path, project_dir: &Path) -> HistoryFacts {
         last_save: last_save_of(repo),
         dirty: dirty_set(repo),
         remote: RemoteFacts {
-            kind: publish_kind(repo, &remote_url).into(),
+            kind: publish_kind(repo, &branch, &remote_url).into(),
             ref_name: rref.unwrap_or_default(),
             ahead,
             behind,
