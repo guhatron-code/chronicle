@@ -14,6 +14,7 @@ import {
   githubCreate,
   copyFile as copyFileIpc,
   copyText,
+  createPath,
   gitCommit,
   gitDiff,
   gitDiscard,
@@ -27,7 +28,10 @@ import {
   listDir,
   readFile,
   readFileB64,
+  renamePath,
+  revealPath,
   statFile,
+  trashPath,
   type FileStat,
   type StateData,
   draftSaveMessage,
@@ -49,6 +53,7 @@ import {
   onFileChanged,
   openBuffer,
   reloadBuffer,
+  renameBuffer,
   saveBuffer,
   saveLabelFor,
   subscribeBuffers,
@@ -62,12 +67,14 @@ import {
   fmtBytes,
   gitLetterMap,
   mapCommits,
+  newPathIn,
   parseDiff,
   publishStateFrom,
   splitName,
   type DirLoad,
   type GitStatus,
 } from "@/lib/repo-data";
+import { sanitizeTitle } from "@/lib/notes-model";
 import { isHtmlPath } from "@/lib/web-url";
 import { toastError, toastRemoteOutcome, toastSuccess } from "@/overlays/toasts";
 import { listen } from "@tauri-apps/api/event";
@@ -107,6 +114,10 @@ interface RepoState {
   banner?: string;
   /** F36 — the active review pass over the agent's ledger. */
   review?: { files: AgentEditFile[]; resolved: Set<string> };
+  /** A name being typed: a new entry in `parent`, or a rename of `renaming`. */
+  pending: { parent: string; kind: "file" | "dir" } | null;
+  renaming: string | null;
+  nameError: string | null;
 }
 
 const CACHE = new Map<string, RepoState>();
@@ -124,6 +135,9 @@ function stateFor(dir: string): RepoState {
       closedGroups: new Set(),
       message: "",
       logLimit: 30,
+      pending: null,
+      renaming: null,
+      nameError: null,
     };
     CACHE.set(dir, s);
   }
@@ -511,6 +525,104 @@ export function RepoPane({
     rerender();
   }, [dir, loadDir, rerender]);
 
+  /* ---- explorer operations: new file/folder, rename, reveal, delete ---- */
+
+  /** "the selected folder, or the root" — a file's own folder counts. */
+  const targetFolder = useCallback((): string => {
+    const id = rs.selectedId;
+    if (!id) return "";
+    const load = rs.loads.get(id);
+    if (load) return id;              // the selection is a folder we have listed
+    return splitName(id).dir;         // a file: its folder
+  }, [rs]);
+
+  const startNew = useCallback((kind: "file" | "dir") => {
+    const parent = targetFolder();
+    const s = stateFor(dir);
+    s.pending = { parent, kind };
+    s.renaming = null;
+    s.nameError = null;
+    if (parent && !s.expanded.has(parent)) {
+      s.expanded.add(parent);
+      if (!s.loads.has(parent)) loadDir(parent);
+    }
+    rerender();
+  }, [dir, targetFolder, loadDir, rerender]);
+
+  const cancelName = useCallback(() => {
+    const s = stateFor(dir);
+    s.pending = null;
+    s.renaming = null;
+    s.nameError = null;
+    rerender();
+  }, [dir, rerender]);
+
+  const commitName = useCallback((raw: string) => {
+    const s = stateFor(dir);
+    // the notes' sanitiser: separators become dashes, a leading dot goes, so
+    // nothing typed into the tree can walk out of the folder it was typed in
+    const name = sanitizeTitle(raw);
+    if (!name) { cancelName(); return; }
+    const done = () => { cancelName(); refreshTree(); };
+    const fail = (e: unknown) => {
+      stateFor(dir).nameError = String(e).slice(0, 90);
+      rerender();
+    };
+    if (s.renaming) {
+      const from = s.renaming;
+      const to = newPathIn(splitName(from).dir, name);
+      if (to === from) { cancelName(); return; }
+      renamePath(dir, from, to)
+        .then(() => {
+          // the open tab, its buffer and its dirt follow the file
+          const t = stateFor(dir).tabs.find((x) => x.path === from);
+          if (t) t.path = to;
+          renameBuffer(dir, from, to);
+          if (stateFor(dir).activeTab === from) stateFor(dir).activeTab = to;
+          if (stateFor(dir).selectedId === from) stateFor(dir).selectedId = to;
+          done();
+        })
+        .catch(fail);
+      return;
+    }
+    if (!s.pending) { cancelName(); return; }
+    const { parent, kind } = s.pending;
+    const path = newPathIn(parent, name);
+    createPath(dir, path, kind === "dir" ? "dir" : "file")
+      .then(() => {
+        done();
+        if (kind === "file") openFile(path);
+        else if (!stateFor(dir).expanded.has(path)) { stateFor(dir).expanded.add(path); loadDir(path); }
+      })
+      .catch(fail);
+  }, [dir, cancelName, refreshTree, rerender, openFile, loadDir]);
+
+  const deletePath = useCallback((id: string) => {
+    const name = splitName(id).name;
+    onConfirm({
+      title: `Delete ${name}?`,
+      body: "It moves to the Trash, so you can put it back from Finder.",
+      cancelLabel: "Keep it",
+      confirmLabel: "Move to Trash",
+      danger: true,
+      onConfirm: () => {
+        trashPath(dir, id)
+          .then(() => {
+            const s = stateFor(dir);
+            const i = s.tabs.findIndex((t) => t.path === id);
+            if (i >= 0) s.tabs.splice(i, 1);
+            closeBuffer(dir, id);
+            if (s.activeTab === id) s.activeTab = s.tabs[Math.max(0, i - 1)]?.path ?? null;
+            s.selectedId = s.activeTab;
+            refreshTree();
+            rerender();
+            toastSuccess("Moved to the Trash", name);
+          })
+          .catch((e) => toastError("Couldn't delete it", humanError(e)));
+      },
+    });
+  }, [dir, onConfirm, refreshTree, rerender]);
+
   /* ---- splitter ---- */
 
   const onTreeSplitterDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
@@ -692,12 +804,24 @@ export function RepoPane({
             .filter((w) => w.path.startsWith(dir + "/"))
             .map((w) => w.path.slice(dir.length + 1).split("/")[0]!),
         ),
+        "",
+        rs.pending,
       ),
       selectedId: rs.selectedId,
+      renamingId: rs.renaming,
+      nameError: rs.nameError,
       onSelect: openFile,
       onToggleDir,
       onRetry: (id) => loadDir(id === "#root" ? "" : id),
       onOpenHistory: () => { rs.historyView = true; rs.historyFrom = "repo"; rerender(); },
+      onNewFile: () => startNew("file"),
+      onNewFolder: () => startNew("dir"),
+      onCommitName: commitName,
+      onCancelName: cancelName,
+      onRename: (id) => { rs.renaming = id; rs.pending = null; rs.nameError = null; rerender(); },
+      onReveal: (id) => { revealPath(dir, id).catch((e) => toastError("Couldn't show it", humanError(e))); },
+      onDelete: deletePath,
+      onOpenInWeb: (id) => onOpenInWeb?.(id),
     };
     const active = rs.tabs.find((t) => t.path === rs.activeTab);
     /* F36 — resolve one review file and move to the next unresolved one */

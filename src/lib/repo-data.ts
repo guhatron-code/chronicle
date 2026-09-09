@@ -57,6 +57,8 @@ export function buildTree(
   gitByPath: Map<string, GitLetter>,
   workspaces: Set<string>,
   parent = "",
+  /** The row being typed into: an empty name field inside `parent`. */
+  pending: { parent: string; kind: "file" | "dir" } | null = null,
 ): TreeNode[] {
   const load = loads.get(parent);
   if (!load) return [];
@@ -64,12 +66,12 @@ export function buildTree(
     return [{ kind: "loading", id: `${parent}#loading`, label: `Reading ${parent.split("/").pop() || "the project"}…` }];
   if (load.kind === "error")
     return [{ kind: "error", id: parent || "#root", message: "Couldn't read this folder" }];
-  return load.entries.map((e): TreeNode => {
+  const rows = load.entries.map((e): TreeNode => {
     const id = parent ? `${parent}/${e.name}` : e.name;
     if (e.is_dir) {
       const open = expanded.has(id);
       const childLoad = loads.get(id);
-      const empty = childLoad?.kind === "ready" && childLoad.entries.length === 0;
+      const empty = childLoad?.kind === "ready" && childLoad.entries.length === 0 && !(pending?.parent === id);
       return {
         kind: "dir",
         id,
@@ -77,7 +79,7 @@ export function buildTree(
         open,
         // loaded children stay in the tree while closed so collapse/expand can
         // animate (the closed body renders inert inside AccBody)
-        children: childLoad ? buildTree(loads, expanded, changed, gitByPath, workspaces, id) : [],
+        children: childLoad ? buildTree(loads, expanded, changed, gitByPath, workspaces, id, pending) : [],
         hasChanges: changed.has(id),
         empty,
         workspace: workspaces.has(id),
@@ -85,6 +87,15 @@ export function buildTree(
     }
     return { kind: "file", id, name: e.name, git: gitByPath.get(id) };
   });
+  if (pending && pending.parent === parent) {
+    rows.unshift({
+      kind: "input",
+      id: `${parent}#new`,
+      placeholder: pending.kind === "dir" ? "Folder name" : "File name",
+      initial: "",
+    });
+  }
+  return rows;
 }
 
 export function gitLetterMap(status: GitStatus | null): Map<string, GitLetter> {
@@ -186,6 +197,25 @@ export function extOf(path: string): string {
 export function splitName(path: string): { name: string; dir: string } {
   const i = path.lastIndexOf("/");
   return i < 0 ? { name: path, dir: "" } : { name: path.slice(i + 1), dir: path.slice(0, i) };
+}
+
+/** A folder plus a name, with no leading slash at the root. */
+export function newPathIn(folder: string, name: string): string {
+  return folder ? `${folder}/${name}` : name;
+}
+
+/** `a.ts` taken becomes `a 2.ts`, then `a 3.ts` — the notes' rule, applied to
+ *  a repo path so nothing is ever silently overwritten by a create. */
+export function nextFreeName(taken: Set<string>, base: string): string {
+  if (!taken.has(base)) return base;
+  const { name, dir } = splitName(base);
+  const dot = name.lastIndexOf(".");
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : "";
+  for (let n = 2; ; n++) {
+    const cand = newPathIn(dir, `${stem} ${n}${ext}`);
+    if (!taken.has(cand)) return cand;
+  }
 }
 
 export function saveFiles(status: GitStatus): SaveFile[] {
