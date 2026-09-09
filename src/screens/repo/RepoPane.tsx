@@ -37,10 +37,27 @@ import {
   type AgentEditFile,
 } from "@/lib/ipc";
 import {
+  bufferFor,
+  bufferKey,
+  closeBuffer,
+  dirtyPathsFor,
+  editBuffer,
+  evictBuffers,
+  keepMine,
+  languageIdFor,
+  loadEditorConfig,
+  onFileChanged,
+  openBuffer,
+  reloadBuffer,
+  saveBuffer,
+  saveLabelFor,
+  subscribeBuffers,
+  tabSizeFor,
+} from "@/lib/repo-editor";
+import {
   buildTree,
   changeGroups,
   changedPaths,
-  codeLines,
   extOf,
   fmtBytes,
   gitLetterMap,
@@ -65,6 +82,8 @@ interface TabState {
   /** Last stat size — drives the huge-card affordances across remounts. */
   sizeBytes?: number;
   body: ViewerBody | null; // null = loading
+  /** false for the paths the backend refuses to write — anything under .git/. */
+  editable?: boolean;
   meta?: string;
   diffStat?: { added: number; removed: number };
   mtime?: number; // as loaded — freshness baseline
@@ -114,6 +133,7 @@ function stateFor(dir: string): RepoState {
 /** Drop a closed project's cached tree/tab state (memory hygiene). */
 export function evictRepo(dir: string): void {
   CACHE.delete(dir);
+  evictBuffers(dir);
 }
 
 /** Open a specific file in the viewer next time the repo pane mounts for
@@ -158,7 +178,6 @@ export function openHistoryView(dir: string, from: "repo" | "roadmap" = "roadmap
   s.historyFrom = from;
 }
 
-const CODE_ROW_CAP = 5_000; // rendered rows — a giant file must not freeze the pane
 const DIFF_ROW_CAP = 2_000;
 const HUGE_WARN = 300_000; // "Reading it may be slow."
 const HUGE_CAP = 1_500_000; // the backend refuses text reads past this
@@ -279,6 +298,7 @@ export function RepoPane({
     const d = dir;
     for (const tab of stateFor(d).tabs) {
       if (tab.mtime == null) continue;
+      if (bufferFor(d, tab.path)) continue; // the buffer reconciles this one
       statFile(d, tab.path)
         .then((st) => {
           if (dirRef.current !== d) return;
@@ -329,10 +349,22 @@ export function RepoPane({
     void listen<string>("project-fs-changed", (ev) => {
       if (ev.payload !== dir) return;
       if (t) clearTimeout(t);
-      t = setTimeout(() => { refreshTree(); checkFreshness(); }, 450);
+      t = setTimeout(() => {
+        refreshTree();
+        checkFreshness();
+        // every open buffer reconciles: clean reloads silently, dirty raises
+        // the bar, and our own write echo is recognised and ignored
+        for (const tab of stateFor(dir).tabs) {
+          if (bufferFor(dir, tab.path)) void onFileChanged(dir, tab.path);
+        }
+      }, 450);
     }).then((u) => { un = u; });
     return () => { if (t) clearTimeout(t); un?.(); };
   }, [dir, refreshTree, checkFreshness]);
+
+  /* the buffer store lives outside React: its save-state changes are what move
+     the header word and the tab's dot */
+  useEffect(() => subscribeBuffers(rerender), [rerender]);
 
   /* ---- the viewer: open / load / mode / freshness ---- */
 
@@ -373,16 +405,43 @@ export function RepoPane({
           };
           t.meta = undefined;
         } else {
-          const text = await readFile(d, path);
+          const r = await readFile(d, path);
           if (dirRef.current !== d) return;
           const cur = tab();
           if (!cur || cur.mode !== "contents") return; // switched to diff mid-load
-          const lines = codeLines(text);
-          const capped = lines.length > CODE_ROW_CAP;
-          t.body = { kind: "code", lines: capped ? lines.slice(0, CODE_ROW_CAP) : lines };
-          t.meta = capped
-            ? `${extOf(path) || "file"} · showing the first ${CODE_ROW_CAP.toLocaleString()} of ${lines.length.toLocaleString()} lines`
-            : `${extOf(path) || "file"} · ${lines.length} line${lines.length === 1 ? "" : "s"}`;
+          if (r.too_large) {
+            t.sizeBytes = r.size;
+            t.body = {
+              kind: "huge",
+              message: `This file is ${fmtBytes(r.size)}`,
+              note: "Too large to open for editing — copying still works.",
+            };
+            t.meta = undefined;
+            t.mtime = st.mtime;
+            t.changedOnDisk = false;
+            rerender();
+            return;
+          }
+          if (r.binary) {
+            t.body = {
+              kind: "binary",
+              message: "This is a binary file — there's nothing readable to show.",
+              note: "Size",
+              detail: fmtBytes(r.size),
+            };
+            t.meta = undefined;
+            t.mtime = st.mtime;
+            rerender();
+            return;
+          }
+          // the buffer is created on OPEN here rather than on the first
+          // keystroke: the editor needs a doc to render, and an untouched
+          // buffer is "clean", costs one Map entry, and never writes anything
+          openBuffer(d, path, r.text, r.mtime_ms);
+          const lines = r.text.split("\n").length;
+          t.body = null; // the body is derived from the buffer at render time
+          t.editable = !path.split("/").some((s) => s === ".git");
+          t.meta = `${extOf(path) || "file"} · ${lines} line${lines === 1 ? "" : "s"}`;
         }
         t.mtime = st.mtime;
         t.changedOnDisk = false;
@@ -433,6 +492,7 @@ export function RepoPane({
     s.selectedId = path;
     if (!s.tabs.find((t) => t.path === path)) {
       s.tabs.push({ path, mode: "contents", body: null });
+      void loadEditorConfig(dir);
       loadContents(path);
     }
     s.activeTab = path;
@@ -659,15 +719,22 @@ export function RepoPane({
       }
       rerender();
     };
+    const buf = active ? bufferFor(dir, active.path) : null;
     const viewer: ViewerProps = !active
       ? { kind: "empty" }
       : {
           kind: "file",
-          tabs: rs.tabs.map((t) => ({ id: t.path, name: splitName(t.path).name })),
+          tabs: rs.tabs.map((t) => ({
+            id: t.path,
+            name: splitName(t.path).name,
+            dirty: dirtyPathsFor(dir).includes(t.path),
+          })),
           activeTabId: active.path,
           path: active.path,
           mode: active.mode,
           meta: active.mode === "contents" ? active.meta : undefined,
+          saveLabel: active.mode === "contents" ? saveLabelFor(buf, Date.now()) : undefined,
+          conflict: active.mode === "contents" && buf?.state === "conflict",
           diffStat: active.mode === "diff" ? active.diffStat : undefined,
           readyToSave:
             active.mode === "diff" &&
@@ -704,14 +771,45 @@ export function RepoPane({
                       },
                 }
               : undefined,
-          body: active.body ?? { kind: "code", lines: [] },
+          body:
+            active.mode === "contents" && buf
+              ? {
+                  kind: "text",
+                  docKey: bufferKey(dir, active.path),
+                  text: buf.text,
+                  language: languageIdFor(active.path),
+                  readOnly: active.editable === false,
+                  tabSize: tabSizeFor(dir, active.path),
+                }
+              : active.body ?? (active.mode === "contents"
+                  // a contents tab still loading: an empty read-only editor, not
+                  // an empty DiffView (which draws a blank Changes surface under
+                  // a header that says Contents)
+                  ? {
+                      kind: "text" as const,
+                      docKey: bufferKey(dir, active.path),
+                      text: "",
+                      language: "plain" as const,
+                      readOnly: true,
+                      tabSize: 2,
+                    }
+                  : { kind: "diff" as const, rows: [] }),
+          onEdit: (text) => editBuffer(dir, active.path, text),
+          onSave: () => { void saveBuffer(dir, active.path); },
+          onKeepMine: () => keepMine(dir, active.path),
+          onReloadFromDisk: () => reloadBuffer(dir, active.path),
           onSelectTab: (id) => { rs.activeTab = id; rs.selectedId = id; rerender(); },
           onCloseTab: (id) => {
-            const i = rs.tabs.findIndex((t) => t.path === id);
-            if (i >= 0) rs.tabs.splice(i, 1);
-            if (rs.activeTab === id) rs.activeTab = rs.tabs[Math.max(0, i - 1)]?.path ?? null;
-            rs.selectedId = rs.activeTab; // the tree follows the viewer
-            rerender();
+            const closeIt = () => {
+              const i = rs.tabs.findIndex((t) => t.path === id);
+              if (i >= 0) rs.tabs.splice(i, 1);
+              closeBuffer(dir, id);
+              if (rs.activeTab === id) rs.activeTab = rs.tabs[Math.max(0, i - 1)]?.path ?? null;
+              rs.selectedId = rs.activeTab; // the tree follows the viewer
+              rerender();
+            };
+            if (dirtyPathsFor(dir).includes(id)) confirmDirtyOne(dir, id, onConfirm, closeIt);
+            else closeIt();
           },
           onModeChange: (mode) => {
             active.mode = mode;
@@ -721,8 +819,8 @@ export function RepoPane({
             rerender();
           },
           onCopy: () => {
-            if (active.body?.kind === "code") {
-              copyText(active.body.lines.map((l) => l.map((s) => s.t).join("")).join("\n"))
+            if (active.mode === "contents" && buf) {
+              copyText(buf.text)
                 .then(() => toastSuccess("Contents copied"))
                 .catch((e) => toastError("Couldn't copy", String(e).slice(0, 90)));
             } else if (active.body?.kind === "huge" && (active.sizeBytes ?? 0) <= 5_000_000) {
@@ -754,4 +852,52 @@ export function RepoPane({
   }
 
   return <Repo view={view} treeWidth={treeWidth} onTreeSplitterDown={onTreeSplitterDown} />;
+}
+
+/* ---- unsaved work: ⌘S, and the one prompt that guards it ---- */
+
+/** ⌘S from anywhere: save whatever the repo pane has open for this project. */
+export function saveActiveFile(dir: string): void {
+  const s = CACHE.get(dir);
+  if (!s?.activeTab) return;
+  void saveBuffer(dir, s.activeTab);
+}
+
+/** One file with unsaved work is about to go away. */
+function confirmDirtyOne(
+  dir: string,
+  path: string,
+  onConfirm: (spec: ConfirmSpec) => void,
+  proceed: () => void,
+): void {
+  onConfirm({
+    title: `Save ${splitName(path).name}?`,
+    body: "It has changes you haven't saved yet.",
+    cancelLabel: "Cancel",
+    confirmLabel: "Save",
+    onConfirm: () => { void saveBuffer(dir, path).then(proceed); },
+    altLabel: "Discard",
+    onAlt: () => { proceed(); },
+  });
+}
+
+/** Every file with unsaved work in this project is about to go away — closing
+ *  the project, or quitting. One prompt, three answers. */
+export function confirmDirty(
+  dir: string,
+  onConfirm: (spec: ConfirmSpec) => void,
+  proceed: () => void,
+): void {
+  const paths = dirtyPathsFor(dir);
+  if (paths.length === 0) { proceed(); return; }
+  if (paths.length === 1) { confirmDirtyOne(dir, paths[0]!, onConfirm, proceed); return; }
+  onConfirm({
+    title: `Save ${paths.length} files?`,
+    body: `${paths.map((p) => splitName(p).name).join(", ")} have changes you haven't saved yet.`,
+    cancelLabel: "Cancel",
+    confirmLabel: "Save them",
+    onConfirm: () => { void Promise.all(paths.map((p) => saveBuffer(dir, p))).then(proceed); },
+    altLabel: "Discard",
+    onAlt: () => { proceed(); },
+  });
 }

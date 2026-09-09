@@ -2,35 +2,37 @@ import * as React from "react";
 /*
  * F24 (Deck 4) — the code/diff viewer: open-file tabs (2px underline bar), the
  * actions bar (mono path · Contents/Diff toggle · meta or ±stat · Copy contents),
- * the code view on surface-input with the tabular right-aligned gutter, the diff
- * view with its sticky hunk header and dual gutters, and the five freshness states
- * (changed-on-disk · read error · image · binary · huge-file guard). Errors are
+ * the editable text body on surface-input, the diff view with its sticky hunk
+ * header and dual gutters, and the freshness states (the conflict bar ·
+ * changed-on-disk · read error · image · binary · huge-file guard). Errors are
  * never cached as content. Presentational only; values transcribed 1:1.
+ *
+ * The editor itself is loaded lazily: CodeMirror is the biggest thing the app
+ * ships, and a session that never opens a file should never pay for it.
  */
 import { StateWord } from "@/components/chrome/atoms";
 import { TabStrip } from "@/components/chrome/TabStrip";
 import { ClockGlyph, CopyGlyph, ImageGlyph } from "@/components/chrome/icons";
+import type { LangId } from "@/lib/repo-editor";
 import { cn } from "@/lib/utils";
 
-/* ---- body content types ---- */
+const CodeEditor = React.lazy(() => import("./CodeEditor"));
 
-export type CodeSeg = { t: string; tone?: "dim" | "subtle" | "primary" };
-/** One rendered line — an array of toned segments (empty array = blank line). */
-export type CodeLine = CodeSeg[];
+/* ---- body content types ---- */
 
 export type DiffRow =
   | { kind: "hunk"; header: string; context?: string } // "@@ -18,7 +18,15 @@" · "function Hero()"
   | { kind: "ctx" | "add" | "del"; old?: number; new?: number; text: string };
 
 export type ViewerBody =
-  | { kind: "code"; lines: CodeLine[] }
+  | { kind: "text"; docKey: string; text: string; language: LangId; readOnly: boolean; tabSize: number }
   | { kind: "diff"; rows: DiffRow[] }
   | { kind: "read-error"; message: string; detail: string } // "This file couldn't be read" · "EACCES · permission denied"
   | { kind: "image"; caption: string; src?: string } // "hero.png · 1440×960 · 212 KB" · src = data: URI when wired
   | { kind: "binary"; message: string; note: string; detail: string }
   | { kind: "huge"; message: string; note: string }; // "This file is 2.4 MB" · "Reading it may be slow."
 
-export type ViewerTab = { id: string; name: string };
+export type ViewerTab = { id: string; name: string; dirty?: boolean };
 
 export type ViewerProps =
   | { kind: "empty"; className?: string } // "Select a file to read it"
@@ -48,6 +50,14 @@ export type ViewerProps =
       diffStat?: { added: number; removed: number };
       /** "File changed on disk — Reload" bar. */
       changedOnDisk?: boolean;
+      /** "unsaved" | "saving" | "saved · 3s ago" | the OS error sentence. */
+      saveLabel?: string;
+      /** The file moved on disk while the buffer was dirty — the bar, never a toast. */
+      conflict?: boolean;
+      onSave?: () => void;
+      onEdit?: (text: string) => void;
+      onKeepMine?: () => void;
+      onReloadFromDisk?: () => void;
       /** F36 — reviewing the agent's changes: the per-file action bar. */
       review?: {
         progress: string; // "2 of 4 reviewed"
@@ -67,40 +77,6 @@ export type ViewerProps =
       onOpenInWeb?: () => void;
       className?: string;
     };
-
-const TONE: Record<NonNullable<CodeSeg["tone"]>, string> = {
-  dim: "text-text-dim",
-  subtle: "text-text-subtle",
-  primary: "text-text-primary",
-};
-
-function CodeView({ lines }: { lines: CodeLine[] }) {
-  // a grid pairs each gutter number with its line, so long lines WRAP and the
-  // numbers stay aligned to the first visual row of their line
-  return (
-    <div data-selectable className="relative min-h-0 flex-1 overflow-y-auto bg-surface-input font-mono text-xs leading-[1.75]">
-      <span aria-hidden className="absolute inset-y-0 left-11 w-px bg-divider-faint" />
-      <div className="grid min-h-full grid-cols-[44px_1fr] content-start py-3">
-        {lines.map((line, i) => (
-          <div key={i} className="col-span-2 grid grid-cols-subgrid">
-            <span aria-hidden className="select-none pr-3 text-right text-text-dimmer tabular-nums">
-              {i + 1}
-            </span>
-            <div className="min-w-0 whitespace-pre-wrap px-4 text-text-secondary [overflow-wrap:anywhere]">
-              {line.length === 0
-                ? " "
-                : line.map((seg, j) => (
-                    <span key={j} className={seg.tone ? TONE[seg.tone] : undefined}>
-                      {seg.t}
-                    </span>
-                  ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 function DiffView({ rows }: { rows: DiffRow[] }) {
   return (
@@ -167,14 +143,14 @@ export function Viewer(p: ViewerProps) {
     );
   }
 
-  const showActions = p.body.kind === "code" || p.body.kind === "diff";
+  const showActions = p.body.kind === "text" || p.body.kind === "diff";
 
   return (
     <div className={cn("flex h-full min-w-0 flex-col", p.className)}>
       {/* open-file tabs */}
       <TabStrip
         label="Open files"
-        tabs={p.tabs.map((tab) => ({ id: tab.id, label: tab.name }))}
+        tabs={p.tabs.map((tab) => ({ id: tab.id, label: tab.name, dot: tab.dirty ? ("dirty" as const) : undefined }))}
         activeId={p.activeTabId}
         onSelect={p.onSelectTab}
         onClose={p.onCloseTab}
@@ -221,6 +197,16 @@ export function Viewer(p: ViewerProps) {
               {p.meta}
             </span>
           )}
+          {p.mode === "contents" && p.saveLabel && (
+            <span
+              className={cn(
+                "shrink-0 text-[11.5px]",
+                p.saveLabel === "unsaved" ? "text-state-warn" : "text-text-dim",
+              )}
+            >
+              {p.saveLabel}
+            </span>
+          )}
           {p.mode === "diff" && p.diffStat && (
             <span className="shrink-0 font-mono text-[11px] tabular-nums">
               {p.readyToSave && <span className="pr-2 font-sans text-text-dim">Ready to save ·</span>}
@@ -260,8 +246,32 @@ export function Viewer(p: ViewerProps) {
         </div>
       )}
 
-      {/* file changed on disk */}
-      {p.changedOnDisk && (
+      {/* the file moved on disk under an unsaved buffer — never a silent overwrite */}
+      {p.conflict && (
+        <div data-chrome className="flex items-center gap-2.5 border-b border-divider bg-fill-subtle px-3.5 py-[7px]">
+          <ClockGlyph size={12} className="shrink-0 text-text-subtle" />
+          <span className="text-[11.5px] text-text-secondary">
+            This file changed on disk while you were editing it.
+          </span>
+          <span className="flex-1" />
+          <button
+            onClick={p.onReloadFromDisk}
+            className="h-[23px] rounded-sm border border-border-strong px-[9px] text-[11px] font-medium text-text-primary hover:bg-fill-hover"
+          >
+            Reload
+          </button>
+          <button
+            onClick={p.onKeepMine}
+            className="h-[23px] rounded-sm bg-primary px-[9px] text-[11px] font-medium text-primary-foreground hover:bg-(--primary-hover)"
+          >
+            Keep mine
+          </button>
+        </div>
+      )}
+
+      {/* a clean file that moved on disk reloads itself — this bar is only for
+          the Changes view, where there is no buffer to reconcile */}
+      {p.changedOnDisk && !p.conflict && (
         <div data-chrome className="flex items-center gap-2.5 border-b border-divider bg-fill-subtle px-3.5 py-[7px]">
           <ClockGlyph size={12} className="shrink-0 text-text-subtle" />
           <span className="text-[11.5px] text-text-secondary">
@@ -277,7 +287,25 @@ export function Viewer(p: ViewerProps) {
       )}
 
       {/* body */}
-      {p.body.kind === "code" && <CodeView lines={p.body.lines} />}
+      {p.body.kind === "text" && (
+        <React.Suspense
+          fallback={
+            <Stage>
+              <span className="text-[12.5px] text-text-dim">Loading editor…</span>
+            </Stage>
+          }
+        >
+          <CodeEditor
+            docKey={p.body.docKey}
+            text={p.body.text}
+            language={p.body.language}
+            readOnly={p.body.readOnly}
+            tabSize={p.body.tabSize}
+            onChange={p.onEdit}
+            onSave={p.onSave}
+          />
+        </React.Suspense>
+      )}
       {p.body.kind === "diff" && <DiffView rows={p.body.rows} />}
       {p.body.kind === "read-error" && (
         <Stage className="gap-[9px] p-4 text-center">
@@ -340,7 +368,7 @@ export function Viewer(p: ViewerProps) {
         </Stage>
       )}
       {/* bottom bar (operator: copy lives down here, out of the reading path) */}
-      {p.mode === "contents" && p.body.kind === "code" && (
+      {p.mode === "contents" && p.body.kind === "text" && (
         <div className="flex items-center justify-end border-t border-divider px-3.5 py-[7px]">
           <button
             onClick={p.onCopy}

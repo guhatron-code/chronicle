@@ -5,7 +5,7 @@
  */
 import type { DirEntry, GitLogRow, GitStatusDetail } from "./ipc";
 import type { TreeNode, GitLetter } from "@/screens/repo/FileTree";
-import type { CodeLine, DiffRow } from "@/screens/repo/Viewer";
+import type { DiffRow } from "@/screens/repo/Viewer";
 import type {
   BranchArc,
   ChangeGroup,
@@ -97,17 +97,6 @@ export function gitLetterMap(status: GitStatus | null): Map<string, GitLetter> {
 }
 
 /* ---- the viewer (F24) ---- */
-
-/** A light tone pass — whole-line comments dim; everything else default. */
-export function codeLines(text: string): CodeLine[] {
-  return text.replace(/\n$/, "").split("\n").map((l): CodeLine => {
-    if (l.length === 0) return [];
-    const t = l.trimStart();
-    if (t.startsWith("//") || t.startsWith("#") || t.startsWith("/*") || t.startsWith("*"))
-      return [{ t: l, tone: "dim" }];
-    return [{ t: l }];
-  });
-}
 
 export function parseDiff(raw: string): { rows: DiffRow[]; added: number; removed: number } {
   const rows: DiffRow[] = [];

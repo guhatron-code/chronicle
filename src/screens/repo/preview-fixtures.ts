@@ -5,7 +5,7 @@
  */
 import type { FileTreeProps, TreeNode } from "./FileTree";
 import type { HistoryPaneProps, HistoryReady } from "./HistoryPane";
-import type { CodeLine, DiffRow, ViewerProps } from "./Viewer";
+import type { DiffRow, ViewerProps } from "./Viewer";
 import type { RepoProps } from "./Repo";
 
 /* ============ F23 · file tree ============ */
@@ -51,63 +51,37 @@ export const fileTree: FileTreeProps = {
   selectedId: "lumen-site/src/Pricing.tsx",
 };
 
-/* ============ F23/F24 · code viewer (contents, changed-on-disk bar) ============ */
-
-const pricingLines: CodeLine[] = [
-  [
-    { t: "import", tone: "dim" },
-    { t: " { Tier } " },
-    { t: "from", tone: "dim" },
-    { t: " " },
-    { t: '"../components/Tier"', tone: "subtle" },
-    { t: ";" },
-  ],
-  [],
-  [
-    { t: "export function", tone: "dim" },
-    { t: " " },
-    { t: "Pricing", tone: "primary" },
-    { t: "() {" },
-  ],
-  [{ t: "  " }, { t: "return", tone: "dim" }, { t: " (" }],
-  [
-    { t: "    <" },
-    { t: "section", tone: "primary" },
-    { t: " " },
-    { t: "className", tone: "subtle" },
-    { t: "=" },
-    { t: '"pricing"', tone: "subtle" },
-    { t: ">" },
-  ],
-  [
-    { t: "      <" },
-    { t: "Tier", tone: "primary" },
-    { t: " " },
-    { t: "name", tone: "subtle" },
-    { t: "=" },
-    { t: '"Solo"', tone: "subtle" },
-    { t: " " },
-    { t: "highlighted", tone: "subtle" },
-    { t: " />" },
-  ],
-  [{ t: "    </" }, { t: "section", tone: "primary" }, { t: ">" }],
-  [{ t: "  );" }],
-  [{ t: "}" }],
-];
+/* ============ F23/F24 · code viewer (contents, the conflict bar) ============ */
 
 export const viewerCode: ViewerProps = {
   kind: "file",
   tabs: [
-    { id: "pricing", name: "Pricing.tsx" },
+    { id: "pricing", name: "Pricing.tsx", dirty: true },
     { id: "plan", name: "PLAN.md" },
   ],
   activeTabId: "pricing",
   path: "src/screens/Pricing.tsx",
   mode: "contents",
   meta: "tsx · 96 lines",
-  changedOnDisk: true,
-  body: { kind: "code", lines: pricingLines },
+  saveLabel: "unsaved",
+  body: {
+    kind: "text",
+    docKey: "/preview src/screens/Pricing.tsx",
+    text: [
+      'import { Tier } from "../components/Tier";',
+      "",
+      "export function Pricing() {",
+      '  return <Tier name="Studio" price={24} />;',
+      "}",
+    ].join("\n"),
+    language: "tsx",
+    readOnly: false,
+    tabSize: 2,
+  },
 };
+
+/** The conflict bar is new; the preview harness is where it gets looked at. */
+export const viewerConflict: ViewerProps = { ...viewerCode, conflict: true, saveLabel: "unsaved" };
 
 /* ============ F24 · diff view ============ */
 

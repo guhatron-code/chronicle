@@ -27,12 +27,13 @@ import { useOverflowEdges } from "@/lib/overflow-edges";
 import { cn } from "@/lib/utils";
 
 /** what the tab's leading dot is saying — each has its own colour */
-export type TabDot = "loading" | "live" | "local";
+export type TabDot = "loading" | "live" | "local" | "dirty";
 
 const DOT: Record<TabDot, string> = {
   loading: "bg-state-neutral",
   live: "bg-state-success",
   local: "bg-text-subtle",
+  dirty: "bg-state-warn",
 };
 
 export type TabStripTab = {
