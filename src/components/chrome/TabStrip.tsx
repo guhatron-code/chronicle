@@ -12,17 +12,20 @@ import * as React from "react";
  * Every tab reserves the close button's size-4 slot, so revealing the X on a
  * background tab never re-truncates its label. Middle-click closes a tab too,
  * the way it does in a browser.
+ *
+ * Keyboard: the ARIA tab pattern — one stop for the whole strip (the active
+ * tab), ←/→ move along it and select as they go, Enter and Space select.
  */
 import { XGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 
 /** what the tab's leading dot is saying — each has its own colour */
-export type TabDot = "loading" | "dirty" | "live";
+export type TabDot = "loading" | "live" | "local";
 
 const DOT: Record<TabDot, string> = {
   loading: "bg-state-neutral",
-  dirty: "bg-text-dim",
   live: "bg-state-success",
+  local: "bg-text-subtle",
 };
 
 export type TabStripTab = {
@@ -44,22 +47,43 @@ export type TabStripProps = {
   onNew?: () => void;
   /** anything else that rides at the end of the strip */
   trailing?: React.ReactNode;
+  /** names the strip for a screen reader */
+  label?: string;
   className?: string;
 };
 
-export function TabStrip({ tabs, activeId, onSelect, onClose, onNew, trailing, className }: TabStripProps) {
+export function TabStrip({ tabs, activeId, onSelect, onClose, onNew, trailing, label, className }: TabStripProps) {
   // scroll the active tab into view only when it CHANGES — a ref callback runs
   // every render, and scrollIntoView on each one hijacks the tab strip's scroll
   const lastScrolled = React.useRef<string | null>(null);
 
+  // roving tabIndex: the strip is one tab stop. With nothing active the first
+  // tab holds it, so the strip is never unreachable from the keyboard.
+  const activeIndex = tabs.findIndex((t) => t.id === activeId);
+  const stop = activeIndex >= 0 ? activeIndex : 0;
+
+  const step = (from: HTMLElement, delta: number) => {
+    const strip = from.parentElement;
+    if (!strip) return;
+    const els = Array.from(strip.querySelectorAll<HTMLElement>('[role="tab"]'));
+    const next = els[els.indexOf(from) + delta];
+    if (!next) return;
+    next.focus();
+    const id = next.dataset.tabId;
+    if (id) onSelect?.(id);
+  };
+
   return (
     <div
+      role="tablist"
+      aria-label={label}
+      aria-orientation="horizontal"
       className={cn(
         "flex h-10 min-w-0 shrink-0 items-end gap-0.5 overflow-x-auto overflow-y-hidden border-b border-divider px-2.5",
         className,
       )}
     >
-      {tabs.map((tab) => {
+      {tabs.map((tab, i) => {
         const active = tab.id === activeId;
         const title = tab.title ?? tab.label;
         return (
@@ -67,7 +91,8 @@ export function TabStrip({ tabs, activeId, onSelect, onClose, onNew, trailing, c
             key={tab.id}
             role="tab"
             aria-selected={active}
-            tabIndex={0}
+            data-tab-id={tab.id}
+            tabIndex={i === stop ? 0 : -1}
             ref={
               active
                 ? (el) => {
@@ -80,9 +105,16 @@ export function TabStrip({ tabs, activeId, onSelect, onClose, onNew, trailing, c
             }
             onClick={() => !active && onSelect?.(tab.id)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
+              if (e.key === "ArrowRight") { e.preventDefault(); step(e.currentTarget, 1); }
+              else if (e.key === "ArrowLeft") { e.preventDefault(); step(e.currentTarget, -1); }
+              else if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
                 if (!active) onSelect?.(tab.id);
+              }
+              // the close button is not its own tab stop, so the key closes it
+              else if (e.key === "Delete" || e.key === "Backspace") {
+                e.preventDefault();
+                onClose?.(tab.id);
               }
             }}
             // middle-click closes, as it does in a browser
@@ -104,7 +136,7 @@ export function TabStrip({ tabs, activeId, onSelect, onClose, onNew, trailing, c
                 hover never shifts the label's truncation width */}
             <button
               aria-label={`Close ${tab.label}`}
-              tabIndex={active ? 0 : -1}
+              tabIndex={-1}
               onClick={(e) => {
                 e.stopPropagation();
                 onClose?.(tab.id);

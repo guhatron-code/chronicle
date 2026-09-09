@@ -65,7 +65,7 @@ export function toastError(message: string, detail?: string) {
         <ErrorGlyph size={13} />
       </span>
       <span className="text-[12.5px] text-text-primary">{message}</span>
-      {detail && <span className="text-xs text-text-muted">{detail}</span>}
+      {detail && <span data-selectable className="text-xs text-text-muted">{detail}</span>}
     </div>
   ), { duration: 2100 });
 }

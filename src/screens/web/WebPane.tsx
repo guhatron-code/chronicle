@@ -11,7 +11,7 @@ import {
   activate, back, blockInfo, closeTab, forward, navigate, newTab, prepare, pushBounds, reload,
   setWebVisible, subscribeBlock, subscribeWeb, webFor,
 } from "@/lib/web-store";
-import { TabStrip } from "@/components/chrome/TabStrip";
+import { TabStrip, type TabDot } from "@/components/chrome/TabStrip";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso); return isNaN(d.getTime()) ? "unknown" : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
@@ -93,9 +93,16 @@ export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
     <div className="flex h-full min-h-0 flex-col">
       {/* tabs — the viewer's strip, so the browser and the repo read the same */}
       <TabStrip
+        label="Browser tabs"
         tabs={p.tabs.map((tab) => {
           const label = tab.title || displayAddress(tab.url) || "New tab";
-          return { id: String(tab.id), label, title: label, dot: tab.loading ? ("loading" as const) : undefined };
+          // the dot the old strip drew: still fetching · a file off this disk ·
+          // a page that loaded. A blank new tab is none of the three.
+          const dot: TabDot | undefined = tab.loading ? "loading"
+            : tab.url.startsWith("chronicle-file") ? "local"
+            : /^https?:\/\//.test(tab.url) ? "live"
+            : undefined;
+          return { id: String(tab.id), label, title: label, dot };
         })}
         activeId={t ? String(t.id) : null}
         onSelect={(id) => { const i = p.tabs.findIndex((x) => String(x.id) === id); if (i >= 0) activate(dir, i); }}

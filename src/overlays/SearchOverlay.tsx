@@ -119,7 +119,7 @@ export function SearchOverlay({
                 {results.files.map((f) => (
                   <CommandItem key={`f-${f}`} value={`f-${f}`} onSelect={() => go(() => onOpenFile(f))} className={ITEM}>
                     <FolderGlyph size={13} className="shrink-0 text-text-dim" />
-                    <span className="min-w-0 truncate font-mono text-[12px] text-text-primary">{f}</span>
+                    <span data-selectable className="min-w-0 truncate font-mono text-[12px] text-text-primary">{f}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -130,7 +130,7 @@ export function SearchOverlay({
                 {results.commits.map((c) => (
                   <CommandItem key={`c-${c.hash}`} value={`c-${c.hash}`} onSelect={() => go(onOpenHistory)} className={ITEM}>
                     <span className="shrink-0 rounded-[5px] bg-fill-subtle px-[5px] font-mono text-[10.5px] text-text-subtle">{c.hash}</span>
-                    <span className="min-w-0 truncate text-[12.5px] text-text-primary">{c.subject}</span>
+                    <span data-selectable className="min-w-0 truncate text-[12.5px] text-text-primary">{c.subject}</span>
                     <span className="flex-1" />
                     <span className="shrink-0 font-mono text-[10.5px] text-text-dim">{c.ago}</span>
                   </CommandItem>
@@ -143,8 +143,8 @@ export function SearchOverlay({
                 {results.docs.map((d) => (
                   <CommandItem key={`d-${d.path}`} value={`d-${d.path}`} onSelect={() => go(() => onOpenFile(d.path))} className={ITEM}>
                     <SearchGlyph size={12} className="shrink-0 text-text-dim" />
-                    <span className="shrink-0 font-mono text-[11px] text-text-secondary">{d.path}</span>
-                    <span className="min-w-0 truncate text-[12px] text-text-dim">{d.line}</span>
+                    <span data-selectable className="shrink-0 font-mono text-[11px] text-text-secondary">{d.path}</span>
+                    <span data-selectable className="min-w-0 truncate text-[12px] text-text-dim">{d.line}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>
@@ -155,7 +155,7 @@ export function SearchOverlay({
                 {notes.map((n) => (
                   <CommandItem key={`n-${n.path}`} value={`n-${n.path}`} onSelect={() => go(() => onOpenNote(n.path))} className={ITEM}>
                     <NotesGlyph size={13} className="shrink-0 text-text-dim" />
-                    <span className="min-w-0 truncate text-[12.5px] text-text-primary">{n.title}</span>
+                    <span data-selectable className="min-w-0 truncate text-[12.5px] text-text-primary">{n.title}</span>
                     <span className="flex-1" />
                     <span className="shrink-0 truncate text-[10.5px] text-text-dim">{folderOf(n.path)}</span>
                   </CommandItem>

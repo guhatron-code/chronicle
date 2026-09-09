@@ -11,6 +11,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Eyebrow } from "@/components/chrome/atoms";
+import { AccBody } from "@/screens/roadmap/bits";
 import { TreeFolderRow, TreeGuide, TreeHeader, TreeIconButton, TreeRow } from "@/components/chrome/Tree";
 import { ChevronRightGlyph, DocGlyph, PlusGlyph, SearchGlyph } from "@/components/chrome/icons";
 import { buildTree, nestTree, tagCounts, type TreeBranch } from "@/lib/notes-model";
@@ -20,6 +21,9 @@ import { RoundCard, type RoundCardData } from "./RoundCard";
 import { StatusChip } from "./StatusChip";
 
 const COLLAPSE_KEY = (dir: string) => `chronicle.notes.tree.${dir}`;
+
+/** buildTree prunes what it is told is collapsed; the sidebar tells it nothing. */
+const NOTHING_COLLAPSED = new Set<string>();
 
 function loadCollapsed(dir: string): Set<string> {
   try {
@@ -62,29 +66,32 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote }: 
       />
     );
   }
+  const open = !collapsed.has(node.path);
   return (
     <div>
       <TreeFolderRow
         depth={depth}
         name={node.name}
-        open={!collapsed.has(node.path)}
+        open={open}
         marquee
         onClick={() => onOpenFolder(node.path)}
       />
-      {node.children.length > 0 && (
-        <TreeGuide>
-          {node.children.map((child) => (
-            <Branch
-              key={child.path}
-              node={child}
-              depth={depth + 1}
-              collapsed={collapsed}
-              openPath={openPath}
-              onOpenFolder={onOpenFolder}
-              onOpenNote={onOpenNote}
-            />
-          ))}
-        </TreeGuide>
+      {(node.children.length > 0 || open) && (
+        <AccBody open={open}>
+          <TreeGuide>
+            {node.children.map((child) => (
+              <Branch
+                key={child.path}
+                node={child}
+                depth={depth + 1}
+                collapsed={collapsed}
+                openPath={openPath}
+                onOpenFolder={onOpenFolder}
+                onOpenNote={onOpenNote}
+              />
+            ))}
+          </TreeGuide>
+        </AccBody>
       )}
     </div>
   );
@@ -138,7 +145,10 @@ export const Sidebar = memo(function Sidebar({
     () => (tagFilter ? notes.filter((n) => n.tags.includes(tagFilter)) : notes),
     [notes, tagFilter],
   );
-  const tree = useMemo(() => nestTree(buildTree(filtered, collapsed)), [filtered, collapsed]);
+  // the tree is built with NOTHING pruned — a closed folder keeps its children
+  // so AccBody has a body to collapse, exactly as the explorer's does. Which
+  // folders are closed is `collapsed`, read per row by Branch.
+  const tree = useMemo(() => nestTree(buildTree(filtered, NOTHING_COLLAPSED)), [filtered]);
   const tags = useMemo(() => tagCounts(notes), [notes]);
 
   const disabledReason = round

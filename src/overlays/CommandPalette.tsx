@@ -70,7 +70,7 @@ export function CommandPalette({
     <>
       <MarkTile mark={p.mark} label={p.markLabel} size={22} />
       <span className="text-[13px] font-medium text-text-primary">{p.name}</span>
-      <span className="font-mono text-[11px] text-text-dim">{p.tildePath}</span>
+      <span data-selectable className="font-mono text-[11px] text-text-dim">{p.tildePath}</span>
       <span className="flex-1" />
       <StateWord kind={p.statusKind} dotSize={5} glyphSize={10} className="shrink-0 whitespace-nowrap text-[11.5px]">
         {p.statusWord}
@@ -155,7 +155,7 @@ export function CommandPalette({
                     onSelect={onGithubSetup}
                     className="gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-fill-hover"
                   >
-                    <span className="text-[12.5px] text-text-muted">{githubError}</span>
+                    <span data-selectable className="text-[12.5px] text-text-muted">{githubError}</span>
                   </CommandItem>
                 ) : (
                   (githubRepos ?? []).map((r) => (
@@ -175,7 +175,7 @@ export function CommandPalette({
                         </span>
                       )}
                       {r.description && (
-                        <span className="min-w-0 truncate text-[11.5px] text-text-dim">{r.description}</span>
+                        <span data-selectable className="min-w-0 truncate text-[11.5px] text-text-dim">{r.description}</span>
                       )}
                       <span className="flex-1" />
                       {cloningRepo === r.nameWithOwner && (

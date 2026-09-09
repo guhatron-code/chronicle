@@ -317,6 +317,15 @@ code,
   user-select: text;
 }
 
+/* …but chrome INSIDE a selectable region stays out of the copy. The opt-in
+   above is unlayered, so it beats Tailwind's own `.select-none`; without this
+   the code viewer's line-number gutter copies along with the code. */
+[data-selectable] .select-none,
+[data-selectable] [aria-hidden="true"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* The DS focus law: every plain interactive element gets the double ring. shadcn-based
    controls carry it via utilities; this covers raw <button>/<a> (window controls, rows). */
 button:focus-visible,

@@ -33,12 +33,16 @@ const TAG_NAME = /^[A-Za-z0-9_/-]+$/;
 export function tagItems(tags: TagSuggestion[], query: string): TagSuggestion[] {
   const q = query.trim();
   const lower = q.toLowerCase();
-  const hits = tags.filter((t) => !lower || t.tag.toLowerCase().includes(lower)).slice(0, 10);
+  const matches = tags.filter((t) => !lower || t.tag.toLowerCase().includes(lower));
   // a tag the vault has never seen still has to be typeable — without this row
-  // the menu is empty exactly when the user is inventing one
-  if (q && TAG_NAME.test(q) && !hits.some((t) => t.tag.toLowerCase() === lower)) {
-    hits.push({ tag: q, count: 0, create: true });
-  }
+  // the menu is empty exactly when the user is inventing one. The check is
+  // against every tag, not the sliced ten: a vault with eleven matches would
+  // otherwise offer to "create" a tag it already has, in an eleventh row.
+  // A trailing `/` or `-` is a half-typed tag, not a name worth creating.
+  const create = !!q && TAG_NAME.test(q) && !/[/-]$/.test(q)
+    && !tags.some((t) => t.tag.toLowerCase() === lower);
+  const hits = matches.slice(0, create ? 9 : 10);
+  if (create) hits.push({ tag: q, count: 0, create: true });
   return hits;
 }
 

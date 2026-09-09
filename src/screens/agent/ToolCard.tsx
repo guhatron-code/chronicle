@@ -168,17 +168,17 @@ export function ToolCard({ tool, dir, readOnly, onViewChanges }: { tool: Tool; d
         )}
       </div>
       {failed && tool.output?.trim() && !open && (
-        <div className="px-[11px] pb-2 pl-8 text-[11.5px] text-text-muted">
+        <div data-selectable className="px-[11px] pb-2 pl-8 text-[11.5px] text-text-muted">
           {tool.output.trim().split("\n").slice(-1)[0]}
         </div>
       )}
       {hasOutput && (running || open) && (
-        <div className="max-h-24 overflow-y-auto rounded-b-md bg-surface-input px-3 py-2 font-mono text-[11px] leading-[1.7] text-text-muted">
+        <div data-selectable className="max-h-24 overflow-y-auto rounded-b-md bg-surface-input px-3 py-2 font-mono text-[11px] leading-[1.7] text-text-muted">
           <pre className="whitespace-pre-wrap">{tool.output}</pre>
         </div>
       )}
       {diffOpen && (
-        <div className="max-h-64 overflow-auto rounded-b-md border-t border-border-hairline bg-surface-input font-mono text-[11px] leading-[1.7]">
+        <div data-selectable className="max-h-64 overflow-auto rounded-b-md border-t border-border-hairline bg-surface-input font-mono text-[11px] leading-[1.7]">
           {diffState === "loading" && <div className="px-3 py-2 text-text-dim">Loading the diff…</div>}
           {diffState === "empty" && <div className="px-3 py-2 text-text-dim">No diff to show.</div>}
           {diffState === "error" && <div className="px-3 py-2 text-text-dim">Couldn't load the diff.</div>}

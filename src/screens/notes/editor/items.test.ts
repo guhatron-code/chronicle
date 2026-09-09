@@ -30,9 +30,33 @@ describe("tagItems", () => {
   });
 
   it("keeps the new-tag row last, after the tags that do match", () => {
-    const rows = tagItems(TAGS, "ui/");
-    expect(rows.map((t) => t.tag)).toEqual(["ui/dark", "ui/"]);
+    const rows = tagItems(TAGS, "ui/dar");
+    expect(rows.map((t) => t.tag)).toEqual(["ui/dark", "ui/dar"]);
     expect(rows[rows.length - 1].create).toBe(true);
+  });
+
+  it("will not offer to create a half-typed tag ending in / or -", () => {
+    expect(tagItems(TAGS, "ui/").map((t) => t.tag)).toEqual(["ui/dark"]);
+    expect(tagItems(TAGS, "ui-").some((t) => t.create)).toBe(false);
+  });
+
+  it("checks the whole tag list before offering to create, not just the visible ten", () => {
+    // eleven tags all match "ui", and the twelfth is the exact one typed —
+    // deduping against the sliced page would offer to create it anyway
+    const many = [
+      ...Array.from({ length: 11 }, (_, i) => ({ tag: `ui/${i}`, count: 1 })),
+      { tag: "ui", count: 9 },
+    ];
+    const rows = tagItems(many, "ui");
+    expect(rows.some((t) => t.create)).toBe(false);
+    expect(rows).toHaveLength(10);
+  });
+
+  it("never returns more than ten rows, create row included", () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ tag: `ui/${i}`, count: 1 }));
+    const rows = tagItems(many, "ui");
+    expect(rows).toHaveLength(10);
+    expect(rows[9]).toEqual({ tag: "ui", count: 0, create: true });
   });
 
   it("does not offer a duplicate row for a tag that already exists", () => {

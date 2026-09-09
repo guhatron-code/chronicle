@@ -142,7 +142,7 @@ function DocRow({ doc, last }: { doc: DetailDoc; last: boolean }) {
         </div>
         <AccBody open={doc.state === "open"}>
           {body !== undefined && (
-            <div className="pb-3.5 pl-[31px] pr-3.5 pt-1 text-[12.5px] leading-[1.6] text-text-secondary">
+            <div data-selectable className="pb-3.5 pl-[31px] pr-3.5 pt-1 text-[12.5px] leading-[1.6] text-text-secondary">
               {heading && <div className="pb-1 font-semibold text-text-primary">{heading}</div>}
               <MiniMd source={body} />
             </div>
@@ -283,7 +283,7 @@ export function PhaseDetail(p: PhaseDetailProps) {
       <div className="grid grid-cols-[1.4fr_1fr]">
         {/* left column */}
         <div className="flex flex-col gap-[18px] border-r border-divider px-5 pb-[22px] pt-[18px]">
-          <div className="max-w-[52ch] text-[13px] leading-[1.6] text-text-secondary">
+          <div data-selectable className="max-w-[52ch] text-[13px] leading-[1.6] text-text-secondary">
             {p.description}
           </div>
 

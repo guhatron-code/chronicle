@@ -67,5 +67,5 @@ export const Backlinks = memo(function Backlinks({
 
 /** The dim half of a link row — whatever is left after the name. */
 function Secondary({ children }: { children: ReactNode }) {
-  return <span className="min-w-0 shrink truncate text-[11px] text-text-dim">{children}</span>;
+  return <span data-selectable className="min-w-0 shrink truncate text-[11px] text-text-dim">{children}</span>;
 }

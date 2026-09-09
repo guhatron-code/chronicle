@@ -104,7 +104,7 @@ function CodeView({ lines }: { lines: CodeLine[] }) {
 
 function DiffView({ rows }: { rows: DiffRow[] }) {
   return (
-    <div className="min-h-0 flex-1 overflow-auto bg-surface-input font-mono text-xs leading-[1.75]">
+    <div data-selectable className="min-h-0 flex-1 overflow-auto bg-surface-input font-mono text-xs leading-[1.75]">
       {rows.map((row, i) => {
         if (row.kind === "hunk") {
           return (
@@ -173,6 +173,7 @@ export function Viewer(p: ViewerProps) {
     <div className={cn("flex h-full min-w-0 flex-col", p.className)}>
       {/* open-file tabs */}
       <TabStrip
+        label="Open files"
         tabs={p.tabs.map((tab) => ({ id: tab.id, label: tab.name }))}
         activeId={p.activeTabId}
         onSelect={p.onSelectTab}

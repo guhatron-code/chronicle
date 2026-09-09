@@ -121,7 +121,8 @@ function MessageRow({ who, avatar, children }: { who: string; avatar: React.Reac
       {avatar}
       <div className="min-w-0 flex-1">
         <div className="mb-0.5 text-[12.5px] font-semibold text-text-primary">{who}</div>
-        <div className="text-[13px] leading-[1.65] text-text-primary [text-wrap:pretty]">{children}</div>
+        {/* the message body is content — the "You"/agent name above it is chrome */}
+        <div data-selectable className="text-[13px] leading-[1.65] text-text-primary [text-wrap:pretty]">{children}</div>
       </div>
     </div>
   );
@@ -235,7 +236,7 @@ function TurnError({ message }: { message: string }) {
   return (
     <div className="mx-3.5 my-1 flex items-start gap-2 rounded-md border border-border-hairline bg-surface-card px-[11px] py-2">
       <span className="mt-0.5 shrink-0 text-state-error"><ErrorGlyph size={12} /></span>
-      <span className="min-w-0 text-xs leading-[1.55] text-text-muted">
+      <span data-selectable className="min-w-0 text-xs leading-[1.55] text-text-muted">
         The agent stopped with an error — <span className="font-mono text-[11px]">{message}</span>. Send the message
         again, or end the session and start fresh.
       </span>
@@ -421,7 +422,7 @@ function QueuedMessages({ dir, queue }: { dir: string; queue: string[] }) {
           className="flex items-start gap-2 rounded-md border border-border-hairline bg-fill-subtle px-[11px] py-2"
         >
           <span className="mt-[1px] shrink-0 rounded-[5px] bg-surface-card px-1.5 text-[10.5px] text-text-dim">queued</span>
-          <span className="min-w-0 flex-1 whitespace-pre-wrap text-[12.5px] text-text-secondary [overflow-wrap:anywhere]">{text}</span>
+          <span data-selectable className="min-w-0 flex-1 whitespace-pre-wrap text-[12.5px] text-text-secondary [overflow-wrap:anywhere]">{text}</span>
           <button
             aria-label="Remove this queued message"
             onClick={() => dequeueAgentMessage(dir, i)}
@@ -569,7 +570,7 @@ export function AgentPane({
       return (
         <div data-agent-banner="error" className="mx-3 mb-2 flex items-start gap-[9px] rounded-md bg-fill-subtle p-[11px]">
           <span className="mt-0.5 shrink-0 text-state-error"><ErrorGlyph size={12} /></span>
-          <div className="flex min-w-0 flex-col gap-[7px]">
+          <div data-selectable className="flex min-w-0 flex-col gap-[7px]">
             <span className="text-[12.5px] leading-[1.5] text-text-secondary">
               The agent bridge stopped and couldn't start a session. It may need an update or a working connection.
             </span>
