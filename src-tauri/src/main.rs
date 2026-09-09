@@ -10,6 +10,7 @@ mod setup;
 mod power;
 mod web;
 mod blocklists;
+mod history;
 mod menu;
 mod notes;
 
@@ -3054,6 +3055,7 @@ fn main() {
             fixes_log_path, fixes_generate, fixes_status, fixes_cancel,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
+            history::history_facts, history::git_fetch,
             list_dir, file_index, read_file, copy_file, copy_text,
             pty_spawn, init_log_path,
             pty_write, pty_resize, pty_kill, pty_info,
