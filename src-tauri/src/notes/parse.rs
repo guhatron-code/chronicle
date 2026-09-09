@@ -250,7 +250,9 @@ pub fn sanitize_title(title: &str) -> String {
         .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { '-' } else { c })
         .collect();
     while s.contains("--") { s = s.replace("--", "-"); }
-    let s = s.trim().trim_matches('-').trim().to_string();
+    // leading dots go too: the index skips hidden files, so a name that starts
+    // with '.' would be a note nobody can see (matches the pane's sanitizeTitle)
+    let s = s.trim().trim_matches('-').trim_start_matches(|c| c == '.' || c == '-').trim().to_string();
     let s: String = s.chars().take(80).collect();
     let s = s.trim().to_string();
     if s.is_empty() { "Untitled".to_string() } else { s }
@@ -422,6 +424,8 @@ mod tests {
         assert_eq!(sanitize_title(&"x".repeat(120)).len(), 80);
         assert_eq!(sanitize_title(""), "Untitled");
         assert_eq!(sanitize_title("///"), "Untitled", "a title that sanitises to nothing still needs a name");
+        assert_eq!(sanitize_title(".hidden idea"), "hidden idea", "a leading dot would make the note invisible to the index");
+        assert_eq!(sanitize_title("..."), "Untitled");
     }
 
     #[test]
