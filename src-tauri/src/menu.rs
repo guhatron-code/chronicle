@@ -68,16 +68,19 @@ const GO: &[Go] = &[
     Go { id: "go-agent",    text: "Toggle Agent",    accel: "Alt+Cmd+Digit2", key: "2", code: "Digit2", alt: true, shift: false, group: 3 },
     Go { id: "go-terminal", text: "Toggle Terminal", accel: "Alt+Cmd+Digit3", key: "3", code: "Digit3", alt: true, shift: false, group: 3 },
     Go { id: "go-help", text: "Keyboard Shortcuts", accel: "Cmd+Slash", key: "/", code: "Slash", alt: false, shift: false, group: 4 },
+    // the Notes pane
+    Go { id: "go-new-note",  text: "New Note",     accel: "Cmd+KeyN", key: "n", code: "KeyN", alt: false, shift: false, group: 5 },
+    Go { id: "go-jump-note", text: "Jump to Note", accel: "Cmd+KeyP", key: "p", code: "KeyP", alt: false, shift: false, group: 5 },
     // jump to an open project by position — plain ⌘, no ⌥
-    Go { id: "go-project-1", text: "Project 1", accel: "Cmd+Digit1", key: "1", code: "Digit1", alt: false, shift: false, group: 5 },
-    Go { id: "go-project-2", text: "Project 2", accel: "Cmd+Digit2", key: "2", code: "Digit2", alt: false, shift: false, group: 5 },
-    Go { id: "go-project-3", text: "Project 3", accel: "Cmd+Digit3", key: "3", code: "Digit3", alt: false, shift: false, group: 5 },
-    Go { id: "go-project-4", text: "Project 4", accel: "Cmd+Digit4", key: "4", code: "Digit4", alt: false, shift: false, group: 5 },
-    Go { id: "go-project-5", text: "Project 5", accel: "Cmd+Digit5", key: "5", code: "Digit5", alt: false, shift: false, group: 5 },
-    Go { id: "go-project-6", text: "Project 6", accel: "Cmd+Digit6", key: "6", code: "Digit6", alt: false, shift: false, group: 5 },
-    Go { id: "go-project-7", text: "Project 7", accel: "Cmd+Digit7", key: "7", code: "Digit7", alt: false, shift: false, group: 5 },
-    Go { id: "go-project-8", text: "Project 8", accel: "Cmd+Digit8", key: "8", code: "Digit8", alt: false, shift: false, group: 5 },
-    Go { id: "go-project-9", text: "Project 9", accel: "Cmd+Digit9", key: "9", code: "Digit9", alt: false, shift: false, group: 5 },
+    Go { id: "go-project-1", text: "Project 1", accel: "Cmd+Digit1", key: "1", code: "Digit1", alt: false, shift: false, group: 6 },
+    Go { id: "go-project-2", text: "Project 2", accel: "Cmd+Digit2", key: "2", code: "Digit2", alt: false, shift: false, group: 6 },
+    Go { id: "go-project-3", text: "Project 3", accel: "Cmd+Digit3", key: "3", code: "Digit3", alt: false, shift: false, group: 6 },
+    Go { id: "go-project-4", text: "Project 4", accel: "Cmd+Digit4", key: "4", code: "Digit4", alt: false, shift: false, group: 6 },
+    Go { id: "go-project-5", text: "Project 5", accel: "Cmd+Digit5", key: "5", code: "Digit5", alt: false, shift: false, group: 6 },
+    Go { id: "go-project-6", text: "Project 6", accel: "Cmd+Digit6", key: "6", code: "Digit6", alt: false, shift: false, group: 6 },
+    Go { id: "go-project-7", text: "Project 7", accel: "Cmd+Digit7", key: "7", code: "Digit7", alt: false, shift: false, group: 6 },
+    Go { id: "go-project-8", text: "Project 8", accel: "Cmd+Digit8", key: "8", code: "Digit8", alt: false, shift: false, group: 6 },
+    Go { id: "go-project-9", text: "Project 9", accel: "Cmd+Digit9", key: "9", code: "Digit9", alt: false, shift: false, group: 6 },
 ];
 
 /// Menu id → the chord it replays. Predefined items (copy, quit, …) are not in the
@@ -240,6 +243,16 @@ mod tests {
         assert_eq!(key_for("go-back").unwrap().code, "BracketLeft");
         assert_eq!(key_for("go-help").unwrap().key, "/");
         assert_eq!(key_for("go-project-9").unwrap().key, "9"); // App.tsx tests e.key
+    }
+
+    #[test]
+    fn the_notes_chords_are_new_and_plain() {
+        for id in ["go-new-note", "go-jump-note"] {
+            let k = key_for(id).unwrap();
+            assert!(k.meta && !k.alt && !k.shift, "{id} is a plain Cmd chord");
+        }
+        assert_eq!(key_for("go-new-note").unwrap().key, "n");
+        assert_eq!(key_for("go-jump-note").unwrap().key, "p");
     }
 
     #[test]

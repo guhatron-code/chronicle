@@ -5,7 +5,7 @@
  * de-boxing law). Each unit (content · agent · terminal) can be shown or
  * hidden via the title-bar cluster — all three at max, exactly one at min;
  * visibility persists per project. SUPERSEDED and retired here: the old
- * "terminal column is absent on Kanban (full-bleed)" rule — the right column
+ * "terminal column is absent on Notes (full-bleed)" rule — the right column
  * may sit beside any content pane; the toggles are how full-bleed happens now.
  * Hiding a unit never kills sessions (they live outside React, like hidden
  * terminal tabs always have).

@@ -1,7 +1,10 @@
 /*
  * ⌘⇧F — global search (F6). One ranked sweep across file names, save subjects,
- * plan documents (backend, jailed) and kanban tasks (client store). Same
- * anatomy as the palette; results are pre-filtered so cmdk doesn't re-filter.
+ * plan documents and notes (all backend, jailed). Same anatomy as the palette;
+ * results are pre-filtered so cmdk doesn't re-filter.
+ *
+ * ⌘P opens the same overlay with `scope="notes"`: only the Notes group shows,
+ * and the repo sweep is skipped entirely rather than walked and hidden.
  */
 import { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -14,62 +17,70 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Kbd } from "@/components/chrome/atoms";
-import { FolderGlyph, SearchGlyph } from "@/components/chrome/icons";
-import { globalSearch, type SearchResults } from "@/lib/ipc";
-import { kanbanFor } from "@/lib/kanban-store";
+import { FolderGlyph, NotesGlyph, SearchGlyph } from "@/components/chrome/icons";
+import { globalSearch, notesSearch, type NoteSearchHit, type SearchResults } from "@/lib/ipc";
 
 const GROUP_HEAD =
   "**:[[cmdk-group-heading]]:px-2.5 **:[[cmdk-group-heading]]:pb-[5px] **:[[cmdk-group-heading]]:pt-2.5 **:[[cmdk-group-heading]]:text-[10px] **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.09em] **:[[cmdk-group-heading]]:text-text-dimmer";
 const ITEM = "gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-fill-hover";
 
+/** `Tasks/Archive/Note.md` → `Tasks/Archive`; a note at the root says "vault". */
+const folderOf = (path: string) => path.split("/").slice(0, -1).join("/") || "vault";
+
 export function SearchOverlay({
   open,
   onOpenChange,
   dir,
+  scope = "all",
   onOpenFile,
   onOpenHistory,
-  onOpenTask,
+  onOpenNote,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   dir: string | null;
+  /** ⌘P narrows the overlay to the vault; ⌘⇧F sweeps everything. */
+  scope?: "all" | "notes";
   onOpenFile: (path: string) => void;
   onOpenHistory: () => void;
-  onOpenTask: (id: string) => void;
+  onOpenNote: (path: string) => void;
 }) {
+  const repo = scope === "all";
   const [q, setQ] = useState("");
   const [results, setResults] = useState<SearchResults>({ files: [], commits: [], docs: [] });
-  const seq = useRef(0);
+  const [notes, setNotes] = useState<NoteSearchHit[]>([]);
+  const seqRepo = useRef(0);
+  const seqNotes = useRef(0);
 
   useEffect(() => {
-    if (!open) { setQ(""); setResults({ files: [], commits: [], docs: [] }); return; }
+    if (!open) { setQ(""); setResults({ files: [], commits: [], docs: [] }); setNotes([]); return; }
   }, [open]);
 
   useEffect(() => {
-    if (!dir || q.trim().length < 2) { setResults({ files: [], commits: [], docs: [] }); return; }
-    const my = ++seq.current;
+    if (!dir || !repo || q.trim().length < 2) { setResults({ files: [], commits: [], docs: [] }); return; }
+    const my = ++seqRepo.current;
     const t = setTimeout(() => {
       globalSearch(dir, q)
-        .then((r) => { if (seq.current === my) setResults(r); })
+        .then((r) => { if (seqRepo.current === my) setResults(r); })
         .catch(() => {});
     }, 220);
     return () => clearTimeout(t);
+  }, [dir, q, repo]);
+
+  useEffect(() => {
+    if (!dir || q.trim().length < 2) { setNotes([]); return; }
+    // no debounce timer of its own: notes_search is an in-memory index scan
+    // plus at most one read per body hit, and the sequence guard already
+    // discards the answers to keystrokes the user has moved past
+    const my = ++seqNotes.current;
+    notesSearch(dir, q).then((r) => { if (seqNotes.current === my) setNotes(r.slice(0, 8)); }).catch(() => {});
   }, [dir, q]);
 
   const needle = q.trim().toLowerCase();
-  const tasks = !dir || needle.length < 2
-    ? []
-    : kanbanFor(dir).tasks
-        .filter((t) => !t.archived)
-        .filter((t) =>
-          t.title.toLowerCase().includes(needle) ||
-          (t.content ?? "").toLowerCase().includes(needle) ||
-          t.id.toLowerCase() === needle)
-        .slice(0, 8);
 
   const go = (fn: () => void) => { onOpenChange(false); fn(); };
-  const empty = needle.length >= 2 && results.files.length === 0 &&
-    results.commits.length === 0 && results.docs.length === 0 && tasks.length === 0;
+  const empty = needle.length >= 2 && notes.length === 0 &&
+    (!repo || (results.files.length === 0 && results.commits.length === 0 && results.docs.length === 0));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -85,7 +96,7 @@ export function SearchOverlay({
           <CommandInput
             value={q}
             onValueChange={setQ}
-            placeholder="Search files, saves, documents, tasks…"
+            placeholder={repo ? "Search files, saves, documents, notes…" : "Search notes…"}
             className="h-11 text-[13px] text-text-primary placeholder:text-text-dim"
           />
           <CommandList className="max-h-[420px] p-2">
@@ -100,7 +111,7 @@ export function SearchOverlay({
               </CommandEmpty>
             )}
 
-            {results.files.length > 0 && (
+            {repo && results.files.length > 0 && (
               <CommandGroup heading="Files" className={GROUP_HEAD}>
                 {results.files.map((f) => (
                   <CommandItem key={`f-${f}`} value={`f-${f}`} onSelect={() => go(() => onOpenFile(f))} className={ITEM}>
@@ -111,7 +122,7 @@ export function SearchOverlay({
               </CommandGroup>
             )}
 
-            {results.commits.length > 0 && (
+            {repo && results.commits.length > 0 && (
               <CommandGroup heading="Saves" className={GROUP_HEAD}>
                 {results.commits.map((c) => (
                   <CommandItem key={`c-${c.hash}`} value={`c-${c.hash}`} onSelect={() => go(onOpenHistory)} className={ITEM}>
@@ -124,7 +135,7 @@ export function SearchOverlay({
               </CommandGroup>
             )}
 
-            {results.docs.length > 0 && (
+            {repo && results.docs.length > 0 && (
               <CommandGroup heading="Plan documents" className={GROUP_HEAD}>
                 {results.docs.map((d) => (
                   <CommandItem key={`d-${d.path}`} value={`d-${d.path}`} onSelect={() => go(() => onOpenFile(d.path))} className={ITEM}>
@@ -136,14 +147,14 @@ export function SearchOverlay({
               </CommandGroup>
             )}
 
-            {tasks.length > 0 && (
-              <CommandGroup heading="Kanban tasks" className={GROUP_HEAD}>
-                {tasks.map((t) => (
-                  <CommandItem key={`t-${t.id}`} value={`t-${t.id}`} onSelect={() => go(() => onOpenTask(t.id))} className={ITEM}>
-                    <span className="shrink-0 rounded-[5px] bg-fill-subtle px-[5px] font-mono text-[10.5px] text-text-subtle">{t.id}</span>
-                    <span className="min-w-0 truncate text-[12.5px] text-text-primary">{t.title}</span>
+            {notes.length > 0 && (
+              <CommandGroup heading="Notes" className={GROUP_HEAD}>
+                {notes.map((n) => (
+                  <CommandItem key={`n-${n.path}`} value={`n-${n.path}`} onSelect={() => go(() => onOpenNote(n.path))} className={ITEM}>
+                    <NotesGlyph size={13} className="shrink-0 text-text-dim" />
+                    <span className="min-w-0 truncate text-[12.5px] text-text-primary">{n.title}</span>
                     <span className="flex-1" />
-                    <span className="shrink-0 text-[10.5px] text-text-dim">{t.column.replace("_", " ")}</span>
+                    <span className="shrink-0 truncate text-[10.5px] text-text-dim">{folderOf(n.path)}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>

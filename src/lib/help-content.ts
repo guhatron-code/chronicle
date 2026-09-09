@@ -6,7 +6,7 @@
  * placeholders); reconcile here if the keymap in App.tsx changes.
  */
 
-export type HelpTarget = "road" | "repo" | "kanban" | "agent" | "setup";
+export type HelpTarget = "road" | "repo" | "notes" | "agent" | "setup";
 
 /* ---------- getting-started guides (the tutorial) ----------
    Written for a designer who has never worked with an AI coding tool. Plain
@@ -249,13 +249,17 @@ export const SHORTCUTS: Shortcut[] = [
   { keys: "⌘K", label: "Open another project" },
   { keys: "⌘O", label: "Open a folder" },
   { keys: "⌘1–9", label: "Switch between open projects" },
-  { keys: "⌘J", label: "Cycle Roadmap · Repo · Kanban" },
+  { keys: "⌘J", label: "Cycle Roadmap · Repo · Notes · Web" },
   { keys: "⌥⌘1", label: "Show or hide the content pane" },
   { keys: "⌥⌘2", label: "Show or hide the agent" },
   { keys: "⌥⌘3", label: "Show or hide the terminal" },
   { keys: "⌘⏎", label: "Send a message to the agent" },
   { keys: "⌘T", label: "New terminal" },
   { keys: "⌘⇧F", label: "Search this project" },
+  { keys: "⌘N", label: "New note" },
+  { keys: "⌘P", label: "Jump to a note" },
+  { keys: "⌘]", label: "Follow the link under the cursor" },
+  { keys: "⌘[", label: "Back to the last note" },
   { keys: "⌘W", label: "Close the project" },
   { keys: "⌘/", label: "Open Help" },
 ];

@@ -1,19 +1,20 @@
 /*
  * The composer's `@` menu — everything in a project worth pointing an agent at.
  *
- * Four sources: repo files, this session's attachments, kanban tasks, and
- * roadmap phases. Files are referenced by path, because the agent can read
- * those itself and a big file costs nothing until it does. A kanban task or a
- * roadmap phase has no file to read, so its text is inlined at send time.
+ * Four sources: repo files, this session's attachments, notes from the vault,
+ * and roadmap phases. Files and notes are referenced by path, because the agent
+ * can read those itself and a big one costs nothing until it does — a note's
+ * text is fetched at send time, never held in the menu. A roadmap phase has no
+ * file to read, so its text is inlined at send time.
  *
  * A mention survives in the textarea as plain text plus an entry in a lookup
  * table. Edit the text so it no longer matches and it silently becomes what it
  * looks like — ordinary prose. No chip ever claims something isn't attached.
  */
-import { fileIndex, readFile } from "./ipc";
-import { kanbanFor } from "./kanban-store";
+import { fileIndex, notesRead, readFile } from "./ipc";
+import { indexFor } from "./notes-store";
 
-export type MentionKind = "file" | "attachment" | "task" | "phase";
+export type MentionKind = "file" | "attachment" | "note" | "phase";
 
 export interface Mention {
   kind: MentionKind;
@@ -23,8 +24,10 @@ export interface Mention {
   label: string;
   /** menu right-hand text */
   detail?: string;
-  /** set for task/phase — inlined into the message at send time */
+  /** set for phase — inlined into the message at send time */
   body?: string;
+  /** set for note — the vault path its text is read from at send time */
+  path?: string;
 }
 
 /* ---------- the file index (cached per project) ---------- */
@@ -123,16 +126,11 @@ export function mentionRows(
     }
   }
 
-  for (const t of kanbanFor(dir).tasks) {
-    if (t.archived) continue;
-    if (matches(q, t.id, t.title)) {
-      out.push({
-        kind: "task",
-        token: t.id,
-        label: t.id,
-        detail: t.title,
-        body: [`${t.id} — ${t.title}`, t.content].filter(Boolean).join("\n"),
-      });
+  for (const n of indexFor(dir).notes) {
+    if (matches(q, n.title, n.path)) {
+      // the token carries its own `note:` prefix so the composer reads
+      // `@note:Web pane retro` — the spec's form, and the mock's
+      out.push({ kind: "note", token: `note:${n.title}`, label: n.title, detail: n.folder || "vault", path: n.path, body: undefined });
     }
   }
 
@@ -157,14 +155,15 @@ export function mentionRows(
 /**
  * The text-only form, for the queue — a queued message is stored as a string
  * and sent unattended later, so its mentions are resolved now while the table
- * still holds them. Paths stay inline; a task or phase appends its text. The
- * agent sees the same information, just without the lazy file links.
+ * still holds them. Paths stay inline; a phase appends its text. A note has a
+ * file, so it appends the path to read rather than the whole note: the queued
+ * message may go out much later, and the note on disk is the honest version.
  */
 export function flattenMentions(text: string, table: Map<string, Mention>): string {
-  const used = [...table.values()].filter((m) => m.body && text.includes(`@${m.token}`));
+  const used = [...table.values()].filter((m) => (m.body || m.path) && text.includes(`@${m.token}`));
   if (used.length === 0) return text;
   const context = used
-    .map((m) => `<context ref="chronicle://${m.kind}/${m.token}">\n${m.body}\n</context>`)
+    .map((m) => `<context ref="${uriFor(m)}">\n${m.body ?? `Read .chronicle/notes/${m.path}`}\n</context>`)
     .join("\n\n");
   return `${text}\n\n${context}`;
 }
@@ -176,23 +175,26 @@ export type ContentBlock =
   | { type: "resource_link"; uri: string; name: string }
   | { type: "resource"; resource: { uri: string; text: string; mimeType: string } };
 
-/** `chronicle://task/T-042` — a stable name for a thing with no file. */
-const uriFor = (m: Mention) => `chronicle://${m.kind}/${m.token}`;
+/** `chronicle://phase/F31`, `chronicle://note/Web pane retro` — a stable name
+ *  for the thing the mention points at. The note token already carries the
+ *  `note:` prefix the composer shows, so the uri names the title, not the token. */
+const uriFor = (m: Mention) => `chronicle://${m.kind}/${m.kind === "note" ? m.label : m.token}`;
 
 /**
  * Split `text` into ACP blocks around every still-intact mention token.
  *
  * A file or attachment becomes a `resource_link`: a pointer the agent follows
  * with its own Read tool, so mentioning a 3000-line file costs nothing until
- * it's actually wanted. A task or phase has no file to read, so it becomes a
- * `resource` carrying its text, which the adapter inlines as a `<context ref>`
- * block.
+ * it's actually wanted. A phase has no file to read, so it becomes a `resource`
+ * carrying its text, which the adapter inlines as a `<context ref>` block. A
+ * note is a file, but not one the agent is told the path of, so its text is
+ * read here — lazily, at send time, never held in the menu.
  *
  * A token the user has since edited no longer matches the table, so it stays
  * in the surrounding text as the prose it now looks like. That is the whole
  * point of the token design — a mention never outlives its own text.
  */
-export function buildBlocks(text: string, table: Map<string, Mention>, dir: string): ContentBlock[] {
+export async function buildBlocks(text: string, table: Map<string, Mention>, dir: string): Promise<ContentBlock[]> {
   // longest token first: `@src/a.ts` must not be matched by a shorter `@src/a`
   const tokens = [...table.keys()].sort((a, b) => b.length - a.length);
 
@@ -221,7 +223,15 @@ export function buildBlocks(text: string, table: Map<string, Mention>, dir: stri
   let cursor = 0;
   for (const h of hits) {
     pushText(text.slice(cursor, h.at));
-    if (h.m.body) {
+    if (h.m.kind === "note" && h.m.path) {
+      // an unreadable note falls back to its own title: the mention never
+      // fails the send, it just carries less
+      const body = await notesRead(dir, h.m.path).catch(() => h.m.label);
+      blocks.push({
+        type: "resource",
+        resource: { uri: uriFor(h.m), text: body, mimeType: "text/markdown" },
+      });
+    } else if (h.m.body) {
       blocks.push({
         type: "resource",
         resource: { uri: uriFor(h.m), text: h.m.body, mimeType: "text/plain" },

@@ -1,7 +1,7 @@
 /*
  * "Start a round ▸" turns the queued notes into a fix plan — the same
- * background session Kanban's ExecuteFlow drove (that file is deleted in
- * Task 9; its generating-card markup is lifted here). No preflight, no done
+ * background session the old board's ExecuteFlow drove (its generating-card
+ * markup was lifted here when that screen was deleted). No preflight, no done
  * card: the sidebar button starts it directly (via the imperative handle)
  * and a toast offers to run it once the plan is written.
  */

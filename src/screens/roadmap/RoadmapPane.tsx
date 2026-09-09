@@ -42,7 +42,7 @@ import { useSessionStatus } from "@/lib/session-status";
 import { AWAY_THRESHOLD_MS, announce, lastSeen, markSeen } from "@/lib/journal";
 import { openFileInRepo } from "@/screens/repo/RepoPane";
 import { fixesCancel, fixesLogPath, fixesStatus, initLogPath } from "@/lib/ipc";
-import { kanbanFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
+import { indexFor, refreshNotes, roundGenerating, subscribeNotes } from "@/lib/notes-store";
 import { setInitRunning } from "@/lib/run-flags";
 import { toastError, toastSuccess, toastRemoteOutcome } from "@/overlays/toasts";
 import { humanError, humanGitError } from "@/lib/utils";
@@ -58,7 +58,7 @@ export function RoadmapPane({
   onOpenProject,
   onGoRepo,
   onGoHistory,
-  onGoKanban,
+  onGoNotes,
   onConfirm,
   onPollNow,
   onStartPhaseWithAgent,
@@ -72,7 +72,7 @@ export function RoadmapPane({
   onOpenProject: (path: string) => void;
   onGoRepo: () => void;
   onGoHistory: () => void;
-  onGoKanban: () => void;
+  onGoNotes: () => void;
   onConfirm: (spec: ConfirmSpec) => void;
   onPollNow: () => void;
   /** F38 — reveal the agent pane and preload this phase's prompt as a draft. */
@@ -90,7 +90,7 @@ export function RoadmapPane({
   const [execRun, setExecRun] = useState<InitRun | null>(null);
   const [digest, setDigest] = useState<{ ts: number; text: string }[] | null>(null);
   const [, kbBump] = useState(0);
-  useEffect(() => subscribeKanban(() => kbBump((n) => n + 1)), []);
+  useEffect(() => subscribeNotes(() => kbBump((n) => n + 1)), []);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
@@ -243,15 +243,13 @@ export function RoadmapPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initSt]);
 
-  /* a headless round execution is live → mirror it on the roadmap */
-  const kb = kanbanFor(dir);
+  /* a headless round execution is live → mirror it on the roadmap. The vault is
+     the ground truth: a round is still running while any of its notes sits at
+     in_progress (Rust's settle_done clears the last one when they're all done). */
   const execRoundN = (() => {
-    for (const r of [...kb.rounds].reverse()) {
-      if (r.state !== "ready") continue;
-      const mine = kb.tasks.filter((t) => t.round === r.n && !t.archived);
-      if (mine.length > 0 && mine.some((t) => t.column !== "completed")) return r.n;
-    }
-    return null;
+    const live = indexFor(dir).notes.filter((n) => n.round != null && n.status === "in_progress");
+    if (live.length === 0) return null;
+    return live.reduce((m, x) => Math.max(m, x.round ?? 0), 0);
   })();
   const execSt = useSessionStatus(dir, "exec", execRoundN != null, roundExecStatus);
   const sawExecLive = useRef(false);
@@ -278,13 +276,13 @@ export function RoadmapPane({
     setExecRun(null);
     if (sawExecLive.current) {
       sawExecLive.current = false;
-      void refreshKanban(dir);
+      void refreshNotes(dir);
       if (st.cancelled) { onPollNowRef.current(); return; }
       if ((st.code ?? 1) === 0) {
-        toastSuccess("The round finished", "Check the board — completed tasks are ticked");
+        toastSuccess("The round finished", "Check Notes — finished items are ticked");
         announce(dir, "round-done", `Round ${execRoundN} finished`, "Chronicle");
       } else {
-        toastError("The round session ended", `Exited with code ${st.code ?? "?"} — unfinished tasks stay on the board`);
+        toastError("The round session ended", `Exited with code ${st.code ?? "?"} — unfinished notes stay in Notes`);
         announce(dir, "round-ended", `Round ${execRoundN} ended early`, "Chronicle");
       }
       onPollNowRef.current();
@@ -292,8 +290,8 @@ export function RoadmapPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [execSt, execRoundN]);
 
-  /* a kanban round is generating → mirror its session on the roadmap */
-  const generating = kanbanFor(dir).rounds.some((r) => r.state === "generating");
+  /* a round's plan is being written → mirror its session on the roadmap */
+  const generating = roundGenerating(dir);
   const fixesSt = useSessionStatus(dir, "fixes", generating, fixesStatus);
   const fixesSettled = useRef(false);
   useEffect(() => {
@@ -319,7 +317,7 @@ export function RoadmapPane({
     if (fixesSettled.current) return; // a duplicate terminal delivery must not double-toast
     fixesSettled.current = true;
     setFixesRun(null);
-    void refreshKanban(dir).then(() => {
+    void refreshNotes(dir).then(() => {
       if (!st.cancelled && (st.code ?? 1) === 0) {
         toastSuccess("The fix plan is written", "The round is on your roadmap");
         announce(dir, "round-plan", "A round's fix plan is ready", "Chronicle");
@@ -445,7 +443,7 @@ export function RoadmapPane({
       },
       onCancelExec: () => {
         roundExecCancel(dir)
-          .then(() => { setExecRun(null); void refreshKanban(dir); toastSuccess("Stopped the round", "Finished tasks stay done; the rest are still on the board"); })
+          .then(() => { setExecRun(null); void refreshNotes(dir); toastSuccess("Stopped the round", "Finished notes stay done; the rest are still in Notes"); })
           .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)));
       },
       onViewExecLog: () => {
@@ -462,7 +460,7 @@ export function RoadmapPane({
       },
       onCancelFixes: () => {
         fixesCancel(dir)
-          .then(() => { setFixesRun(null); void refreshKanban(dir); toastSuccess("Stopped the session"); })
+          .then(() => { setFixesRun(null); void refreshNotes(dir); toastSuccess("Stopped the session"); })
           .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)));
       },
       onCancelInit: () => {
@@ -597,7 +595,7 @@ export function RoadmapPane({
           .then(() => { toastSuccess("History started"); onPollNow(); })
           .catch((e) => toastError("Couldn't start history", String(e).slice(0, 90)));
       },
-      onAddNext: onGoKanban,
+      onAddNext: onGoNotes,
       onReadDecision: setDetailId,
     },
   };

@@ -1,7 +1,7 @@
 /*
  * The app root: picker (no project open) ⇄ the persistent shell. C2 wires the
  * project tabs, the 8s ground-truth poll, the keyboard map, and the per-project
- * splitter. The content panes (roadmap/repo/kanban) land in C3–C5; the live
+ * splitter. The content panes (roadmap/repo/notes) land in C3–C5; the live
  * terminal in C6.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -22,6 +22,7 @@ import {
   getPicker,
   getState,
   onMenuKey,
+  onNotesMigrated,
   openProject,
   pickFolder,
   removeRecent,
@@ -54,11 +55,22 @@ import {
 } from "@/lib/term-sessions";
 import type { TerminalTab } from "@/components/chrome/TerminalColumn";
 import { TrafficLights } from "@/components/chrome/TitleBar";
-import { KanbanPane } from "@/screens/kanban/KanbanPane";
+import { NotesPane } from "@/screens/notes/NotesPane";
 import { WebPane } from "@/screens/web/WebPane";
 import { openInWeb, reloadProjectFiles } from "@/lib/web-store";
 import { isHtmlPath, isClaudeArtifactUrl } from "@/lib/web-url";
-import { evictKanban, kanbanFor, openTaskInKanban, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
+import {
+  createNote,
+  evictNotes,
+  followLinkUnderCaret,
+  noteGeneration,
+  noteHistoryBack,
+  openNoteInPane,
+  refreshNotes,
+  queuedCountFor,
+  setNotesOnScreen,
+  subscribeNotes,
+} from "@/lib/notes-store";
 import { announce } from "@/lib/journal";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { checkForUpdate, dismissUpdate, installUpdate, restartUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
@@ -72,7 +84,7 @@ import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, subscribeAgent } from "@/lib/agent-session";
 import { agentSessionStop, readFile } from "@/lib/ipc";
 import { openAgentReview } from "@/screens/repo/RepoPane";
-import { copyText, fixesStatus, githubClone, githubRepos, initStatus, launchOpenDir, openUrl, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
+import { copyText, githubClone, githubRepos, initStatus, launchOpenDir, openUrl, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
 
 interface ProjectEntry {
@@ -86,12 +98,12 @@ interface ProjectEntry {
   justSwitchedAt?: number; // the ~2s banner emphasis window
 }
 
-const PANES: Pane[] = ["road", "repo", "kanban", "web"];
+const PANES: Pane[] = ["road", "repo", "notes", "web"];
 const splitKey = (dir: string) => `chronicle.split.${dir}`;
 
 /* F31 — the three-unit layout (content · agent · terminal): visibility,
  * per-section collapse, and the horizontal splitter, persisted per project.
- * The old kanban full-bleed rule is retired — full-bleed happens via the
+ * The old board's full-bleed rule is retired — full-bleed happens via the
  * toggles now. */
 interface PaneLayout {
   content: boolean;
@@ -142,6 +154,8 @@ export default function App() {
   const [helpOpen, setHelpOpen] = useState(false);
 
   const [searchOpen, setSearchOpen] = useState(false);
+  /** ⌘⇧F sweeps the project; ⌘P narrows the same overlay to the vault. */
+  const [searchScope, setSearchScope] = useState<"all" | "notes">("all");
   const [newProjOpen, setNewProjOpen] = useState(false);
   const [newProjError, setNewProjError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null);
@@ -160,7 +174,6 @@ export default function App() {
 
   /* ---- the ground-truth poll: every open project, on the 60s heartbeat + fs events ---- */
   const pollInFlight = useRef(new Set<string>());
-  const kanbanSeen = useRef(new Map<string, number>());
   const pollOne = useCallback(async (dir: string) => {
     if (pollInFlight.current.has(dir)) return; // a slow getState must not stack
     pollInFlight.current.add(dir);
@@ -171,11 +184,6 @@ export default function App() {
     }
   }, []);
   const pollOneInner = useCallback(async (dir: string) => {
-    // a generating round settles server-side inside fixes_status — poll it even
-    // when no pane is watching, so rounds can't stay "generating" forever (T-006)
-    if (kanbanFor(dir).rounds.some((r) => r.state === "generating")) {
-      void fixesStatus(dir).catch(() => {});
-    }
     // a "Writing your roadmap…" flag with no RoadmapPane mounted to clear it
     // (user on Home) is verified against the backend and released when stale
     if (isInitRunning(dir)) {
@@ -185,15 +193,11 @@ export default function App() {
     }
     try {
       const s = await getState(dir);
-      // the rail badge + round overlays stay live — but only re-read the board
-      // when its file actually changed (the fs watcher wakes this poll on writes)
-      // a failed getState skips this cycle; the unchanged seen-mtime means the
+      // the rail badge + round cards stay live — but only re-read the vault when
+      // its generation actually moved (the fs watcher wakes this poll on writes).
+      // A failed getState skips this cycle; the unchanged generation means the
       // next good poll catches up
-      const kmt = s.kanban_mtime ?? 0;
-      if (kanbanSeen.current.get(dir) !== kmt) {
-        kanbanSeen.current.set(dir, kmt);
-        void refreshKanban(dir);
-      }
+      noteGeneration(dir, s.notes_generation ?? 0);
       // transitions observed against the previous ground truth → journal + notify
       const before = projectsRef.current.get(dir);
       if (before?.state) {
@@ -263,6 +267,23 @@ export default function App() {
     }).then((u) => { un = u; });
     return () => un?.();
   }, [pollOne]);
+
+  /* the one-time board→vault move (get_state's hook, src-tauri/src/notes/migrate.rs).
+     A failed move says nothing: the board is untouched and the next heartbeat
+     retries. A move that found nothing to carry says nothing either. */
+  useEffect(() => {
+    let un: UnlistenFn | undefined;
+    let dead = false;
+    void onNotesMigrated((m) => {
+      if (m.error || m.count <= 0) return;
+      void refreshNotes(m.dir);
+      toastSuccess(
+        `Moved ${m.count} ${m.count === 1 ? "task" : "tasks"} into Notes`,
+        "Your board is now a set of notes. The old file is kept as kanban.json.migrated.",
+      );
+    }).then((u) => { if (dead) u(); else un = u; });
+    return () => { dead = true; un?.(); };
+  }, []);
 
   /* OTA: one quiet daily check; nothing installs without a click */
   const [, updBump] = useState(0);
@@ -467,7 +488,7 @@ export default function App() {
       })
       .catch((e) => toastError("Couldn't read the prompt file", String(e).slice(0, 90)));
   }, [patchLayout]);
-  useEffect(() => subscribeKanban(() => termBump((n) => n + 1)), []);
+  useEffect(() => subscribeNotes(() => termBump((n) => n + 1)), []);
   useEffect(() => subscribeRunFlags(() => termBump((n) => n + 1)), []);
   const setActiveTerm = useCallback((dir: string, id: number) => {
     setActiveTermFor(dir, id);
@@ -540,8 +561,8 @@ export default function App() {
       if (agentRunning) void agentSessionStop(dir, false).catch(() => {});
       closeTermsFor(dir);
       evictRepo(dir);
-      evictKanban(dir);
-      kanbanSeen.current.delete(dir);
+      evictNotes(dir);
+      setNotesOnScreen(null); // the vault listener must not outlive the project
       void unwatchProject(dir).catch(() => {});
       setProjects((prev) => {
         const next = new Map(prev);
@@ -675,10 +696,28 @@ export default function App() {
       }
       else if (mod && e.shiftKey && (e.key === "f" || e.key === "F") && activeRef.current) {
         e.preventDefault();
+        setSearchScope("all");
         setSearchOpen(true);
       }
       else if (mod && e.key === "o") { e.preventDefault(); openDialog(); }
       else if (mod && e.key === "/") { e.preventDefault(); setHelpOpen(true); }
+      else if (mod && e.key === "n" && activeRef.current && pane === "notes") {
+        e.preventDefault();
+        void createNote(activeRef.current, "", "");
+      }
+      else if (mod && e.key === "p" && activeRef.current) {
+        e.preventDefault();
+        setSearchScope("notes");
+        setSearchOpen(true);
+      }
+      else if (mod && (e.key === "[" || e.key === "]") && activeRef.current && pane === "notes") {
+        // in Notes these are note history / follow the link under the caret;
+        // in Web they stay the page's back and forward (menu.rs carries one chord
+        // for both, and the pane decides what it means)
+        e.preventDefault();
+        if (e.key === "[") noteHistoryBack(activeRef.current);
+        else followLinkUnderCaret(activeRef.current);
+      }
       else if (e.metaKey && e.altKey && activeRef.current && /^Digit[123]$/.test(e.code)) {
         // ⌥⌘1/2/3 — toggle content / agent / terminal (e.code: ⌥ changes e.key on macOS)
         e.preventDefault();
@@ -703,7 +742,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openDialog, activate, closeProject, newTerminal, togglePaneUnit, revealContent]);
+  }, [openDialog, activate, closeProject, newTerminal, togglePaneUnit, revealContent, pane]);
 
   /* ---- the same map, arriving from the native menu (src-tauri/src/menu.rs) ----
      The Web pane's page is a native WKWebView: while it is first responder our
@@ -754,7 +793,7 @@ export default function App() {
     setHelpOpen(false);
     if (t === "setup") { setSetupMode("health"); return; }
     if (t === "repo") { goPane("repo"); patchLayout({ content: true }); }
-    else if (t === "kanban") { goPane("kanban"); patchLayout({ content: true }); }
+    else if (t === "notes") { goPane("notes"); patchLayout({ content: true }); }
     else if (t === "road") { goPane("road"); patchLayout({ content: true }); }
     else if (t === "agent") { patchLayout({ agent: true, agentCollapsed: false }); }
   }, [goPane, patchLayout]);
@@ -847,6 +886,7 @@ export default function App() {
         open={searchOpen}
         onOpenChange={setSearchOpen}
         dir={activeDir}
+        scope={searchScope}
         onOpenFile={(path) => {
           if (!activeRef.current) return;
           if (isHtmlPath(path)) { void openInWeb(activeRef.current, { file: path }); goPane("web"); return; }
@@ -858,9 +898,9 @@ export default function App() {
           openHistoryView(activeRef.current, "repo");
           goPane("repo");
         }}
-        onOpenTask={(id) => {
-          openTaskInKanban(id);
-          goPane("kanban");
+        onOpenNote={(path) => {
+          openNoteInPane(path);
+          goPane("notes");
         }}
       />
       <ChronicleToaster />
@@ -964,7 +1004,7 @@ export default function App() {
               openAgentReview(active.dir, agentSessionFor(active.dir).editFiles);
               goPane("repo");
             }}
-            onOpenBoard={() => goPane("kanban")}
+            onOpenNotes={() => goPane("notes")}
           />
         }
         onConfirm={setConfirm}
@@ -1003,7 +1043,7 @@ export default function App() {
               openHistoryView(active.dir, "roadmap");
               goPane("repo");
             }}
-            onGoKanban={() => goPane("kanban")}
+            onGoNotes={() => goPane("notes")}
             onConfirm={setConfirm}
             onPollNow={() => void pollOne(active.dir)}
             onStartPhaseWithAgent={startPhaseWithAgent}
@@ -1018,13 +1058,17 @@ export default function App() {
             onGoRoadmap={() => goPane("road")}
             onOpenInWeb={(path) => { void openInWeb(active.dir, { file: path }); goPane("web"); }}
           />
-        ) : pane === "kanban" ? (
-          <KanbanPane
+        ) : pane === "notes" ? (
+          <NotesPane
             key={active.dir}
             dir={active.dir}
             agent={agent}
+            onScreen={paneLayout.content && !overlayOpen}
             onConfirm={setConfirm}
             onGoRoadmap={() => goPane("road")}
+            onOpenSearch={() => { setSearchScope("notes"); setSearchOpen(true); }}
+            onOpenFile={(path) => { openFileInRepo(active.dir, path); goPane("repo"); }}
+            onOpenUrl={(url) => { void openInWeb(active.dir, { url }); goPane("web"); }}
             onRunRoundInPane={(n, total) => {
               patchLayout({ agent: true, agentCollapsed: false });
               void startRoundInPane(active.dir, n, total).catch((e) =>

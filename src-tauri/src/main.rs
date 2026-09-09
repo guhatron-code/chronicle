@@ -614,7 +614,7 @@ fn derive_statuses(ctx: &Ctx, manifest: &Value) -> Vec<PhaseState> {
                 }
                 status.get("default_label").and_then(|v| v.as_str()).unwrap_or(fallback).to_string()
             };
-            // kanban overlay phases carry their precomputed truth (from task columns)
+            // fix-round overlay phases carry their precomputed truth (from the notes)
             if let Some(frs) = phase.get("fixRoundState") {
                 let rdone = frs.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
                 let label = frs.get("label").and_then(|v| v.as_str()).unwrap_or("ready to run").to_string();
@@ -886,7 +886,7 @@ async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: St
         }
     }
     if let Some(obj) = s.as_object_mut() {
-        // the MERGED manifest (kanban rounds injected) — statuses are derived from it,
+        // the MERGED manifest (fix rounds injected) — statuses are derived from it,
         // so the phase list and the status list must describe the same document
         obj.insert("manifest".into(), p.manifest.as_ref()
             .map(|m| inject_rounds(&p.dir, m)).unwrap_or(Value::Null));
@@ -897,15 +897,8 @@ async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: St
         obj.insert("extras".into(), json!(p.extras.iter()
             .map(|(a, pp)| json!({"alias": a, "path": pp.to_string_lossy()})).collect::<Vec<_>>()));
         obj.insert("init_consent".into(), init_consent_for(&p.dir));
-        // the board's mtime lets the UI skip re-reading an unchanged kanban.json
-        // on every heartbeat (energy: no parse, no re-render, unless it moved)
-        let kmt = std::fs::metadata(kanban_path(&p.dir)).ok()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as u64).unwrap_or(0);
-        obj.insert("kanban_mtime".into(), json!(kmt));
         // the vault's generation lets the pane skip re-reading an unchanged index
-        // on every heartbeat — the same discipline kanban_mtime gave the board
+        // on every heartbeat (energy: no parse, no re-render, unless it moved)
         notes::rounds::settle_done(&p.dir);
         obj.insert("notes_generation".into(), json!(notes::index::generation(&notes, &p.dir)));
     }
@@ -1222,62 +1215,6 @@ fn state_for_project(p: &Project) -> Value {
         "work_branch": p.manifest.as_ref().and_then(|m| m.get("workBranch")).cloned().unwrap_or(Value::Null),
         "checked_at": hhmmss_now(),
     })
-}
-
-/* ================= the kanban engine (R4) =================
-   Tasks live IN the project (.chronicle/kanban.json) so they travel with the repo;
-   attachments beside them (.chronicle/attachments/). The project is only ever written
-   by explicit user actions (editing tasks, attaching, "Ready to execute"). Fix rounds
-   surface on the roadmap as OVERLAY phases at derive time — chronicle.json is never
-   mutated, so a /chronicle-init re-run can't wipe a round. */
-
-fn kanban_path(dir: &Path) -> PathBuf { dir.join(".chronicle/kanban.json") }
-
-fn load_kanban(dir: &Path) -> Value {
-    std::fs::read_to_string(kanban_path(dir)).ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| json!({ "version": 1, "next_id": 1, "tasks": [], "rounds": [] }))
-}
-
-/// Missing file => a fresh default board; a file that EXISTS but can't be parsed => None,
-/// so callers never silently overwrite a corrupt board with an empty one (audit B2).
-fn load_kanban_checked(dir: &Path) -> Option<Value> {
-    match std::fs::read_to_string(kanban_path(dir)) {
-        Ok(s) => serde_json::from_str(&s).ok(),
-        Err(_) => Some(json!({ "version": 1, "next_id": 1, "tasks": [], "rounds": [] })),
-    }
-}
-
-/// Atomic write: temp file in the same dir + rename, so a crash mid-write
-/// can never leave a truncated board (audit B2).
-fn write_kanban(dir: &Path, store: &Value) -> Result<(), String> {
-    let path = kanban_path(dir);
-    let tmp = path.with_extension("json.tmp");
-    let body = serde_json::to_string_pretty(store).map_err(|e| e.to_string())?;
-    std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
-    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn kanban_get(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
-    let p = project_for(&roots, &dir)?;
-    load_kanban_checked(&p.dir)
-        .ok_or_else(|| "the board file couldn't be read — fix .chronicle/kanban.json first".into())
-}
-
-/// Whole-store save (the board is small; last-write-wins is fine for a single user).
-#[tauri::command]
-async fn kanban_save(roots: State<'_, OpenRoots>, dir: String, data: Value) -> Result<(), String> {
-    let p = project_for(&roots, &dir)?;
-    if !data.is_object() || !data.get("tasks").map(|t| t.is_array()).unwrap_or(false) {
-        return Err("malformed kanban data".into());
-    }
-    if load_kanban_checked(&p.dir).is_none() {
-        return Err("the board file on disk couldn't be read — not overwriting it".into());
-    }
-    std::fs::create_dir_all(p.dir.join(".chronicle")).map_err(|e| e.to_string())?;
-    write_kanban(&p.dir, &data).map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 /// Save a composer attachment into `.chronicle/attachments/`, never clobbering:
@@ -1723,9 +1660,9 @@ fn exec_run_key(dir: &str) -> Result<(String, PathBuf), String> {
 }
 
 /// Run a settled round's prompt headlessly — the same machinery, consent, and
-/// lifecycle as the generation session. The executor updates task columns in
-/// .chronicle/kanban.json itself (the prompt file carries that contract), so
-/// the board and roadmap tick live off the ordinary poll.
+/// lifecycle as the generation session. The executor sets `status: done` in each
+/// note's front matter itself (the prompt file carries that contract), so the
+/// pane and the roadmap tick live off the ordinary poll.
 #[tauri::command]
 async fn round_execute(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, n: u64, agent: Option<String>) -> Result<(), String> {
     let p = project_for(&roots, &dir)?;
@@ -2322,7 +2259,7 @@ fn jailed(p: &Project, path: &str) -> Result<PathBuf, String> {
                 .ok_or_else(|| format!("unknown root @{rest}"))?
         }
     } else if path == ".chronicle" || path.starts_with(".chronicle/") {
-        // kanban attachments live beside the manifest (p.dir), which is not
+        // attachments and notes live beside the manifest (p.dir), which is not
         // always the repo root — resolve them against the right base (audit B3)
         p.dir.join(path)
     } else {
@@ -2997,7 +2934,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
             init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
-            kanban_get, kanban_save, agent_attach, agent_attach_path,
+            agent_attach, agent_attach_path,
             notes::notes_index, notes::notes_read, notes::notes_write, notes::notes_move,
             notes::notes_delete, notes::notes_search, notes::notes_attach, notes::notes_detach,
             fixes_log_path, fixes_generate, fixes_status, fixes_cancel,

@@ -134,7 +134,7 @@ export function CurrentStateBanner(p: CurrentStateBannerProps) {
       {p.kind === "all-done" && (
         <div className="mt-0.5 flex gap-2">
           <BtnPrimary size="md" onClick={p.onAddNext}>
-            Add what's next in the Kanban
+            Add what's next in Notes
           </BtnPrimary>
           <BtnSecondary size="md" onClick={p.onRebuild}>
             Rebuild the roadmap

@@ -79,11 +79,10 @@ export const RepoGlyph = ({ size = 15, ...p }: P) => (
   </svg>
 );
 
-export const KanbanGlyph = ({ size = 15, ...p }: P) => (
-  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
-    <rect x="2.2" y="2.5" width="3.4" height="11" rx="1" />
-    <rect x="6.9" y="2.5" width="3.4" height="7" rx="1" />
-    <rect x="11.6" y="2.5" width="3.4" height="4.5" rx="1" />
+/** A page with a folded corner and two lines — the Notes pane. */
+export const NotesGlyph = ({ size = 15, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M6 3h9l4 4v14H6zM15 3v4h4M9 12h6M9 16h6" />
   </svg>
 );
 

@@ -1,7 +1,7 @@
 /*
  * The terminal column (F26) — the tab strip (chips · "+" · START + the two
  * brand logos) over the xterm host surface. Persistent across Roadmap/Repo;
- * absent on Kanban and Picker (the Shell decides). Anatomy per Deck-5 F26;
+ * absent on Notes and Picker (the Shell decides). Anatomy per Deck-5 F26;
  * in-shell measures per Deck-6 L1/L2; the strip keeps the C2 h-10 row (the
  * operator pass aligned it with the viewer bar).
  *

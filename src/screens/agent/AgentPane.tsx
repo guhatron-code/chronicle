@@ -17,7 +17,7 @@ import {
   type AgentEntry,
   type AgentSessionState,
 } from "@/lib/agent-session";
-import { kanbanFor, subscribeKanban } from "@/lib/kanban-store";
+import { indexFor, subscribeNotes } from "@/lib/notes-store";
 import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint, agentsAvailable } from "@/lib/ipc";
 import { CheckGlyph } from "@/components/chrome/icons";
 import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term-sessions";
@@ -244,29 +244,29 @@ function TurnError({ message }: { message: string }) {
 }
 
 /** F39 — the round header card. Done/failed derive from GROUND TRUTH only:
- *  the board's task columns plus the session's stop reason — never the
+ *  the round notes' statuses plus the session's stop reason — never the
  *  agent's own claim. */
 function RoundCard({
   dir,
   entry,
   onRetry,
-  onOpenBoard,
+  onOpenNotes,
 }: {
   dir: string;
   entry: Extract<AgentEntry, { kind: "round" }>;
   onRetry?: () => void;
-  onOpenBoard?: () => void;
+  onOpenNotes?: () => void;
 }) {
-  const tasks = kanbanFor(dir).tasks.filter((t) => t.round === entry.n && !t.archived);
-  const total = tasks.length || entry.total;
-  const done = tasks.filter((t) => t.column === "completed").length;
+  const notes = indexFor(dir).notes.filter((n) => n.round === entry.n);
+  const total = notes.length || entry.total;
+  const done = notes.filter((n) => n.status === "done").length;
   const allDone = total > 0 && done === total;
   const stopped = entry.ended && !allDone;
   return (
     <div data-round-card className="flex flex-col gap-2 rounded-[10px] border border-border-hairline bg-surface-card-raised px-3.5 py-3">
       <div className="flex items-center gap-2 whitespace-nowrap">
         <span className="text-[13px] font-semibold text-text-primary">
-          Round {entry.n} · {total} {total === 1 ? "task" : "tasks"}
+          Round {entry.n} · {total} {total === 1 ? "note" : "notes"}
         </span>
         {allDone ? (
           <span className="inline-flex items-center gap-[5px] text-xs text-state-success">
@@ -285,8 +285,8 @@ function RoundCard({
           </span>
         )}
         <span className="flex-1" />
-        <button onClick={onOpenBoard} className="text-[11.5px] text-text-secondary hover:text-text-primary">
-          Open the board ›
+        <button onClick={onOpenNotes} className="text-[11.5px] text-text-secondary hover:text-text-primary">
+          Open Notes ›
         </button>
       </div>
       {!entry.ended && (
@@ -295,11 +295,11 @@ function RoundCard({
         </div>
       )}
       <span className="font-mono text-[10.5px] text-text-dim tabular-nums">
-        {done} of {total} tasks done on the board
+        {done} of {total} notes done
       </span>
       {allDone && (
         <span className="text-[11.5px] text-text-muted">
-          Every task in the round is completed on the board — that's what "done" means here.
+          Every note in the round is done — that's what "done" means here.
         </span>
       )}
       {stopped && (
@@ -307,12 +307,12 @@ function RoundCard({
           <span className="text-[11.5px] leading-[1.55] text-text-muted">
             The session ended before the round finished
             {entry.stopReason ? <> — stop reason: <span className="font-mono text-[11px]">{entry.stopReason}</span></> : null}
-            . The {total - done} remaining {total - done === 1 ? "task stays" : "tasks stay"} on the board.
+            . The {total - done} remaining {total - done === 1 ? "note stays" : "notes stay"} in Notes.
           </span>
           {onRetry && (
             <div className="flex gap-2">
               <BtnPrimary size="sm" onClick={onRetry}>Pick the round back up</BtnPrimary>
-              <BtnSecondary size="sm" onClick={onOpenBoard}>Open the board</BtnSecondary>
+              <BtnSecondary size="sm" onClick={onOpenNotes}>Open Notes</BtnSecondary>
             </div>
           )}
         </>
@@ -360,7 +360,7 @@ function Entry({
   onConfirm,
   readOnly,
   onRetryRound,
-  onOpenBoard,
+  onOpenNotes,
 }: {
   dir: string;
   entry: AgentEntry;
@@ -368,7 +368,7 @@ function Entry({
   onConfirm: (spec: ConfirmSpec) => void;
   readOnly?: boolean;
   onRetryRound?: (n: number, total: number) => void;
-  onOpenBoard?: () => void;
+  onOpenNotes?: () => void;
 }) {
   if (entry.kind === "user")
     return (
@@ -384,7 +384,7 @@ function Entry({
           dir={dir}
           entry={entry}
           onRetry={readOnly ? undefined : () => onRetryRound?.(entry.n, entry.total)}
-          onOpenBoard={onOpenBoard}
+          onOpenNotes={onOpenNotes}
         />
       </div>
     );
@@ -442,7 +442,7 @@ export function AgentPane({
   onConfirm,
   onRevealTerminal,
   onOpenReview,
-  onOpenBoard,
+  onOpenNotes,
 }: {
   dir: string;
   onConfirm: (spec: ConfirmSpec) => void;
@@ -450,12 +450,12 @@ export function AgentPane({
   onRevealTerminal: () => void;
   /** F36 — Review opens the repo viewer on the ledger diff */
   onOpenReview: () => void;
-  /** F39 — the round card's "Open the board" */
-  onOpenBoard?: () => void;
+  /** F39 — the round card's "Open Notes" */
+  onOpenNotes?: () => void;
 }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeAgent(() => bump((n) => n + 1)), []);
-  useEffect(() => subscribeKanban(() => bump((n) => n + 1)), []); // round cards tick with the board
+  useEffect(() => subscribeNotes(() => bump((n) => n + 1)), []); // round cards tick with the vault
   useEffect(() => {
     // a live backend session survives a reload; if there's none AND the agent
     // is actually installed, auto-start once — the pane is only mounted for the
@@ -613,7 +613,7 @@ export function AgentPane({
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
           {s.viewing.entries.map((entry, i) => (
-            <Entry key={i} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenBoard={onOpenBoard} />
+            <Entry key={i} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} />
           ))}
         </div>
       </div>
@@ -649,7 +649,7 @@ export function AgentPane({
               entry={entry}
               turnActive={s.turnActive}
               onConfirm={onConfirm}
-              onOpenBoard={onOpenBoard}
+              onOpenNotes={onOpenNotes}
               onRetryRound={(n, total) => {
                 void startRoundInPane(dir, n, total).catch((e) => toastError("Couldn't restart the round", String(e).slice(0, 90)));
               }}

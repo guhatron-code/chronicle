@@ -215,7 +215,7 @@ export function Composer({
 
   const GROUP: Record<Mention["kind"], string> = {
     attachment: "Attached",
-    task: "Board",
+    note: "Notes",
     phase: "Roadmap",
     file: "Files",
   };
@@ -329,10 +329,11 @@ export function Composer({
     const withRefs = attachments.length
       ? `${typed ? `${typed}\n\n` : ""}Attached files:\n${attachments.map((a) => `- ${a.relPath}`).join("\n")}`
       : typed;
-    // files become links the agent follows itself; a task or phase has no file
-    // to read, so its text rides along inline
+    // files become links the agent follows itself; a note or phase rides along
+    // inline — a note's text is read from the vault here, at send time
     setSending(true);
-    sendAgentMessage(dir, withRefs, buildBlocks(withRefs, mentions.current, dir))
+    buildBlocks(withRefs, mentions.current, dir)
+      .then((blocks) => sendAgentMessage(dir, withRefs, blocks))
       .then(() => {
         setText("");
         mirrorComposerText(dir, "");

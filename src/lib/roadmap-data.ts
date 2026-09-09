@@ -6,7 +6,7 @@
 import { createElement } from "react";
 import type { StateData, ManifestPhase, PhaseStatus } from "./ipc";
 import { sentence } from "./utils";
-import { kanbanFor } from "./kanban-store";
+import { indexFor } from "./notes-store";
 import type { RoadmapProps } from "@/screens/roadmap/Roadmap";
 import type { NeedsYouRow } from "@/screens/roadmap/NeedsYou";
 import type { RailPhase, RailStage, RailChip } from "@/screens/roadmap/PhaseRail";
@@ -32,7 +32,7 @@ export interface RoadmapCtx {
   agent: "claude" | "codex";
   partOf: { name: string; path: string } | null;
   initRun: InitRun | null;
-  /** A kanban fixes session writing the plan — same card, different title. */
+  /** A round's fixes session writing the plan — same card, different title. */
   fixesRun: InitRun | null;
   /** A headless round EXECUTION session (F1) — same card again. */
   execRun: InitRun | null;
@@ -313,7 +313,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
   }
 
   /* -- the building card: any running session (first build, rebuild, OR the
-        kanban's fix-plan writer) shows F13 in the top slot -- */
+        the fix-plan writer) shows F13 in the top slot -- */
   if (ctx.initRun?.running) {
     const r = ctx.initRun;
     // with a roadmap already on screen this is a REBUILD — one name everywhere
@@ -338,7 +338,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     const r = ctx.execRun;
     const title = ctx.execRoundN != null ? `Running round ${ctx.execRoundN}…` : "Running the round…";
     props.building = r.elapsedS > 300
-      ? { kind: "still-running", note: "Rounds can take a while. Tasks tick done on the board as they're verified.", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelExec, onViewFullLog: H.onViewExecLog }
+      ? { kind: "still-running", note: "Rounds can take a while. Notes tick done as they're verified.", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelExec, onViewFullLog: H.onViewExecLog }
       : {
           kind: "running",
           title,
@@ -480,14 +480,14 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
         if (!status || status.state === "pool") continue;
         const id = ph.id ?? "?";
         if (ph.fixRound !== undefined) {
-          // a fix round is a full phase: the round's tasks are its steps
+          // a fix round is a full phase: the round's notes are its steps
           // (ticking live as the executor completes them), the prompt is what
           // you paste, the plan is reference
-          const roundTasks = kanbanFor(s.dir).tasks.filter((t) => t.round === ph.fixRound);
-          const nTasks = roundTasks.length || Number(ph.desc?.match(/^(\d+)/)?.[1] ?? 0);
+          const roundNotes = indexFor(s.dir).notes.filter((n) => n.round === ph.fixRound);
+          const nNotes = roundNotes.length || Number(ph.desc?.match(/^(\d+)/)?.[1] ?? 0);
           railPhases.push({
             kind: "phase", id, name: ph.name ?? "",
-            badge: `From the Kanban · ${nTasks} ${nTasks === 1 ? "task" : "tasks"}`,
+            badge: `From Notes · ${nNotes} ${nNotes === 1 ? "note" : "notes"}`,
             open: ctx.expandedId === null ? status.state === "now" : ctx.expandedId === id,
             status:
             status.state === "done"
@@ -495,9 +495,9 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
               : status.state === "now" ? "now" : "later",
             statusWord: status.state === "done" ? "Done" : sentence(status.label),
             description: (ph.desc ?? "").replace(/<[^>]+>/g, ""),
-            steps: roundTasks.map((t) => ({
-              label: `${t.id} · ${t.title}`,
-              done: t.column === "completed",
+            steps: roundNotes.map((n) => ({
+              label: n.title,
+              done: n.status === "done",
             })),
             paste: (ph.paste ?? []).map((c) => ({
               name: (c.path ?? "").split("/").pop() ?? "",

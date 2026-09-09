@@ -6,7 +6,7 @@
 import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  KanbanGlyph,
+  NotesGlyph,
   RefreshGlyph,
   RepoGlyph,
   RoadmapGlyph,
@@ -14,7 +14,7 @@ import {
 } from "./icons";
 import { cn } from "@/lib/utils";
 
-export type Pane = "road" | "repo" | "kanban" | "web";
+export type Pane = "road" | "repo" | "notes" | "web";
 
 function RailButton({
   label,
@@ -92,11 +92,11 @@ export function Rail({
       </RailButton>
       <div className="relative">
         <RailButton
-          label={queuedCount > 0 ? `Kanban — ${queuedCount} ${queuedCount === 1 ? "task" : "tasks"} queued` : "Kanban"}
-          tooltip="Kanban" mono="⌘J to cycle"
-          selected={pane === "kanban"} onClick={() => onPane("kanban")}
+          label={queuedCount > 0 ? `Notes — ${queuedCount} ${queuedCount === 1 ? "note" : "notes"} queued` : "Notes"}
+          tooltip="Notes" mono="⌘J to cycle"
+          selected={pane === "notes"} onClick={() => onPane("notes")}
         >
-          <KanbanGlyph />
+          <NotesGlyph />
         </RailButton>
         {queuedCount > 0 && (
           <span className="absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-lg border border-border-strong bg-surface-overlay px-1 font-mono text-[9.5px] text-text-secondary tabular-nums">

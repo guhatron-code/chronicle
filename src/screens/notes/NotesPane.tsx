@@ -43,13 +43,15 @@ function markMissingLinks(container: HTMLElement, notes: NoteEntry[], path: stri
 }
 
 export function NotesPane({
-  dir, agent, onScreen, onConfirm, onGoRoadmap, onOpenFile, onOpenUrl, onRunRoundInPane,
+  dir, agent, onScreen, onConfirm, onGoRoadmap, onOpenSearch, onOpenFile, onOpenUrl, onRunRoundInPane,
 }: {
   dir: string;
   agent: "claude" | "codex";
   onScreen: boolean;
   onConfirm: (spec: ConfirmSpec) => void;
   onGoRoadmap: () => void;
+  /** the sidebar's search button — App opens the overlay scoped to the vault */
+  onOpenSearch: () => void;
   onOpenFile: (path: string) => void;
   onOpenUrl: (url: string) => void;
   onRunRoundInPane?: (n: number, total: number) => void;
@@ -106,9 +108,6 @@ export function NotesPane({
     const folder = entry?.folder ?? "";
     createNote(dir, folder, title.split("/").pop() ?? title).catch((e) => toastError("Couldn't create the note", String(e).slice(0, 90)));
   }, [dir, entry?.folder]);
-  const onOpenSearch = useCallback(() => {
-    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, shiftKey: true }));
-  }, []);
   const onRevealVault = useCallback(() => {
     runCommand(dir, 'open ".chronicle/notes"').catch((e) => toastError("Couldn't reveal it", String(e).slice(0, 90)));
   }, [dir]);

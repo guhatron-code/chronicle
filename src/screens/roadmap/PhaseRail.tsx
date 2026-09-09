@@ -2,7 +2,7 @@
  * F21 (Deck 3) — the phase rail: stage headers, the connector, the dots
  * (done solid success · now 12px neutral pulse + 3px fill-hover ring · later hairline
  * circle), collapsed/expanded phase cards, window phases (dashed grouping), the
- * just-completed ring moment, and FX kanban-round phases. Presentational only.
+ * just-completed ring moment, and FX fix-round phases. Presentational only.
  */
 import { Eyebrow, IdChip, StateWord } from "@/components/chrome/atoms";
 import { CheckGlyph } from "@/components/chrome/icons";
@@ -17,7 +17,7 @@ export type RailPhase =
       kind: "phase";
       id: string;
       name: string;
-      /** e.g. "From the Kanban · 6 tasks" — fix-round phases carry one. */
+      /** e.g. "From Notes · 6 notes" — fix-round phases carry one. */
       badge?: string;
       /** body visibility — open/close animate via AccBody */
       open: boolean;

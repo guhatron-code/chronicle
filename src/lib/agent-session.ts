@@ -93,7 +93,7 @@ export type AgentEntry =
       n: number;
       total: number;
       /** set when the turn carrying the round ended — done/failed derive from
-       *  the BOARD's columns plus this stop reason, never the agent's claim */
+       *  the NOTES' statuses plus this stop reason, never the agent's claim */
       ended?: boolean;
       stopReason?: string | null;
     }
@@ -395,7 +395,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
   if (method === "_chronicle/turn_end") {
     s.turnActive = false;
     settleStreaming(s);
-    // a running round settles with the turn — its face derives from the board
+    // a running round settles with the turn — its face derives from the notes
     for (let i = s.entries.length - 1; i >= 0; i--) {
       const e = s.entries[i];
       if (e.kind === "round" && !e.ended) {
@@ -604,7 +604,7 @@ export async function adoptAgentSession(dir: string): Promise<void> {
 /**
  * Send a turn. `text` is what the thread shows; `blocks` is what goes on the
  * wire when the composer built something richer than plain text (file links,
- * inlined board/roadmap context). Omit it and the message is one text block —
+ * inlined note/roadmap context). Omit it and the message is one text block —
  * which is what every non-composer caller wants.
  */
 export async function sendAgentMessage(dir: string, text: string, blocks?: unknown[]): Promise<void> {
@@ -747,15 +747,15 @@ export async function resumeAgentSession(dir: string, id: string): Promise<void>
 
 /* ---------- round-in-pane (F39) ---------- */
 
-/** Run a kanban round in the pane: the round card enters the thread, the
- *  round prompt becomes the session's next message (sent as soon as the
- *  session is ready — starting one if needed). Done/failed derive from the
- *  BOARD plus the stop reason, never from the agent's prose. */
+/** Run a round in the pane: the round card enters the thread, the round
+ *  prompt becomes the session's next message (sent as soon as the session is
+ *  ready — starting one if needed). Done/failed derive from the NOTES plus the
+ *  stop reason, never from the agent's prose. */
 export async function startRoundInPane(dir: string, n: number, total: number): Promise<void> {
   const s = agentSessionFor(dir);
   const message =
     `Read fixes/phase_${n}_fixes_prompt.md and fixes/phase_${n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: ` +
-    `every item, verified honestly, and after each item completes update that task's "column" to "completed" in .chronicle/kanban.json (match by task id, touch updated_at, change nothing else in that file).`;
+    `every item, verified honestly, and after each item completes set \`status: done\` in that note's front matter (the file named by the item's path, under .chronicle/notes/), changing nothing else in that file.`;
   s.viewing = null;
   if (s.phase === "ready" && !s.turnActive) {
     s.entries.push({ kind: "round", n, total });

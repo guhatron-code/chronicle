@@ -4,7 +4,7 @@
  * phase, and feeds the presentational PhaseDetail.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { executingRound, kanbanFor } from "@/lib/kanban-store";
+import { openRoundFor } from "@/lib/notes-store";
 import { PhaseDetail, type DetailDoc, type DetailSaves } from "./PhaseDetail";
 import type { ManifestPhase, PhaseStatus } from "@/lib/ipc";
 import { statFile, gitLogGraph, readFile, roundRetro } from "@/lib/ipc";
@@ -145,7 +145,7 @@ export function PhaseDetailHost({
     const n = projectState.dirty.length;
     preflight.push({ label: n === 0 ? "no unsaved edits" : `${n} unsaved edit${n === 1 ? "" : "s"}`, ok: n === 0 });
   }
-  const busyRound = executingRound(kanbanFor(dir));
+  const busyRound = openRoundFor(dir)?.n ?? null;
   if (busyRound != null) preflight.push({ label: `round ${busyRound} is active here`, ok: false });
 
   return (

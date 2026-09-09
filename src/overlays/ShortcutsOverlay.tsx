@@ -1,6 +1,6 @@
 /*
  * F9 — the keyboard shortcuts overlay (⌘/). Same anatomy as the palette; two-column
- * groups Projects / Panes / Terminal with kbd chips.
+ * groups Projects / Notes / Panes / Terminal with kbd chips.
  */
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Eyebrow, Kbd } from "@/components/chrome/atoms";
@@ -22,10 +22,21 @@ const GROUPS: { title: string; col: 0 | 1; pt?: string; rows: [string, string][]
     title: "Panes",
     col: 1,
     rows: [
-      ["Cycle Roadmap · Repo · Kanban", "⌘J or ⌃tab"],
+      ["Cycle Roadmap · Repo · Notes · Web", "⌘J or ⌃tab"],
       ["Show or hide the content pane", "⌥⌘1"],
       ["Show or hide the agent", "⌥⌘2"],
       ["Show or hide the terminal", "⌥⌘3"],
+    ],
+  },
+  {
+    title: "Notes",
+    col: 0,
+    pt: "pt-3",
+    rows: [
+      ["New note", "⌘N"],
+      ["Jump to a note", "⌘P"],
+      ["Follow the link under the cursor", "⌘]"],
+      ["Back to the last note", "⌘["],
     ],
   },
   {
