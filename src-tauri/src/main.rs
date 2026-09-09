@@ -856,7 +856,7 @@ async fn open_project(roots: State<'_, OpenRoots>, path: String) -> Result<Value
 /// while the project is open (e.g. by a background /chronicle-init) is picked up on the
 /// next poll or refresh, no reopen needed.
 #[tauri::command]
-async fn get_state(roots: State<'_, OpenRoots>, notes: State<'_, notes::index::NotesState>, dir: String) -> Result<Value, String> {
+async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: State<'_, notes::index::NotesState>, dir: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
     let mut s = state_for_project(&p);
     let marker = p.dir.join(".chronicle-blank");
@@ -881,6 +881,22 @@ async fn get_state(roots: State<'_, OpenRoots>, notes: State<'_, notes::index::N
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64).unwrap_or(0);
         obj.insert("kanban_mtime".into(), json!(kmt));
+        // one-time: a project that still has a board and no vault moves across now.
+        // A failure is silent here — the board keeps working and the next heartbeat
+        // retries; the toast comes from the event, not from get_state's result.
+        if notes::migrate::needs_migration(&p.dir) {
+            match notes::migrate::run(&p.dir) {
+                Ok(count) => {
+                    notes::index::refresh(&notes, &p.dir);
+                    let _ = app.emit_to(tauri::EventTarget::webview("main"), "notes-migrated",
+                        json!({ "dir": dir, "count": count }));
+                }
+                Err(e) => {
+                    let _ = app.emit_to(tauri::EventTarget::webview("main"), "notes-migrated",
+                        json!({ "dir": dir, "count": 0, "error": e }));
+                }
+            }
+        }
         // the vault's generation lets the pane skip re-reading an unchanged index
         // on every heartbeat — the same discipline kanban_mtime gave the board
         obj.insert("notes_generation".into(), json!(notes::index::generation(&notes, &p.dir)));
