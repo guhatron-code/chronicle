@@ -138,7 +138,15 @@ const External = Annotation.define<boolean>();
 /* ---- the per-buffer state cache ---- */
 
 const states = new Map<string, EditorState>();
-onBufferDisposed((key) => { states.delete(key); });
+/* A buffer is disposed while its editor is still mounted: the store drops the
+   key, React unmounts the view a beat later, and the unmount's cleanup would
+   put the state straight back — so reopening the file would restore the undo
+   history of a buffer that is gone, and one ⌘Z + ⌘S would write the pre-close
+   text back to disk. The mark says "this key died; do not resurrect it". It is
+   cleared by whichever comes first: the cleanup that skipped, or a fresh mount
+   on the same key. */
+const disposed = new Set<string>();
+onBufferDisposed((key) => { states.delete(key); disposed.add(key); });
 
 const langComp = new Compartment();
 const roComp = new Compartment();
@@ -168,6 +176,7 @@ export function CodeEditor({ docKey, text, language, readOnly, tabSize, onChange
   useEffect(() => {
     const el = host.current;
     if (!el) return;
+    disposed.delete(docKey); // a live mount owns this key again
     const cached = states.get(docKey);
     const state = cached ?? EditorState.create({
       doc: text,
@@ -224,8 +233,11 @@ export function CodeEditor({ docKey, text, language, readOnly, tabSize, onChange
     ] });
     view.current = v;
     return () => {
-      // keep the state (undo history included) for when this buffer comes back
-      states.set(docKey, v.state);
+      // keep the state (undo history included) for when this buffer comes back —
+      // unless the buffer was closed under us, in which case its history died
+      // with it and writing the cache here would resurrect it
+      if (disposed.has(docKey)) disposed.delete(docKey);
+      else states.set(docKey, v.state);
       v.destroy();
       view.current = null;
     };

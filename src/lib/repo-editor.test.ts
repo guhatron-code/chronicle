@@ -138,6 +138,48 @@ describe("the repo buffer store", () => {
     expect(ed.dirtyPathsFor(DIR)).toEqual([F]);
   });
 
+  /* The close prompt's Save answer asks the store, not the promise: saveBuffer
+     resolves either way, so "did it land?" is `state === "clean"` and nothing
+     else. If this ever went the other way a refused save would close the tab
+     and take the text with it. */
+  it("a failed save leaves the buffer, its text and its dirt in place", async () => {
+    ed.openBuffer(DIR, F, "one\n", 1000);
+    ed.editBuffer(DIR, F, "mine\n");
+    writeError = "Read-only file system (os error 30)";
+    await ed.saveBuffer(DIR, F);
+    expect(ed.bufferFor(DIR, F)!.state).not.toBe("clean");
+    expect(ed.bufferFor(DIR, F)!.text).toBe("mine\n");
+    // and the same question over a set — the project-wide prompt's answer
+    expect(ed.dirtyPathsFor(DIR)).toEqual([F]);
+  });
+
+  it("a save refused as a conflict is also not clean — the tab stays open", async () => {
+    ed.openBuffer(DIR, F, "one\n", 1000);
+    ed.editBuffer(DIR, F, "mine\n");
+    diskText = "theirs\n";
+    diskMtime = 2000;
+    writeError = "This file changed on disk since you opened it";
+    await ed.saveBuffer(DIR, F);
+    const b = ed.bufferFor(DIR, F)!;
+    expect(b.state).toBe("conflict");
+    expect(b.text).toBe("mine\n");
+    expect(b.error).toBeNull(); // a conflict is the bar, never a toast
+  });
+
+  it("evicting a project disposes every one of its editor states", () => {
+    const disposed: string[] = [];
+    const off = ed.onBufferDisposed((k) => disposed.push(k));
+    ed.openBuffer(DIR, F, "one\n", 1000);
+    ed.openBuffer(DIR, "src/b.ts", "two\n", 1000);
+    ed.openBuffer("/other", F, "three\n", 1000);
+    ed.evictBuffers(DIR);
+    expect(disposed.sort()).toEqual([ed.bufferKey(DIR, F), ed.bufferKey(DIR, "src/b.ts")].sort());
+    expect(ed.bufferFor(DIR, F)).toBeNull();
+    expect(ed.bufferFor("/other", F)).not.toBeNull();
+    off();
+    ed.evictBuffers("/other");
+  });
+
   it("a rename carries the buffer, its dirt and a fresh undo key", () => {
     const disposed: string[] = [];
     const off = ed.onBufferDisposed((k) => disposed.push(k));

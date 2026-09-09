@@ -385,6 +385,13 @@ export function RepoPane({
   const loadContents = useCallback((path: string, ignoreGuard = false) => {
     const d = dir;
     const tab = () => stateFor(d).tabs.find((t) => t.path === path);
+    /* This path is no longer readable text — it went binary, oversize, or away
+       entirely. A clean buffer is stale now and would keep the old text on
+       screen in front of the new card, so it goes; a buffer with unsaved work
+       is never thrown away by a background reload. */
+    const dropStaleBuffer = () => {
+      if (bufferFor(d, path)?.state === "clean") closeBuffer(d, path);
+    };
     statFile(d, path)
       .then(async (st: FileStat) => {
         if (dirRef.current !== d) return;
@@ -397,6 +404,7 @@ export function RepoPane({
           const mime = IMG_MIME[extOf(path).toLowerCase()] ?? "image/png";
           t.body = { kind: "image", caption: `${name} · ${fmtBytes(st.size)}`, src: `data:${mime};base64,${b64}` };
           t.meta = undefined;
+          dropStaleBuffer();
         } else if (st.kind === "binary") {
           t.body = {
             kind: "binary",
@@ -405,6 +413,7 @@ export function RepoPane({
             detail: fmtBytes(st.size),
           };
           t.meta = undefined;
+          dropStaleBuffer();
         } else if (st.size > HUGE_WARN && !ignoreGuard) {
           t.sizeBytes = st.size;
           t.body = {
@@ -418,6 +427,7 @@ export function RepoPane({
                   : "Reading it may be slow.",
           };
           t.meta = undefined;
+          dropStaleBuffer();
         } else {
           const r = await readFile(d, path);
           if (dirRef.current !== d) return;
@@ -431,6 +441,7 @@ export function RepoPane({
               note: "Too large to open for editing — copying still works.",
             };
             t.meta = undefined;
+            dropStaleBuffer();
             t.mtime = st.mtime;
             t.changedOnDisk = false;
             rerender();
@@ -444,6 +455,7 @@ export function RepoPane({
               detail: fmtBytes(r.size),
             };
             t.meta = undefined;
+            dropStaleBuffer();
             t.mtime = st.mtime;
             rerender();
             return;
@@ -467,6 +479,7 @@ export function RepoPane({
         if (!t) return;
         t.body = { kind: "read-error", message: "This file couldn't be read", detail: humanError(e) };
         t.meta = undefined;
+        dropStaleBuffer();
         rerender();
       });
   }, [dir, rerender]);
@@ -844,6 +857,7 @@ export function RepoPane({
       rerender();
     };
     const buf = active ? bufferFor(dir, active.path) : null;
+    const dirtyNow = dirtyPathsFor(dir); // one pass over the store, not one per tab
     const viewer: ViewerProps = !active
       ? { kind: "empty" }
       : {
@@ -851,7 +865,7 @@ export function RepoPane({
           tabs: rs.tabs.map((t) => ({
             id: t.path,
             name: splitName(t.path).name,
-            dirty: dirtyPathsFor(dir).includes(t.path),
+            dirty: dirtyNow.includes(t.path),
           })),
           activeTabId: active.path,
           path: active.path,
@@ -919,7 +933,7 @@ export function RepoPane({
                     }
                   : { kind: "diff" as const, rows: [] }),
           onEdit: (text) => editBuffer(dir, active.path, text),
-          onSave: () => { void saveBuffer(dir, active.path); },
+          onSave: () => { void saveBuffer(dir, active.path).then(() => { savesLanded(dir, [active.path]); }); },
           onKeepMine: () => keepMine(dir, active.path),
           onReloadFromDisk: () => reloadBuffer(dir, active.path),
           onSelectTab: (id) => { rs.activeTab = id; rs.selectedId = id; rerender(); },
@@ -932,6 +946,8 @@ export function RepoPane({
               rs.selectedId = rs.activeTab; // the tree follows the viewer
               rerender();
             };
+            // asked live, not from the render's `dirtyNow`: the click lands
+            // after the render that made this closure
             if (dirtyPathsFor(dir).includes(id)) confirmDirtyOne(dir, id, onConfirm, closeIt);
             else closeIt();
           },
@@ -980,11 +996,34 @@ export function RepoPane({
 
 /* ---- unsaved work: ⌘S, and the one prompt that guards it ---- */
 
+/** Did every one of these buffers actually reach the disk? `saveBuffer` never
+ *  rejects — it parks the failure in the store — so this is the only honest
+ *  answer to "can the tab close now?".
+ *
+ *  A write failure is a toast carrying the OS sentence, and the buffer stays
+ *  dirty. A conflict is never a toast: the bar in the header is the one place
+ *  that is said. Only the first stuck file is reported — a project-wide save
+ *  that hits a read-only volume must not stack ten toasts. */
+function savesLanded(dir: string, paths: string[]): boolean {
+  const stuck = paths.filter((p) => {
+    const b = bufferFor(dir, p);
+    return b !== null && b.state !== "clean";
+  });
+  const first = stuck[0];
+  if (first === undefined) return true;
+  const b = bufferFor(dir, first);
+  if (b?.state === "error") {
+    toastError(`Couldn't save ${splitName(first).name}`, (b.error ?? "").slice(0, 90));
+  }
+  return false;
+}
+
 /** ⌘S from anywhere: save whatever the repo pane has open for this project. */
 export function saveActiveFile(dir: string): void {
   const s = CACHE.get(dir);
   if (!s?.activeTab) return;
-  void saveBuffer(dir, s.activeTab);
+  const path = s.activeTab;
+  void saveBuffer(dir, path).then(() => { savesLanded(dir, [path]); });
 }
 
 /** One file with unsaved work is about to go away. */
@@ -999,7 +1038,11 @@ function confirmDirtyOne(
     body: "It has changes you haven't saved yet.",
     cancelLabel: "Cancel",
     confirmLabel: "Save",
-    onConfirm: () => { void saveBuffer(dir, path).then(proceed); },
+    // the tab goes away only if the write landed — a refused save that closed
+    // the tab anyway would lose the text for good
+    onConfirm: () => {
+      void saveBuffer(dir, path).then(() => { if (savesLanded(dir, [path])) proceed(); });
+    },
     altLabel: "Discard",
     onAlt: () => { proceed(); },
   });
@@ -1020,7 +1063,10 @@ export function confirmDirty(
     body: `${paths.map((p) => splitName(p).name).join(", ")} have changes you haven't saved yet.`,
     cancelLabel: "Cancel",
     confirmLabel: "Save them",
-    onConfirm: () => { void Promise.all(paths.map((p) => saveBuffer(dir, p))).then(proceed); },
+    onConfirm: () => {
+      void Promise.all(paths.map((p) => saveBuffer(dir, p)))
+        .then(() => { if (savesLanded(dir, paths)) proceed(); });
+    },
     altLabel: "Discard",
     onAlt: () => { proceed(); },
   });

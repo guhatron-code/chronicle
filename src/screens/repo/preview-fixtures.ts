@@ -80,8 +80,10 @@ export const viewerCode: ViewerProps = {
   },
 };
 
-/** The conflict bar is new; the preview harness is where it gets looked at. */
-export const viewerConflict: ViewerProps = { ...viewerCode, conflict: true, saveLabel: "unsaved" };
+/** The conflict bar is new; the preview harness is where it gets looked at.
+ *  The save word goes quiet under it — `saveLabelFor` returns "" for a buffer
+ *  in conflict, because the bar is already saying the whole story. */
+export const viewerConflict: ViewerProps = { ...viewerCode, conflict: true, saveLabel: "" };
 
 /* ============ F24 · diff view ============ */
 
