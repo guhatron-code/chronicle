@@ -66,7 +66,7 @@ export function historyPanelFrom(
           ahead: f.remote.ahead,
           behind: f.remote.behind,
           refName: f.remote.ref_name,
-          checked: f.remote.checked_ms === null ? "never checked" : ago(nowMs, Math.floor(f.remote.checked_ms / 1000)),
+          checked: f.remote.checked_ms === null ? "never" : ago(nowMs, Math.floor(f.remote.checked_ms / 1000)),
           error: f.remote.error ?? undefined,
         };
   return {

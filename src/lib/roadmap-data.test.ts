@@ -71,7 +71,7 @@ describe("the four history lines", () => {
       remote: { kind: "ok", ref_name: "origin/main", ahead: 0, behind: 0, checked_ms: null, error: null },
     }), NOW, CTX);
     if (p.kind !== "panel") throw new Error("expected the panel");
-    expect(p.remote).toMatchObject({ kind: "counts", checked: "never checked" });
+    expect(p.remote).toMatchObject({ kind: "counts", checked: "never" });
   });
 
   it("a failed check keeps the old numbers and the old time, and says why", () => {
