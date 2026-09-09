@@ -8,13 +8,22 @@ let fileText = "---\nstatus: queued\n---\n\nbody\n";
 let holdWrite = false;
 let releaseWrite: (() => void) | null = null;
 
+interface FakeNote { path: string; title: string; folder: string; status: string | null; round: number | null }
+interface FakeRound { n: number; state: string; kind: string | null; note_paths: string[] }
+const A_NOTE = { path: "Tasks/A.md", title: "A", folder: "Tasks", status: "queued", round: null };
+// what notesIndex answers with; tests reshape it before calling refreshNotes
+let indexNotes: FakeNote[] = [A_NOTE];
+let indexRounds: FakeRound[] = [];
+let indexGeneration = 1;
+
 vi.mock("./ipc", () => ({
   notesIndex: vi.fn(async () => ({
-    notes: [{
-      path: "Tasks/A.md", title: "A", folder: "Tasks", status: "queued", round: null,
-      tags: [], links: [], resolved: [], ambiguous: [], mtime: 1, size: 10, snippet: "body", unreadable: false,
-    }],
-    generation: 1,
+    notes: indexNotes.map((n) => ({
+      ...n, tags: [], links: [], resolved: [], ambiguous: [],
+      mtime: 1, size: 10, snippet: "body", unreadable: false,
+    })),
+    generation: indexGeneration,
+    rounds: indexRounds,
   })),
   notesRead: vi.fn(async () => fileText),
   notesWrite: vi.fn(async (_d: string, path: string, text: string) => {
@@ -47,7 +56,11 @@ describe("the notes store", () => {
     fileText = "---\nstatus: queued\n---\n\nbody\n";
     holdWrite = false;
     releaseWrite = null;
+    indexNotes = [A_NOTE];
+    indexRounds = [];
+    indexGeneration = 1;
     store.evictNotes("/p");
+    store.setRoundGenerating("/p", false);
   });
   afterEach(() => { vi.useRealTimers(); });
 
@@ -119,6 +132,42 @@ describe("the notes store", () => {
     store.editBody("/p", "nope");
     await store.flushSave("/p");
     expect(store.openFor("/p")?.state).toBe("locked");
+  });
+
+  it("takes the open round and the editor's lock from the record, not from this session", async () => {
+    // a restart mid-round: nothing in memory says a round is live, and only
+    // rounds.json can tell the pane the notes are locked
+    indexNotes = [
+      { path: "Tasks/A.md", title: "A", folder: "Tasks", status: "in_progress", round: 4 },
+      { path: "Tasks/B.md", title: "B", folder: "Tasks", status: "done", round: 4 },
+      { path: "Loose.md", title: "Loose", folder: "", status: null, round: null },
+    ];
+    indexRounds = [{ n: 4, state: "ready", kind: "bug fixes", note_paths: ["Tasks/A.md", "Tasks/B.md"] }];
+    await store.refreshNotes("/p");
+
+    const open = store.openRoundFor("/p");
+    expect(open?.n).toBe(4);
+    expect(open?.total).toBe(2);
+    expect(open?.done).toBe(1);
+    expect(store.roundStateFor("/p", 4)).toBe("ready");   // the header's "locked by the round"
+    expect(store.roundStateFor("/p", null)).toBeNull();
+    expect(store.roundGenerating("/p")).toBe(false);
+
+    // the plan being written: the same record, a different state
+    indexRounds = [{ n: 4, state: "generating", kind: null, note_paths: ["Tasks/A.md", "Tasks/B.md"] }];
+    indexGeneration = 2;
+    await store.refreshNotes("/p");
+    expect(store.openRoundFor("/p")).toBeNull();          // no card until the plan lands
+    expect(store.roundStateFor("/p", 4)).toBe("generating");
+    expect(store.roundGenerating("/p")).toBe(true);
+
+    // settled: the round lets go, whatever the notes still say
+    indexRounds = [{ n: 4, state: "done", kind: "bug fixes", note_paths: ["Tasks/A.md", "Tasks/B.md"] }];
+    indexGeneration = 3;
+    await store.refreshNotes("/p");
+    expect(store.openRoundFor("/p")).toBeNull();
+    expect(store.roundStateFor("/p", 4)).toBeNull();
+    expect(store.roundGenerating("/p")).toBe(false);
   });
 
   it("resolves an attachment against the vault root, not the note's folder", async () => {

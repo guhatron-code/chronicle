@@ -34,11 +34,19 @@ pub struct NoteEntry {
 pub struct NotesIndex {
     pub notes: Vec<NoteEntry>,
     pub generation: u64,
+    /// `.chronicle/rounds.json`, so the pane knows a round is live — and which
+    /// notes it locks — without holding that in session memory. A restart in
+    /// the middle of a round has to agree with `notes_write`'s `locked`.
+    pub rounds: Vec<super::rounds::RoundSummary>,
 }
 
 pub struct Vault {
     pub notes: Vec<NoteEntry>,
     pub generation: u64,
+    /// Only for change detection: a round settling touches rounds.json and no
+    /// note file, and the generation still has to move or the frontend will
+    /// never re-read and never unlock the editor.
+    pub rounds: Vec<super::rounds::RoundSummary>,
 }
 
 pub struct NotesState {
@@ -141,12 +149,14 @@ pub fn refresh(state: &NotesState, dir: &Path) -> (Vec<String>, u64) {
 
     let vault = vault_dir(dir);
     let on_disk = walk(&vault);
+    let rounds = super::rounds::summaries(dir);
 
-    let (old, prev_generation, prev_len): (HashMap<String, NoteEntry>, u64, usize) = {
+    #[allow(clippy::type_complexity)]
+    let (old, prev_generation, prev_len, prev_rounds): (HashMap<String, NoteEntry>, u64, usize, Option<Vec<super::rounds::RoundSummary>>) = {
         let guard = match state.vaults.lock() { Ok(g) => g, Err(e) => e.into_inner() };
         match guard.get(dir) {
-            Some(v) => (v.notes.iter().map(|n| (n.path.clone(), n.clone())).collect(), v.generation, v.notes.len()),
-            None => (HashMap::new(), 0, 0),
+            Some(v) => (v.notes.iter().map(|n| (n.path.clone(), n.clone())).collect(), v.generation, v.notes.len(), Some(v.rounds.clone())),
+            None => (HashMap::new(), 0, 0, None),
         }
     };
 
@@ -160,23 +170,29 @@ pub fn refresh(state: &NotesState, dir: &Path) -> (Vec<String>, u64) {
     }
     let seen: std::collections::HashSet<&String> = on_disk.iter().map(|(r, _, _)| r).collect();
     for gone in old.keys().filter(|p| !seen.contains(p)) { changed.push((*gone).clone()); }
-    if changed.is_empty() && next.len() == prev_len { return (vec![], prev_generation); }
+    if changed.is_empty() && next.len() == prev_len && prev_rounds.as_ref() == Some(&rounds) {
+        return (vec![], prev_generation);
+    }
     fill_resolved(&mut next);
     next.sort_by(|a, b| a.path.cmp(&b.path));
 
     let mut guard = match state.vaults.lock() { Ok(g) => g, Err(e) => e.into_inner() };
-    let v = guard.entry(dir.to_path_buf()).or_insert_with(|| Vault { notes: vec![], generation: 0 });
+    let v = guard.entry(dir.to_path_buf()).or_insert_with(|| Vault { notes: vec![], generation: 0, rounds: vec![] });
     v.notes = next;
+    v.rounds = rounds;
     v.generation += 1;
     (changed, v.generation)
 }
 
 pub fn snapshot(state: &NotesState, dir: &Path) -> NotesIndex {
     ensure(state, dir);
+    // rounds come off disk rather than out of the cache: the record is small,
+    // and a project nobody is watching must still answer with the truth
+    let rounds = super::rounds::summaries(dir);
     let guard = match state.vaults.lock() { Ok(g) => g, Err(e) => e.into_inner() };
     match guard.get(dir) {
-        Some(v) => NotesIndex { notes: v.notes.clone(), generation: v.generation },
-        None => NotesIndex { notes: vec![], generation: 0 },
+        Some(v) => NotesIndex { notes: v.notes.clone(), generation: v.generation, rounds },
+        None => NotesIndex { notes: vec![], generation: 0, rounds },
     }
 }
 
@@ -331,6 +347,56 @@ mod tests {
         let idx = snapshot(&st, &d);
         assert_eq!(idx.notes.len(), 1);
         assert_eq!(idx.notes[0].path, "New.md");
+    }
+
+    /// What `notes_index` hands the pane has to include the round record from
+    /// disk, or a restart mid-round shows no round card while `notes_write`
+    /// still refuses with `locked`. And a round settling — which touches
+    /// rounds.json and no note file at all — has to move the generation, or the
+    /// frontend never re-reads and the editor stays locked forever.
+    #[test]
+    fn the_index_carries_the_rounds_from_disk_and_moves_when_they_do() {
+        let d = tmp("rounds-in-index");
+        write(&d, "Tasks/A.md", "---\nstatus: in_progress\nround: 2\n---\n\na\n");
+        let st = NotesState::new();
+        assert!(snapshot(&st, &d).rounds.is_empty(), "no record yet");
+
+        let round = |state: &str| super::super::rounds::Round {
+            n: 2, state: state.into(), kind: Some("bug fixes".into()), task_ids: vec![],
+            note_paths: vec!["Tasks/A.md".into()], created_at: 1,
+            plan_path: "fixes/phase_2_fixes_plan.md".into(),
+            prompt_path: "fixes/phase_2_fixes_prompt.md".into(),
+        };
+        super::super::rounds::save(&d, &[round("ready")]).unwrap();
+        let (_, g1) = refresh(&st, &d);
+        let idx = snapshot(&st, &d);
+        assert_eq!(idx.rounds.len(), 1);
+        assert_eq!(idx.rounds[0].n, 2);
+        assert_eq!(idx.rounds[0].state, "ready");
+        assert_eq!(idx.rounds[0].note_paths, vec!["Tasks/A.md".to_string()]);
+
+        // the record alone moving is enough — no note file changes here
+        super::super::rounds::save(&d, &[round("done")]).unwrap();
+        let (changed, g2) = refresh(&st, &d);
+        assert!(changed.is_empty(), "no note file moved");
+        assert!(g2 > g1, "a settled round still has to reach the frontend");
+        assert_eq!(snapshot(&st, &d).rounds[0].state, "done");
+
+        let (_, g3) = refresh(&st, &d);
+        assert_eq!(g3, g2, "and an unchanged record still costs nothing");
+    }
+
+    /// An unparseable record must never make the index fail: the pane has to
+    /// keep working, and "no rounds" is the fallback that leaves notes editable.
+    #[test]
+    fn a_corrupt_round_record_reads_as_no_rounds() {
+        let d = tmp("rounds-corrupt");
+        write(&d, "A.md", "a\n");
+        std::fs::write(d.join(".chronicle/rounds.json"), "{ not json").unwrap();
+        let st = NotesState::new();
+        let idx = snapshot(&st, &d);
+        assert!(idx.rounds.is_empty());
+        assert_eq!(idx.notes.len(), 1);
     }
 
     #[test]

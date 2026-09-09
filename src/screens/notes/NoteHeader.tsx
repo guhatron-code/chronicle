@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { BtnPrimary, BtnSecondary } from "@/components/chrome/atoms";
 import { pillFor, statusInFront } from "@/lib/notes-model";
-import { deleteNote, keepMine, openRoundFor, reloadOpen, renameNote, roundGenerating, setStatus, type OpenNote } from "@/lib/notes-store";
+import { deleteNote, keepMine, reloadOpen, renameNote, roundStateFor, setStatus, type OpenNote } from "@/lib/notes-store";
 import { copyText, runCommand, type NoteEntry, type NoteStatus } from "@/lib/ipc";
 import { toastError, toastSuccess } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
@@ -66,13 +66,7 @@ export function NoteHeader({
   const title = entry?.title ?? (path.split("/").pop() ?? path).replace(/\.md$/, "");
   const filename = path.split("/").pop() ?? path;
 
-  const roundState = entry?.round == null
-    ? null
-    : roundGenerating(dir)
-      ? "generating"
-      : openRoundFor(dir)?.n === entry.round
-        ? "ready"
-        : null;
+  const roundState = roundStateFor(dir, entry?.round);
   const pill = pillFor(statusInFront(open.front), entry?.round ?? null, roundState);
 
   const folders = [...new Set(notes.map((n) => n.folder))].sort();

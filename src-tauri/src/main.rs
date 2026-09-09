@@ -1518,10 +1518,17 @@ fn watch_project(app: tauri::AppHandle, roots: State<OpenRoots>, watch: State<Wa
             if ev.paths.iter().any(|pa| fs_event_matters(pa)) {
                 let _ = app.emit("project-fs-changed", emit_dir.clone());
             }
-            if ev.paths.iter().any(|pa| pa.to_string_lossy().contains("/.chronicle/notes/")) {
+            // the vault's own files, and the round record beside it: a round
+            // settling touches only rounds.json, and the pane has to hear about
+            // that too — it is what unlocks the editor
+            let vault_touched = ev.paths.iter().any(|pa| pa.to_string_lossy().contains("/.chronicle/notes/"));
+            let rounds_touched = ev.paths.iter().any(|pa| pa.to_string_lossy().ends_with("/.chronicle/rounds.json"));
+            if vault_touched || rounds_touched {
                 if let Some(st) = app.try_state::<notes::index::NotesState>() {
                     let (changed, gen) = notes::index::refresh(&st, &watch_dir);
-                    if !changed.is_empty() { notes::index::emit_changed(&app, &emit_dir, &changed, gen); }
+                    // a rounds-only change reports no paths but still moved the
+                    // generation, so it is always worth announcing
+                    if !changed.is_empty() || rounds_touched { notes::index::emit_changed(&app, &emit_dir, &changed, gen); }
                 }
             }
         }

@@ -30,6 +30,26 @@ pub struct Round {
     #[serde(default)] pub prompt_path: String,
 }
 
+/// What the index carries to the frontend: enough to draw the round card and
+/// to know which notes are locked, without the pane reading the file itself.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct RoundSummary {
+    pub n: u64,
+    pub state: String,
+    pub kind: Option<String>,
+    pub note_paths: Vec<String>,
+}
+
+/// The read-only view for the index. A file we cannot parse reads as no rounds
+/// — never an error: the index must always be able to answer, and "no rounds"
+/// is the fallback that leaves every note editable (the rule at the top of
+/// this file). `load` stays the one that tells corrupt from absent.
+pub fn summaries(dir: &Path) -> Vec<RoundSummary> {
+    load_or_none(dir).into_iter()
+        .map(|r| RoundSummary { n: r.n, state: r.state, kind: r.kind, note_paths: r.note_paths })
+        .collect()
+}
+
 fn file(dir: &Path) -> PathBuf { dir.join(".chronicle/rounds.json") }
 
 /// No file (or an empty one) means no rounds yet. Anything else that will not

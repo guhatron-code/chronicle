@@ -29,7 +29,7 @@ export interface OpenNote {
   incoming: string | null;
 }
 
-const EMPTY: NotesIndex = { notes: [], generation: 0 };
+const EMPTY: NotesIndex = { notes: [], generation: 0, rounds: [] };
 const indexes = new Map<string, NotesIndex>();
 const opens = new Map<string, OpenNote>();
 const subs = new Set<() => void>();
@@ -261,22 +261,37 @@ export function noteEntry(dir: string, path: string): NoteEntry | undefined {
 
 export interface OpenRound { n: number; notes: NoteEntry[]; done: number; total: number }
 
-/** The round the pane pins above the tree: the highest round number that still
- *  has a note sitting at `in_progress`. A round whose notes are all `done` is
- *  finished and shows nothing (Rust's settle_done agrees on the next heartbeat). */
+/** The round the pane pins above the tree: the newest round the RECORD still
+ *  calls `ready` — its plan is written and its notes are locked. Reading the
+ *  record rather than the notes' own statuses is what makes this survive a
+ *  restart, and it is the same thing `notes_write` refuses on. A round whose
+ *  notes are all done settles to `done` (Rust's settle_done) and shows nothing. */
 export function openRoundFor(dir: string): OpenRound | null {
-  const notes = indexFor(dir).notes;
-  const live = notes.filter((n) => n.round != null && n.status === "in_progress");
+  const idx = indexFor(dir);
+  const live = idx.rounds.filter((r) => r.state === "ready");
   if (live.length === 0) return null;
-  const n = live.reduce((m, x) => Math.max(m, x.round ?? 0), 0);
-  const mine = notes.filter((x) => x.round === n).sort((a, b) => a.path.localeCompare(b.path));
+  const n = live.reduce((m, r) => Math.max(m, r.n), 0);
+  const mine = idx.notes.filter((x) => x.round === n).sort((a, b) => a.path.localeCompare(b.path));
   return { n, notes: mine, done: mine.filter((x) => x.status === "done").length, total: mine.length };
 }
 
-/** True while the fixes session is writing a plan — the sidebar's button and the
- *  roadmap's mirrored card both ask this instead of reading the board. */
+/** What this note's round means for its editor: the pill says "locked by the
+ *  round" for both, and `notes_write` refuses for both. Derived from the record
+ *  on disk, so reopening the app mid-round says so instead of letting the user
+ *  type into a note whose every save fails with a raw `locked`. */
+export function roundStateFor(dir: string, round: number | null | undefined): "generating" | "ready" | null {
+  if (round == null) return null;
+  const state = indexFor(dir).rounds.find((r) => r.n === round)?.state;
+  return state === "generating" || state === "ready" ? state : null;
+}
+
+/** True while a plan is being written. The record on disk is the truth — so a
+ *  restart still knows — and the local flag only covers the window between the
+ *  click and the first index refresh that carries the new round. */
 const generating = new Set<string>();
-export function roundGenerating(dir: string): boolean { return generating.has(dir); }
+export function roundGenerating(dir: string): boolean {
+  return indexFor(dir).rounds.some((r) => r.state === "generating") || generating.has(dir);
+}
 export function setRoundGenerating(dir: string, on: boolean): void {
   if (on) generating.add(dir); else generating.delete(dir);
   notify();

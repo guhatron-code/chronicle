@@ -388,7 +388,10 @@ export interface NoteEntry {
   tags: string[]; links: RawLink[]; resolved: (string | null)[]; ambiguous: boolean[];
   mtime: number; size: number; snippet: string; unreadable: boolean;
 }
-export interface NotesIndex { notes: NoteEntry[]; generation: number }
+/** `.chronicle/rounds.json` as the index carries it — enough to draw the round
+ *  card and to know which notes the round locks. */
+export interface RoundSummary { n: number; state: string; kind: string | null; note_paths: string[] }
+export interface NotesIndex { notes: NoteEntry[]; generation: number; rounds: RoundSummary[] }
 export interface NoteSearchHit { path: string; title: string; kind: "title" | "tag" | "body"; snippet: string }
 export interface NotesChanged { dir: string; paths: string[]; generation: number }
 export const notesIndex = (dir: string) => invoke<NotesIndex>("notes_index", { dir });
