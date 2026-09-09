@@ -573,6 +573,7 @@ export async function startAgentSession(dir: string): Promise<void> {
   } catch (e) {
     s.phase = "error";
     s.errorMessage = String(e);
+    clearAgentRound(dir); // a session that failed to start is not running anyone's round
     notify();
     throw e;
   }
@@ -767,7 +768,12 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
   if (s.phase === "ready" && !s.turnActive) {
     s.entries.push({ kind: "round", n, total });
     notify();
-    await sendAgentMessage(dir, message);
+    try {
+      await sendAgentMessage(dir, message);
+    } catch (e) {
+      clearAgentRound(dir);
+      throw e;
+    }
     return;
   }
   // start (or restart) the session, then land the card and send once ready —
@@ -776,9 +782,9 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
     const cur = agentSessionFor(dir);
     if (cur.phase === "ready" && !cur.turnActive) {
       un();
-      void sendAgentMessage(dir, message).catch(() => {});
+      void sendAgentMessage(dir, message).catch(() => clearAgentRound(dir));
     }
-    if (cur.phase === "error" || cur.phase === "needs-login") un();
+    if (cur.phase === "error" || cur.phase === "needs-login") { un(); clearAgentRound(dir); }
   });
   if (s.phase !== "installing" && s.phase !== "starting") {
     await startAgentSession(dir);
