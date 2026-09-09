@@ -435,21 +435,25 @@ a:focus-visible,
   box-shadow: none;
 }
 
-/* Task lists (`- [ ] …`). TipTap renders <li data-type="taskItem"><label><input/>
-   </label><div><p/></div></li>; the pane's own list rules (NotesPane docClasses)
-   give every ul a disc and every p a bottom margin, so without these the
-   checkbox stacked on its own line above the text under a stray bullet. The
-   item is a row — checkbox beside the text — and the list carries no marker. */
+/* Task lists (`- [ ] …`). The live editor's task-item node view emits
+   <li class="note-task" data-checked><label><input/><span/></label><div><p/></div></li>
+   (no data-type — that only appears in static HTML), so every rule targets the
+   class and keeps the attribute form for pasted/static markup. The item is a
+   row — checkbox beside the first line of text — and the list has no marker.
+   The box is the app's checkbox drawn in CSS: 16px, 4px radius, input border,
+   primary fill with a check when done. */
 .note-doc ul[data-type="taskList"] {
   list-style: none;
   margin-left: 0;
   padding-left: 0;
 }
+.note-doc li.note-task,
 .note-doc li[data-type="taskItem"] {
   display: flex;
   align-items: flex-start;
   gap: 8px;
 }
+.note-doc li.note-task > label,
 .note-doc li[data-type="taskItem"] > label {
   flex: none;
   display: inline-flex;
@@ -458,20 +462,53 @@ a:focus-visible,
   /* sit the box on the text's first line (14px / 1.62) */
   height: calc(14px * 1.62);
 }
-/* A nested task list lives inside its parent item's <div>, which already starts
-   at the parent's TEXT column — that is the indent. All it needs is the list
-   margins off, or every level would add the paragraph gap back. */
-.note-doc li[data-type="taskItem"] ul[data-type="taskList"] {
-  margin-top: 2px;
-  margin-bottom: 0;
+.note-doc li.note-task > label > input[type="checkbox"],
+.note-doc li[data-type="taskItem"] > label > input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--input);
+  background: transparent;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
 }
+.note-doc li.note-task > label > input[type="checkbox"]:focus-visible,
+.note-doc li[data-type="taskItem"] > label > input[type="checkbox"]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.note-doc li.note-task > label > input[type="checkbox"]:checked,
+.note-doc li[data-type="taskItem"] > label > input[type="checkbox"]:checked {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+.note-doc li.note-task > label > input[type="checkbox"]:checked::before,
+.note-doc li[data-type="taskItem"] > label > input[type="checkbox"]:checked::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--primary-foreground);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+.note-doc li.note-task > label > span,
+.note-doc li[data-type="taskItem"] > label > span { display: none; }
+.note-doc li.note-task > div,
 .note-doc li[data-type="taskItem"] > div {
   flex: 1;
   min-width: 0;
 }
+.note-doc li.note-task p,
 .note-doc li[data-type="taskItem"] p {
   margin-bottom: 0;
 }
+.note-doc li.note-task ul[data-type="taskList"],
+.note-doc li[data-type="taskItem"] ul[data-type="taskList"] { margin-top: 2px; margin-bottom: 0; }
+.note-doc li.note-task[data-checked="true"] > div,
 .note-doc li[data-type="taskItem"][data-checked="true"] > div {
   color: var(--text-dim);
   text-decoration: line-through;

@@ -127,7 +127,10 @@ export const NOTE_EXTENSIONS: AnyExtension[] = [
   TableCell,
   TableHeader,
   TaskList,
-  TaskItem.configure({ nested: true }),
+  // The live editor draws task items through a node view that sets only
+  // data-checked plus these attributes — `data-type` exists only in static
+  // HTML — so the row styles hang off this class, not the attribute.
+  TaskItem.configure({ nested: true, HTMLAttributes: { class: "note-task" } }),
   WikiLink,
   Tag,
   Markdown,
