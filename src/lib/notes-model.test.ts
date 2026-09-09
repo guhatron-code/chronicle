@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NoteEntry } from "./ipc";
 import {
   backlinksFor, buildTree, joinFrontMatter, nestTree, newNotePath,
-  outlinksFor, pillFor, roundLogHeader, roundPhaseOf, roundSubline, setStatusInFront, slugFor,
+  outlinksFor, pillFor, roundLogHeader, roundPhaseOf, roundSubline, sanitizeTitle, setStatusInFront, slugFor,
   splitFrontMatter, statusInFront, stickToBottom, tagCounts, tailLines, LOG_MAX_LINES, STICK_SLOP,
 } from "./notes-model";
 
@@ -20,6 +20,17 @@ describe("front matter", () => {
     expect(front).toBe("---\nstatus: queued\ntags: [ui]\n---\n\n");
     expect(body).toBe("# Title\n\nbody\n");
     expect(joinFrontMatter(front, body)).toBe(file);
+  });
+  it("reads a block written with CRLF line endings", () => {
+    const crlf = "---\r\nstatus: queued\r\n---\r\n\r\n# Title\r\n\r\nbody\r\n";
+    const { front, body } = splitFrontMatter(crlf);
+    expect(front).toBe("---\r\nstatus: queued\r\n---\r\n\r\n");
+    expect(body).toBe("# Title\r\n\r\nbody\r\n");
+    expect(statusInFront(front)).toBe("queued");
+    expect(setStatusInFront(front, "done")).toBe("---\r\nstatus: done\r\n---\r\n\r\n");
+    expect(setStatusInFront(front, null)).toBe("");
+    expect(setStatusInFront("---\r\ntags: [ui]\r\n---\r\n\r\n", "queued"))
+      .toBe("---\r\nstatus: queued\r\ntags: [ui]\r\n---\r\n\r\n");
   });
   it("treats a file with no block as all body", () => {
     const { front, body } = splitFrontMatter("just text\n");
@@ -127,6 +138,14 @@ describe("paths", () => {
     expect(newNotePath("Tasks", "", taken)).toBe("Tasks/Untitled 3.md");
     expect(newNotePath("", "Web pane retro", new Set())).toBe("Web pane retro.md");
     expect(newNotePath("Design", "a/b", new Set())).toBe("Design/a-b.md");
+  });
+  it("reduces free text to one safe path segment", () => {
+    // the same sanitiser guards a note title AND a new folder's name
+    expect(sanitizeTitle("Web pane retro")).toBe("Web pane retro");
+    expect(sanitizeTitle("../../etc")).toBe("etc");
+    expect(sanitizeTitle(".hidden")).toBe("hidden");
+    expect(sanitizeTitle("a/b:c*d?")).toBe("a-b-c-d");
+    expect(sanitizeTitle("   ")).toBe("");
   });
 });
 

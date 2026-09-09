@@ -19,7 +19,7 @@ import { Backlinks } from "./Backlinks";
 import { RoundFlow, type RoundFlowHandle } from "./RoundFlow";
 import { RoundLog } from "./RoundLog";
 import { BtnPrimary } from "@/components/chrome/atoms";
-import { runCommand, type NoteEntry } from "@/lib/ipc";
+import { notesRevealVault, type NoteEntry } from "@/lib/ipc";
 import {
   createNote, editBody, flushSave, hasLiveRound, indexFor, noteEntry, openFor, openNote,
   queuedCountFor, roundKindFor, roundNotesFor, roundPhase, roundRoute, setNotesOnScreen,
@@ -165,7 +165,7 @@ export function NotesPane({
     createNote(dir, folder, title.split("/").pop() ?? title).catch((e) => toastError("Couldn't create the note", String(e).slice(0, 90)));
   }, [dir, entry?.folder]);
   const onRevealVault = useCallback(() => {
-    runCommand(dir, 'open ".chronicle/notes"').catch((e) => toastError("Couldn't reveal it", String(e).slice(0, 90)));
+    notesRevealVault(dir).catch((e) => toastError("Couldn't reveal it", String(e).slice(0, 90)));
   }, [dir]);
 
   /* App re-renders on every keystroke, so an inline prop would give RoundLog a

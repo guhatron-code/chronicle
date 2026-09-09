@@ -15,7 +15,10 @@ export interface Backlink { path: string; title: string; context: string }
 export interface Outlink { target: string; label: string | null; path: string | null; ambiguous: boolean }
 export interface Pill { label: string; tone: "none" | "queued" | "progress" | "done" | "unknown"; locked: boolean }
 
-const FM = /^---\n([\s\S]*?)\n---\n\n?/;
+/* A file written on Windows (or pasted from one) ends its lines with \r\n; a
+   front-matter block the regex missed would be edited as body text and the
+   status line would be saved twice over. */
+const FM = /^---\r?\n([\s\S]*?)\r?\n---\r?\n(?:\r?\n)?/;
 
 export function splitFrontMatter(text: string): { front: string; body: string } {
   const m = FM.exec(text);
@@ -34,11 +37,11 @@ export function statusInFront(front: string): string | null {
 export function setStatusInFront(front: string, status: NoteStatus | null): string {
   if (!front) return status ? `---\nstatus: ${status}\n---\n\n` : "";
   if (status === null) {
-    const stripped = front.replace(/^status:[ \t]*.*\n/m, "");
-    return stripped === "---\n---\n\n" ? "" : stripped;
+    const stripped = front.replace(/^status:[ \t]*[^\r\n]*\r?\n/m, "");
+    return /^---\r?\n---\r?\n\r?\n?$/.test(stripped) ? "" : stripped;
   }
-  if (/^status:/m.test(front)) return front.replace(/^status:[ \t]*.*$/m, `status: ${status}`);
-  return front.replace(/^---\n/, `---\nstatus: ${status}\n`);
+  if (/^status:/m.test(front)) return front.replace(/^status:[ \t]*[^\r\n]*$/m, `status: ${status}`);
+  return front.replace(/^---(\r?\n)/, `---$1status: ${status}$1`);
 }
 
 /** Folders before notes at the vault root; inside a folder its own notes come
@@ -123,8 +126,17 @@ export function slugFor(path: string): string {
 }
 
 const SANITIZE = /[/\\:*?"<>|]/g;
+/** Free text reduced to ONE safe path segment — a note title, or a new folder's
+ *  name. Separators become dashes and a leading dot goes, so nothing the user
+ *  types can walk out of the vault or hide the file it makes. */
+export function sanitizeTitle(raw: string): string {
+  return raw
+    .replace(SANITIZE, "-").replace(/-{2,}/g, "-")
+    .trim().replace(/^[-.]+|-+$/g, "")
+    .slice(0, 80).trim();
+}
 export function newNotePath(folder: string, title: string, taken: Set<string>): string {
-  const base = title.replace(SANITIZE, "-").replace(/-{2,}/g, "-").trim().replace(/^-+|-+$/g, "").slice(0, 80).trim() || "Untitled";
+  const base = sanitizeTitle(title) || "Untitled";
   const at = (name: string) => (folder ? `${folder}/${name}.md` : `${name}.md`);
   if (!taken.has(at(base))) return at(base);
   for (let n = 2; ; n++) if (!taken.has(at(`${base} ${n}`))) return at(`${base} ${n}`);

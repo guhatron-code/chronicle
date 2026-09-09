@@ -435,6 +435,48 @@ a:focus-visible,
   box-shadow: none;
 }
 
+/* Task lists (`- [ ] …`). TipTap renders <li data-type="taskItem"><label><input/>
+   </label><div><p/></div></li>; the pane's own list rules (NotesPane docClasses)
+   give every ul a disc and every p a bottom margin, so without these the
+   checkbox stacked on its own line above the text under a stray bullet. The
+   item is a row — checkbox beside the text — and the list carries no marker. */
+.note-doc ul[data-type="taskList"] {
+  list-style: none;
+  margin-left: 0;
+  padding-left: 0;
+}
+.note-doc li[data-type="taskItem"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.note-doc li[data-type="taskItem"] > label {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  /* sit the box on the text's first line (14px / 1.62) */
+  height: calc(14px * 1.62);
+}
+/* A nested task list lives inside its parent item's <div>, which already starts
+   at the parent's TEXT column — that is the indent. All it needs is the list
+   margins off, or every level would add the paragraph gap back. */
+.note-doc li[data-type="taskItem"] ul[data-type="taskList"] {
+  margin-top: 2px;
+  margin-bottom: 0;
+}
+.note-doc li[data-type="taskItem"] > div {
+  flex: 1;
+  min-width: 0;
+}
+.note-doc li[data-type="taskItem"] p {
+  margin-bottom: 0;
+}
+.note-doc li[data-type="taskItem"][data-checked="true"] > div {
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+
 .note-doc .wikilink {
   text-decoration: underline dotted;
   text-underline-offset: 2px;

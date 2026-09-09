@@ -14,7 +14,7 @@ import { Eyebrow } from "@/components/chrome/atoms";
 import { AccBody } from "@/screens/roadmap/bits";
 import { TreeFolderRow, TreeGuide, TreeHeader, TreeIconButton, TreeRow } from "@/components/chrome/Tree";
 import { ChevronRightGlyph, DocGlyph, PlusGlyph, SearchGlyph } from "@/components/chrome/icons";
-import { buildTree, nestTree, tagCounts, type TreeBranch } from "@/lib/notes-model";
+import { buildTree, nestTree, sanitizeTitle, tagCounts, type TreeBranch } from "@/lib/notes-model";
 import type { NoteEntry } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { RoundCard, type RoundCardData } from "./RoundCard";
@@ -183,7 +183,9 @@ export const Sidebar = memo(function Sidebar({
           className="mx-2 mb-1 mt-2"
           onSubmit={(e) => {
             e.preventDefault();
-            const name = newFolder.trim();
+            // the name becomes a path segment, so it goes through the same
+            // sanitiser a note title does — no separators, no leading dot
+            const name = sanitizeTitle(newFolder);
             if (name) onNewNote(name);
             setNewFolder(null);
           }}

@@ -208,10 +208,12 @@ export type ContentBlock =
   | { type: "resource_link"; uri: string; name: string }
   | { type: "resource"; resource: { uri: string; text: string; mimeType: string } };
 
-/** `chronicle://phase/F31`, `chronicle://note/Web pane retro` — a stable name
- *  for the thing the mention points at. The note token already carries the
- *  `note:` prefix the composer shows, so the uri names the title, not the token. */
-const uriFor = (m: Mention) => `chronicle://${m.kind}/${m.kind === "note" ? m.label : m.token}`;
+/** `chronicle://phase/F31`, `chronicle://note/Design/Web pane retro.md` — a
+ *  stable name for the thing the mention points at. A note is named by its
+ *  vault PATH: the token carries the `note:` prefix the composer shows, and the
+ *  LABEL carries " — folder" whenever two notes share a title, so neither one
+ *  identifies the file. */
+const uriFor = (m: Mention) => `chronicle://${m.kind}/${m.kind === "note" ? (m.path ?? m.token) : m.token}`;
 
 /**
  * Split `text` into ACP blocks around every still-intact mention token.

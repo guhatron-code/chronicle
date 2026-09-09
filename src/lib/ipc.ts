@@ -403,6 +403,10 @@ export const notesSearch = (dir: string, query: string) => invoke<NoteSearchHit[
 export const notesAttach = (dir: string, note: string, name: string, b64: string) =>
   invoke<string>("notes_attach", { dir, note, name, b64 });
 export const notesDetach = (dir: string, path: string) => invoke<void>("notes_detach", { dir, path });
+/** Reveal in Finder, through the vault jail. Rust runs `open -R` with argv, no
+ *  shell — a note path is user text and must never reach one. */
+export const notesReveal = (dir: string, path: string) => invoke<void>("notes_reveal", { dir, path });
+export const notesRevealVault = (dir: string) => invoke<void>("notes_reveal_vault", { dir });
 export const onNotesChanged = (cb: (c: NotesChanged) => void): Promise<UnlistenFn> =>
   listen<NotesChanged>("notes-changed", (e) => cb(e.payload));
 /** The one-time board→vault move, announced by get_state's migration hook.

@@ -42,7 +42,7 @@ import { useSessionStatus } from "@/lib/session-status";
 import { AWAY_THRESHOLD_MS, announce, lastSeen, markSeen } from "@/lib/journal";
 import { openFileInRepo } from "@/screens/repo/RepoPane";
 import { fixesCancel, fixesLogPath, fixesStatus, initLogPath } from "@/lib/ipc";
-import { indexFor, refreshNotes, roundGenerating, subscribeNotes } from "@/lib/notes-store";
+import { indexFor, refreshNotes, roundGenerating, subscribeNotesIndex } from "@/lib/notes-store";
 import { setInitRunning } from "@/lib/run-flags";
 import { toastError, toastSuccess, toastRemoteOutcome } from "@/overlays/toasts";
 import { humanError, humanGitError } from "@/lib/utils";
@@ -90,7 +90,7 @@ export function RoadmapPane({
   const [execRun, setExecRun] = useState<InitRun | null>(null);
   const [digest, setDigest] = useState<{ ts: number; text: string }[] | null>(null);
   const [, kbBump] = useState(0);
-  useEffect(() => subscribeNotes(() => kbBump((n) => n + 1)), []);
+  useEffect(() => subscribeNotesIndex(() => kbBump((n) => n + 1)), []);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);

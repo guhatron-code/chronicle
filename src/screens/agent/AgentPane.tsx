@@ -17,7 +17,7 @@ import {
   type AgentEntry,
   type AgentSessionState,
 } from "@/lib/agent-session";
-import { indexFor, subscribeNotes } from "@/lib/notes-store";
+import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
 import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint, agentsAvailable } from "@/lib/ipc";
 import { CheckGlyph } from "@/components/chrome/icons";
 import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term-sessions";
@@ -456,7 +456,7 @@ export function AgentPane({
 }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeAgent(() => bump((n) => n + 1)), []);
-  useEffect(() => subscribeNotes(() => bump((n) => n + 1)), []); // round cards tick with the vault
+  useEffect(() => subscribeNotesIndex(() => bump((n) => n + 1)), []); // round cards tick with the vault, not with a keystroke
   useEffect(() => {
     // a live backend session survives a reload; if there's none AND the agent
     // is actually installed, auto-start once — the pane is only mounted for the

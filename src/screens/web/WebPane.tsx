@@ -107,7 +107,7 @@ export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
         activeId={t ? String(t.id) : null}
         onSelect={(id) => { const i = p.tabs.findIndex((x) => String(x.id) === id); if (i >= 0) activate(dir, i); }}
         onClose={(id) => { const i = p.tabs.findIndex((x) => String(x.id) === id); if (i >= 0) void closeTab(dir, i); }}
-        onNew={() => { void newTab(dir); setTimeout(() => input.current?.focus(), 0); }}
+        onNew={() => { void newTab(dir); requestAnimationFrame(() => input.current?.focus()); }}
       />
       {/* address bar */}
       <div className="flex items-center gap-1.5 border-b border-divider bg-surface-sidebar px-2 py-1.5">

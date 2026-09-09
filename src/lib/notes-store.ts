@@ -36,10 +36,20 @@ export interface OpenNote {
 const EMPTY: NotesIndex = { notes: [], generation: 0, rounds: [] };
 const indexes = new Map<string, NotesIndex>();
 const opens = new Map<string, OpenNote>();
+/* Two subscriber sets, because they answer to different rates. `subs` is the
+   Notes pane: it wants the open buffer's save state as well as the index.
+   `indexSubs` is everyone ELSE that draws off the vault (the shell's terminal
+   column, the agent pane's round cards, the roadmap) — they read the index and
+   nothing else, so a keystroke in the editor must never reach them. */
 const subs = new Set<() => void>();
+const indexSubs = new Set<() => void>();
 const notify = () => { for (const cb of subs) cb(); };
+/** The index itself moved: everyone hears it. */
+const notifyIndex = () => { for (const cb of indexSubs) cb(); notify(); };
 
 export function subscribeNotes(cb: () => void): () => void { subs.add(cb); return () => { subs.delete(cb); }; }
+/** For panes that only read `indexFor`/round state — never fires on an edit. */
+export function subscribeNotesIndex(cb: () => void): () => void { indexSubs.add(cb); return () => { indexSubs.delete(cb); }; }
 export function indexFor(dir: string): NotesIndex { return indexes.get(dir) ?? EMPTY; }
 export function openFor(dir: string): OpenNote | null { return opens.get(dir) ?? null; }
 export function queuedCountFor(dir: string): number {
@@ -49,7 +59,7 @@ export function queuedCountFor(dir: string): number {
 export async function refreshNotes(dir: string): Promise<void> {
   try {
     indexes.set(dir, await notesIndex(dir));
-    notify();
+    notifyIndex();
   } catch { /* not an open project — the pane shows its empty state */ }
 }
 
@@ -62,17 +72,30 @@ export function noteGeneration(dir: string, generation: number): void {
 /* ---------- the on-screen subscription ---------- */
 let onScreen: string | null = null;
 let unlisten: (() => void) | null = null;
+/* Every call takes a number. `listen()` is a round trip, so a dir → null → dir
+   sequence can be back on screen before the FIRST subscription lands: the
+   listener that arrives holding a stale number is dropped rather than stacked
+   on top of the live one, and a `dir` that is now `null` drops its own. */
+let seq = 0;
 export function setNotesOnScreen(dir: string | null): void {
   onScreen = dir;
+  const my = ++seq;
   if (dir && !unlisten) {
-    let dead = false;
     void onNotesChanged((c) => { void onDiskChanged(c.dir, c.paths, c.generation); })
-      .then((u) => { if (dead) u(); else unlisten = u; });
-    // the setter may have flipped back before the listener landed
-    if (!onScreen) { dead = true; }
+      .then((u) => { if (my !== seq || !onScreen) u(); else unlisten = u; });
   }
   if (!dir && unlisten) { unlisten(); unlisten = null; }
-  if (dir) void refreshNotes(dir);
+  if (dir) {
+    // Off screen there is no listener, so any write that landed while the pane
+    // was away is unseen: the index is refetched AND the open note reconciled,
+    // once, on the way back. Passing the (just refreshed) generation keeps
+    // onDiskChanged from fetching the index a second time.
+    void refreshNotes(dir).then(() => {
+      const open = opens.get(dir);
+      if (!open || my !== seq) return;
+      void onDiskChanged(dir, [open.path], indexFor(dir).generation);
+    });
+  }
 }
 
 /** A write landed on disk — ours or the agent's. */
@@ -83,17 +106,39 @@ export async function onDiskChanged(dir: string, paths: string[], generation?: n
   let text: string;
   try { text = await notesRead(dir, open.path); } catch { notify(); return; }
   const { front, body } = splitFrontMatter(text);
+  // The front matter is never the buffer's to keep: Rust owns created/updated
+  // and the round owns `status`/`round`, so whatever is on disk is the truth
+  // and every branch below takes it. Only the BODY is the user's.
   if (open.state === "saving") {
     // a write is in flight for this note: never overwrite the buffer mid-save.
     // Remember that disk moved under us so the pending save's resolution
-    // lands on "dirty" (and re-arms) instead of a false "saved".
-    if (body !== open.body) racedWhileSaving.add(dir);
-  } else if (open.state === "dirty" || open.state === "error" || open.state === "locked") {
-    if (body !== open.body) { open.incoming = text; open.conflict = true; }
-  } else if (body !== open.body) {
-    open.front = front; open.body = body; open.savedBody = body; open.conflict = false; open.incoming = null;
-  } else {
+    // lands on "dirty" (and re-arms) instead of a false "saved" — and the
+    // re-save then carries the block adopted here rather than the stale one.
     open.front = front;
+    if (body !== open.body) racedWhileSaving.add(dir);
+    notify();
+    return;
+  }
+  // Front matter only. For most of a round that is ALL that moves — the start
+  // stamps `in_progress`/`round`, the executor stamps `done`, settle releases
+  // the note — so it must never raise the conflict bar or touch the buffer.
+  if (body === open.savedBody) {
+    open.front = front;
+    // ...and if a round was refusing this note's writes, the release it just
+    // wrote is the moment the edits it refused become saveable again.
+    if (open.state === "locked" && roundStateFor(dir, noteEntry(dir, open.path)?.round) === null) {
+      open.state = "dirty";
+      arm(dir);
+    }
+    notify();
+    return;
+  }
+  if (open.state === "dirty" || open.state === "error" || open.state === "locked") {
+    if (body !== open.body) { open.incoming = text; open.conflict = true; }
+    else open.front = front; // someone wrote exactly what is in the buffer
+  } else {
+    // nothing unsaved (the body-only-matches case returned above): take it whole
+    open.front = front; open.body = body; open.savedBody = body; open.conflict = false; open.incoming = null;
   }
   notify();
 }
@@ -108,6 +153,11 @@ export function reloadOpen(dir: string): void {
 export function keepMine(dir: string): void {
   const open = opens.get(dir);
   if (!open) return;
+  // "mine" is the BODY. The front matter is Rust's and the agent's — created,
+  // updated, and the round's own status — so the block that was waiting behind
+  // the bar comes along, or keeping your paragraph would quietly rewind a
+  // `status: done` the executor had already stamped.
+  if (open.incoming !== null) open.front = splitFrontMatter(open.incoming).front;
   open.conflict = false; open.incoming = null;
   arm(dir);
   notify();
@@ -129,11 +179,15 @@ export async function openNote(dir: string, path: string): Promise<void> {
 export function editBody(dir: string, body: string): void {
   const open = opens.get(dir);
   if (!open) return;
+  const was = open.state;
   open.body = body;
   open.state = body === open.savedBody ? "clean" : "dirty";
   lastEdit.set(dir, Date.now());
   if (open.state === "dirty") arm(dir);
-  notify();
+  // The editor owns its own DOM; the only thing a keystroke changes for React
+  // is the save label, and that moves once per save cycle (clean → dirty), not
+  // once per character. Notifying on every one re-rendered the whole shell.
+  if (open.state !== was) notify();
 }
 
 /* ---------- the 600 ms debounce, on the scheduler ---------- */
@@ -336,7 +390,7 @@ export function roundGenerating(dir: string): boolean {
 }
 export function setRoundGenerating(dir: string, on: boolean): void {
   if (on) generating.add(dir); else generating.delete(dir);
-  notify();
+  notifyIndex();
 }
 
 /* ---------- images ----------

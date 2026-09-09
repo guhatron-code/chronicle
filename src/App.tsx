@@ -69,7 +69,7 @@ import {
   refreshNotes,
   queuedCountFor,
   setNotesOnScreen,
-  subscribeNotes,
+  subscribeNotesIndex,
 } from "@/lib/notes-store";
 import { announce } from "@/lib/journal";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -488,7 +488,7 @@ export default function App() {
       })
       .catch((e) => toastError("Couldn't read the prompt file", String(e).slice(0, 90)));
   }, [patchLayout]);
-  useEffect(() => subscribeNotes(() => termBump((n) => n + 1)), []);
+  useEffect(() => subscribeNotesIndex(() => termBump((n) => n + 1)), []);
   useEffect(() => subscribeRunFlags(() => termBump((n) => n + 1)), []);
   const setActiveTerm = useCallback((dir: string, id: number) => {
     setActiveTermFor(dir, id);

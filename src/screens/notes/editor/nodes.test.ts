@@ -69,4 +69,24 @@ describe("markdown round trip", () => {
   it("survives a note with nothing in it", () => {
     expect(roundTrip("")).toBe("");
   });
+
+  /* Ticking the box in the editor sets the taskItem's `checked` attribute —
+     which is what TipTap renders as `data-checked="true"` and what index.css
+     strikes through. The buffer that reaches the file has to say `[x]`, or the
+     tick would vanish on the next open. */
+  it("serialises a checked task item as [x] and an unchecked one as [ ]", () => {
+    expect(markdownToJSON("- [x] a done task\n").content?.[0]?.content?.[0]?.attrs?.checked).toBe(true);
+    const md = jsonToMarkdown({
+      type: "doc",
+      content: [{
+        type: "taskList",
+        content: [
+          { type: "taskItem", attrs: { checked: true }, content: [{ type: "paragraph", content: [{ type: "text", text: "ticked" }] }] },
+          { type: "taskItem", attrs: { checked: false }, content: [{ type: "paragraph", content: [{ type: "text", text: "open" }] }] },
+        ],
+      }],
+    });
+    expect(md).toContain("- [x] ticked");
+    expect(md).toContain("- [ ] open");
+  });
 });

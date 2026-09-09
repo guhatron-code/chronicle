@@ -8,9 +8,9 @@ import {
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BtnPrimary, BtnSecondary } from "@/components/chrome/atoms";
-import { pillFor, statusInFront } from "@/lib/notes-model";
+import { pillFor, sanitizeTitle, statusInFront } from "@/lib/notes-model";
 import { deleteNote, keepMine, reloadOpen, renameNote, roundStateFor, setStatus, type OpenNote } from "@/lib/notes-store";
-import { copyText, runCommand, type NoteEntry, type NoteStatus } from "@/lib/ipc";
+import { copyText, notesReveal, type NoteEntry, type NoteStatus } from "@/lib/ipc";
 import { toastError, toastSuccess } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { cn } from "@/lib/utils";
@@ -45,10 +45,6 @@ const PILL_TONE: Record<string, string> = {
   done: "border-border-strong text-text-secondary",
   unknown: "border-border-hairline text-text-dim",
 };
-
-function sanitizeTitle(raw: string): string {
-  return raw.replace(/[/\\:*?"<>|]/g, "-").replace(/-{2,}/g, "-").trim().replace(/^-+|-+$/g, "").slice(0, 80).trim();
-}
 
 export function NoteHeader({
   dir, path, entry, open, notes, onConfirm,
@@ -192,7 +188,7 @@ export function NoteHeader({
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={() => {
-                runCommand(dir, `open -R ".chronicle/notes/${path}"`)
+                notesReveal(dir, path)
                   .catch((e) => toastError("Couldn't reveal it", String(e).slice(0, 90)));
               }}
             >

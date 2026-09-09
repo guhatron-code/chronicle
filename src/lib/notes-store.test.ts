@@ -7,6 +7,12 @@ let fileText = "---\nstatus: queued\n---\n\nbody\n";
 // let one test hold a write in flight until it explicitly releases it
 let holdWrite = false;
 let releaseWrite: (() => void) | null = null;
+// `listen()` is a round trip: with `deferListen` on, a subscription only lands
+// when the test grants it, which is what lets a pane leave and come back
+// INSIDE that trip. `listeners` counts the ones actually installed.
+let listeners = 0;
+let deferListen = false;
+let grantListen: (() => void)[] = [];
 
 interface FakeNote { path: string; title: string; folder: string; status: string | null; round: number | null }
 interface FakeRound { n: number; state: string; kind: string | null; note_paths: string[] }
@@ -39,7 +45,10 @@ vi.mock("./ipc", () => ({
   notesSearch: vi.fn(async () => []),
   notesAttach: vi.fn(async () => "../attachments/a-1.png"),
   notesDetach: vi.fn(async () => {}),
-  onNotesChanged: vi.fn(async () => () => {}),
+  onNotesChanged: vi.fn(() => new Promise<() => void>((resolve) => {
+    const grant = () => { listeners++; resolve(() => { listeners--; }); };
+    if (deferListen) grantListen.push(grant); else grant();
+  })),
   readFileB64: vi.fn(async () => "aGk="),
   IMG_MIME: { png: "image/png", jpg: "image/jpeg" },
 }));
@@ -59,6 +68,10 @@ describe("the notes store", () => {
     indexNotes = [A_NOTE];
     indexRounds = [];
     indexGeneration = 1;
+    deferListen = false;
+    grantListen = [];
+    store.setNotesOnScreen(null);
+    listeners = 0;
     store.evictNotes("/p");
     store.setRoundGenerating("/p", false);
   });
@@ -228,5 +241,93 @@ describe("the notes store", () => {
     expect(writes).toHaveLength(2);
     expect(writes[1]).toEqual({ path: "Tasks/A.md", text: "---\nstatus: queued\n---\n\nmine" });
     expect(store.openFor("/p")?.state).toBe("saved");
+  });
+
+  it("takes the agent's front matter into a dirty buffer without raising the bar", async () => {
+    await store.refreshNotes("/p");
+    await store.openNote("/p", "Tasks/A.md");
+    store.editBody("/p", "half a sentence");
+
+    // the round starts: Rust stamps the block and touches nothing else
+    fileText = "---\nstatus: in_progress\nround: 4\n---\n\nbody\n";
+    await store.onDiskChanged("/p", ["Tasks/A.md"]);
+    expect(store.openFor("/p")?.conflict).toBe(false);      // not a conflict
+    expect(store.openFor("/p")?.body).toBe("half a sentence"); // buffer untouched
+    expect(store.openFor("/p")?.front).toBe("---\nstatus: in_progress\nround: 4\n---\n\n");
+
+    // and the save that follows carries the NEW block, not the stale one
+    await store.flushSave("/p");
+    expect(writes[0].text).toBe("---\nstatus: in_progress\nround: 4\n---\n\nhalf a sentence");
+  });
+
+  it("keeps the agent's status when you keep your own text", async () => {
+    await store.refreshNotes("/p");
+    await store.openNote("/p", "Tasks/A.md");
+    store.editBody("/p", "mine");
+
+    // a real conflict: the executor rewrote the body AND marked it done
+    fileText = "---\nstatus: done\n---\n\nthe executor's write-up\n";
+    await store.onDiskChanged("/p", ["Tasks/A.md"]);
+    expect(store.openFor("/p")?.conflict).toBe(true);
+
+    store.keepMine("/p");
+    await vi.advanceTimersByTimeAsync(700);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].text).toBe("---\nstatus: done\n---\n\nmine"); // done, not queued
+  });
+
+  it("reconciles the open note when the pane comes back", async () => {
+    await store.refreshNotes("/p");
+    await store.openNote("/p", "Tasks/A.md");
+    store.setNotesOnScreen(null);
+
+    // off screen there is no listener at all — this write is only ever seen
+    // because coming back reconciles the open note
+    fileText = "---\nstatus: done\n---\n\nwritten while away\n";
+    indexGeneration = 2;
+    store.setNotesOnScreen("/p");
+    await vi.advanceTimersByTimeAsync(1);
+    expect(store.openFor("/p")?.body).toBe("written while away\n");
+    expect(store.openFor("/p")?.state).toBe("clean");
+  });
+
+  it("never stacks two notes-changed listeners", async () => {
+    deferListen = true;
+    store.setNotesOnScreen("/p");   // the listen() round trip starts…
+    store.setNotesOnScreen(null);   // …the pane leaves…
+    store.setNotesOnScreen("/p");   // …and is back before it lands
+    for (const grant of grantListen.splice(0)) grant();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(listeners).toBe(1);      // the stale one dropped itself
+
+    store.setNotesOnScreen(null);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(listeners).toBe(0);      // and off screen costs nothing
+  });
+
+  it("notifies once per save cycle while typing, not once per keystroke", async () => {
+    await store.refreshNotes("/p");
+    await store.openNote("/p", "Tasks/A.md");
+    let hits = 0;
+    const off = store.subscribeNotes(() => { hits++; });
+    store.editBody("/p", "a");   // clean → dirty: the label moved
+    store.editBody("/p", "ab");  // still dirty: nothing on screen changed
+    store.editBody("/p", "abc");
+    expect(hits).toBe(1);
+    off();
+  });
+
+  it("keeps a keystroke away from the panes that only read the index", async () => {
+    await store.refreshNotes("/p");
+    await store.openNote("/p", "Tasks/A.md");
+    let hits = 0;
+    const off = store.subscribeNotesIndex(() => { hits++; });
+    store.editBody("/p", "typing");
+    await vi.advanceTimersByTimeAsync(700); // the save lands
+    expect(hits).toBe(0);
+    indexGeneration = 2;
+    await store.refreshNotes("/p");
+    expect(hits).toBe(1);                   // the index moving still reaches them
+    off();
   });
 });
