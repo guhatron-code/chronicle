@@ -62,7 +62,7 @@ export function SearchOverlay({
     // state and be there waiting when the overlay reopens
     if (!dir || !repo || q.trim().length < 2) { seqRepo.current += 1; setResults({ files: [], commits: [], docs: [] }); return; }
     const my = ++seqRepo.current;
-    const t = setTimeout(() => {
+    const t = setTimeout(() => { // timer-ok: the 220ms keystroke debounce, cleared on every keystroke and on unmount
       globalSearch(dir, q)
         .then((r) => { if (seqRepo.current === my) setResults(r); })
         .catch(() => {});

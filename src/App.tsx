@@ -177,6 +177,18 @@ export default function App() {
   activeRef.current = activeDir;
   const roadmapOnScreenRef = useRef(false);
   roadmapOnScreenRef.current = pane === "road" && paneLayout.content;
+  /* Both callers below want the facts the moment the roadmap comes up on a
+     project — opening one fires the pane effect AND a poll — and each request is
+     ~10 git spawns. One funnel, and a request for the same project inside a
+     second is the same request. */
+  const lastHist = useRef<{ dir: string; at: number }>({ dir: "", at: 0 });
+  const refreshHistory = useCallback(async (dir: string) => {
+    const last = lastHist.current;
+    if (last.dir === dir && Date.now() - last.at < 1_000) return;
+    lastHist.current = { dir, at: Date.now() };
+    const f = await historyFacts(dir).catch(() => null);
+    if (f && dir === activeRef.current) setHistFacts({ dir, facts: f });
+  }, []);
 
   const refreshPicker = useCallback(() => {
     getPicker()
@@ -250,11 +262,8 @@ export default function App() {
     }
     // the history section's four facts, on the same cadence and only while the
     // roadmap is the pane on screen — history_facts reads git and never fetches
-    if (dir === activeRef.current && roadmapOnScreenRef.current) {
-      const f = await historyFacts(dir).catch(() => null);
-      if (f && dir === activeRef.current) setHistFacts({ dir, facts: f });
-    }
-  }, []);
+    if (dir === activeRef.current && roadmapOnScreenRef.current) await refreshHistory(dir);
+  }, [refreshHistory]);
 
   /* the ground-truth heartbeat: 60s through the scheduler (hidden pauses it,
      unfocused slows it, battery doubles it). The fs watcher below wakes an
@@ -270,13 +279,8 @@ export default function App() {
      it is visible, and a hidden roadmap asks for nothing. */
   useEffect(() => {
     if (!activeDir || pane !== "road" || !paneLayout.content) return;
-    const dir = activeDir;
-    let dead = false;
-    void historyFacts(dir)
-      .then((f) => { if (!dead) setHistFacts({ dir, facts: f }); })
-      .catch(() => {});
-    return () => { dead = true; };
-  }, [activeDir, pane, paneLayout.content]);
+    void refreshHistory(activeDir);
+  }, [activeDir, pane, paneLayout.content, refreshHistory]);
 
   /* fs events → an immediate ground-truth poll (debounced per project: agent
      sessions write in bursts, and pollOne is single-flight anyway) */
@@ -741,20 +745,21 @@ export default function App() {
       }
       else if (mod && e.key === "o") { e.preventDefault(); openDialog(); }
       else if (mod && e.key === "/") { e.preventDefault(); setHelpOpen(true); }
-      else if (mod && e.key === "n" && activeRef.current) {
+      // one chord, two meanings — the Go menu row says "New Note or File". On
+      // the other panes it means nothing, so it is not swallowed either
+      else if (mod && e.key === "n" && activeRef.current && (pane === "notes" || pane === "repo")) {
         e.preventDefault();
-        // one chord, two meanings — the Go menu row says "New Note or File"
         if (pane === "notes") void createNote(activeRef.current, "", "");
-        else if (pane === "repo") newFileInRepo(activeRef.current);
+        else newFileInRepo(activeRef.current);
       }
-      else if (mod && e.key === "s" && activeRef.current) {
+      else if (mod && e.key === "s" && activeRef.current && (pane === "repo" || pane === "notes")) {
         // the editor's own Mod-s already saved and called preventDefault (it does
         // not stopPropagation, so the chord still bubbles up here) — saving twice
         // would race two writes at the same path
         if (e.defaultPrevented) return;
         e.preventDefault();
         if (pane === "repo") saveActiveFile(activeRef.current);
-        else if (pane === "notes") void flushSave(activeRef.current);
+        else void flushSave(activeRef.current);
       }
       else if (mod && e.key === "p" && activeRef.current) {
         e.preventDefault();
@@ -828,6 +833,10 @@ export default function App() {
     let dead = false;
     void onWindowClose(async () => {
       if (!anyDirty()) return true;
+      // A promise that never settles holds the window open forever, and that is
+      // the right answer to a save that FAILED: confirmDirty never calls proceed
+      // when the write was refused, so the text stays on screen and the toast
+      // says why. Clicking close again asks again.
       return await new Promise<boolean>((resolve) => {
         // one prompt per project that still has unsaved work, the open one
         // first; a project is asked about once, so Discard can't loop

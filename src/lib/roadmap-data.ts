@@ -34,10 +34,14 @@ export function ago(nowMs: number, tsSeconds: number): string {
   if (d < 7) return `${d} days ago`;
   const w = Math.floor(d / 7);
   if (d < 60) return `${w} week${w === 1 ? "" : "s"} ago`;
-  const mo = Math.floor(d / 30);
-  if (mo < 12) return `${mo} month${mo === 1 ? "" : "s"} ago`;
-  const y = Math.floor(d / 365);
-  return `${y} year${y === 1 ? "" : "s"} ago`;
+  // years first: a 360-day gap is 12 thirty-day "months" but 0 whole years, and
+  // the naive order said "0 years ago" for the five days before a birthday
+  if (d >= 365) {
+    const y = Math.floor(d / 365);
+    return `${y} year${y === 1 ? "" : "s"} ago`;
+  }
+  const mo = Math.min(11, Math.floor(d / 30));
+  return `${mo} month${mo === 1 ? "" : "s"} ago`;
 }
 
 /** get_state told us whether there is a repo; history_facts tells us what it
@@ -49,6 +53,10 @@ export function historyPanelFrom(
   ctx: {
     uncommittedOpen: boolean;
     checking: boolean;
+    /** The last Check now that failed, held by the pane. `history_facts` never
+     *  carries an error (it does not touch the network), so a fetch failure
+     *  would otherwise vanish on the very next poll. */
+    checkError: string | null;
     onCheckNow: () => void;
     onToggleUncommitted: () => void;
     onViewDetails: () => void;
@@ -67,7 +75,7 @@ export function historyPanelFrom(
           behind: f.remote.behind,
           refName: f.remote.ref_name,
           checked: f.remote.checked_ms === null ? "never" : ago(nowMs, Math.floor(f.remote.checked_ms / 1000)),
-          error: f.remote.error ?? undefined,
+          error: ctx.checkError ?? f.remote.error ?? undefined,
         };
   return {
     kind: "panel",
@@ -120,6 +128,8 @@ export interface RoadmapCtx {
   /** The history section's facts — null until the first history_facts lands. */
   historyFacts: HistoryFacts | null;
   historyChecking: boolean;
+  /** The last failed Check now, until the next one succeeds. */
+  historyError: string | null;
   uncommittedOpen: boolean;
   handlers: {
     onAgentChange: (a: "claude" | "codex") => void;
@@ -475,6 +485,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
   props.history = historyPanelFrom(ctx.historyFacts, Date.now(), {
     uncommittedOpen: ctx.uncommittedOpen,
     checking: ctx.historyChecking,
+    checkError: ctx.historyError,
     onCheckNow: H.onCheckNow,
     onToggleUncommitted: H.onToggleUncommitted,
     onViewDetails: H.onHistoryDetails,

@@ -6,7 +6,7 @@ const NOW = 1_757_500_000_000; // ms
 const S = NOW / 1000;
 
 const CTX = {
-  uncommittedOpen: false, checking: false,
+  uncommittedOpen: false, checking: false, checkError: null,
   onCheckNow: () => {}, onToggleUncommitted: () => {},
   onViewDetails: () => {}, onStartHistory: () => {},
 };
@@ -36,6 +36,21 @@ describe("ago", () => {
     expect(ago(NOW, S - 21 * 86_400)).toBe("3 weeks ago");
     expect(ago(NOW, S - 200 * 86_400)).toBe("6 months ago");
     expect(ago(NOW, S + 500)).toBe("just now"); // a clock skew never says "in 8 minutes"
+  });
+
+  it("counts the last days before a year as months, not as zero years", () => {
+    expect(ago(NOW, S - 360 * 86_400)).toBe("11 months ago");
+    expect(ago(NOW, S - 364 * 86_400)).toBe("11 months ago");
+    expect(ago(NOW, S - 365 * 86_400)).toBe("1 year ago");
+    expect(ago(NOW, S - 730 * 86_400)).toBe("2 years ago");
+  });
+
+  it("never counts backwards, however far the clock has drifted", () => {
+    for (const skew of [1, 500, 86_400, 400 * 86_400]) {
+      const said = ago(NOW, S + skew);
+      expect(said).toBe("just now");
+      expect(said).not.toMatch(/-|in /);
+    }
   });
 });
 
@@ -84,6 +99,17 @@ describe("the four history lines", () => {
     if (p.kind !== "panel") throw new Error("expected the panel");
     expect(p.remote).toEqual({
       kind: "counts", ahead: 2, behind: 1, refName: "origin/main",
+      checked: "20 minutes ago", error: "Could not resolve host: github.com",
+    });
+  });
+
+  it("a failed check keeps saying why after the facts have been re-read", () => {
+    // history_facts never carries an error — it reads git and never fetches — so
+    // the sentence has to come from the pane, or it dies on the next poll
+    const p = historyPanelFrom(facts(), NOW, { ...CTX, checkError: "Could not resolve host: github.com" });
+    if (p.kind !== "panel") throw new Error("expected the panel");
+    expect(p.remote).toEqual({
+      kind: "counts", ahead: 2, behind: 0, refName: "origin/react-shadcn",
       checked: "20 minutes ago", error: "Could not resolve host: github.com",
     });
   });

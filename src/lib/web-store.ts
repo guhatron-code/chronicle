@@ -99,7 +99,7 @@ const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 function schedulePersist(dir: string): void {
   const existing = persistTimers.get(dir);
   if (existing) clearTimeout(existing);
-  persistTimers.set(dir, setTimeout(() => { persistTimers.delete(dir); void persist(dir); }, 500));
+  persistTimers.set(dir, setTimeout(() => { persistTimers.delete(dir); void persist(dir); }, 500)); // timer-ok: the persist debounce, cleared on every write
 }
 
 /** Called by the pane on first show for a project: restore saved tabs (lazily — only the active one gets a view). */
@@ -227,7 +227,7 @@ const reloadTimers = new Map<string, ReturnType<typeof setTimeout>>();
 export function reloadProjectFiles(dir: string): void {
   const existing = reloadTimers.get(dir);
   if (existing) clearTimeout(existing);
-  reloadTimers.set(dir, setTimeout(() => {
+  reloadTimers.set(dir, setTimeout(() => { // timer-ok: the reload debounce for file tabs, cleared on every fs burst
     reloadTimers.delete(dir);
     const p = projects.get(dir); if (!p) return;
     for (const t of p.tabs) if (t.label && t.url.startsWith("chronicle-file://")) void webTabReload(t.label).catch(() => {});

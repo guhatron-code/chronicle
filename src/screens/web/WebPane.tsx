@@ -62,7 +62,7 @@ export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
       // the terminal/agent column keeps its own ⌘T/⌘L while it has focus
       if ((document.activeElement as HTMLElement | null)?.closest?.("[data-right-column]")) return;
       if (e.key === "l") { e.preventDefault(); e.stopPropagation(); input.current?.focus(); input.current?.select(); }
-      else if (e.key === "t") { e.preventDefault(); e.stopPropagation(); void newTab(dir); setTimeout(() => input.current?.focus(), 0); }
+      else if (e.key === "t") { e.preventDefault(); e.stopPropagation(); void newTab(dir); setTimeout(() => input.current?.focus(), 0); } // timer-ok: one-shot, focuses the address bar after a new tab opens
       else if (e.key === "w" && t) { e.preventDefault(); e.stopPropagation(); void closeTab(dir, p.active); }
       else if (e.key === "r" && t) { e.preventDefault(); reload(t); }
       else if (e.key === "[" && t) { e.preventDefault(); back(t); }

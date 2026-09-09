@@ -121,6 +121,9 @@ export function RoadmapPane({
   }, [state?.statuses]);
   const [publishing, setPublishing] = useState(false);
   const [historyChecking, setHistoryChecking] = useState(false);
+  /* the last Check now that failed. history_facts never carries an error, so
+     without this the sentence would be gone on the very next poll. */
+  const [historyError, setHistoryError] = useState<string | null>(null);
   const [uncommittedOpen, setUncommittedOpen] = useState(false);
   const [warningDismissed, setWarningDismissed] = useState(false);
   const [consentLocal, setConsentLocal] = useState<"auto" | "manual" | "basic" | null>(null);
@@ -164,6 +167,8 @@ export function RoadmapPane({
       setDetailId(null);
       setWarningDismissed(false);
       setConsentLocal(null);
+      setHistoryError(null); // another project's fetch failure is not this one's
+      setUncommittedOpen(false);
       setJustDoneId(null);
       prevDone.current = null; // a different project needs a fresh baseline
     }
@@ -424,6 +429,7 @@ export function RoadmapPane({
     justSwitched,
     historyFacts,
     historyChecking,
+    historyError,
     uncommittedOpen,
     warningDismissed,
     handlers: {
@@ -623,10 +629,20 @@ export function RoadmapPane({
          numbers and the time it last really checked — git_fetch returns the
          same facts with `error` set, so the line says why instead of lying. */
       onCheckNow: () => {
+        if (historyChecking) return; // single-flight: one fetch per click, like publishing
         setHistoryChecking(true);
         gitFetch(dir)
-          .then((f) => onHistoryFacts(f))
-          .catch((e) => toastError("Couldn't check", humanGitError(e)))
+          .then((f) => {
+            onHistoryFacts(f);
+            // git ran: the failure, if any, is on the line — and it stays there
+            // until the next check rather than dying on the next poll
+            setHistoryError(f.remote.error ?? null);
+          })
+          .catch((e) => {
+            const sentence = humanGitError(e);
+            setHistoryError(sentence);
+            toastError("Couldn't check", sentence);
+          })
           .finally(() => setHistoryChecking(false));
       },
       onToggleUncommitted: () => setUncommittedOpen((o) => !o),

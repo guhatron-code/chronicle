@@ -342,7 +342,8 @@ pub(crate) fn git_in_checked(repo: &Path, args: &[&str]) -> Result<String, Strin
 }
 
 /// Which remote ref this branch is measured against, in the spec's order:
-/// the configured upstream, then `origin/<branch>`, then `origin/HEAD`.
+/// the configured upstream, then `origin/<branch>`, then whatever `origin/HEAD`
+/// points at (resolved to its real name — "origin/main", not "origin/HEAD").
 /// Reading `branch.<name>.merge` alone (what this used to do) called a branch
 /// that had been pushed without `-u` "never published".
 pub(crate) fn remote_ref(repo: &Path, branch: &str) -> Option<String> {
@@ -359,7 +360,10 @@ pub(crate) fn remote_ref(repo: &Path, branch: &str) -> Option<String> {
         if ok(&["rev-parse", "--verify", "--quiet", &full]) { return Some(format!("origin/{branch}")); }
     }
     if ok(&["rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD"]) {
-        return Some("origin/HEAD".into());
+        // origin/HEAD is a symbolic ref: say the name it points at ("origin/main"),
+        // which is the name the user sees on GitHub and the one git prints back
+        let name = git_in(repo, &["rev-parse", "--abbrev-ref", "origin/HEAD"]);
+        return Some(if name.is_empty() { "origin/HEAD".into() } else { name });
     }
     None
 }
@@ -3855,8 +3859,9 @@ mod history_tests {
         assert!(git_in(&d, &["branch", "-r", "--contains", "HEAD"]).trim().is_empty());
 
         assert_eq!(publish_kind(&d, "feature", "url"), "ok");
-        assert_eq!(remote_ref(&d, "feature").as_deref(), Some("origin/HEAD"));
-        assert_eq!(ahead_behind(&d, "origin/HEAD"), (1, 0));
+        // and it is named the way the user would name it, not "origin/HEAD"
+        assert_eq!(remote_ref(&d, "feature").as_deref(), Some("origin/main"));
+        assert_eq!(ahead_behind(&d, "origin/main"), (1, 0));
     }
 
     /// The other side of that rule: a remote is configured but holds nothing of

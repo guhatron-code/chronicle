@@ -102,7 +102,7 @@ function scheduleForegroundProbe(id: number) {
   const prev = fgTimers.get(id);
   if (prev) clearTimeout(prev);
   else probeForeground(id); // was quiet — a stream's first chunk shouldn't wait 300ms
-  fgTimers.set(id, setTimeout(() => { fgTimers.delete(id); probeForeground(id); }, FG_SETTLE_MS));
+  fgTimers.set(id, setTimeout(() => { fgTimers.delete(id); probeForeground(id); }, FG_SETTLE_MS)); // timer-ok: the trailing foreground probe, cleared on every chunk
 }
 
 function ensureListeners() {
@@ -327,7 +327,7 @@ export async function spawnTerm(dir: string, opts: SpawnOpts = {}): Promise<Term
   const typed = opts.autoType ?? (opts.agent ? `${opts.agent}\n` : null);
   if (typed) {
     // legacy timing: let the shell prompt settle first
-    setTimeout(() => void ptyWrite(id, typed.endsWith("\n") ? typed : `${typed}\n`).catch(() => {}), 650);
+    setTimeout(() => void ptyWrite(id, typed.endsWith("\n") ? typed : `${typed}\n`).catch(() => {}), 650); // timer-ok: one-shot, lets the shell prompt settle before autotyping
   }
   notify();
   return session;
