@@ -11,6 +11,7 @@ mod power;
 mod web;
 mod blocklists;
 mod menu;
+mod notes;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
