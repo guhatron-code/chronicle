@@ -36,6 +36,12 @@ flate2 = "1" # the bundled block-list chunks ship gzipped
 url = "2"
 percent-encoding = "2"
 
+# muda is what tauri::menu parses accelerator strings with; it is not re-exported, so
+# the test that pins every Go accelerator borrows the type directly. Version tracks
+# the one tauri already resolves (Cargo.lock: muda 0.19.3).
+[dev-dependencies]
+muda = "0.19"
+
 [profile.release]
 strip = true
 lto = true

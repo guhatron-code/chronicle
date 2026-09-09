@@ -89,7 +89,7 @@ not; those are the gap between this and the uBlock Origin extension, and the hel
 - Input with a scheme, or containing a dot and no spaces, is a URL; `https://` is prepended when no scheme is given. Anything else searches DuckDuckGo (`https://duckduckgo.com/?q=`).
 - `chronicle-file` URLs display as `this project › <relative path>`; the raw scheme is never shown.
 - ⌘L focuses the bar, ⌘T new tab, ⌘W close tab, ⌘R reload, ⌘[ / ⌘] back / forward. These bind only while the Web pane is active so they don't collide with existing shortcuts.
-- These work while the *page* is focused too: the page is a native child webview that swallows ⌘-chords, so the app carries every shortcut as a key equivalent in a native menu bar (Chronicle · Edit · View · Window · Go). macOS routes a chord the page did not handle to the menu, and the menu item sends it back to the main webview as a synthetic keydown — the same handlers run, and the ones that land in Chronicle's chrome (⌘K/⌘T/⌘L/⌘W/⌘J/⌘/ and ⌥⌘1-3) take keyboard focus back from the page.
+- These work while the *page* is focused too: the page is a native child webview that swallows ⌘-chords, so the app carries every shortcut as a key equivalent in a native menu bar (Chronicle · Edit · View · Window · Go). The Go submenu carries the whole keyboard map — ⌘K/⌘J/⌘O/⌘⇧F, ⌘T/⌘L/⌘W, ⌘R/⌘[/⌘], ⌥⌘1-3, ⌘/, and ⌘1-9 — so macOS routes a chord the page did not handle to the menu, and the menu item sends it back to the main webview as a synthetic keydown. The same handlers run, and every chord except the page-navigation three (⌘R/⌘[/⌘]) takes keyboard focus back from the page.
 
 ## Opening project files
 
