@@ -366,6 +366,28 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
   animation-play-state: paused !important;
 }
 
+/* The note editor's two inline atoms (src/screens/notes/editor/nodes.ts). A
+   wikilink is dotted while it resolves and dashed while it does not; a tag is a
+   small mono chip. Both stay inside the text line — no wrapping, no reflow. */
+.note-doc .wikilink {
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.note-doc .wikilink[data-missing="true"] {
+  text-decoration-style: dashed;
+  color: var(--text-dim);
+}
+.note-doc .note-tag {
+  border-radius: 4px;
+  background: var(--fill-subtle);
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.001s !important;
