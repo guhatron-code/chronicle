@@ -216,7 +216,7 @@ function AssistantMessage({ text, streaming }: { text: string; streaming: boolea
         ) : (
           // format AS IT STREAMS — markdown renders progressively, not only at
           // the end; a caret trails the live text
-          <span className="[&>*:last-child]:inline">
+          <span data-selectable className="[&>*:last-child]:inline">
             <MiniMd source={text} />
             {streaming && (
               <span

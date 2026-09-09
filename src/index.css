@@ -297,6 +297,26 @@ body {
   overflow: hidden;
 }
 
+/* Chrome is not selectable — labels, rows, headers, pills read as controls, not
+   text. Content opts back in: fields, the editor, the terminal, code, and any
+   region marked data-selectable (file viewer, transcripts, logs). */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+}
+input,
+textarea,
+[contenteditable="true"],
+.ProseMirror,
+.xterm,
+pre,
+code,
+[data-selectable],
+[data-selectable] * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
 /* The DS focus law: every plain interactive element gets the double ring. shadcn-based
    controls carry it via utilities; this covers raw <button>/<a> (window controls, rows). */
 button:focus-visible,

@@ -77,7 +77,7 @@ function CodeView({ lines }: { lines: CodeLine[] }) {
   // a grid pairs each gutter number with its line, so long lines WRAP and the
   // numbers stay aligned to the first visual row of their line
   return (
-    <div className="relative min-h-0 flex-1 overflow-y-auto bg-surface-input font-mono text-xs leading-[1.75]">
+    <div data-selectable className="relative min-h-0 flex-1 overflow-y-auto bg-surface-input font-mono text-xs leading-[1.75]">
       <span aria-hidden className="absolute inset-y-0 left-11 w-px bg-divider-faint" />
       <div className="grid min-h-full grid-cols-[44px_1fr] content-start py-3">
         {lines.map((line, i) => (
