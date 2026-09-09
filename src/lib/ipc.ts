@@ -416,6 +416,30 @@ export const onWebOpenTab = (cb: (p: { from_label: string; url: string }) => voi
 export const onWebDownload = (cb: (p: { url: string; ok: boolean }) => void): Promise<UnlistenFn> => listen<{ url: string; ok: boolean }>("web-download", (e) => cb(e.payload));
 export const onWebBlocklistsChanged = (cb: (i: BlockInfo) => void): Promise<UnlistenFn> => listen<BlockInfo>("web-blocklists-changed", (e) => cb(e.payload));
 
+/* ---------- notes (the vault — src-tauri/src/notes/) ---------- */
+export type NoteStatus = "queued" | "in_progress" | "done";
+export interface RawLink { target: string; label: string | null }
+export interface NoteEntry {
+  path: string; title: string; folder: string;
+  status: string | null; round: number | null;
+  tags: string[]; links: RawLink[]; resolved: (string | null)[]; ambiguous: boolean[];
+  mtime: number; size: number; snippet: string; unreadable: boolean;
+}
+export interface NotesIndex { notes: NoteEntry[]; generation: number }
+export interface NoteSearchHit { path: string; title: string; kind: "title" | "tag" | "body"; snippet: string }
+export interface NotesChanged { dir: string; paths: string[]; generation: number }
+export const notesIndex = (dir: string) => invoke<NotesIndex>("notes_index", { dir });
+export const notesRead = (dir: string, path: string) => invoke<string>("notes_read", { dir, path });
+export const notesWrite = (dir: string, path: string, text: string) => invoke<void>("notes_write", { dir, path, text });
+export const notesMove = (dir: string, from: string, to: string) => invoke<string[]>("notes_move", { dir, from, to });
+export const notesDelete = (dir: string, path: string) => invoke<string>("notes_delete", { dir, path });
+export const notesSearch = (dir: string, query: string) => invoke<NoteSearchHit[]>("notes_search", { dir, query });
+export const notesAttach = (dir: string, note: string, name: string, b64: string) =>
+  invoke<string>("notes_attach", { dir, note, name, b64 });
+export const notesDetach = (dir: string, path: string) => invoke<void>("notes_detach", { dir, path });
+export const onNotesChanged = (cb: (c: NotesChanged) => void): Promise<UnlistenFn> =>
+  listen<NotesChanged>("notes-changed", (e) => cb(e.payload));
+
 /* ---------- the doctor (setup & health — src-tauri/src/setup.rs) ---------- */
 
 /** One check's detected state. */
