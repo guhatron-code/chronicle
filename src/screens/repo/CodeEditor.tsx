@@ -138,15 +138,26 @@ const External = Annotation.define<boolean>();
 /* ---- the per-buffer state cache ---- */
 
 const states = new Map<string, EditorState>();
-/* A buffer is disposed while its editor is still mounted: the store drops the
-   key, React unmounts the view a beat later, and the unmount's cleanup would
-   put the state straight back — so reopening the file would restore the undo
-   history of a buffer that is gone, and one ⌘Z + ⌘S would write the pre-close
-   text back to disk. The mark says "this key died; do not resurrect it". It is
-   cleared by whichever comes first: the cleanup that skipped, or a fresh mount
-   on the same key. */
-const disposed = new Set<string>();
-onBufferDisposed((key) => { states.delete(key); disposed.add(key); });
+onBufferDisposed((key) => { states.delete(key); });
+
+/* A buffer can be disposed while its editor is still mounted: the store drops
+   the key, React unmounts the view a beat later, and a cleanup that cached
+   blindly would put the state straight back — reopening the file would restore
+   the undo history of a buffer that is gone, and one ⌘Z + ⌘S would write the
+   pre-close text back to disk.
+
+   So the cleanup ASKS the store, by key, rather than reading a mark the store
+   set earlier. A mark is consumed once: closing and reopening one docKey in the
+   same tick left it set (the instance never unmounted, so no mount effect ever
+   cleared it), and the next real unmount then skipped caching and dropped a
+   live undo history on the floor. A question has no such memory, and two mounts
+   of one key each get their own answer.
+
+   With no predicate — a preview, a fixture — there is no store to have closed
+   anything, so the state is kept. */
+export function shouldCacheOnUnmount(docKey: string, isBufferOpen?: (key: string) => boolean): boolean {
+  return isBufferOpen ? isBufferOpen(docKey) : true;
+}
 
 const langComp = new Compartment();
 const roComp = new Compartment();
@@ -155,6 +166,11 @@ const tabComp = new Compartment();
 export type CodeEditorProps = {
   /** identity of the document — `bufferKey(dir, path)`. */
   docKey: string;
+  /** Is the buffer behind `key` still open? Asked at unmount, for the key that
+   *  is unmounting: the EditorState (undo history included) is cached only
+   *  while the buffer it belongs to is alive. Omit it outside the app, where
+   *  nothing closes buffers and every state is worth keeping. */
+  isBufferOpen?: (key: string) => boolean;
   text: string;
   language: LangId;
   readOnly: boolean;
@@ -164,19 +180,22 @@ export type CodeEditorProps = {
   className?: string;
 };
 
-export function CodeEditor({ docKey, text, language, readOnly, tabSize, onChange, onSave, className }: CodeEditorProps) {
+export function CodeEditor({ docKey, text, language, readOnly, tabSize, isBufferOpen, onChange, onSave, className }: CodeEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   // the callbacks live in refs so a re-render never rebuilds the EditorState
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
+  // the unmount cleanup must ask the CURRENT store, not the one that was
+  // current when this instance mounted
+  const isBufferOpenRef = useRef(isBufferOpen);
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
+  isBufferOpenRef.current = isBufferOpen;
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    disposed.delete(docKey); // a live mount owns this key again
     const cached = states.get(docKey);
     const state = cached ?? EditorState.create({
       doc: text,
@@ -236,8 +255,8 @@ export function CodeEditor({ docKey, text, language, readOnly, tabSize, onChange
       // keep the state (undo history included) for when this buffer comes back —
       // unless the buffer was closed under us, in which case its history died
       // with it and writing the cache here would resurrect it
-      if (disposed.has(docKey)) disposed.delete(docKey);
-      else states.set(docKey, v.state);
+      if (shouldCacheOnUnmount(docKey, isBufferOpenRef.current)) states.set(docKey, v.state);
+      else states.delete(docKey);
       v.destroy();
       view.current = null;
     };

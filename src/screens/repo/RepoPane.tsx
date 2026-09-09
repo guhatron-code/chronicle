@@ -949,6 +949,7 @@ export function RepoPane({
               ? {
                   kind: "text",
                   docKey: bufferKey(dir, active.path),
+                  isBufferOpen: bufferIsOpenFor,
                   text: buf.text,
                   language: languageIdFor(active.path),
                   readOnly: active.editable === false,
@@ -961,6 +962,7 @@ export function RepoPane({
                   ? {
                       kind: "text" as const,
                       docKey: bufferKey(dir, active.path),
+                      isBufferOpen: bufferIsOpenFor,
                       text: "",
                       language: "plain" as const,
                       readOnly: true,
@@ -1027,6 +1029,20 @@ export function RepoPane({
   }
 
   return <Repo view={view} treeWidth={treeWidth} onTreeSplitterDown={onTreeSplitterDown} />;
+}
+
+/** The editor asks this as it unmounts, about the key it was showing: a cached
+ *  EditorState — undo history and all — may only outlive the mount while the
+ *  buffer behind it is still open. Asked per key rather than answered from a
+ *  closure over the active tab, because a tab switch tears the old editor down
+ *  while the props already name the new file.
+ *
+ *  The key is `bufferKey(dir, path)`: the pair joined by the one separator a
+ *  path cannot contain. */
+function bufferIsOpenFor(key: string): boolean {
+  const cut = key.indexOf("\0");
+  if (cut < 0) return false;
+  return bufferFor(key.slice(0, cut), key.slice(cut + 1)) !== null;
 }
 
 /* ---- unsaved work: ⌘S, and the one prompt that guards it ---- */

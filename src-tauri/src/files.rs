@@ -25,8 +25,8 @@ pub const MAX_EDIT_BYTES: u64 = 4 * 1024 * 1024;
 /// `node_modules_helper` are ordinary files.
 pub fn refused(rel: &str) -> Option<String> {
     for seg in rel.split('/') {
-        if seg == ".git" { return Some("that's git's own folder — Chronicle won't touch it".into()); }
-        if seg == "node_modules" { return Some("node_modules is installed, not written — leave it to npm".into()); }
+        if seg == ".git" { return Some("that's git's own folder — Chronicle won't touch it.".into()); }
+        if seg == "node_modules" { return Some("node_modules is installed, not written — leave it to npm.".into()); }
     }
     None
 }
@@ -40,7 +40,7 @@ pub fn refused(rel: &str) -> Option<String> {
 /// manifest folder is not the repo root.
 pub fn jailed_target(p: &Project, rel: &str) -> Result<PathBuf, String> {
     if rel.is_empty() || rel.starts_with('/') || rel.contains('\0') || rel.split('/').any(|s| s == "..") {
-        return Err("that path isn't inside this project".into());
+        return Err("that path isn't inside this project.".into());
     }
     let base = if rel == ".chronicle" || rel.starts_with(".chronicle/") { &p.dir } else { &p.repo };
     let full = base.join(rel);
@@ -48,13 +48,13 @@ pub fn jailed_target(p: &Project, rel: &str) -> Result<PathBuf, String> {
     while !probe.exists() {
         match probe.parent() { Some(par) => probe = par.to_path_buf(), None => break }
     }
-    let real = probe.canonicalize().map_err(|_| "that path isn't inside this project".to_string())?;
+    let real = probe.canonicalize().map_err(|_| "that path isn't inside this project.".to_string())?;
     let mut roots: Vec<PathBuf> = vec![p.repo.clone(), p.dir.clone()];
     roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
     let inside = roots.iter().filter_map(|r| r.canonicalize().ok()).any(|r| real.starts_with(&r));
-    if !inside { return Err("that path isn't inside this project".into()); }
+    if !inside { return Err("that path isn't inside this project.".into()); }
     if full.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-        return Err("that path isn't inside this project".into());
+        return Err("that path isn't inside this project.".into());
     }
     Ok(full)
 }
@@ -72,7 +72,7 @@ pub(crate) fn mtime_ms_of(full: &Path) -> Result<u64, String> {
 
 pub(crate) fn read_at(p: &Project, rel: &str) -> Result<ReadFile, String> {
     if rel.split('/').any(|s| s == ".git") {
-        return Err("that's git's own folder — Chronicle won't touch it".into());
+        return Err("that's git's own folder — Chronicle won't touch it.".into());
     }
     let full = jailed_target(p, rel)?;
     let md = std::fs::metadata(&full).map_err(|e| e.to_string())?;
@@ -107,7 +107,7 @@ pub(crate) fn write_at(p: &Project, rel: &str, text: &str, expected_mtime_ms: Op
         if !existed { return Err("changed on disk".into()); }
         if mtime_ms_of(&full)? != expected { return Err("changed on disk".into()); }
     }
-    let parent = full.parent().ok_or("that path has no folder")?;
+    let parent = full.parent().ok_or("that path has no folder.")?;
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let name = full.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
     let tmp = tmp_beside(parent, &name);
@@ -120,7 +120,14 @@ pub(crate) fn write_at(p: &Project, rel: &str, text: &str, expected_mtime_ms: Op
     // check again with the temp already written: the gap between the precondition
     // and the rename is now one syscall wide instead of one whole file write.
     if let Some(expected) = expected_mtime_ms {
-        if mtime_ms_of(&full).unwrap_or(0) != expected {
+        // an unreadable mtime is reported, not swallowed as "0 != expected": the
+        // first check says exactly why it could not stat the file, and a write
+        // that cannot verify its precondition must say the same thing
+        let now = match mtime_ms_of(&full) {
+            Ok(now) => now,
+            Err(e) => { let _ = std::fs::remove_file(&tmp); return Err(e); }
+        };
+        if now != expected {
             let _ = std::fs::remove_file(&tmp);
             return Err("changed on disk".into());
         }
@@ -146,14 +153,14 @@ fn tmp_beside(parent: &Path, name: &str) -> PathBuf {
 pub(crate) fn create_at(p: &Project, rel: &str, kind: &str) -> Result<(), String> {
     if let Some(why) = refused(rel) { return Err(why); }
     let full = jailed_target(p, rel)?;
-    if full.exists() { return Err("something with that name is already there".into()); }
+    if full.exists() { return Err("something with that name is already there.".into()); }
     match kind {
         "dir" => std::fs::create_dir_all(&full).map_err(|e| e.to_string()),
         "file" => {
             if let Some(parent) = full.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
             std::fs::write(&full, "").map_err(|e| e.to_string())
         }
-        _ => Err("a new thing is either a file or a folder".into()),
+        _ => Err("a new thing is either a file or a folder.".into()),
     }
 }
 
@@ -162,12 +169,12 @@ pub(crate) fn rename_at(p: &Project, from: &str, to: &str) -> Result<(), String>
     if let Some(why) = refused(to) { return Err(why); }
     let src = jailed_target(p, from)?;
     let dst = jailed_target(p, to)?;
-    if !src.exists() { return Err("that file isn't there anymore".into()); }
+    if !src.exists() { return Err("that file isn't there anymore.".into()); }
     // APFS is case-insensitive by default, so `a.txt` and `A.txt` are the SAME file
     // and `exists()` calls a rename that only changes the case a collision. Same
     // device + same inode means the "collision" is the file we are moving.
     if dst.exists() && !same_file(&src, &dst) {
-        return Err("something with that name is already there".into());
+        return Err("something with that name is already there.".into());
     }
     if let Some(parent) = dst.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
     std::fs::rename(&src, &dst).map_err(|e| e.to_string())
@@ -189,8 +196,11 @@ fn same_file(a: &Path, b: &Path) -> bool {
 pub(crate) fn trash_at(p: &Project, rel: &str) -> Result<(), String> {
     if let Some(why) = refused(rel) { return Err(why); }
     let full = jailed_target(p, rel)?;
-    if !full.exists() { return Err("that file isn't there anymore".into()); }
-    trash::delete(&full).map_err(|e| format!("couldn't move it to the Trash — {e}"))
+    if !full.exists() { return Err("that file isn't there anymore.".into()); }
+    // the OS sentence is quoted as-is, minus its own full stop, so the line
+    // ends in exactly one period like every other refusal here
+    trash::delete(&full)
+        .map_err(|e| format!("couldn't move it to the Trash — {}.", e.to_string().trim_end_matches('.')))
 }
 
 #[tauri::command]
@@ -230,7 +240,7 @@ pub async fn trash_path(roots: State<'_, OpenRoots>, dir: String, path: String) 
 pub async fn reveal_path(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<(), String> {
     let p = crate::project_for(&roots, &dir)?;
     let full = jailed_target(&p, &path)?;
-    if !full.exists() { return Err("that file isn't there anymore".into()); }
+    if !full.exists() { return Err("that file isn't there anymore.".into()); }
     std::process::Command::new("/usr/bin/open").arg("-R").arg(&full).output().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -293,10 +303,11 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "two\n");
         assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o755);
         assert!(m1 >= before);
-        // no .tmp survives
+        // no temp survives — the real suffix `tmp_beside` writes, not a ".tmp"
+        // that matches neither the temp name nor the target and so passed always
         let leftovers: Vec<_> = std::fs::read_dir(&root).unwrap().flatten()
-            .filter(|e| e.file_name().to_string_lossy().contains(".tmp")).collect();
-        assert!(leftovers.is_empty(), "a temp file survived the write");
+            .filter(|e| e.file_name().to_string_lossy().contains(".chronicle-tmp")).collect();
+        assert!(leftovers.is_empty(), "a temp file survived the write: {leftovers:?}");
 
         // the right precondition: accepted
         let m2 = write_at(&p, "a.sh", "three\n", Some(m1)).unwrap();
@@ -402,9 +413,16 @@ mod tests {
 
         std::fs::write(root.join("shared.txt"), "one\n").unwrap();
         let other = p.clone();
+        // both writers start on the same instant — without the barrier the spawn
+        // costs enough that the main thread's 40 writes can finish before the
+        // other's first one begins, and the test proves nothing about sharing
+        let gate = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let their_gate = std::sync::Arc::clone(&gate);
         let h = std::thread::spawn(move || {
+            their_gate.wait();
             for _ in 0..40 { write_at(&other, "shared.txt", "thread\n", None).unwrap(); }
         });
+        gate.wait();
         for _ in 0..40 { write_at(&p, "shared.txt", "main\n", None).unwrap(); }
         h.join().unwrap();
 

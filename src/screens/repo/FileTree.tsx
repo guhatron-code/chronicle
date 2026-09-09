@@ -51,8 +51,7 @@ export type FileTreeProps = {
   rootsCount?: number;
   roots: TreeNode[];
   selectedId?: string | null;
-  /** The id of the "input" row, or the row being renamed. */
-  pendingId?: string | null;
+  /** The row being renamed — its name turns into the field in place. */
   renamingId?: string | null;
   nameError?: string | null;
   onSelect?: (id: string) => void;
@@ -265,7 +264,6 @@ function Row({
             selected={selected}
             dimmed={deleted}
             struck={deleted}
-            className="w-full"
             icon={
               <DocGlyph
                 size={13}
@@ -311,7 +309,7 @@ function Row({
             open={node.open}
             dimmed={node.empty}
             tint={node.hasChanges}
-            className={cn("w-full", notFirstRoot && "mt-1")}
+            className={cn(notFirstRoot && "mt-1")}
             after={
               <>
                 {node.workspace && <span className="shrink-0 text-[10.5px] text-text-dimmer">workspace</span>}

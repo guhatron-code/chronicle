@@ -25,7 +25,17 @@ export type DiffRow =
   | { kind: "ctx" | "add" | "del"; old?: number; new?: number; text: string };
 
 export type ViewerBody =
-  | { kind: "text"; docKey: string; text: string; language: LangId; readOnly: boolean; tabSize: number }
+  | {
+      kind: "text";
+      docKey: string;
+      text: string;
+      language: LangId;
+      readOnly: boolean;
+      tabSize: number;
+      /** Asked when the editor unmounts: only a still-open buffer keeps its
+       *  cached EditorState (and with it the undo history). */
+      isBufferOpen?: (key: string) => boolean;
+    }
   | { kind: "diff"; rows: DiffRow[] }
   | { kind: "read-error"; message: string; detail: string } // "This file couldn't be read" · "EACCES · permission denied"
   | { kind: "image"; caption: string; src?: string } // "hero.png · 1440×960 · 212 KB" · src = data: URI when wired
@@ -301,6 +311,7 @@ export function Viewer(p: ViewerProps) {
             language={p.body.language}
             readOnly={p.body.readOnly}
             tabSize={p.body.tabSize}
+            isBufferOpen={p.body.isBufferOpen}
             onChange={p.onEdit}
             onSave={p.onSave}
           />
