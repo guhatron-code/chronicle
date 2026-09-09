@@ -12,27 +12,10 @@ import tippy, { type Instance as TippyInstance } from "tippy.js";
 import Fuse from "fuse.js";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import type { NoteEntry } from "@/lib/ipc";
+import { tagAllowed, tagItems, wikiLinkItems, type NoteSuggestion, type TagSuggestion } from "./items";
 
-export interface NoteSuggestion { path: string; title: string; folder: string; create?: boolean }
-export interface TagSuggestion { tag: string; count: number }
-
-/** Fuzzy over titles and folders; "Create …" is always the last row. */
-export function wikiLinkItems(notes: NoteEntry[], query: string): NoteSuggestion[] {
-  const rows: NoteSuggestion[] = notes.map((n) => ({ path: n.path, title: n.title, folder: n.folder }));
-  const q = query.trim();
-  if (!q) return rows.slice(0, 8);
-  const fuse = new Fuse(rows, { keys: ["title", "folder"], threshold: 0.35, minMatchCharLength: 1 });
-  const hits = fuse.search(q).map((r) => r.item).slice(0, 8);
-  if (!hits.some((h) => h.title.toLowerCase() === q.toLowerCase())) {
-    hits.push({ path: "", title: q, folder: "new note", create: true });
-  }
-  return hits;
-}
-
-export function tagItems(tags: TagSuggestion[], query: string): TagSuggestion[] {
-  const q = query.trim().toLowerCase();
-  return tags.filter((t) => !q || t.tag.toLowerCase().includes(q)).slice(0, 10);
-}
+export { tagAllowed, tagItems, wikiLinkItems };
+export type { NoteSuggestion, TagSuggestion };
 
 /* ---------- the shared popup ---------- */
 
@@ -93,7 +76,7 @@ function popup<T>(cfg: Omit<MenuProps<T>, "items" | "command">) {
           getReferenceClientRect: () => props.clientRect?.() || new DOMRect(),
           appendTo: () => document.body,
           content: component.element,
-          showOnCreate: true,
+          showOnCreate: props.items.length > 0,
           interactive: true,
           trigger: "manual",
           placement: "bottom-start",
@@ -102,6 +85,10 @@ function popup<T>(cfg: Omit<MenuProps<T>, "items" | "command">) {
       onUpdate: (props: SuggestionProps<T, T>) => {
         component?.updateProps({ items: props.items, command: props.command, ...cfg });
         instance?.setProps({ getReferenceClientRect: () => props.clientRect?.() || new DOMRect() });
+        // a menu with nothing in it renders an empty box, which reads as "the
+        // editor is broken" rather than as "no matches"
+        if (props.items.length === 0) instance?.hide();
+        else instance?.show();
       },
       onKeyDown: (props: SuggestionKeyDownProps) => {
         if (props.event.key === "Escape") { instance?.hide(); return true; }
@@ -215,11 +202,10 @@ export function tagSuggest(tags: () => TagSuggestion[]): Extension {
         editor: this.editor,
         char: "#",
         pluginKey: tagKey,
-        // `# ` at the start of a line is a heading, never a tag: a bare `#`
-        // opening its block stays silent, but `#b` there is already a tag.
-        allow: ({ state, range }) =>
-          state.doc.resolve(range.from).parentOffset > 0
-          || state.doc.textBetween(range.from, range.to).length > 1,
+        allow: ({ state, range }) => tagAllowed(
+          state.doc.resolve(range.from).parentOffset,
+          state.doc.textBetween(range.from, range.to),
+        ),
         items: ({ query }) => tagItems(tags(), query),
         command: ({ editor, range, props }) =>
           editor.chain().focus().deleteRange(range)
@@ -227,7 +213,7 @@ export function tagSuggest(tags: () => TagSuggestion[]): Extension {
         render: popup<TagSuggestion>({
           heading: "Tag · ↑↓ then ⏎",
           label: (i) => `#${i.tag}`,
-          hint: (i) => String(i.count),
+          hint: (i) => (i.create ? "new tag" : String(i.count)),
         }),
       })];
     },

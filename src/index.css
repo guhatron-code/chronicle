@@ -400,12 +400,20 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
   text-decoration-style: dashed;
   color: var(--text-dim);
 }
+/* A chip, like the mock's (design/mocks-notes.html .tag/.htag). The fill alone
+   is nearly invisible on either theme — the hairline is what makes it read as a
+   chip rather than as a run of mono text. Both tokens are translucent, so this
+   holds on the dark and the light theme without a second rule. */
 .note-doc .note-tag {
+  display: inline-block;
+  border: 1px solid var(--border-hairline);
   border-radius: 4px;
-  background: var(--fill-subtle);
-  padding: 0 4px;
+  background: var(--fill-hover);
+  padding: 2px 6px;
   font-family: var(--font-mono);
   font-size: 12px;
+  line-height: 1.25;
+  white-space: nowrap;
   color: var(--text-secondary);
 }
 
