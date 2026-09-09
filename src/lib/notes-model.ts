@@ -132,7 +132,33 @@ export function newNotePath(folder: string, title: string, taken: Set<string>): 
 
 /* ---------- the round log panel (pure parts) ---------- */
 
-export type RoundPhase = "generating" | "executing";
+export type RoundPhase = "generating" | "plan-ready" | "executing";
+
+/** Just the fields the phase model needs off `.chronicle/rounds.json`. */
+export interface RoundRecord { n: number; state: string }
+
+/**
+ * Which phase a project's newest live round is in, and its number.
+ *
+ * The record cannot answer this on its own: it says `ready` from the moment
+ * the plan is written until the last note is done, which covers both "written,
+ * nothing has run" and "the executor is working". Only a live session tells
+ * them apart — the headless `exec` session, or (for the agent-pane route,
+ * which has no session and no log) this session's own record of the click.
+ */
+export function roundPhaseOf(
+  rounds: RoundRecord[],
+  execRunning: boolean,
+  agentRound: number | null,
+): { phase: RoundPhase; n: number } | null {
+  const newest = (rs: RoundRecord[]) => rs.reduce((m, r) => Math.max(m, r.n), 0);
+  const generating = rounds.filter((r) => r.state === "generating");
+  if (generating.length > 0) return { phase: "generating", n: newest(generating) };
+  const ready = rounds.filter((r) => r.state === "ready");
+  if (ready.length === 0) return null; // done, failed, or nothing at all
+  const n = newest(ready);
+  return { phase: execRunning || agentRound === n ? "executing" : "plan-ready", n };
+}
 
 /** The panel never grows without bound: a long round's tail is thousands of
  *  lines nobody scrolls back through, and the DOM pays for every one. The
@@ -156,9 +182,23 @@ export function stickToBottom(scrollTop: number, scrollHeight: number, clientHei
   return scrollHeight - clientHeight - scrollTop <= STICK_SLOP;
 }
 
+/** The round card's second line, in each phase. */
+export function roundSubline(
+  phase: RoundPhase,
+  route: "headless" | "agent" | null,
+  done: number,
+  total: number,
+): string {
+  const notes = `${total} ${total === 1 ? "note" : "notes"}`;
+  if (phase === "generating") return `${notes} · writing the plan…`;
+  if (phase === "plan-ready") return `${notes} · plan ready · not started`;
+  return `${notes} · executing · ${done} of ${total} done · ${route === "agent" ? "in the agent pane" : "headless"}`;
+}
+
 /** The one line at the top of the panel. Executing counts what has actually
  *  landed in the notes' front matter — the same truth the round card shows. */
 export function roundLogHeader(phase: RoundPhase, n: number, done: number, total: number): string {
   if (phase === "generating") return `Round ${n} · writing the plan`;
+  if (phase === "plan-ready") return `Round ${n} · plan ready · not started`;
   return `Round ${n} · executing · ${done} of ${total} done`;
 }

@@ -21,9 +21,12 @@ import { RoundLog } from "./RoundLog";
 import { BtnPrimary } from "@/components/chrome/atoms";
 import { runCommand, type NoteEntry } from "@/lib/ipc";
 import {
-  createNote, editBody, flushSave, generatingRoundFor, indexFor, noteEntry, openFor, openNote,
-  openRoundFor, queuedCountFor, roundGenerating, setNotesOnScreen, subscribeNotes, takePendingOpenNote,
+  createNote, editBody, flushSave, hasLiveRound, indexFor, noteEntry, openFor, openNote,
+  queuedCountFor, roundKindFor, roundNotesFor, roundPhase, roundRoute, setNotesOnScreen,
+  subscribeNotes, takePendingOpenNote,
 } from "@/lib/notes-store";
+import { armRoundWatch, subscribeRoundSession } from "@/lib/round-log";
+import type { RoundCardData } from "./RoundCard";
 import { toastError } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
@@ -67,6 +70,9 @@ export function NotesPane({
 }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeNotes(() => bump((n) => n + 1)), []);
+  // a session starting or stopping is a phase change, so the card and the log
+  // header both move — it fires on that, never on a log line
+  useEffect(() => subscribeRoundSession(() => bump((n) => n + 1)), []);
   useEffect(() => { setNotesOnScreen(onScreen ? dir : null); return () => setNotesOnScreen(null); }, [dir, onScreen]);
 
   /* the search overlay / palette land here */
@@ -106,13 +112,30 @@ export function NotesPane({
      refreshNotes is the only thing that replaces it — so memoising on it means
      Sidebar's `roundOpen` prop stays referentially stable while the user types,
      and only actually changes when the index itself does. */
-  const roundOpen = useMemo(() => openRoundFor(dir), [dir, index]);
-  const generating = roundGenerating(dir);
-  const generatingN = generatingRoundFor(dir);
+  /* The one answer to "what is this round doing?" — the record cannot tell a
+     written plan from a running one, so the live session decides. The card and
+     the log panel both read this, so they can never disagree again. */
+  const live = hasLiveRound(dir);
+  useEffect(() => {
+    armRoundWatch(dir, onScreen && live);
+    return () => armRoundWatch(dir, false);
+  }, [dir, onScreen, live]);
 
-  /* the log panel: the writing phase wins while it lasts, then the running
-     round's own output. No round, no panel — and no subscription either. */
-  const logPhase = generating ? "generating" as const : roundOpen ? "executing" as const : null;
+  const ph = roundPhase(dir);
+  const phase = ph?.phase ?? null;
+  const roundN = ph?.n ?? null;
+  const route = roundRoute(dir);
+  const roundNotes = useMemo(
+    () => (roundN == null ? [] : roundNotesFor(dir, roundN)),
+    [dir, index, roundN],
+  );
+  const round = useMemo<RoundCardData | null>(
+    () => (phase == null || roundN == null ? null : {
+      phase, n: roundN, kind: roundKindFor(dir, roundN), notes: roundNotes,
+      done: roundNotes.filter((x) => x.status === "done").length, route,
+    }),
+    [dir, phase, roundN, roundNotes, route],
+  );
   const [logOpen, setLogOpen] = useState(() => loadLogOpen(dir));
   useEffect(() => setLogOpen(loadLogOpen(dir)), [dir]);
   const toggleLog = useCallback(() => {
@@ -125,7 +148,7 @@ export function NotesPane({
     setLogOpen(false);
     try { localStorage.setItem(LOG_KEY(dir), "0"); } catch { /* private mode */ }
   }, [dir]);
-  const showLog = logOpen && logPhase !== null;
+  const showLog = logOpen && round !== null;
 
   const openNoteHere = useCallback((path: string) => { void openNote(dir, path); }, [dir]);
   const newNoteIn = useCallback((folder: string) => {
@@ -186,10 +209,10 @@ export function NotesPane({
         onOpenSearch={onOpenSearch}
         onRevealVault={onRevealVault}
         queued={queued}
-        roundOpen={roundOpen}
-        generating={generating}
-        generatingN={generatingN}
+        round={round}
+        agent={agent}
         onStartRound={onStartRound}
+        onRunRoundInPane={onRunRoundInPane}
         logOpen={logOpen}
         onToggleLog={toggleLog}
       />
@@ -242,13 +265,13 @@ export function NotesPane({
             )}
           </>
         )}
-        {showLog && logPhase && (
+        {showLog && round && (
           <RoundLog
             dir={dir}
-            phase={logPhase}
-            n={logPhase === "generating" ? (generatingN ?? roundOpen?.n ?? 0) : (roundOpen?.n ?? 0)}
-            done={roundOpen?.done ?? 0}
-            total={roundOpen?.total ?? 0}
+            phase={round.phase}
+            n={round.n}
+            done={round.done}
+            total={round.notes.length}
             onClose={closeLog}
             onRevealTerminal={revealTerminal}
           />

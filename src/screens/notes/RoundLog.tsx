@@ -8,10 +8,17 @@
  * re-renders this panel and nothing else — the tree, the editor and the
  * backlinks never hear about it.
  *
+ * It shows the log the CURRENT PHASE actually has. While the plan is being
+ * written, and after it is written but before anything has run, that is the
+ * generation session's log — showing an empty executor log there was the bug
+ * that made a finished plan look like it had never run. Only once the headless
+ * executor is live does the panel switch to the exec log.
+ *
  * The tail the session carries is capped at 30 kB by Rust, and again at
  * LOG_MAX_LINES here; "Open full log" tails the real file in a terminal tab,
- * exactly as the roadmap's View-full-log does. The line area is marked
- * `data-selectable` so the text can be copied — the header row is chrome.
+ * exactly as the roadmap's View-full-log does — and is hidden when the phase's
+ * log has produced nothing, because there is no file to tail. The line area is
+ * marked `data-selectable` so the text can be copied — the header row is chrome.
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LOG_MAX_LINES, roundLogHeader, stickToBottom, tailLines, type RoundPhase } from "@/lib/notes-model";
@@ -34,14 +41,18 @@ export const RoundLog = memo(function RoundLog({
   onClose: () => void;
   onRevealTerminal?: () => void;
 }) {
-  const kind = phase === "generating" ? "fixes" : "exec";
+  // the log that exists for this phase: the executor only has one once it runs
+  const kind = phase === "executing" ? "exec" : "fixes";
   const [, bump] = useState(0);
   useEffect(() => subscribeRoundLog(() => bump((x) => x + 1)), []);
   // the only thing that keeps the listener alive: no panel, no subscription
   useEffect(() => { armRoundLog(dir, kind); return () => armRoundLog(dir, null); }, [dir, kind]);
 
-  const log = roundLogFor(dir);
+  const log = roundLogFor(dir, kind);
   const lines = tailLines(log.tail, LOG_MAX_LINES);
+  // a tail with something in it is the proof the file is there — the exec log
+  // path resolves to a name whether or not anything ever wrote to it
+  const hasFile = lines.length > 0;
 
   /* follow the tail until the reader scrolls up, and pick it up again when they
      scroll back down — measured before the paint that would move it */
@@ -56,7 +67,7 @@ export const RoundLog = memo(function RoundLog({
     const existing = termsFor(dir).find((t) => t.title === TERM_TITLE && !t.dead);
     onRevealTerminal?.();
     if (existing) { setActiveTermFor(dir, existing.id); return; }
-    (kind === "fixes" ? fixesLogPath(dir) : execLogPath(dir))
+    (kind === "exec" ? execLogPath(dir) : fixesLogPath(dir))
       .then((path) => spawnTerm(dir, { title: TERM_TITLE, autoType: `tail -n 200 -f '${path.replace(/'/g, "'\\''")}'` }))
       .catch((e) => toastError("Couldn't open the log", String(e).slice(0, 90)));
   };
@@ -73,13 +84,15 @@ export const RoundLog = memo(function RoundLog({
           {roundLogHeader(phase, n, done, total)}
         </span>
         <span className="flex-1" />
-        <button
-          type="button"
-          onClick={openFullLog}
-          className="rounded-[5px] px-1.5 py-0.5 text-[11px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
-        >
-          Open full log
-        </button>
+        {hasFile && (
+          <button
+            type="button"
+            onClick={openFullLog}
+            className="rounded-[5px] px-1.5 py-0.5 text-[11px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
+          >
+            Open full log
+          </button>
+        )}
         <button
           type="button"
           aria-label="Hide the log"
@@ -102,11 +115,13 @@ export const RoundLog = memo(function RoundLog({
       >
         {lines.length === 0 ? (
           <div className="text-text-dimmer">
-            {log.seen
-              ? phase === "generating"
+            {!log.seen
+              ? "Reading the log…"
+              : phase === "generating"
                 ? "Nothing logged yet — the session is starting."
-                : "Nothing logged yet. A round you sent to the agent pane reports in the agent thread, not here."
-              : "Reading the log…"}
+                : phase === "plan-ready"
+                  ? "The plan is written. Run the round to see the executor here."
+                  : "Nothing logged yet. A round you sent to the agent pane reports in the agent thread, not here."}
           </div>
         ) : (
           lines.map((line, i) => <div key={i} className="whitespace-pre-wrap break-words">{line}</div>)

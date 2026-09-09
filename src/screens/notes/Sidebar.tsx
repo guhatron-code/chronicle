@@ -14,9 +14,10 @@ import { Eyebrow } from "@/components/chrome/atoms";
 import { TreeFolderRow, TreeGuide, TreeHeader, TreeIconButton, TreeRow } from "@/components/chrome/Tree";
 import { ChevronRightGlyph, DocGlyph, PlusGlyph, SearchGlyph } from "@/components/chrome/icons";
 import { buildTree, nestTree, tagCounts, type TreeBranch } from "@/lib/notes-model";
-import type { OpenRound } from "@/lib/notes-store";
 import type { NoteEntry } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
+import { RoundCard, type RoundCardData } from "./RoundCard";
+import { StatusChip } from "./StatusChip";
 
 const COLLAPSE_KEY = (dir: string) => `chronicle.notes.tree.${dir}`;
 
@@ -25,34 +26,6 @@ function loadCollapsed(dir: string): Set<string> {
     const raw = localStorage.getItem(COLLAPSE_KEY(dir));
     return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
   } catch { return new Set(); }
-}
-
-/** "Is it actually working?" — the way into the log panel, from either phase. */
-function LogToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="shrink-0 rounded-[5px] border border-border-hairline px-[7px] py-[2px] text-[10.5px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
-    >
-      {open ? "Hide log" : "View log"}
-    </button>
-  );
-}
-
-const TONE: Record<string, string> = {
-  none: "text-text-dim", queued: "text-state-warn", progress: "text-state-neutral",
-  done: "text-state-success", unknown: "text-text-dim",
-};
-
-/** The trailing chip on a note row: a dot and a word, never colour alone. */
-function StatusChip({ label, tone }: { label: string; tone: string }) {
-  return (
-    <span className={cn("flex shrink-0 items-center gap-[5px] font-mono text-[10.5px]", TONE[tone] ?? "text-text-dim")}>
-      <i className="size-[5px] shrink-0 rounded-full bg-current" />
-      {label}
-    </span>
-  );
 }
 
 function rowStatus(entry: NoteEntry): { label: string; tone: string } | null {
@@ -121,14 +94,14 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote }: 
  * Memoised: `NotesPane` re-renders on every keystroke (the store notifies on
  * every editBody), and this tree can be 100+ rows deep on a real vault. Every
  * prop below is either a primitive or a reference NotesPane only replaces
- * when the underlying data actually changes (notes/roundOpen track the
+ * when the underlying data actually changes (notes/round track the
  * index's cache object, not the open note's mutated body; the callbacks are
  * useCallback'd) — so the default shallow-equal comparator is exactly right,
  * and typing in the editor no longer re-reconciles the whole tree.
  */
 export const Sidebar = memo(function Sidebar({
   dir, notes, openPath, onOpenNote, onNewNote, onOpenSearch, onRevealVault,
-  queued, roundOpen, generating, generatingN, onStartRound, logOpen, onToggleLog,
+  queued, round, agent, onStartRound, onRunRoundInPane, logOpen, onToggleLog,
 }: {
   dir: string;
   notes: NoteEntry[];
@@ -140,11 +113,11 @@ export const Sidebar = memo(function Sidebar({
   onOpenSearch: () => void;
   onRevealVault: () => void;
   queued: number;
-  roundOpen: OpenRound | null;
-  generating: boolean;
-  /** the round whose plan is being written, when the record names one */
-  generatingN: number | null;
+  /** the pinned round, in whatever phase it is in — null when there is none */
+  round: RoundCardData | null;
+  agent: "claude" | "codex";
   onStartRound: () => void;
+  onRunRoundInPane?: (n: number, total: number) => void;
   logOpen: boolean;
   onToggleLog: () => void;
 }) {
@@ -168,13 +141,15 @@ export const Sidebar = memo(function Sidebar({
   const tree = useMemo(() => nestTree(buildTree(filtered, collapsed)), [filtered, collapsed]);
   const tags = useMemo(() => tagCounts(notes), [notes]);
 
-  const disabledReason = roundOpen
-    ? `Round ${roundOpen.n} is still running`
-    : generating
+  const disabledReason = round
+    ? round.phase === "generating"
       ? "A round is being planned"
-      : queued === 0
-        ? "Nothing is queued yet"
-        : null;
+      : round.phase === "plan-ready"
+        ? `Round ${round.n} hasn't been run yet`
+        : `Round ${round.n} is still running`
+    : queued === 0
+      ? "Nothing is queued yet"
+      : null;
 
   return (
     <div className="flex h-full w-[232px] flex-none flex-col border-r border-border-hairline">
@@ -225,52 +200,17 @@ export const Sidebar = memo(function Sidebar({
         <span className="font-mono text-[10px] text-text-dimmer">⌘P</span>
       </button>
 
-      {/* the plan is being written and there is no card yet — after a restart
-          mid-round there is no RoundFlow dialog either, so this is the only way
-          back to the log */}
-      {!roundOpen && generating && (
-        <div className="mx-2 mb-2 mt-1 flex items-center gap-2 rounded-lg border border-border-strong bg-surface-card px-3 py-2">
-          <span
-            aria-hidden
-            className="size-[5px] shrink-0 rounded-full bg-state-neutral"
-            style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }}
-          />
-          <span className="min-w-0 flex-1 truncate text-[11.5px] text-text-secondary">
-            {generatingN != null ? `Round ${generatingN} · writing the plan` : "Writing the plan"}
-          </span>
-          <LogToggle open={logOpen} onClick={onToggleLog} />
-        </div>
-      )}
-
-      {roundOpen && (
-        <div className="mx-2 mb-2 mt-1 rounded-lg border border-border-strong bg-surface-card px-3 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-text-primary">Round {roundOpen.n} · fixes</span>
-            <LogToggle open={logOpen} onClick={onToggleLog} />
-          </div>
-          <div className="mt-0.5 text-[11px] text-text-muted">
-            {roundOpen.total} {roundOpen.total === 1 ? "note" : "notes"} · {roundOpen.done} done · headless session
-          </div>
-          <div className="my-2.5 h-[2px] overflow-hidden rounded-[1px] bg-fill-subtle">
-            <div
-              className="h-full rounded-[1px] bg-state-neutral"
-              style={{ width: `${roundOpen.total ? Math.round((roundOpen.done / roundOpen.total) * 100) : 0}%` }}
-            />
-          </div>
-          <div className="flex flex-col text-[12.5px] text-text-secondary">
-            {roundOpen.notes.map((n) => (
-              <TreeRow
-                key={n.path}
-                name={n.title}
-                marquee
-                icon={<DocGlyph size={13} strokeWidth={1.2} className="shrink-0 text-text-subtle" />}
-                selected={n.path === openPath}
-                trailing={<StatusChip {...(n.status === "done" ? { label: "done", tone: "done" } : { label: "working", tone: "progress" })} />}
-                onClick={() => onOpenNote(n.path)}
-              />
-            ))}
-          </div>
-        </div>
+      {round && (
+        <RoundCard
+          dir={dir}
+          agent={agent}
+          round={round}
+          openPath={openPath}
+          onOpenNote={onOpenNote}
+          logOpen={logOpen}
+          onToggleLog={onToggleLog}
+          onRunInPane={onRunRoundInPane}
+        />
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1 text-[12.5px] text-text-secondary">

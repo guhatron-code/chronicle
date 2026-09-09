@@ -19,8 +19,11 @@ import {
   readFileB64, IMG_MIME,
   type NoteEntry, type NoteStatus, type NotesIndex,
 } from "./ipc";
-import { joinFrontMatter, newNotePath, setStatusInFront, splitFrontMatter, type SaveState } from "./notes-model";
-import { evictRoundLog } from "./round-log";
+import {
+  joinFrontMatter, newNotePath, roundPhaseOf, setStatusInFront, splitFrontMatter,
+  type RoundPhase, type SaveState,
+} from "./notes-model";
+import { agentRoundFor, evictRoundLog, execRunning } from "./round-log";
 import { toastError } from "@/overlays/toasts";
 
 export interface OpenNote {
@@ -285,6 +288,36 @@ export function openRoundFor(dir: string): OpenRound | null {
  *  Read from the record, so a restart mid-generation still finds it. */
 export function generatingRoundFor(dir: string): number | null {
   return indexFor(dir).rounds.find((r) => r.state === "generating")?.n ?? null;
+}
+
+/** The pane's one answer to "what is this round doing?" — see roundPhaseOf.
+ *  The record says `ready` for both "the plan is written, nothing has run" and
+ *  "the executor is working"; the live session is what tells them apart. */
+export function roundPhase(dir: string): { phase: RoundPhase; n: number } | null {
+  return roundPhaseOf(indexFor(dir).rounds, execRunning(dir), agentRoundFor(dir));
+}
+
+/** How the round is being run, when it is: the headless session, or the agent
+ *  pane (which has no session of its own). */
+export function roundRoute(dir: string): "headless" | "agent" | null {
+  if (execRunning(dir)) return "headless";
+  return agentRoundFor(dir) != null ? "agent" : null;
+}
+
+/** "bug fixes" / "feature additions" — what the plan's first line declared. */
+export function roundKindFor(dir: string, n: number): string {
+  return indexFor(dir).rounds.find((r) => r.n === n)?.kind ?? "fixes";
+}
+
+/** The notes a round froze, in path order, and how many are done. */
+export function roundNotesFor(dir: string, n: number): NoteEntry[] {
+  return indexFor(dir).notes.filter((x) => x.round === n).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** True while any round record could still change — what arms the pane's
+ *  session watch, and nothing else. No round, no listeners. */
+export function hasLiveRound(dir: string): boolean {
+  return indexFor(dir).rounds.some((r) => r.state === "generating" || r.state === "ready");
 }
 
 export function roundStateFor(dir: string, round: number | null | undefined): "generating" | "ready" | null {
