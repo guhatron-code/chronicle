@@ -10,6 +10,7 @@ mod setup;
 mod power;
 mod web;
 mod blocklists;
+mod menu;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -3010,6 +3011,10 @@ fn main() {
         })
         .setup(|app| {
             power::install(app.handle().clone()); // main thread: the run-loop source lands on the main loop
+            // the menu carries every ⌘ shortcut as a key equivalent, so a chord still
+            // reaches us while the Web pane's native page is first responder (menu.rs)
+            app.set_menu(menu::build(app.handle())?)?;
+            app.on_menu_event(menu::handle);
             Ok(())
         })
         .on_window_event(|window, event| {

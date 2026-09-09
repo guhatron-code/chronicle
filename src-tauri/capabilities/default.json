@@ -8,6 +8,7 @@
   "permissions": [
     "default",
     "core:default",
+    "core:webview:allow-set-webview-focus",
     "core:window:allow-set-title",
     "core:window:allow-close",
     "core:window:allow-minimize",

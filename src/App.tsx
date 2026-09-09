@@ -18,14 +18,17 @@ import { ChronicleToaster, toastSuccess, toastError } from "@/overlays/toasts";
 import {
   agentsAvailable,
   createProject,
+  focusMainWebview,
   getPicker,
   getState,
+  onMenuKey,
   openProject,
   pickFolder,
   removeRecent,
   windowControls,
   type PickerRecent,
 } from "@/lib/ipc";
+import { keydownInit, reclaimsFocus } from "@/lib/menu-keys";
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
 import { RoadmapPane } from "@/screens/roadmap/RoadmapPane";
 import { RepoPane, evictRepo, openHistoryView } from "@/screens/repo/RepoPane";
@@ -57,7 +60,7 @@ import { openInWeb, reloadProjectFiles } from "@/lib/web-store";
 import { isHtmlPath, isClaudeArtifactUrl } from "@/lib/web-url";
 import { evictKanban, kanbanFor, openTaskInKanban, queuedCountFor, refreshKanban, subscribeKanban } from "@/lib/kanban-store";
 import { announce } from "@/lib/journal";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { checkForUpdate, dismissUpdate, installUpdate, restartUpdate, subscribeUpdates, updateAvailable } from "@/lib/updates";
 import { isInitRunning, setInitRunning, subscribeRunFlags } from "@/lib/run-flags";
 import { every } from "@/lib/scheduler";
@@ -701,6 +704,29 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [openDialog, activate, closeProject, newTerminal, togglePaneUnit, revealContent]);
+
+  /* ---- the same map, arriving from the native menu (src-tauri/src/menu.rs) ----
+     The Web pane's page is a native WKWebView: while it is first responder our
+     keydown listeners never see a ⌘-chord. macOS routes the unhandled chord to the
+     menu instead, and the menu sends it back here. Replayed on document.body so the
+     listeners run in their real order — WebPane's capture listener on window first
+     (its stopPropagation still keeps ⌘T/⌘L/⌘W out of the map above), then this
+     effect's sibling on the bubble phase. */
+  useEffect(() => {
+    let un: UnlistenFn | undefined;
+    let dead = false;
+    void onMenuKey((k) => {
+      // The menu only fires when no page swallowed the chord. If this document does
+      // not have focus, the key came from the Web pane's native page: whatever the
+      // DOM still thinks is focused (often the terminal) is stale, so drop it before
+      // the handlers look at activeElement.
+      const fromPage = !document.hasFocus();
+      if (fromPage) (document.activeElement as HTMLElement | null)?.blur?.();
+      document.body.dispatchEvent(new KeyboardEvent("keydown", keydownInit(k)));
+      if (fromPage && reclaimsFocus(k)) void focusMainWebview();
+    }).then((u) => { if (dead) u(); else un = u; });
+    return () => { dead = true; un?.(); };
+  }, []);
 
   /* ---- dev-only handle for the cleanroom harness ---- */
   useEffect(() => {

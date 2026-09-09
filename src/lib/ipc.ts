@@ -15,7 +15,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import type { MenuKey } from "./menu-keys";
+
+export type { MenuKey };
 
 /* ---------- domain types (refine per-slice; see header note) ---------- */
 /** get_picker → one recents row (shape read from main.rs get_picker). */
@@ -497,6 +501,19 @@ export const agentEditUndo = (dir: string, path: string | null) =>
   invoke<number>("agent_edit_undo", { dir, path });
 export const agentRestoreCheckpoint = (dir: string, id: string) =>
   invoke("agent_restore_checkpoint", { dir, id });
+
+/* ---------- the native menu (src-tauri/src/menu.rs) ---------- */
+/*
+ * The app menu carries every ⌘ shortcut as a key equivalent so a chord still reaches
+ * us while the Web pane's native page is first responder. The menu item emits this;
+ * App.tsx replays it as a synthetic keydown. Register ONCE at app scope and always
+ * return the UnlistenFn from effect cleanup or HMR fires the chord twice.
+ */
+export const onMenuKey = (cb: (k: MenuKey) => void): Promise<UnlistenFn> =>
+  listen<MenuKey>("menu-key", (e) => cb(e.payload));
+
+/** Take first responder back from the Web pane's child webview. */
+export const focusMainWebview = () => getCurrentWebview().setFocus();
 
 /* ---------- window chrome + dialogs (frameless window) ---------- */
 export const pickFolder = () => openDialog({ directory: true });
