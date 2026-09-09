@@ -38,6 +38,16 @@ pub(crate) struct Project {
     manifest_error: Option<String>,
 }
 
+impl Project {
+    /// A project with no manifest and no extras — the shape the notes commands
+    /// need, and what the unit tests construct. Not called from production code
+    /// yet, only from `notes::tests`, hence the explicit allow.
+    #[allow(dead_code)]
+    pub(crate) fn bare(dir: &Path) -> Self {
+        Self { dir: dir.to_path_buf(), repo: dir.to_path_buf(), extras: vec![], manifest: None, manifest_error: None }
+    }
+}
+
 /// Background /chronicle-init runs, keyed by the CANONICALIZED project path (same-named
 /// folders in different places must never share a run or a log).
 fn hhmmss_now() -> String {
@@ -1246,24 +1256,6 @@ async fn kanban_save(roots: State<'_, OpenRoots>, dir: String, data: Value) -> R
     Ok(())
 }
 
-/// Save an image attachment; returns the repo-relative path for the task to reference.
-#[tauri::command]
-async fn kanban_attach(roots: State<'_, OpenRoots>, dir: String, task_id: String, name: String, b64: String) -> Result<String, String> {
-    let p = project_for(&roots, &dir)?;
-    let safe_id: String = task_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect();
-    let safe_name: String = name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') { c } else { '-' })
-        .collect();
-    if safe_id.is_empty() || safe_name.is_empty() { return Err("bad attachment name".into()); }
-    let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|e| e.to_string())?;
-    if bytes.len() > 10_000_000 { return Err("attachment is over 10 MB".into()); }
-    let adir = p.dir.join(".chronicle/attachments");
-    std::fs::create_dir_all(&adir).map_err(|e| e.to_string())?;
-    let rel = format!(".chronicle/attachments/{safe_id}-{safe_name}");
-    std::fs::write(p.dir.join(&rel), bytes).map_err(|e| e.to_string())?;
-    Ok(rel)
-}
-
 /// Save a composer attachment into `.chronicle/attachments/`, never clobbering:
 /// a name collision gets a `-2`, `-3`, … suffix before the extension. Returns
 /// the repo-relative path (approach A — the agent reads it from disk).
@@ -1340,29 +1332,6 @@ fn fixes_log_path(roots: State<OpenRoots>, dir: String) -> Result<String, String
     let _ = project_for(&roots, &dir)?;
     let (_, log) = fixes_run_key(&dir)?;
     Ok(log.to_string_lossy().to_string())
-}
-
-/// Delete one attachment file — only ever inside .chronicle/attachments, so a
-/// removed thumb / deleted task / cancelled composer leaves no orphans.
-#[tauri::command]
-async fn kanban_detach(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<(), String> {
-    let p = project_for(&roots, &dir)?;
-    if !path.starts_with(".chronicle/attachments/") || path.contains("..") {
-        return Err("only attachment files can be removed".into());
-    }
-    // a symlink here would canonicalize to its target and delete THAT — refuse it
-    let raw = p.dir.join(&path);
-    if let Ok(md) = std::fs::symlink_metadata(&raw) {
-        if md.file_type().is_symlink() {
-            return Err("only attachment files can be removed".into());
-        }
-    }
-    let full = jailed(&p, &path)?;
-    match std::fs::remove_file(&full) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.to_string()),
-    }
 }
 
 #[tauri::command]
@@ -3053,8 +3022,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
             init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
-            kanban_get, kanban_save, kanban_attach,
-            kanban_detach, agent_attach, agent_attach_path,
+            kanban_get, kanban_save, agent_attach, agent_attach_path,
+            notes::notes_index, notes::notes_read, notes::notes_write, notes::notes_move,
+            notes::notes_delete, notes::notes_search, notes::notes_attach, notes::notes_detach,
             fixes_log_path, fixes_generate, fixes_status, fixes_cancel,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
