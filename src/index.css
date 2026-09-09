@@ -507,7 +507,7 @@ a:focus-visible,
   margin-bottom: 0;
 }
 .note-doc li.note-task ul[data-type="taskList"],
-.note-doc li[data-type="taskItem"] ul[data-type="taskList"] { margin-top: 2px; margin-bottom: 0; }
+.note-doc li[data-type="taskItem"] ul[data-type="taskList"] { margin-top: 2px; margin-bottom: 0; margin-left: 24px; }
 .note-doc li.note-task[data-checked="true"] > div,
 .note-doc li[data-type="taskItem"][data-checked="true"] > div {
   color: var(--text-dim);
