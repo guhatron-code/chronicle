@@ -55,6 +55,10 @@ import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
  *  the next successful check or a project switch. */
 const lastCheckError = new Map<string, string>();
 
+/** A closed project forgets its last failed check — the sentence belongs to a
+ *  session with that project open, and reopening it starts clean. */
+export function dropCheckError(dir: string): void { lastCheckError.delete(dir); }
+
 export function RoadmapPane({
   dir,
   state,
@@ -126,8 +130,9 @@ export function RoadmapPane({
   }, [state?.statuses]);
   const [publishing, setPublishing] = useState(false);
   const [historyChecking, setHistoryChecking] = useState(false);
-  /* the last Check now that failed. history_facts never carries an error, so
-     without this the sentence would be gone on the very next poll. */
+  /* the last Check now that failed. Only git_fetch sets `error`, and the next
+     poll re-reads the facts without one, so without this the sentence would be
+     gone on the very next tick. */
   const [historyError, setHistoryErrorState] = useState<string | null>(() => lastCheckError.get(dir) ?? null);
   const setHistoryError = (e: string | null) => {
     if (e) lastCheckError.set(dir, e); else lastCheckError.delete(dir);
@@ -645,7 +650,7 @@ export function RoadmapPane({
             onHistoryFacts(f);
             // git ran: the failure, if any, is on the line — and it stays there
             // until the next check rather than dying on the next poll
-            setHistoryError(f.remote.error ?? null);
+            setHistoryError(f.error ?? null);
           })
           .catch((e) => {
             const sentence = humanGitError(e);

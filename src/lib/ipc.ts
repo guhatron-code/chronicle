@@ -202,20 +202,15 @@ export const gitPull = (dir: string) => invoke<RemoteOutcome>("git_pull", { dir 
 /* ---------- the history section (src-tauri/src/history.rs) ---------- */
 export type DirtyBadge = "new" | "edited" | "deleted" | "renamed";
 export type PublishKind = "no-remote" | "never-published" | "ok";
+/** The two facts only `git log` can answer, plus when the remote was last
+ *  really checked. Everything else the panel says — the Remote counts and the
+ *  Uncommitted files — rides on `StateData`, which every poll already carries,
+ *  so the section costs two git spawns instead of ten. */
 export interface HistoryFacts {
-  degraded: boolean;
-  is_git: boolean;
   last_save: { ts: number; subject: string } | null; // ts = unix SECONDS
-  dirty: { code: string; path: string; badge: DirtyBadge }[];
-  remote: {
-    kind: PublishKind;
-    ref_name: string; // "origin/react-shadcn" — "" when nothing resolved
-    ahead: number;
-    behind: number;
-    checked_ms: number | null; // null = never checked
-    error: string | null; // set only by a failed gitFetch
-  };
   last_publish: { ts: number; tag: string | null } | null;
+  checked_ms: number | null; // null = never checked
+  error?: string | null; // set only by a failed gitFetch
 }
 export const historyFacts = (dir: string) => invoke<HistoryFacts>("history_facts", { dir });
 /** The ONLY fetch in the app — "Check now" and nothing else. */
@@ -575,6 +570,12 @@ export const onWindowClose = (cb: () => Promise<boolean> | boolean): Promise<Unl
   getCurrentWindow().onCloseRequested(async (e) => {
     if (!(await cb())) e.preventDefault();
   });
+
+/** The one call that really ends the process. Both doors — ⌘Q (replayed from
+ *  the menu row that replaced the predefined Quit item) and the red button —
+ *  run the dirty-buffer guard first and then come here; the backend refuses
+ *  every other exit, so unsaved work cannot leave by a side door. */
+export const quitApp = () => invoke<void>("quit_app");
 
 export function windowControls() {
   const w = getCurrentWindow();

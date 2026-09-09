@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 let diskText = "one\n";
 let diskMtime = 1000;
 let writeError: string | null = null;
+/** Set to hold a write open — the only way to observe a buffer mid-save. */
+let holdWrite: Promise<void> | null = null;
 const writes: { path: string; text: string; expected?: number }[] = [];
 
 vi.mock("./ipc", () => ({
@@ -11,6 +13,7 @@ vi.mock("./ipc", () => ({
   })),
   readFileText: vi.fn(async () => diskText),
   writeFile: vi.fn(async (_d: string, path: string, text: string, expected?: number) => {
+    if (holdWrite) await holdWrite;
     if (writeError) throw writeError;
     writes.push({ path, text, expected });
     diskText = text;
@@ -30,6 +33,7 @@ describe("the repo buffer store", () => {
     diskText = "one\n";
     diskMtime = 1000;
     writeError = null;
+    holdWrite = null;
     writes.length = 0;
   });
 
@@ -192,6 +196,86 @@ describe("the repo buffer store", () => {
     expect(b.text).toBe("mine\n");
     expect(disposed).toEqual([ed.bufferKey(DIR, F)]);
     off();
+  });
+
+  /* The pane's own tabs are re-read from disk on every remount, and the Repo
+     pane unmounts whenever another pane is on screen. openBuffer hands back the
+     buffer it already has and drops the text it was given, so the fresh read
+     went nowhere — the store's reconciliation is the only thing that lands it. */
+  it("a buffer left behind a hidden pane takes the disk on the way back", async () => {
+    ed.openBuffer(DIR, F, "one\n", 1000);
+    diskText = "from the agent\n";
+    diskMtime = 2000;
+    expect(ed.openBuffer(DIR, F, diskText, diskMtime).text).toBe("one\n"); // the old way saw nothing
+    await ed.onFileChanged(DIR, F);
+    const b = ed.bufferFor(DIR, F)!;
+    expect(b.text).toBe("from the agent\n");
+    expect(b.savedText).toBe("from the agent\n");
+    expect(b.mtime).toBe(2000);
+    expect(b.state).toBe("clean");
+  });
+
+  it("and one with unsaved work in it raises the bar instead of being overwritten", async () => {
+    ed.openBuffer(DIR, F, "one\n", 1000);
+    ed.editBuffer(DIR, F, "mine\n");
+    diskText = "from the agent\n";
+    diskMtime = 2000;
+    await ed.onFileChanged(DIR, F);
+    const b = ed.bufferFor(DIR, F)!;
+    expect(b.state).toBe("conflict");
+    expect(b.text).toBe("mine\n");
+  });
+
+  /* The save re-looked the buffer up by the key it started under. A rename that
+     landed mid-write moved it to a new key, the lookup found nothing, and the
+     file sat on "saving" — no dot, no word, and ⌘S refused it — until the tab
+     was closed and reopened. */
+  it("a rename during a save leaves the buffer clean under its new name", async () => {
+    let release!: () => void;
+    holdWrite = new Promise<void>((r) => { release = r; });
+    ed.openBuffer(DIR, F, "one\n", 1000);
+    ed.editBuffer(DIR, F, "mine\n");
+    const saving = ed.saveBuffer(DIR, F);
+    expect(ed.bufferFor(DIR, F)!.state).toBe("saving");
+    ed.renameBuffer(DIR, F, "src/b.ts");
+    release();
+    await saving;
+    expect(ed.bufferFor(DIR, F)).toBeNull();
+    const b = ed.bufferFor(DIR, "src/b.ts")!;
+    expect(b.state).toBe("clean");
+    expect(b.savedText).toBe("mine\n");
+    expect(ed.dirtyPathsFor(DIR)).toEqual([]);
+  });
+
+  it("a buffer closed during a save takes nothing with it", async () => {
+    let release!: () => void;
+    holdWrite = new Promise<void>((r) => { release = r; });
+    ed.openBuffer(DIR, F, "one\n", 1000);
+    ed.editBuffer(DIR, F, "mine\n");
+    const saving = ed.saveBuffer(DIR, F);
+    ed.closeBuffer(DIR, F);
+    release();
+    await saving;
+    expect(ed.bufferFor(DIR, F)).toBeNull();
+    expect(ed.anyDirty()).toBe(false);
+  });
+
+  it("names the next project with unsaved work, the open one first, once each", () => {
+    ed.openBuffer(DIR, F, "one\n", 1000);
+    ed.editBuffer(DIR, F, "mine\n");
+    ed.openBuffer("/other", F, "one\n", 1000);
+    ed.editBuffer("/other", F, "theirs\n");
+    const asked = new Set<string>();
+    expect(ed.nextDirtyDir(["/other", DIR], asked)).toBe("/other");
+    asked.add("/other");
+    expect(ed.nextDirtyDir(["/other", DIR], asked)).toBe(DIR);
+    asked.add(DIR);
+    expect(ed.nextDirtyDir(["/other", DIR], asked)).toBeNull();
+    // a null active project (nothing open) is skipped, not asked about
+    expect(ed.nextDirtyDir([null, "/other"], new Set())).toBe("/other");
+    // and a clean project is never asked at all
+    ed.evictBuffers("/other");
+    expect(ed.nextDirtyDir(["/other"], new Set())).toBeNull();
   });
 
   it("closing disposes the buffer and tells the editor to drop its undo history", () => {

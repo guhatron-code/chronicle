@@ -82,25 +82,30 @@ export async function saveBuffer(dir: string, path: string): Promise<void> {
   b.state = "saving";
   b.error = null;
   notify();
+  /* The buffer is followed as an OBJECT, never looked up again by the key it
+   * started under: a rename during the write moves the very same live buffer to
+   * a new key, and re-reading the old key found nothing and left the file stuck
+   * on "saving" forever. `alive` is false only when the buffer really went
+   * away — closed, or the project evicted — and every exit notifies, because
+   * the header word and the tab's dot are what change here. */
+  const alive = () => bufferFor(b.dir, b.path) === b;
   try {
     const mtime = await writeFile(dir, path, text, expected);
-    const now = buffers.get(bufferKey(dir, path));
-    if (!now) return;
-    now.savedText = text;
-    now.mtime = mtime;
-    now.savedAt = Date.now();
-    now.state = now.text === text ? "clean" : "dirty"; // typed on while saving
-    now.incoming = null;
+    if (!alive()) { notify(); return; }
+    b.savedText = text;
+    b.mtime = mtime;
+    b.savedAt = Date.now();
+    b.state = b.text === text ? "clean" : "dirty"; // typed on while saving
+    b.incoming = null;
   } catch (e) {
-    const now = buffers.get(bufferKey(dir, path));
-    if (!now) return;
+    if (!alive()) { notify(); return; }
     const msg = String(e);
     if (msg.includes("changed on disk")) {
       // never a toast: the bar is the only place this is said
-      await raiseConflict(now);
+      await raiseConflict(b);
     } else {
-      now.state = "error";
-      now.error = msg.slice(0, 140);
+      b.state = "error";
+      b.error = msg.slice(0, 140);
     }
   }
   notify();
@@ -188,6 +193,14 @@ export function dirtyPathsFor(dir: string): string[] {
     if (b.dir === dir && (b.state === "dirty" || b.state === "conflict" || b.state === "error")) out.push(b.path);
   }
   return out.sort();
+}
+
+/** The quit guard's chain, without the quit: the next project that still has
+ *  unsaved work, the open one first, each asked about at most once. Null means
+ *  nothing is left to ask about — the app may go. */
+export function nextDirtyDir(dirs: (string | null | undefined)[], asked: ReadonlySet<string>): string | null {
+  for (const d of dirs) if (d && !asked.has(d) && dirtyPathsFor(d).length > 0) return d;
+  return null;
 }
 
 export function anyDirty(): boolean {

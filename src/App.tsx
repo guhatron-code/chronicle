@@ -27,6 +27,7 @@ import {
   onWindowClose,
   openProject,
   pickFolder,
+  quitApp,
   removeRecent,
   windowControls,
   type HistoryFacts,
@@ -34,9 +35,9 @@ import {
 } from "@/lib/ipc";
 import { keydownInit, reclaimsFocus } from "@/lib/menu-keys";
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
-import { RoadmapPane } from "@/screens/roadmap/RoadmapPane";
+import { RoadmapPane, dropCheckError } from "@/screens/roadmap/RoadmapPane";
 import { RepoPane, confirmDirty, evictRepo, newFileInRepo, openHistoryView, saveActiveFile } from "@/screens/repo/RepoPane";
-import { anyDirty, dirtyPathsFor } from "@/lib/repo-editor";
+import { anyDirty, nextDirtyDir } from "@/lib/repo-editor";
 import { openFileInRepo } from "@/screens/repo/RepoPane";
 import { SearchOverlay } from "@/overlays/SearchOverlay";
 import {
@@ -598,6 +599,7 @@ export default function App() {
       closeTermsFor(dir);
       evictRepo(dir);
       evictNotes(dir);
+      dropCheckError(dir); // the last failed Check now belonged to this project
       // only the FOREGROUND project's close drops the vault listener — closing a
       // background tab must leave the pane on screen still hearing notes-changed
       if (activeRef.current === dir) setNotesOnScreen(null);
@@ -723,6 +725,43 @@ export default function App() {
     Promise.allSettled(dirs.map((d) => pollOne(d))).finally(() => setChecking(false));
   }, [pollOne]);
 
+  /* ---- quitting with unsaved work asks once, whichever door was used ----
+     ⌘Q and the red button are the same event now: menu.rs replaced the
+     predefined Quit item with a row that replays the chord through `menu-key`,
+     and the backend refuses ExitRequested unless quit_app asked for it. So
+     neither route can end the process without coming through here first. Save
+     and Discard let it go; Cancel, Escape and a click outside all mean "don't
+     quit", which is why the promise resolves false from onCancel (onClose fires
+     on every path, including the two that already said yes). */
+  const quitGuard = useCallback(async (): Promise<boolean> => {
+    if (!anyDirty()) return true;
+    // A promise that never settles holds the app open forever, and that is the
+    // right answer to a save that FAILED: confirmDirty never calls proceed when
+    // the write was refused, so the text stays on screen and the toast says
+    // why. Asking to quit again asks again.
+    return await new Promise<boolean>((resolve) => {
+      // one prompt per project that still has unsaved work, the open one
+      // first; a project is asked about once, so Discard can't loop
+      const asked = new Set<string>();
+      const askNext = () => {
+        const dir = nextDirtyDir([activeRef.current, ...projectsRef.current.keys()], asked);
+        if (!dir) { resolve(true); return; }
+        asked.add(dir);
+        confirmDirty(
+          dir,
+          (spec) => setConfirm({ ...spec, onCancel: () => resolve(false) }),
+          askNext,
+        );
+      };
+      askNext();
+    });
+  }, []);
+
+  /** The only way out of the app. */
+  const quitNow = useCallback(() => {
+    void quitGuard().then((ok) => { if (ok) void quitApp().catch(() => {}); });
+  }, [quitGuard]);
+
   /* ---- the keyboard map (§5 of the handoff) ---- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -730,6 +769,10 @@ export default function App() {
       // ^K kill-line) — never app shortcuts. Meta chords stay global. (T-012)
       const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
       if (typing && !e.metaKey) return;
+      // ⌘Q — ours, not the system's: the menu row replays it here so unsaved
+      // work gets the same one prompt the red button raises. Meta only; ^Q is
+      // not a quit anywhere.
+      if (e.metaKey && !e.ctrlKey && e.key === "q") { e.preventDefault(); quitNow(); return; }
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key === "k") { e.preventDefault(); setPaletteOpen((o) => !o); }
       else if (mod && e.key === "t" && activeRef.current) { e.preventDefault(); newTerminal(); }
@@ -798,7 +841,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openDialog, activate, closeProject, newTerminal, togglePaneUnit, revealContent, pane]);
+  }, [openDialog, activate, closeProject, newTerminal, togglePaneUnit, revealContent, pane, quitNow]);
 
   /* ---- the same map, arriving from the native menu (src-tauri/src/menu.rs) ----
      The Web pane's page is a native WKWebView: while it is first responder our
@@ -823,40 +866,20 @@ export default function App() {
     return () => { dead = true; un?.(); };
   }, []);
 
-  /* ---- quitting with unsaved work asks once ----
-     The window is held open until the dialog is answered. Save and Discard let
-     it go; Cancel, Escape and a click outside all mean "don't quit", which is
-     why the promise resolves false from onCancel (onClose fires on every path,
-     including the two that already said yes). */
+  /* ---- the red button: the same guard, the same exit ----
+     The close event is never allowed. It runs the guard and then asks the
+     backend to quit, so closing the window and pressing ⌘Q are one code path
+     with one prompt — and a held-open window is simply one that never got as
+     far as quit_app. */
   useEffect(() => {
     let un: UnlistenFn | undefined;
     let dead = false;
     void onWindowClose(async () => {
-      if (!anyDirty()) return true;
-      // A promise that never settles holds the window open forever, and that is
-      // the right answer to a save that FAILED: confirmDirty never calls proceed
-      // when the write was refused, so the text stays on screen and the toast
-      // says why. Clicking close again asks again.
-      return await new Promise<boolean>((resolve) => {
-        // one prompt per project that still has unsaved work, the open one
-        // first; a project is asked about once, so Discard can't loop
-        const asked = new Set<string>();
-        const askNext = () => {
-          const dirs = [activeRef.current, ...projectsRef.current.keys()];
-          const dir = dirs.find((d): d is string => !!d && !asked.has(d) && dirtyPathsFor(d).length > 0);
-          if (!dir) { resolve(true); return; }
-          asked.add(dir);
-          confirmDirty(
-            dir,
-            (spec) => setConfirm({ ...spec, onCancel: () => resolve(false) }),
-            askNext,
-          );
-        };
-        askNext();
-      });
+      if (await quitGuard()) void quitApp().catch(() => {});
+      return false;
     }).then((u) => { if (dead) u(); else un = u; });
     return () => { dead = true; un?.(); };
-  }, []);
+  }, [quitGuard]);
 
   /* ---- dev-only handle for the cleanroom harness ---- */
   useEffect(() => {

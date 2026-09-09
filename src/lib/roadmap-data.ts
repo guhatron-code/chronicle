@@ -44,18 +44,24 @@ export function ago(nowMs: number, tsSeconds: number): string {
   return `${mo} month${mo === 1 ? "" : "s"} ago`;
 }
 
-/** get_state told us whether there is a repo; history_facts tells us what it
- *  says. Everything here is a fact with its own timestamp — nothing is
- *  computed by subtracting one count from another. */
+/** Two sources, four lines. `get_state` — which every poll already carries —
+ *  says whether there is a repo, what the remote stands at and what is
+ *  uncommitted; `history_facts` adds the two facts only `git log` can answer
+ *  and the moment the remote was last really checked. Everything here is a
+ *  fact with its own timestamp — nothing is computed by subtracting one count
+ *  from another. */
 export function historyPanelFrom(
   f: HistoryFacts | null,
-  nowMs: number,
+  s: StateData | null,
   ctx: {
+    /** Passed in so the mapping stays pure and the panel never claims more
+     *  precision than the next render can honour. */
+    nowMs: number;
     uncommittedOpen: boolean;
     checking: boolean;
-    /** The last Check now that failed, held by the pane. `history_facts` never
-     *  carries an error (it does not touch the network), so a fetch failure
-     *  would otherwise vanish on the very next poll. */
+    /** The last Check now that failed, held by the pane. The facts are re-read
+     *  on every poll and carry no error of their own, so a fetch failure would
+     *  otherwise vanish on the very next one. */
     checkError: string | null;
     onCheckNow: () => void;
     onToggleUncommitted: () => void;
@@ -63,29 +69,30 @@ export function historyPanelFrom(
     onStartHistory: () => void;
   },
 ): HistoryPanelProps {
-  if (f?.degraded) return { kind: "degraded" };
-  if (f && !f.is_git) return { kind: "no-history", onStartHistory: ctx.onStartHistory };
-  const remote: RemoteLine = !f || f.remote.kind === "no-remote"
+  if (s?.git_degraded) return { kind: "degraded" };
+  if (s && !s.is_git) return { kind: "no-history", onStartHistory: ctx.onStartHistory };
+  const published = s?.published ?? "no-remote";
+  const remote: RemoteLine = published === "no-remote"
     ? { kind: "no-remote" }
-    : f.remote.kind === "never-published"
+    : published === "never-published"
       ? { kind: "never-published" }
       : {
           kind: "counts",
-          ahead: f.remote.ahead,
-          behind: f.remote.behind,
-          refName: f.remote.ref_name,
-          checked: f.remote.checked_ms === null ? "never" : ago(nowMs, Math.floor(f.remote.checked_ms / 1000)),
-          error: ctx.checkError ?? f.remote.error ?? undefined,
+          ahead: s?.ahead ?? 0,
+          behind: s?.behind ?? 0,
+          refName: s?.remote_ref ?? "",
+          checked: f?.checked_ms == null ? "never" : ago(ctx.nowMs, Math.floor(f.checked_ms / 1000)),
+          error: ctx.checkError ?? f?.error ?? undefined,
         };
   return {
     kind: "panel",
-    lastSave: f?.last_save ? { ago: ago(nowMs, f.last_save.ts), subject: f.last_save.subject } : null,
+    lastSave: f?.last_save ? { ago: ago(ctx.nowMs, f.last_save.ts), subject: f.last_save.subject } : null,
     uncommitted: {
-      files: (f?.dirty ?? []).map((d): HistoryLineFile => ({ path: d.path, badge: d.badge })),
+      files: (s?.dirty ?? []).map((d): HistoryLineFile => ({ path: d.path, badge: d.badge })),
       open: ctx.uncommittedOpen,
     },
     remote,
-    lastPublish: f?.last_publish ? { ago: ago(nowMs, f.last_publish.ts), tag: f.last_publish.tag } : null,
+    lastPublish: f?.last_publish ? { ago: ago(ctx.nowMs, f.last_publish.ts), tag: f.last_publish.tag } : null,
     checking: ctx.checking,
     onCheckNow: ctx.onCheckNow,
     onToggleUncommitted: ctx.onToggleUncommitted,
@@ -481,16 +488,22 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     }
   }
 
-  /* -- history panel: four facts, no pipeline, no milestones, no save count -- */
-  props.history = historyPanelFrom(ctx.historyFacts, Date.now(), {
-    uncommittedOpen: ctx.uncommittedOpen,
-    checking: ctx.historyChecking,
-    checkError: ctx.historyError,
-    onCheckNow: H.onCheckNow,
-    onToggleUncommitted: H.onToggleUncommitted,
-    onViewDetails: H.onHistoryDetails,
-    onStartHistory: H.onStartHistory,
-  });
+  /* -- history panel: four facts, no pipeline, no milestones, no save count.
+        Undefined until the facts land, so the section is absent rather than
+        claiming "nothing saved yet · not on GitHub · never published" through
+        the first read and through every project switch. -- */
+  props.history = ctx.historyFacts
+    ? historyPanelFrom(ctx.historyFacts, s, {
+        nowMs: Date.now(),
+        uncommittedOpen: ctx.uncommittedOpen,
+        checking: ctx.historyChecking,
+        checkError: ctx.historyError,
+        onCheckNow: H.onCheckNow,
+        onToggleUncommitted: H.onToggleUncommitted,
+        onViewDetails: H.onHistoryDetails,
+        onStartHistory: H.onStartHistory,
+      })
+    : undefined;
 
   /* -- what needs you -- */
   if (s.manifest_present || s.is_git) {

@@ -181,6 +181,10 @@ export function openFileInRepo(dir: string, path: string) {
   if (!s.tabs.find((t) => t.path === path)) s.tabs.push({ path, mode: "contents", body: null });
   s.activeTab = path;
   s.selectedId = path;
+  // the same first question a tree open asks: this project's indentation, read
+  // once. Without it a file opened from the roadmap or search drew at 2 spaces
+  // in a 4-space project until some other tab happened to load the config.
+  void loadEditorConfig(dir);
 }
 
 /** F36 — start a review pass over the agent's unresolved edits: the viewer
@@ -353,11 +357,15 @@ export function RepoPane({
     if (!rs.loads.has("")) loadDir("");
     setHistoryLoading(true);
     refreshGit();
-    // tabs opened from outside the pane (openFileInRepo / openAgentReview)
-    // arrive body-less — load them in their own mode
+    // Tabs opened from outside the pane (openFileInRepo / openAgentReview)
+    // arrive body-less — load them in their own mode. A TEXT tab's body is
+    // permanently null (it is drawn from the buffer), so every remount used to
+    // re-read every open file; now a tab that already has a buffer only asks
+    // whether the disk moved while the pane was away.
     for (const t of rs.tabs) {
       if (t.body !== null) continue;
       if (t.mode === "diff") loadDiff(t.path);
+      else if (bufferFor(dir, t.path)) reconcileTab(t.path);
       else loadContents(t.path);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -484,10 +492,16 @@ export function RepoPane({
             rerender();
             return;
           }
-          // the buffer is created on OPEN here rather than on the first
+          // The buffer is created on OPEN here rather than on the first
           // keystroke: the editor needs a doc to render, and an untouched
-          // buffer is "clean", costs one Map entry, and never writes anything
-          openBuffer(d, path, r.text, r.mtime_ms);
+          // buffer is "clean", costs one Map entry, and never writes anything.
+          // When one already exists this is a RE-read — openBuffer would hand
+          // back the old buffer and throw the fresh text away, so the store's
+          // reconciliation decides instead: clean reloads, dirty raises the bar.
+          if (bufferFor(d, path)) {
+            await onFileChanged(d, path);
+            if (dirRef.current !== d) return;
+          } else openBuffer(d, path, r.text, r.mtime_ms);
           const lines = r.text.split("\n").length;
           t.body = null; // the body is derived from the buffer at render time
           t.editable = !path.split("/").some((s) => s === ".git");
@@ -507,6 +521,25 @@ export function RepoPane({
         rerender();
       });
   }, [dir, rerender]);
+
+  /* Coming back to a pane that was away: the tab kept its buffer, but the disk
+     may have moved under it. One question — has the mtime? — and only a real
+     move pays for the store's reconciliation (which re-reads: clean reloads,
+     dirty raises the bar). A file that stopped being readable text while we
+     were gone goes back through the full load, which draws the right card. */
+  const reconcileTab = useCallback((path: string) => {
+    const d = dir;
+    if (!bufferFor(d, path)) { loadContents(path); return; }
+    readFile(d, path)
+      .then((r) => {
+        if (dirRef.current !== d) return;
+        if (r.binary || r.too_large) { loadContents(path); return; }
+        const cur = bufferFor(d, path);
+        if (!cur || cur.mtime === r.mtime_ms) return; // still in step with the disk
+        void onFileChanged(d, path);
+      })
+      .catch(() => { loadContents(path); }); // gone since — the read-error card says so
+  }, [dir, loadContents]);
 
   const loadDiff = useCallback((path: string) => {
     const d = dir;
@@ -636,9 +669,20 @@ export function RepoPane({
 
   const deletePath = useCallback((id: string) => {
     const name = splitName(id).name;
+    /* A folder takes everything under it — its tabs, their buffers and their
+       unsaved edits. The prompt says so before the Trash does it: "you can put
+       it back from Finder" is true of the file, not of work that was never
+       written to it. */
+    const inside = (p: string) => p === id || p.startsWith(`${id}/`);
+    const unsaved = dirtyPathsFor(dir).filter(inside);
+    const body = unsaved.length === 0
+      ? "It moves to the Trash, so you can put it back from Finder."
+      : unsaved.length === 1 && unsaved[0] === id
+        ? "It has edits you haven't saved — they go with it. The file moves to the Trash, so you can put that back from Finder."
+        : `${unsaved.length} file${unsaved.length === 1 ? "" : "s"} inside ${unsaved.length === 1 ? "has" : "have"} edits you haven't saved — they go too. It moves to the Trash, so you can put that back from Finder.`;
     onConfirm({
       title: `Delete ${name}?`,
-      body: "It moves to the Trash, so you can put it back from Finder.",
+      body,
       cancelLabel: "Keep it",
       confirmLabel: "Move to Trash",
       danger: true,
@@ -646,11 +690,16 @@ export function RepoPane({
         trashPath(dir, id)
           .then(() => {
             const s = stateFor(dir);
-            const i = s.tabs.findIndex((t) => t.path === id);
-            if (i >= 0) s.tabs.splice(i, 1);
+            const i = s.tabs.findIndex((t) => inside(t.path));
             closeBuffer(dir, id);
-            if (s.activeTab === id) s.activeTab = s.tabs[Math.max(0, i - 1)]?.path ?? null;
-            s.selectedId = s.activeTab;
+            for (const t of s.tabs) if (inside(t.path)) closeBuffer(dir, t.path);
+            if (i >= 0) {
+              s.tabs = s.tabs.filter((t) => !inside(t.path));
+              if (s.activeTab !== null && inside(s.activeTab)) {
+                s.activeTab = s.tabs[Math.max(0, i - 1)]?.path ?? null;
+              }
+              s.selectedId = s.activeTab;
+            }
             refreshTree();
             rerender();
             toastSuccess("Moved to the Trash", name);
