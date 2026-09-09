@@ -133,3 +133,23 @@ Replaces the Kanban pane in the rail: id `kanban` becomes `notes` everywhere use
 - Rust unit tests: front matter round-trip (unknown keys preserved), tag extraction rules, link resolution (same folder, ancestor, vault, ambiguity), link rewriting on move (all three link forms), file name sanitising, migration mapping table, jail refusals, search ranking.
 - Vitest: markdown ↔ editor round-trip for every block type the pane supports plus wikilinks and tags; the ellipsis/marquee row component; the save debounce through the scheduler's fake clock; the status pill state machine.
 - Live test on a signed local build: migrate this repo's real kanban, create/link/rename/move/delete notes, run a round end-to-end and watch the agent flip `status: done`, relaunch and confirm the tree state and open note come back.
+
+## Live test
+
+Run 2026-09-09/10 on signed local bundles (`npm run tauri:build && npm run sign-local`) against a throwaway copy of this repo (the migration renames `kanban.json`, which the user's installed Chronicle reads live), user at the keyboard.
+
+| Check | Result |
+|---|---|
+| Migration on the first heartbeat: 140 tasks → `Tasks/*.md`, 7 rounds → `rounds.json`, `kanban.json.migrated` | pass |
+| New note, heading + paragraph, "saving" → "saved" | pass |
+| `[[` suggester, existing link, "Create" for a missing one | pass |
+| `#tag` chip and sidebar tag count | pass after fix (the suggester listed nothing for a new tag; chip had no visible fill) |
+| Rename via breadcrumb, links still resolve; move; delete → trash, link goes dashed | pass |
+| Round: queued notes → Start a round → plan written | pass; execution needed explicit run buttons (added) and the panel mislabelled a ready round as executing (fixed) |
+| Live round log, both phases | added during the test |
+| Relaunch restores the open note and tree state | pass |
+| Shortcuts from a focused editor (⌘N ⌘P ⌘⇧F ⌘[ ⌘]) | pass |
+
+Found and fixed during the test: editor focus outline; ⋯ menus oversized with a focus ring (shared dropdown fixed); text chevrons; chrome text selectable app-wide (now `user-select: none` with content opting in); the notes tree and the browser tabs did not share the explorer's components (extracted `Tree.tsx` and `TabStrip.tsx`); a phantom scrollbar under the repo tabs and native-width scrollbars everywhere (an inherited `scrollbar-color` on `html` disabled the thin-scrollbar rules); project tabs capped at four; a round's phase flipping when an overlay opened; the agent-pane route never ending; a long path wrapping a palette row.
+
+Also landed on this branch because the test surfaced them: ACP adapter 0.59.0 → 0.75.1 (current models, effort to max, custom agents as the session agent, Auto mode alongside Unattended).
