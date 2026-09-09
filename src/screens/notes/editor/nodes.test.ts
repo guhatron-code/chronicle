@@ -90,3 +90,17 @@ describe("markdown round trip", () => {
     expect(md).toContain("- [ ] open");
   });
 });
+
+import { lastGraphemeLength, QuoteDelete, NOTE_EXTENSIONS } from "./nodes";
+
+describe("quote delete", () => {
+  it("measures the last grapheme, not the last code unit", () => {
+    expect(lastGraphemeLength("abc")).toBe(1);
+    expect(lastGraphemeLength("ab😀")).toBe(2);
+    expect(lastGraphemeLength("")).toBe(0);
+  });
+  it("is part of the editor's extension set and runs before the core keymap", () => {
+    expect(NOTE_EXTENSIONS).toContain(QuoteDelete);
+    expect(QuoteDelete.config.priority).toBe(1001);
+  });
+});

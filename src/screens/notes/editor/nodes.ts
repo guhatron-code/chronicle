@@ -8,14 +8,7 @@
  * same code path the live editor uses.
  */
 import { Markdown, MarkdownManager } from "@tiptap/markdown";
-import {
-  Node,
-  mergeAttributes,
-  resolveExtensions,
-  type AnyExtension,
-  type JSONContent,
-  type MarkdownToken,
-} from "@tiptap/core";
+import { Node, mergeAttributes, resolveExtensions, type AnyExtension, type JSONContent, type MarkdownToken, Extension } from "@tiptap/core";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
 import Image from "@tiptap/extension-image";
 import { TaskItem, TaskList } from "@tiptap/extension-list";
@@ -116,6 +109,65 @@ export const Tag = Node.create({
 
 const lowlight = createLowlight(all);
 
+/** The length, in UTF-16 code units, of the last grapheme of `text` — so a
+ *  delete never splits an emoji or a combining mark. */
+export function lastGraphemeLength(text: string): number {
+  if (!text) return 0;
+  const Seg = (globalThis as { Intl?: { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(s: string): Iterable<{ segment: string }> } } }).Intl?.Segmenter;
+  if (Seg) {
+    let last = "";
+    for (const g of new Seg(undefined, { granularity: "grapheme" }).segment(text)) last = g.segment;
+    return last.length;
+  }
+  const cps = Array.from(text);
+  return cps[cps.length - 1]?.length ?? 1;
+}
+
+/** WKWebView refuses to perform a native character delete inside a
+ *  <blockquote> in a contenteditable (typing works, Backspace/Delete do
+ *  nothing), while every ProseMirror-handled case — lifting the quote at its
+ *  start, undoing the `> ` input rule — works. ProseMirror only takes over at
+ *  block boundaries and before non-text nodes, so the plain "one character
+ *  before the caret" case reaches the browser and dies there. This keymap
+ *  does that one case itself whenever the caret sits inside a blockquote and
+ *  otherwise stays out of the way (returns false → the normal chain runs). */
+export const QuoteDelete = Extension.create({
+  name: "quoteDelete",
+  priority: 1001, // before the core keymap
+  addKeyboardShortcuts() {
+    const inQuote = (state: { selection: { $from: { depth: number; node(d: number): { type: { name: string } } } } }) => {
+      const { $from } = state.selection;
+      for (let d = $from.depth; d > 0; d--) if ($from.node(d).type.name === "blockquote") return true;
+      return false;
+    };
+    return {
+      Backspace: ({ editor }) => {
+        const { state } = editor;
+        const { empty, $from } = state.selection;
+        if (!empty || !$from.parent.isTextblock || $from.parentOffset === 0 || !inQuote(state)) return false;
+        const before = $from.nodeBefore;
+        if (!before || !before.isText) return false;
+        const n = lastGraphemeLength(before.text ?? "");
+        if (n === 0) return false;
+        return editor.commands.command(({ tr }) => { tr.delete($from.pos - n, $from.pos); return true; });
+      },
+      Delete: ({ editor }) => {
+        const { state } = editor;
+        const { empty, $from } = state.selection;
+        if (!empty || !$from.parent.isTextblock || $from.parentOffset >= $from.parent.content.size || !inQuote(state)) return false;
+        const after = $from.nodeAfter;
+        if (!after || !after.isText) return false;
+        const text = after.text ?? "";
+        const Seg = (globalThis as { Intl?: { Segmenter?: new (l?: string, o?: { granularity: string }) => { segment(s: string): Iterable<{ segment: string }> } } }).Intl?.Segmenter;
+        let n = 1;
+        if (Seg) { for (const g of new Seg(undefined, { granularity: "grapheme" }).segment(text)) { n = g.segment.length; break; } }
+        else n = Array.from(text)[0]?.length ?? 1;
+        return editor.commands.command(({ tr }) => { tr.delete($from.pos, $from.pos + n); return true; });
+      },
+    };
+  },
+});
+
 /** The exact extension set the pane's editor runs — and the tests measure. */
 export const NOTE_EXTENSIONS: AnyExtension[] = [
   StarterKit.configure({ codeBlock: false }),
@@ -133,6 +185,7 @@ export const NOTE_EXTENSIONS: AnyExtension[] = [
   TaskItem.configure({ nested: true, HTMLAttributes: { class: "note-task" } }),
   WikiLink,
   Tag,
+  QuoteDelete,
   Markdown,
 ];
 
