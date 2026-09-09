@@ -11,6 +11,7 @@ mod power;
 mod web;
 mod blocklists;
 mod history;
+mod files;
 mod menu;
 mod notes;
 
@@ -2278,7 +2279,7 @@ async fn stat_file(roots: State<'_, OpenRoots>, dir: String, path: String) -> Re
 
 /// "text" | "image" | "binary" — image by extension (the viewer renders these as
 /// data: URIs), binary by a NUL byte in the first 8 KB, text otherwise.
-fn sniff_kind(full: &Path) -> &'static str {
+pub(crate) fn sniff_kind(full: &Path) -> &'static str {
     let ext = full.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
     if matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" | "ico" | "heic" | "avif") {
         return "image";
@@ -2475,19 +2476,6 @@ async fn file_index(roots: State<'_, OpenRoots>, dir: String) -> Result<Vec<Stri
     out.sort();
     out.truncate(CAP);
     Ok(out)
-}
-
-#[tauri::command]
-async fn read_file(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<String, String> {
-    let p = project_for(&roots, &dir)?;
-    let full = jailed(&p, &path)?;
-    // size gate from METADATA — never read a huge file just to refuse it
-    let len = std::fs::metadata(&full).map_err(|e| e.to_string())?.len();
-    if len > 1_500_000 {
-        return Ok(format!("[file is {len} bytes — too large to preview; click-to-copy still works]"));
-    }
-    let bytes = std::fs::read(&full).map_err(|e| e.to_string())?;
-    match String::from_utf8(bytes) { Ok(s) => Ok(s), Err(_) => Ok("[binary file — no preview]".into()) }
 }
 
 #[tauri::command]
@@ -3056,7 +3044,9 @@ fn main() {
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
             history::history_facts, history::git_fetch,
-            list_dir, file_index, read_file, copy_file, copy_text,
+            list_dir, file_index, copy_file, copy_text,
+            files::read_file, files::write_file, files::create_path,
+            files::rename_path, files::trash_path, files::reveal_path,
             pty_spawn, init_log_path,
             pty_write, pty_resize, pty_kill, pty_info,
             round_execute, round_exec_status, round_exec_cancel, round_retro, exec_log_path,

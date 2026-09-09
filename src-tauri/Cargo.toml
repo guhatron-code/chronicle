@@ -34,6 +34,7 @@ objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKWebViewConfigurat
 block2 = "0.6"
 flate2 = "1" # the bundled block-list chunks ship gzipped
 url = "2"
+trash = "5.2.8" # Finder's Trash, restorable — the app never unlinks a user's file
 percent-encoding = "2"
 
 # muda is what tauri::menu parses accelerator strings with; it is not re-exported, so
