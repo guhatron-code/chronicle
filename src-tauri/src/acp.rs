@@ -28,7 +28,7 @@ use std::sync::{mpsc, Arc, Mutex};
 /// Exact pin first; loosen to a bounded range only if exact-pin installs prove
 /// flaky under npm min-release-age.
 pub const ADAPTER_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp";
-pub const ADAPTER_VERSION: &str = "0.59.0";
+pub const ADAPTER_VERSION: &str = "0.75.1";
 
 const INIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180); // first npx run downloads the bridge
 const NEW_SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);

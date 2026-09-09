@@ -567,6 +567,7 @@ export function Composer({
         )}
         {!disabled && <ConfigSelect dir={dir} optionId="model" title="The model the agent uses" />}
         {!disabled && <ConfigSelect dir={dir} optionId="effort" title="How hard the model thinks" />}
+        {!disabled && <ConfigSelect dir={dir} optionId="agent" title="Run the session as one of your custom agents" />}
         <input
           ref={fileInput}
           type="file"
