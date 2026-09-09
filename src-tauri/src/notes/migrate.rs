@@ -163,6 +163,19 @@ fn migrating_key(dir: &Path) -> String {
         .unwrap_or_else(|_| dir.to_string_lossy().into_owned())
 }
 
+/// Releases its key from `MIGRATING` in `Drop` — including on an unwind — so a
+/// panic anywhere inside `run_locked` can never leak the key and permanently
+/// disable migration for that project until the process restarts. Sequential
+/// "call run_locked, then remove the key" code only releases on the ok path;
+/// this releases on every exit path (`Ok`, `Err`, or a panic) because `Drop`
+/// runs during unwinding too.
+struct MigratingGuard(String);
+impl Drop for MigratingGuard {
+    fn drop(&mut self) {
+        migrating().lock().unwrap_or_else(|e| e.into_inner()).remove(&self.0);
+    }
+}
+
 /// `Ok(None)` means a concurrent call is already migrating this project —
 /// nothing was done, nothing to report, and no error: the caller (a heartbeat)
 /// just tries again next time. Everything else this module does assumes only
@@ -174,9 +187,8 @@ pub fn run(dir: &Path) -> Result<Option<usize>, String> {
         let mut set = migrating().lock().unwrap_or_else(|e| e.into_inner());
         if !set.insert(key.clone()) { return Ok(None); }
     }
-    let result = run_locked(dir);
-    migrating().lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
-    result.map(Some)
+    let _guard = MigratingGuard(key);
+    run_locked(dir).map(Some)
 }
 
 fn run_locked(dir: &Path) -> Result<usize, String> {
@@ -479,5 +491,33 @@ mod tests {
         assert_eq!(migrated, vec![1], "exactly one call performs the migration: {results:?}");
         assert!(d.join(".chronicle/notes/Tasks/T-001 One.md").exists());
         assert!(!needs_migration(&d), "a single clean vault, no duplicate or half-written notes");
+    }
+
+    #[test]
+    fn a_panic_after_the_guard_is_created_still_releases_the_key_and_a_later_run_proceeds() {
+        let d = tmp("panic-guard");
+        std::fs::write(d.join(".chronicle/kanban.json"), json!({
+            "version": 1, "next_id": 2,
+            "tasks": [ { "id": "T-001", "title": "One", "column": "queued" } ], "rounds": []
+        }).to_string()).unwrap();
+
+        let key = migrating_key(&d);
+        // mirrors run()'s own sequence — insert the key, then create the guard —
+        // but panics right after instead of calling run_locked
+        let outcome = std::panic::catch_unwind(|| {
+            {
+                let mut set = migrating().lock().unwrap_or_else(|e| e.into_inner());
+                assert!(set.insert(key.clone()));
+            }
+            let _guard = MigratingGuard(key.clone());
+            panic!("simulated failure mid-migration");
+        });
+        assert!(outcome.is_err(), "the panic must propagate out of catch_unwind");
+        assert!(!migrating().lock().unwrap_or_else(|e| e.into_inner()).contains(&key),
+                 "the guard's Drop releases the key even when the body panics, not just on a normal return");
+
+        // a leaked key would make every future run() for this project return
+        // Ok(None) forever — confirm a real run isn't blocked by the panic above
+        assert_eq!(run(&d).unwrap(), Some(1));
     }
 }
