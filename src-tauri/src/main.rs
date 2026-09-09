@@ -899,6 +899,7 @@ async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: St
         }
         // the vault's generation lets the pane skip re-reading an unchanged index
         // on every heartbeat — the same discipline kanban_mtime gave the board
+        notes::rounds::settle_done(&p.dir);
         obj.insert("notes_generation".into(), json!(notes::index::generation(&notes, &p.dir)));
     }
     Ok(s)
@@ -1330,7 +1331,7 @@ async fn agent_attach_path(roots: State<'_, OpenRoots>, dir: String, path: Strin
     attach_from_path(&p.dir, &PathBuf::from(&path))
 }
 
-const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written tasks (bugs, issues, ideas — with optional screenshots and design links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every task below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its task id. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the tasks' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly. The prompt MUST also instruct the executor: after each item is completed AND verified, edit .chronicle/kanban.json and set that task's \"column\" to \"completed\" (match by task id; touch \"updated_at\" with epoch ms; change nothing else in the file) — this is how the board and the roadmap track the round live.\n\nDo not change any other file except the two above (and the kanban column updates the executor makes later). The tasks are in `{TASKS}` — read that file (a JSON array) before writing anything.\n";
+const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written notes (bugs, issues, ideas — with optional screenshots and links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every note below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its note path. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the notes' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly. The prompt MUST also instruct the executor: after each item is completed AND verified, set `status: done` in that note's front matter (the file at `path`, under .chronicle/notes/); change nothing else in the file — this is how the pane and the roadmap track the round live.\n\nDo not change any other file except the two above (and the note status updates the executor makes later). The notes are in `{TASKS}` — read that file (a JSON array of {path, title, body}) before writing anything.\n";
 
 fn fixes_run_key(dir: &str) -> Result<(String, PathBuf), String> {
     let (key, log) = canon_key(dir)?;
@@ -1353,8 +1354,6 @@ fn fixes_log_path(roots: State<OpenRoots>, dir: String) -> Result<String, String
 #[tauri::command]
 async fn fixes_generate(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>) -> Result<u64, String> {
     let p = project_for(&roots, &dir)?;
-    let mut store = load_kanban_checked(&p.dir)
-        .ok_or("the board file couldn't be read — fix .chronicle/kanban.json first")?;
     // the guard comes BEFORE any store mutation: a second click during a live
     // round must not write a phantom round (audit wave-4 B1). The lock is held
     // through the store write + spawn so nothing interleaves.
@@ -1365,45 +1364,37 @@ async fn fixes_generate(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init
             return Err("a fix round is already generating".into());
         }
     }
-    // the round takes every QUEUED task not already frozen into a round
-    let mut picked: Vec<Value> = Vec::new();
-    let round_n = store.get("rounds").and_then(|r| r.as_array()).map(|r| r.len() as u64).unwrap_or(0) + 1;
-    if let Some(tasks) = store.get_mut("tasks").and_then(|t| t.as_array_mut()) {
-        for t in tasks.iter_mut() {
-            let queued = t.get("column").and_then(|c| c.as_str()) == Some("queued");
-            let unrounded = t.get("round").is_none() || t.get("round") == Some(&Value::Null);
-            let archived = t.get("archived").and_then(|a| a.as_bool()).unwrap_or(false);
-            if queued && unrounded && !archived {
-                if let Some(obj) = t.as_object_mut() {
-                    obj.insert("round".into(), json!(round_n));
-                    // frozen tasks move to the round's lane so the board shows it
-                    obj.insert("column".into(), json!("in_progress"));
-                }
-                picked.push(t.clone());
-            }
-        }
+    let picked = notes::rounds::queued_notes(&p.dir);
+    if picked.is_empty() { return Err("no queued notes to execute".into()); }
+    let mut rounds = notes::rounds::load(&p.dir);
+    let round_n = rounds.iter().map(|r| r.n).max().unwrap_or(0) + 1;
+    // the round takes them: status in_progress, round N, written into the files
+    for rel in &picked {
+        notes::rounds::set_status(&p.dir, rel, Some("in_progress"), Some(round_n))?;
     }
-    if picked.is_empty() { return Err("no queued tasks to execute".into()); }
-    let task_ids: Vec<Value> = picked.iter().filter_map(|t| t.get("id").cloned()).collect();
-    if let Some(rounds) = store.get_mut("rounds").and_then(|r| r.as_array_mut()) {
-        rounds.push(json!({
-            "n": round_n, "state": "generating", "kind": Value::Null,
-            "created_at": epoch_ms(),
-            "task_ids": task_ids,
-            "plan_path": format!("fixes/phase_{round_n}_fixes_plan.md"),
-            "prompt_path": format!("fixes/phase_{round_n}_fixes_prompt.md"),
-        }));
-    }
-    std::fs::create_dir_all(p.dir.join(".chronicle")).map_err(|e| e.to_string())?;
-    write_kanban(&p.dir, &store).map_err(|e| e.to_string())?;
+    rounds.push(notes::rounds::Round {
+        n: round_n, state: "generating".into(), kind: None,
+        task_ids: vec![], note_paths: picked.clone(), created_at: epoch_ms(),
+        plan_path: format!("fixes/phase_{round_n}_fixes_plan.md"),
+        prompt_path: format!("fixes/phase_{round_n}_fixes_prompt.md"),
+    });
+    notes::rounds::save(&p.dir, &rounds)?;
 
     // spawn the generation session (same machinery + lifecycle as /chronicle-init).
-    // The tasks go via a file — a big round would blow ARG_MAX as an argv string (H7).
-    let tasks_rel = format!(".chronicle/round_{round_n}_tasks.json");
-    std::fs::write(
-        p.dir.join(&tasks_rel),
-        serde_json::to_string_pretty(&picked).unwrap_or_default(),
-    ).map_err(|e| e.to_string())?;
+    // the notes go via a file — a big round would blow ARG_MAX as an argv string (H7)
+    let vault = notes::index::vault_dir(&p.dir);
+    let payload: Vec<Value> = picked.iter().map(|rel| {
+        let text = std::fs::read_to_string(vault.join(rel)).unwrap_or_default();
+        let (_, body) = notes::parse::split_front_matter(&text);
+        json!({
+            "path": rel,
+            "title": rel.rsplit('/').next().unwrap_or(rel).trim_end_matches(".md"),
+            "body": body,
+        })
+    }).collect();
+    let tasks_rel = format!(".chronicle/round_{round_n}_notes.json");
+    std::fs::write(p.dir.join(&tasks_rel), serde_json::to_string_pretty(&payload).unwrap_or_default())
+        .map_err(|e| e.to_string())?;
     let prompt = FIXES_PROMPT_HEAD
         .replace("{N}", &round_n.to_string())
         .replace("{TASKS}", &tasks_rel);
@@ -1468,29 +1459,15 @@ async fn fixes_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, d
     let (key, _) = fixes_run_key(&dir)?;
     let entry = init.runs.lock().map_err(|e| e.to_string())?.remove(&key);
     if let Some((mut child, _, _)) = entry { term_then_kill(&mut child); }
-    // a cancelled generating round unfreezes its tasks
-    let Some(mut store) = load_kanban_checked(&p.dir) else { return Ok(()) };
-    let cancelled: Option<u64> = store.get_mut("rounds").and_then(|r| r.as_array_mut()).and_then(|rounds| {
-        let last = rounds.last_mut()?;
-        if last.get("state").and_then(|s| s.as_str()) == Some("generating") {
-            let n = last.get("n").and_then(|v| v.as_u64());
+    // a cancelled generating round unfreezes its notes
+    let mut rounds = notes::rounds::load(&p.dir);
+    if let Some(last) = rounds.last() {
+        if last.state == "generating" {
+            let paths = last.note_paths.clone();
             rounds.pop();
-            n
-        } else { None }
-    });
-    if let Some(n) = cancelled {
-        if let Some(tasks) = store.get_mut("tasks").and_then(|t| t.as_array_mut()) {
-            for t in tasks.iter_mut() {
-                if t.get("round").and_then(|v| v.as_u64()) == Some(n) {
-                    if let Some(obj) = t.as_object_mut() {
-                        obj.insert("round".into(), Value::Null);
-                        // back to the lane they came from — never stranded frozen
-                        obj.insert("column".into(), json!("queued"));
-                    }
-                }
-            }
+            for rel in &paths { let _ = notes::rounds::set_status(&p.dir, rel, Some("queued"), None); }
+            let _ = notes::rounds::save(&p.dir, &rounds);
         }
-        let _ = std::fs::write(kanban_path(&p.dir), serde_json::to_string_pretty(&store).unwrap_or_default());
     }
     Ok(())
 }
@@ -1498,68 +1475,42 @@ async fn fixes_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, d
 /// After a generation session exits: read what it actually wrote and record the truth —
 /// the plan file's first line names the round kind; both files must exist or it failed.
 fn settle_round(dir: &Path) {
-    let Some(mut store) = load_kanban_checked(dir) else { return }; // never write over corrupt
-    let Some(rounds) = store.get_mut("rounds").and_then(|r| r.as_array_mut()) else { return };
-    // settle the newest GENERATING round — never assume it's last() (audit B1)
-    let Some(last) = rounds.iter_mut().rev()
-        .find(|r| r.get("state").and_then(|s| s.as_str()) == Some("generating")) else { return };
-    let n = last.get("n").and_then(|v| v.as_u64()).unwrap_or(0);
+    let mut rounds = notes::rounds::load(dir);
+    let Some(i) = rounds.iter().rposition(|r| r.state == "generating") else { return };
+    let n = rounds[i].n;
     let plan = dir.join(format!("fixes/phase_{n}_fixes_plan.md"));
     let prompt = dir.join(format!("fixes/phase_{n}_fixes_prompt.md"));
     if plan.exists() && prompt.exists() {
-        let first = std::fs::read_to_string(&plan).unwrap_or_default()
-            .lines().next().unwrap_or("").to_lowercase();
-        let kind = if first.contains("feature") { "feature additions" } else { "bug fixes" };
-        if let Some(obj) = last.as_object_mut() {
-            obj.insert("state".into(), json!("ready"));
-            obj.insert("kind".into(), json!(kind));
-        }
-    } else if let Some(obj) = last.as_object_mut() {
-        obj.insert("state".into(), json!("failed"));
-        // the failure toast promises "your tasks are untouched" — make it true:
-        // release the round's tasks back to Queued (the record keeps the failure)
-        let failed_n = n;
-        if let Some(tasks) = store.get_mut("tasks").and_then(|t| t.as_array_mut()) {
-            for t in tasks.iter_mut() {
-                if t.get("round").and_then(|v| v.as_u64()) == Some(failed_n) {
-                    if let Some(o) = t.as_object_mut() {
-                        o.insert("round".into(), Value::Null);
-                        o.insert("column".into(), json!("queued"));
-                    }
-                }
-            }
-        }
+        let first = std::fs::read_to_string(&plan).unwrap_or_default().lines().next().unwrap_or("").to_lowercase();
+        rounds[i].state = "ready".into();
+        rounds[i].kind = Some(if first.contains("feature") { "feature additions" } else { "bug fixes" }.into());
+    } else {
+        rounds[i].state = "failed".into();
+        // the failure toast promises "your notes are untouched" — make it true
+        for rel in rounds[i].note_paths.clone() { let _ = notes::rounds::set_status(dir, &rel, Some("queued"), None); }
     }
-    let _ = write_kanban(dir, &store);
+    let _ = notes::rounds::save(dir, &rounds);
 }
 
 /// The roadmap overlay: settled rounds become synthetic phases in a synthetic stage
 /// inserted right after the stage holding the LAST DONE phase. The manifest on disk is
-/// never touched. Each phase carries fixRound metadata + precomputed done/label (from
-/// the tasks' columns) that derive_statuses honors.
+/// never touched. Each phase carries fixRound metadata + precomputed done/label (read
+/// from the notes' front matter on disk) that derive_statuses honors.
 fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
-    let store = load_kanban(dir);
-    let rounds = store.get("rounds").and_then(|r| r.as_array()).cloned().unwrap_or_default();
-    let settled: Vec<&Value> = rounds.iter()
-        .filter(|r| matches!(r.get("state").and_then(|s| s.as_str()), Some("ready") | Some("done")))
-        .collect();
+    notes::rounds::settle_done(dir);
+    let rounds = notes::rounds::load(dir);
+    let settled: Vec<&notes::rounds::Round> = rounds.iter()
+        .filter(|r| r.state == "ready" || r.state == "done").collect();
     if settled.is_empty() { return manifest.clone(); }
-    let tasks = store.get("tasks").and_then(|t| t.as_array()).cloned().unwrap_or_default();
 
     let mut phases: Vec<Value> = Vec::new();
     for r in settled {
-        let n = r.get("n").and_then(|v| v.as_u64()).unwrap_or(0);
-        let kind = r.get("kind").and_then(|v| v.as_str()).unwrap_or("bug fixes");
-        let ids: Vec<String> = r.get("task_ids").and_then(|v| v.as_array())
-            .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
-            .unwrap_or_default();
-        let mine: Vec<&Value> = tasks.iter()
-            .filter(|t| t.get("id").and_then(|i| i.as_str()).map(|i| ids.contains(&i.to_string())).unwrap_or(false))
-            .filter(|t| !t.get("archived").and_then(|a| a.as_bool()).unwrap_or(false))
-            .collect();
-        let done = !mine.is_empty()
-            && mine.iter().all(|t| t.get("column").and_then(|c| c.as_str()) == Some("completed"));
-        let in_progress = mine.iter().any(|t| matches!(t.get("column").and_then(|c| c.as_str()), Some("in_progress")));
+        let n = r.n;
+        let kind = r.kind.clone().unwrap_or_else(|| "bug fixes".into());
+        let st = notes::rounds::statuses_for(dir, &r.note_paths);
+        let total = r.note_paths.len();
+        let done = total > 0 && r.note_paths.iter().all(|p| st.get(p).and_then(|s| s.as_deref()) == Some("done"));
+        let in_progress = r.note_paths.iter().any(|p| st.get(p).and_then(|s| s.as_deref()) == Some("in_progress"));
         let title = {
             let cap = { let mut c = kind.chars(); match c.next() { Some(f) => f.to_uppercase().collect::<String>() + c.as_str(), None => String::new() } };
             if n > 1 { format!("{cap} · round {n}") } else { cap }
@@ -1567,22 +1518,17 @@ fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
         phases.push(json!({
             "id": format!("FX-{n}"),
             "name": title,
-            "desc": format!("{} task{} from the kanban, frozen into an executable plan.", ids.len(), if ids.len() == 1 { "" } else { "s" }),
+            "desc": format!("{} note{} from Notes, frozen into an executable plan.", total, if total == 1 { "" } else { "s" }),
             "paste": [ { "path": format!("fixes/phase_{n}_fixes_prompt.md"), "into": "Claude Code" } ],
             "docs": [ { "path": format!("fixes/phase_{n}_fixes_plan.md") } ],
             "fixRound": n,
+            "fixRoundNotes": r.note_paths,
             "fixRoundState": { "done": done, "label": if done { "done" } else if in_progress { "being fixed" } else { "ready to run" } }
         }));
     }
-
     let mut m = manifest.clone();
     let Some(stages) = m.get_mut("stages").and_then(|s| s.as_array_mut()) else { return manifest.clone() };
-    // find the stage containing the last done-ish content: walk with a throwaway derive
-    // is circular; instead place after the LAST stage whose every phase has a satisfied
-    // done_when — cheap approximation: insert after the last stage index where any phase
-    // exists (fallback: append). The precise "after the last completed phase" placement
-    // is refined by the frontend when rendering (it has the statuses).
-    let synth = json!({ "title": "Fixes & ideas", "note": "from the kanban", "synthetic": true, "phases": phases });
+    let synth = json!({ "title": "Fixes & ideas", "note": "from Notes", "synthetic": true, "phases": phases });
     stages.push(synth);
     m
 }
@@ -1785,7 +1731,7 @@ async fn round_execute(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init:
         }
     }
     let prompt = format!(
-        "Read {prompt_rel} and fixes/phase_{n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: every item, verified honestly, and after each item completes update that task's \"column\" to \"completed\" in .chronicle/kanban.json (match by task id, touch updated_at, change nothing else in that file)."
+        "Read {prompt_rel} and fixes/phase_{n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: every item, verified honestly, and after each item completes set `status: done` in that note's front matter (the file named by the item's path, under .chronicle/notes/), changing nothing else in that file."
     );
     let logf = std::fs::File::create(&log).map_err(|e| e.to_string())?;
     let errf = logf.try_clone().map_err(|e| e.to_string())?;
@@ -1862,11 +1808,9 @@ async fn round_exec_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitStat
 #[tauri::command]
 async fn round_retro(roots: State<'_, OpenRoots>, dir: String, n: u64) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
-    let store = load_kanban(&p.dir);
-    let created = store.get("rounds").and_then(|r| r.as_array())
-        .and_then(|rs| rs.iter().find(|r| r.get("n").and_then(|v| v.as_u64()) == Some(n)))
-        .and_then(|r| r.get("created_at")).and_then(|v| v.as_u64())
-        .ok_or("that round isn't on the board")?;
+    let created = notes::rounds::load(&p.dir).iter().find(|r| r.n == n)
+        .map(|r| r.created_at).filter(|c| *c > 0)
+        .ok_or("that round isn't in this project")?;
     let since = format!("--since={}", created / 1000); // git accepts epoch seconds
     let subjects = git_in(&p.repo, &["log", &since, "--format=%h\x1f%s"]);
     let saves: Vec<Value> = subjects.lines().filter(|l| !l.is_empty()).take(50).map(|l| {
@@ -3464,48 +3408,42 @@ mod r4_tests {
         d.canonicalize().unwrap()
     }
 
-    fn store_with_round(dir: &Path, cols: &[&str], state: &str) {
-        let tasks: Vec<Value> = cols.iter().enumerate()
-            .map(|(i, c)| json!({"id": format!("T-00{}", i + 1), "title": format!("task {}", i + 1), "column": c, "round": 1}))
-            .collect();
-        let ids: Vec<Value> = tasks.iter().map(|t| t["id"].clone()).collect();
-        let store = json!({"version": 1, "next_id": cols.len() + 1, "tasks": tasks,
-            "rounds": [{"n": 1, "state": state, "kind": "bug fixes", "task_ids": ids,
-                        "plan_path": "fixes/phase_1_fixes_plan.md", "prompt_path": "fixes/phase_1_fixes_prompt.md"}]});
-        std::fs::create_dir_all(dir.join(".chronicle")).unwrap();
-        std::fs::write(kanban_path(dir), serde_json::to_string_pretty(&store).unwrap()).unwrap();
-    }
-
-    #[test]
-    fn kanban_store_defaults_and_roundtrips() {
-        let d = tmp("store");
-        let fresh = load_kanban(&d);
-        assert_eq!(fresh["next_id"], 1);
-        assert!(fresh["tasks"].as_array().unwrap().is_empty());
-        store_with_round(&d, &["queued"], "ready");
-        assert_eq!(load_kanban(&d)["rounds"][0]["n"], 1);
+    fn vault_round(d: &Path, states: &[&str], round_state: &str) {
+        let vault = d.join(".chronicle/notes/Tasks");
+        std::fs::create_dir_all(&vault).unwrap();
+        let mut paths = Vec::new();
+        for (i, s) in states.iter().enumerate() {
+            let rel = format!("Tasks/N{i}.md");
+            std::fs::write(d.join(".chronicle/notes").join(&rel),
+                format!("---\nstatus: {s}\nround: 1\n---\n\nnote {i}\n")).unwrap();
+            paths.push(rel);
+        }
+        notes::rounds::save(d, &[notes::rounds::Round {
+            n: 1, state: round_state.into(), kind: None, task_ids: vec![], note_paths: paths,
+            created_at: 1, plan_path: "fixes/phase_1_fixes_plan.md".into(),
+            prompt_path: "fixes/phase_1_fixes_prompt.md".into(),
+        }]).unwrap();
     }
 
     #[test]
     fn settle_round_reads_the_truth_from_disk() {
         let d = tmp("settle");
-        store_with_round(&d, &["in_progress"], "generating");
-        // no files written → failed
-        settle_round(&d);
-        let failed = load_kanban(&d);
-        assert_eq!(failed["rounds"][0]["state"], "failed");
-        // a failed round RELEASES its tasks — back to queued, round cleared
-        assert_eq!(failed["tasks"][0]["column"], "queued");
-        assert!(failed["tasks"][0]["round"].is_null());
-        // files present + kind line → ready + kind
-        store_with_round(&d, &["queued"], "generating");
+        vault_round(&d, &["in_progress"], "generating");
+        settle_round(&d); // no plan files → failed, and the notes go back to queued
+        assert_eq!(notes::rounds::load(&d)[0].state, "failed");
+        let text = std::fs::read_to_string(d.join(".chronicle/notes/Tasks/N0.md")).unwrap();
+        let (fm, _) = notes::parse::split_front_matter(&text);
+        assert_eq!(notes::parse::status_of(&fm).as_deref(), Some("queued"));
+        assert_eq!(notes::parse::round_of(&fm), None);
+
+        vault_round(&d, &["in_progress"], "generating");
         std::fs::create_dir_all(d.join("fixes")).unwrap();
-        std::fs::write(d.join("fixes/phase_1_fixes_plan.md"), "Round kind: feature additions\n\n- T-001 …").unwrap();
+        std::fs::write(d.join("fixes/phase_1_fixes_plan.md"), "Round kind: feature additions\n\n- item").unwrap();
         std::fs::write(d.join("fixes/phase_1_fixes_prompt.md"), "Execute the plan.").unwrap();
         settle_round(&d);
-        let s = load_kanban(&d);
-        assert_eq!(s["rounds"][0]["state"], "ready");
-        assert_eq!(s["rounds"][0]["kind"], "feature additions");
+        let r = notes::rounds::load(&d);
+        assert_eq!(r[0].state, "ready");
+        assert_eq!(r[0].kind.as_deref(), Some("feature additions"));
     }
 
     #[test]
@@ -3515,12 +3453,13 @@ mod r4_tests {
             {"id": "P1", "name": "one", "status": {"done_when": [{"file_exists": "done.marker"}]}}
         ]}]});
         std::fs::write(d.join("done.marker"), "x").unwrap();
-        store_with_round(&d, &["queued", "in_progress"], "ready");
+        vault_round(&d, &["queued", "in_progress"], "ready");
         std::fs::create_dir_all(d.join("fixes")).unwrap();
 
         let merged = inject_rounds(&d, &manifest);
         let stages = merged["stages"].as_array().unwrap();
         assert_eq!(stages.len(), 2, "a synthetic stage is appended");
+        assert_eq!(stages[1]["note"], "from Notes");
         let fix = &stages[1]["phases"][0];
         assert_eq!(fix["id"], "FX-1");
         assert_eq!(fix["name"], "Bug fixes");
@@ -3531,31 +3470,30 @@ mod r4_tests {
         let m: std::collections::HashMap<&str, (&str, &str)> = sts.iter()
             .map(|s| (s.id.as_str(), (s.state.as_str(), s.label.as_str()))).collect();
         assert_eq!(m["P1"].0, "done");
-        assert_eq!(m["FX-1"], ("now", "being fixed"), "an in-progress round is the current work");
+        assert_eq!(m["FX-1"], ("now", "being fixed"));
 
-        // all tasks completed → the round phase derives done
-        store_with_round(&d, &["completed", "completed"], "ready");
+        vault_round(&d, &["done", "done"], "ready");
         let merged = inject_rounds(&d, &manifest);
-        let sts = derive_statuses(&ctx, &merged);
-        let fx = sts.iter().find(|s| s.id == "FX-1").unwrap();
+        let fx = derive_statuses(&ctx, &merged).into_iter().find(|s| s.id == "FX-1").unwrap();
         assert_eq!(fx.state, "done");
+        assert_eq!(notes::rounds::load(&d)[0].state, "done", "settle_done ran and lifted the lock");
     }
 
     #[test]
     fn round_two_gets_its_own_name() {
         let d = tmp("round2");
-        let tasks = vec![
-            json!({"id": "T-001", "column": "completed", "round": 1}),
-            json!({"id": "T-002", "column": "queued", "round": 2}),
-        ];
-        let store = json!({"version": 1, "next_id": 3, "tasks": tasks, "rounds": [
-            {"n": 1, "state": "ready", "kind": "bug fixes", "task_ids": ["T-001"],
-             "plan_path": "fixes/phase_1_fixes_plan.md", "prompt_path": "fixes/phase_1_fixes_prompt.md"},
-            {"n": 2, "state": "ready", "kind": "bug fixes", "task_ids": ["T-002"],
-             "plan_path": "fixes/phase_2_fixes_plan.md", "prompt_path": "fixes/phase_2_fixes_prompt.md"}
-        ]});
-        std::fs::create_dir_all(d.join(".chronicle")).unwrap();
-        std::fs::write(kanban_path(&d), serde_json::to_string(&store).unwrap()).unwrap();
+        std::fs::create_dir_all(d.join(".chronicle/notes/Tasks")).unwrap();
+        for (i, n) in [1u64, 2].iter().enumerate() {
+            std::fs::write(d.join(format!(".chronicle/notes/Tasks/N{i}.md")),
+                format!("---\nstatus: done\nround: {n}\n---\n\nnote\n")).unwrap();
+        }
+        let mk = |n: u64, rel: &str| notes::rounds::Round {
+            n, state: "ready".into(), kind: Some("bug fixes".into()), task_ids: vec![],
+            note_paths: vec![rel.to_string()], created_at: 1,
+            plan_path: format!("fixes/phase_{n}_fixes_plan.md"),
+            prompt_path: format!("fixes/phase_{n}_fixes_prompt.md"),
+        };
+        notes::rounds::save(&d, &[mk(1, "Tasks/N0.md"), mk(2, "Tasks/N1.md")]).unwrap();
         let merged = inject_rounds(&d, &json!({"name": "x", "stages": [{"title": "S", "phases": []}]}));
         let phases = merged["stages"][1]["phases"].as_array().unwrap();
         assert_eq!(phases.len(), 2);
@@ -3569,7 +3507,7 @@ mod r4_tests {
         let d = tmp("noop");
         let manifest = json!({"name": "x", "stages": [{"title": "S", "phases": []}]});
         let merged = inject_rounds(&d, &manifest);
-        assert_eq!(merged, manifest, "no kanban store → the manifest passes through untouched");
+        assert_eq!(merged, manifest, "no rounds store → the manifest passes through untouched");
     }
 }
 
