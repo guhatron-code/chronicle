@@ -31,6 +31,18 @@ pub fn refused(rel: &str) -> Option<String> {
     None
 }
 
+/// What a symlink AT THE LEAF means for this operation.
+///
+/// A read follows it: the canonical target has already been proved to be inside the
+/// project, and a link to a file in the same repo is an ordinary file to read — the
+/// old blanket refusal made those unopenable for no gain.
+///
+/// Every write refuses it. Saving through a link rewrites the link's TARGET (a file
+/// the user did not open), and a rename or a trash moves the link and leaves the
+/// file — neither is what the pane just said it would do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leaf { Follow, Refuse }
+
 /// The jail for a path that may not exist yet: canonicalise the deepest existing
 /// ancestor, then require it to sit under one of the project's roots. A symlinked
 /// parent that leaves the project is refused even when the leaf is new.
@@ -39,6 +51,10 @@ pub fn refused(rel: &str) -> Option<String> {
 /// does: notes and attachments live beside the manifest, and in a sub-project the
 /// manifest folder is not the repo root.
 pub fn jailed_target(p: &Project, rel: &str) -> Result<PathBuf, String> {
+    jailed(p, rel, Leaf::Refuse)
+}
+
+pub fn jailed(p: &Project, rel: &str, leaf: Leaf) -> Result<PathBuf, String> {
     if rel.is_empty() || rel.starts_with('/') || rel.contains('\0') || rel.split('/').any(|s| s == "..") {
         return Err("that path isn't inside this project.".into());
     }
@@ -53,7 +69,11 @@ pub fn jailed_target(p: &Project, rel: &str) -> Result<PathBuf, String> {
     roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
     let inside = roots.iter().filter_map(|r| r.canonicalize().ok()).any(|r| real.starts_with(&r));
     if !inside { return Err("that path isn't inside this project.".into()); }
-    if full.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+    // `real` above is the FOLLOWED path, so a link out of the project is already
+    // refused; this is the extra refusal writes want and reads do not.
+    if leaf == Leaf::Refuse
+        && full.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false)
+    {
         return Err("that path isn't inside this project.".into());
     }
     Ok(full)
@@ -74,7 +94,7 @@ pub(crate) fn read_at(p: &Project, rel: &str) -> Result<ReadFile, String> {
     if rel.split('/').any(|s| s == ".git") {
         return Err("that's git's own folder — Chronicle won't touch it.".into());
     }
-    let full = jailed_target(p, rel)?;
+    let full = jailed(p, rel, Leaf::Follow)?;
     let md = std::fs::metadata(&full).map_err(|e| e.to_string())?;
     let size = md.len();
     let mtime_ms = mtime_ms_of(&full)?;
@@ -103,8 +123,12 @@ pub(crate) fn write_at(p: &Project, rel: &str, text: &str, expected_mtime_ms: Op
     if let Some(why) = refused(rel) { return Err(why); }
     let full = jailed_target(p, rel)?;
     let existed = full.exists();
-    if let Some(expected) = expected_mtime_ms {
-        if !existed { return Err("changed on disk".into()); }
+    // A precondition is a promise about a file that IS there. Creating a file that
+    // does not exist clobbers nobody, so the stale mtime the editor is holding — from
+    // a buffer whose file was renamed or trashed underneath it — must not refuse the
+    // save; it just writes the file back.
+    let precondition = expected_mtime_ms.filter(|_| existed);
+    if let Some(expected) = precondition {
         if mtime_ms_of(&full)? != expected { return Err("changed on disk".into()); }
     }
     let parent = full.parent().ok_or("that path has no folder.")?;
@@ -119,7 +143,7 @@ pub(crate) fn write_at(p: &Project, rel: &str, text: &str, expected_mtime_ms: Op
     }
     // check again with the temp already written: the gap between the precondition
     // and the rename is now one syscall wide instead of one whole file write.
-    if let Some(expected) = expected_mtime_ms {
+    if let Some(expected) = precondition {
         // an unreadable mtime is reported, not swallowed as "0 != expected": the
         // first check says exactly why it could not stat the file, and a write
         // that cannot verify its precondition must say the same thing
@@ -199,8 +223,26 @@ pub(crate) fn trash_at(p: &Project, rel: &str) -> Result<(), String> {
     if !full.exists() { return Err("that file isn't there anymore.".into()); }
     // the OS sentence is quoted as-is, minus its own full stop, so the line
     // ends in exactly one period like every other refusal here
-    trash::delete(&full)
+    trash_context().delete(&full)
         .map_err(|e| format!("couldn't move it to the Trash — {}.", e.to_string().trim_end_matches('.')))
+}
+
+/// THE BUG: `trash::delete` defaults to `DeleteMethod::Finder`, which drives Finder
+/// over Apple events. A signed, sandboxed bundle without an
+/// `NSAppleEventsUsageDescription` is denied that outright (-1743), so every delete
+/// from the shipped app failed while every delete from `cargo test` worked.
+///
+/// `NSFileManager.trashItemAtURL:` is the same Trash — restorable, "Put Back" and
+/// all — done by the app itself: no Finder, no Apple event, no permission prompt.
+fn trash_context() -> trash::TrashContext {
+    #[allow(unused_mut)]
+    let mut ctx = trash::TrashContext::new();
+    #[cfg(target_os = "macos")]
+    {
+        use trash::macos::{DeleteMethod, TrashContextExtMacos};
+        ctx.set_delete_method(DeleteMethod::NsFileManager);
+    }
+    ctx
 }
 
 #[tauri::command]
@@ -447,6 +489,52 @@ mod tests {
         // a real collision is still refused
         std::fs::write(root.join("b.txt"), "b\n").unwrap();
         assert!(rename_at(&p, "b.txt", "A.txt").is_err());
+    }
+
+    /// THE BUG: an editor holding a stale mtime for a file that has since been
+    /// renamed, trashed or never existed got "changed on disk" — the one thing it
+    /// could not be. A new file clobbers nobody, so the precondition does not apply.
+    #[test]
+    fn a_precondition_on_a_file_that_is_not_there_does_not_refuse() {
+        let (root, p) = proj("absent-precondition");
+        let m = write_at(&p, "gone.txt", "back again\n", Some(1_700_000_000_000)).unwrap();
+        assert_eq!(std::fs::read_to_string(root.join("gone.txt")).unwrap(), "back again\n");
+        assert!(m > 1_600_000_000_000, "a real mtime came back: {m}");
+        // deep, still-absent parents are made the same way
+        write_at(&p, "new/deep/leaf.txt", "x\n", Some(1)).unwrap();
+        assert!(root.join("new/deep/leaf.txt").is_file());
+        // and the moment it IS there, the promise is kept again
+        assert_eq!(write_at(&p, "gone.txt", "no\n", Some(1)).unwrap_err(), "changed on disk");
+        assert_eq!(std::fs::read_to_string(root.join("gone.txt")).unwrap(), "back again\n");
+    }
+
+    /// A symlink to a file in the SAME project is an ordinary file to read — the
+    /// blanket refusal made those unopenable. Every write still refuses it: a save
+    /// through a link rewrites the link's target, a rename or a trash moves the link
+    /// and leaves the file.
+    #[test]
+    fn a_symlink_leaf_reads_but_never_writes() {
+        let (root, p) = proj("symlink-leaf");
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::write(root.join("real/a.txt"), "linked\n").unwrap();
+        std::os::unix::fs::symlink(root.join("real/a.txt"), root.join("link.txt")).unwrap();
+
+        assert_eq!(read_at(&p, "link.txt").unwrap().text, "linked\n");
+        assert!(write_at(&p, "link.txt", "no\n", None).is_err());
+        assert!(rename_at(&p, "link.txt", "moved.txt").is_err());
+        assert!(trash_at(&p, "link.txt").is_err());
+        assert_eq!(std::fs::read_to_string(root.join("real/a.txt")).unwrap(), "linked\n",
+                   "no write reached the link's target");
+        assert!(root.join("link.txt").symlink_metadata().unwrap().file_type().is_symlink());
+
+        // a link OUT of the project is still refused, read included
+        let outside = root.parent().unwrap().join(format!("chronicle-files-away-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.txt"), "shh\n").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.txt"), root.join("away.txt")).unwrap();
+        assert!(read_at(&p, "away.txt").is_err(), "the jail still applies to what it points AT");
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     /// `.chronicle/…` lives beside the MANIFEST, which in a sub-project is not the

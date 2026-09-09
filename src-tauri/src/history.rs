@@ -1,9 +1,17 @@
-//! The four facts the history section states, and the one place in the app that
-//! runs `git fetch`. Every line is read straight out of git — nothing is derived
-//! by subtracting one number from another, which is how the old panel came to
-//! claim "2 saves waiting" on a branch that had never been published at all.
+//! The two facts the history section states that nothing else on screen knows —
+//! when the last save landed and when the last publish did — and the one place in
+//! the app that runs `git fetch`. Every line is read straight out of git; nothing
+//! is derived by subtracting one number from another, which is how the old panel
+//! came to claim "2 saves waiting" on a branch that had never been published at all.
+//!
+//! THE COST: this used to recompute the whole remote picture — the ref, the kind,
+//! ahead/behind, the dirty set — every time the roadmap polled, and `get_state` had
+//! just computed all of it on the same heartbeat. It answers only what get_state
+//! cannot now: the Remote and Uncommitted lines are built in the frontend from
+//! `StateData` (`published`, `remote_ref`, `ahead`, `behind`, `dirty`), and three
+//! `git` spawns cover what is left.
 
-use crate::{ahead_behind, dirty_set, git_in, git_in_checked, publish_kind, remote_ref, DirtyEntry, OpenRoots};
+use crate::{git_in, OpenRoots};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::State;
@@ -15,23 +23,13 @@ pub struct LastSave { pub ts: u64, pub subject: String }
 pub struct LastPublish { pub ts: u64, pub tag: Option<String> }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
-pub struct RemoteFacts {
-    pub kind: String,
-    pub ref_name: String,
-    pub ahead: u32,
-    pub behind: u32,
-    pub checked_ms: Option<u64>,
-    pub error: Option<String>,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct HistoryFacts {
-    pub degraded: bool,
-    pub is_git: bool,
     pub last_save: Option<LastSave>,
-    pub dirty: Vec<DirtyEntry>,
-    pub remote: RemoteFacts,
     pub last_publish: Option<LastPublish>,
+    /// when Chronicle last ran a fetch for this project; `None` = never checked
+    pub checked_ms: Option<u64>,
+    /// only ever set by `git_fetch` — reading git cannot fail into a sentence
+    pub error: Option<String>,
 }
 
 fn fetch_dir() -> PathBuf { crate::config_dir().join("fetch") }
@@ -73,40 +71,14 @@ fn last_save_of(repo: &Path) -> Option<LastSave> {
     Some(LastSave { ts: ts.trim().parse().ok()?, subject: subject.trim().to_string() })
 }
 
+/// Three `git` spawns: the last save, the newest commit any `origin/*` ref can
+/// reach, and the tag on it. The checked time is a file beside the app's config.
 pub fn facts(repo: &Path, project_dir: &Path) -> HistoryFacts {
-    // the same probe get_state uses: an Err means git itself could not run,
-    // which is DEGRADED — quite different from "this folder isn't a repo"
-    let branch_probe = git_in_checked(repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
-    let degraded = branch_probe.is_err();
-    let branch = branch_probe.unwrap_or_default();
-    let is_git = !branch.is_empty();
-    if !is_git {
-        return HistoryFacts {
-            degraded, is_git: false, last_save: None, dirty: vec![],
-            remote: RemoteFacts {
-                kind: "no-remote".into(), ref_name: String::new(),
-                ahead: 0, behind: 0, checked_ms: None, error: None,
-            },
-            last_publish: None,
-        };
-    }
-    let remote_url = git_in(repo, &["remote", "get-url", "origin"]);
-    let rref = remote_ref(repo, &branch);
-    let (ahead, behind) = rref.as_deref().map(|r| ahead_behind(repo, r)).unwrap_or((0, 0));
     HistoryFacts {
-        degraded,
-        is_git: true,
         last_save: last_save_of(repo),
-        dirty: dirty_set(repo),
-        remote: RemoteFacts {
-            kind: publish_kind(repo, &branch, &remote_url).into(),
-            ref_name: rref.unwrap_or_default(),
-            ahead,
-            behind,
-            checked_ms: checked_ms(project_dir),
-            error: None,
-        },
         last_publish: last_publish_of(repo),
+        checked_ms: checked_ms(project_dir),
+        error: None,
     }
 }
 
@@ -129,11 +101,18 @@ pub async fn git_fetch(roots: State<'_, OpenRoots>, dir: String) -> Result<Histo
         store_checked(&p.dir, crate::epoch_ms());
         return Ok(facts(&p.repo, &p.dir));
     }
+    // git says WHY on the `fatal:`/`ERROR:` line and then prints a generic
+    // "could not read from remote repository" epilogue underneath it. The last line
+    // was the epilogue — the useless half of the message.
     let stderr = String::from_utf8_lossy(&out.stderr);
-    let sentence = stderr.lines().map(str::trim).filter(|l| !l.is_empty())
-        .next_back().unwrap_or("couldn't reach the online copy").to_string();
+    let lines: Vec<&str> = stderr.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let sentence = lines.iter()
+        .find(|l| l.starts_with("fatal:") || l.starts_with("ERROR:"))
+        .or_else(|| lines.last())
+        .map(|l| l.to_string())
+        .unwrap_or_else(|| "couldn't reach the online copy".to_string());
     let mut f = facts(&p.repo, &p.dir);
-    f.remote.error = Some(sentence.chars().take(140).collect());
+    f.error = Some(sentence.chars().take(140).collect());
     Ok(f)
 }
 
@@ -165,38 +144,19 @@ mod tests {
     }
 
     #[test]
-    fn a_plain_repo_reports_its_last_save_and_no_remote() {
+    fn a_plain_repo_reports_its_last_save() {
         let d = repo("plain");
         let f = facts(&d, &d);
-        assert!(!f.degraded);
-        assert!(f.is_git);
         let ls = f.last_save.expect("a last save");
         assert_eq!(ls.subject, "feat: first save");
         assert!(ls.ts > 1_600_000_000, "a real unix second: {}", ls.ts);
-        assert_eq!(f.remote.kind, "no-remote");
-        assert_eq!(f.remote.ref_name, "");
-        assert_eq!(f.remote.checked_ms, None);
-        assert!(f.last_publish.is_none());
-        assert!(f.dirty.is_empty());
+        assert!(f.last_publish.is_none(), "nothing was ever pushed");
+        assert_eq!(f.checked_ms, None);
+        assert_eq!(f.error, None);
     }
 
     #[test]
-    fn the_dirty_list_carries_badge_words() {
-        let d = repo("dirty");
-        std::fs::write(d.join("a.txt"), "two\n").unwrap();
-        std::fs::write(d.join("b.txt"), "new\n").unwrap();
-        let f = facts(&d, &d);
-        let mut got: Vec<(String, String)> =
-            f.dirty.iter().map(|e| (e.path.clone(), e.badge.clone())).collect();
-        got.sort();
-        assert_eq!(got, vec![
-            ("a.txt".to_string(), "edited".to_string()),
-            ("b.txt".to_string(), "new".to_string()),
-        ]);
-    }
-
-    #[test]
-    fn a_published_repo_names_the_ref_the_counts_and_the_tag() {
+    fn a_published_repo_names_the_publish_time_and_the_tag() {
         let origin = tmp("pub-origin");
         git(&origin, &["init", "-q", "--bare", "-b", "main"]);
         let d = repo("pub");
@@ -205,39 +165,43 @@ mod tests {
         git(&d, &["push", "-q", "origin", "main", "--tags"]);
 
         let f = facts(&d, &d);
-        assert_eq!(f.remote.kind, "ok");
-        assert_eq!(f.remote.ref_name, "origin/main");
-        assert_eq!((f.remote.ahead, f.remote.behind), (0, 0));
         let lp = f.last_publish.expect("a last publish");
         assert_eq!(lp.tag.as_deref(), Some("v0.7.0"));
 
-        // one save on top: ahead moves, the publish line does NOT
+        // one save on top: the publish line does NOT move
         std::fs::write(d.join("a.txt"), "two\n").unwrap();
         git(&d, &["commit", "-qam", "fix: second save"]);
         let f2 = facts(&d, &d);
-        assert_eq!((f2.remote.ahead, f2.remote.behind), (1, 0));
         assert_eq!(f2.last_publish.unwrap().ts, lp.ts, "publishing is not saving");
         assert_eq!(f2.last_save.unwrap().subject, "fix: second save");
     }
 
     #[test]
-    fn a_never_published_repo_says_so_without_lying_about_counts() {
-        let d = repo("never");
-        git(&d, &["remote", "add", "origin", "https://example.invalid/x.git"]);
+    fn a_folder_that_is_not_a_repo_states_nothing() {
+        let d = tmp("nogit");
         let f = facts(&d, &d);
-        assert_eq!(f.remote.kind, "never-published");
-        assert_eq!(f.remote.ref_name, "");
-        assert_eq!((f.remote.ahead, f.remote.behind), (0, 0));
+        assert!(f.last_save.is_none());
         assert!(f.last_publish.is_none());
     }
 
+    /// THE COST: the roadmap polls this every 8 seconds beside `get_state`, which
+    /// has just read the branch, the remote ref, ahead/behind and the dirty set on
+    /// the same heartbeat. Recomputing all of that here cost ~16 `git` processes a
+    /// poll. These are the only three facts get_state does not already carry.
     #[test]
-    fn a_folder_that_is_not_a_repo_is_not_degraded() {
-        let d = tmp("nogit");
-        let f = facts(&d, &d);
-        assert!(!f.degraded, "git ran fine — the folder just isn't a repo");
-        assert!(!f.is_git);
-        assert!(f.last_save.is_none());
+    fn the_facts_cost_three_git_spawns() {
+        let origin = tmp("spawn-origin");
+        git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+        let d = repo("spawns");
+        git(&d, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
+        git(&d, &["push", "-qu", "origin", "main"]);
+        std::fs::write(d.join("a.txt"), "two\n").unwrap();
+        git(&d, &["commit", "-qam", "fix: second save"]);
+
+        let (f, spawns) = crate::git_spawns(|| facts(&d, &d));
+        assert_eq!(spawns, 3, "log -1 HEAD, log -1 --remotes=origin, tag --points-at");
+        assert_eq!(f.last_save.unwrap().subject, "fix: second save");
+        assert!(f.last_publish.is_some());
     }
 
     #[test]

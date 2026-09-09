@@ -85,10 +85,29 @@ const GO: &[Go] = &[
     Go { id: "go-project-9", text: "Project 9", accel: "Cmd+Digit9", key: "9", code: "Digit9", alt: false, shift: false, group: 6 },
 ];
 
-/// Menu id → the chord it replays. Predefined items (copy, quit, …) are not in the
+/// The Chronicle submenu's own rows — same table shape, rendered up there instead
+/// of under Go.
+///
+/// ⌘Q cannot be `PredefinedMenuItem::quit`: that calls `app.exit()` on the spot,
+/// so no window ever sees a close request and the unsaved-file guard never runs —
+/// an edited buffer died silently. As a table row the chord goes out as a
+/// `menu-key` like every other one, the frontend asks about unsaved work, and only
+/// then does `quit_app` (main.rs) let the process go. Every other route out — the
+/// Dock's Quit, `osascript quit` — is turned back at `RunEvent::ExitRequested` and
+/// replayed through this same chord.
+const APP: &[Go] = &[
+    Go { id: "go-quit", text: "Quit Chronicle", accel: "Cmd+KeyQ", key: "q", code: "KeyQ", alt: false, shift: false, group: 0 },
+];
+
+/// Every row in both tables — what `key_for` searches and what the tests pin.
+fn rows() -> impl Iterator<Item = &'static Go> {
+    GO.iter().chain(APP.iter())
+}
+
+/// Menu id → the chord it replays. Predefined items (copy, paste, …) are not in a
 /// table: they do their own native thing and must never be routed to the webview.
 pub fn key_for(id: &str) -> Option<MenuKey> {
-    let g = GO.iter().find(|g| g.id == id)?;
+    let g = rows().find(|g| g.id == id)?;
     Some(MenuKey {
         key: g.key.into(),
         code: g.code.into(),
@@ -100,6 +119,9 @@ pub fn key_for(id: &str) -> Option<MenuKey> {
 
 /// Build the whole menu bar: Chronicle · Edit · View · Window · Go.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let app_rows: Vec<MenuItem<R>> = APP.iter()
+        .map(|g| MenuItem::with_id(app, g.id, g.text, true, Some(g.accel)))
+        .collect::<tauri::Result<_>>()?;
     let app_menu = Submenu::with_items(
         app,
         "Chronicle",
@@ -113,7 +135,8 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &PredefinedMenuItem::hide_others(app, None)?,
             &PredefinedMenuItem::show_all(app, None)?,
             &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::quit(app, None)?,
+            // the custom Quit sits exactly where the predefined one did
+            &app_rows[0],
         ],
     )?;
 
@@ -178,7 +201,7 @@ mod tests {
     /// silently dropped and the item just never fires.
     #[test]
     fn accelerators_all_parse() {
-        for g in GO {
+        for g in rows() {
             g.accel
                 .parse::<Accelerator>()
                 .unwrap_or_else(|e| panic!("{}: {:?} does not parse ({e})", g.id, g.accel));
@@ -187,7 +210,7 @@ mod tests {
 
     #[test]
     fn every_menu_id_maps_to_a_chord() {
-        for g in GO {
+        for g in rows() {
             let k = key_for(g.id).unwrap_or_else(|| panic!("{} has no key", g.id));
             assert!(k.meta, "{} must carry Cmd", g.id);
             assert!(!k.key.is_empty() && !k.code.is_empty(), "{} must name a key and a code", g.id);
@@ -196,7 +219,7 @@ mod tests {
 
     #[test]
     fn ids_are_unique() {
-        let mut ids: Vec<_> = GO.iter().map(|g| g.id).collect();
+        let mut ids: Vec<_> = rows().map(|g| g.id).collect();
         ids.sort_unstable();
         let n = ids.len();
         ids.dedup();
@@ -205,7 +228,7 @@ mod tests {
 
     #[test]
     fn accelerators_are_unique() {
-        let mut a: Vec<_> = GO.iter().map(|g| g.accel).collect();
+        let mut a: Vec<_> = rows().map(|g| g.accel).collect();
         a.sort_unstable();
         let n = a.len();
         a.dedup();
@@ -214,7 +237,7 @@ mod tests {
 
     #[test]
     fn the_pane_toggles_are_the_only_alt_chords() {
-        for g in GO {
+        for g in rows() {
             let alt = key_for(g.id).unwrap().alt;
             let expected = matches!(g.id, "go-content" | "go-agent" | "go-terminal");
             assert_eq!(alt, expected, "{} alt", g.id);
@@ -232,7 +255,7 @@ mod tests {
 
     #[test]
     fn search_is_the_only_shift_chord() {
-        for g in GO {
+        for g in rows() {
             assert_eq!(key_for(g.id).unwrap().shift, g.id == "go-search", "{} shift", g.id);
         }
         // App.tsx accepts "f" or "F"; macOS reports the shifted form
@@ -256,6 +279,23 @@ mod tests {
         assert_eq!(key_for("go-new-note").unwrap().key, "n");
         assert_eq!(key_for("go-jump-note").unwrap().key, "p");
         assert_eq!(key_for("go-save").unwrap().key, "s");
+    }
+
+    /// ⌘Q is OURS now: a table row, not `PredefinedMenuItem::quit`. The frontend
+    /// gets the chord, asks about unsaved files, and calls `quit_app` — the
+    /// predefined item exited before any of that could happen.
+    #[test]
+    fn quit_is_a_table_row_with_a_replayable_chord() {
+        let q = APP.iter().find(|g| g.id == "go-quit").expect("the app menu carries Quit");
+        assert_eq!(q.text, "Quit Chronicle");
+        assert_eq!(q.accel, "Cmd+KeyQ");
+        let k = key_for("go-quit").expect("go-quit replays a chord");
+        assert_eq!(k.key, "q");
+        assert_eq!(k.code, "KeyQ");
+        assert!(k.meta && !k.alt && !k.shift, "⌘Q is a plain Cmd chord");
+        // and it is NOT in the Go submenu — it renders in Chronicle, where macOS
+        // users look for it
+        assert!(!GO.iter().any(|g| g.id == "go-quit"), "Quit belongs to the App submenu");
     }
 
     #[test]

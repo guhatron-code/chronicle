@@ -324,6 +324,23 @@ fn load_project(dir: &Path) -> Project {
 
 /* ================= git + condition context ================= */
 
+// Every `git` in this file spawns through `git_in_checked`, and under `cfg(test)`
+// that bumps this counter — so a test can state the heartbeat's real cost instead
+// of the cost someone remembers. Per-THREAD on purpose: the rest of the suite runs
+// git in parallel, and a global would count other tests' spawns.
+#[cfg(test)]
+thread_local! {
+    static GIT_SPAWNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Run `f`, and say how many `git` processes it started on this thread.
+#[cfg(test)]
+pub(crate) fn git_spawns<T>(f: impl FnOnce() -> T) -> (T, usize) {
+    GIT_SPAWNS.with(|c| c.set(0));
+    let out = f();
+    (out, GIT_SPAWNS.with(|c| c.get()))
+}
+
 fn git_in(repo: &Path, args: &[&str]) -> String {
     git_in_checked(repo, args).unwrap_or_default()
 }
@@ -336,73 +353,111 @@ fn git_in(repo: &Path, args: &[&str]) -> String {
 /// significant space (" M path") and `.trim()` used to eat it, shifting every
 /// field of that one line by one character. Callers trim per line.
 pub(crate) fn git_in_checked(repo: &Path, args: &[&str]) -> Result<String, String> {
+    #[cfg(test)]
+    GIT_SPAWNS.with(|c| c.set(c.get() + 1));
     Command::new("git").arg("-C").arg(repo).args(args).output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim_end_matches(['\n', '\r']).to_string())
         .map_err(|e| e.to_string())
 }
 
+/// How the remote ref was resolved. `publish_kind` reads it: the first two answers
+/// already prove this branch is on the remote, so the probes that used to ask the
+/// same question a second time never run at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RefSource {
+    /// the configured upstream — `@{u}`
+    Upstream,
+    /// no upstream, but `refs/remotes/origin/<branch>` is there
+    OriginBranch,
+    /// nothing for this branch; measured against whatever `origin/HEAD` names
+    OriginHead,
+    /// neither of those, but some remote branch contains HEAD — that branch
+    OriginContaining,
+    /// nothing on the remote answers for this branch
+    Nothing,
+}
+
+/// The ref the panel names, and how it was found.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RemoteRef {
+    pub name: Option<String>,
+    pub source: RefSource,
+}
+
 /// Which remote ref this branch is measured against, in the spec's order:
 /// the configured upstream, then `origin/<branch>`, then whatever `origin/HEAD`
-/// points at (resolved to its real name — "origin/main", not "origin/HEAD").
+/// points at (resolved to its real name — "origin/main", not "origin/HEAD"), and
+/// last any remote branch that holds this HEAD.
 /// Reading `branch.<name>.merge` alone (what this used to do) called a branch
 /// that had been pushed without `-u` "never published".
-pub(crate) fn remote_ref(repo: &Path, branch: &str) -> Option<String> {
-    let ok = |args: &[&str]| {
-        Command::new("git").arg("-C").arg(repo).args(args).output()
-            .map(|o| o.status.success()).unwrap_or(false)
-    };
-    if ok(&["rev-parse", "--verify", "--quiet", "@{u}"]) {
-        let name = git_in(repo, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
-        if !name.is_empty() { return Some(name); }
+///
+/// THE COST: this runs on every heartbeat, per open project. The three
+/// `rev-parse --verify` probes it used to make are one `for-each-ref` listing now —
+/// the answers were all in the same place, and each probe was a whole process.
+pub(crate) fn remote_ref_of(repo: &Path, branch: &str) -> RemoteRef {
+    // `rev-parse @{u}` prints nothing and exits non-zero when there is no upstream,
+    // so the empty string IS the answer — the separate --verify probe said nothing
+    // this one does not.
+    let up = git_in(repo, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+    let up = up.lines().next().unwrap_or("").trim();
+    if !up.is_empty() {
+        return RemoteRef { name: Some(up.to_string()), source: RefSource::Upstream };
     }
-    if !branch.is_empty() {
-        let full = format!("refs/remotes/origin/{branch}");
-        if ok(&["rev-parse", "--verify", "--quiet", &full]) { return Some(format!("origin/{branch}")); }
+    // FULL names, not `%(refname:short)`: origin/HEAD shortens to a bare "origin",
+    // which none of the lookups below would recognise.
+    let refs: Vec<String> = git_in(repo, &["for-each-ref", "--format=%(refname)", "refs/remotes/"])
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("refs/remotes/"))
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    let has = |want: &str| refs.iter().any(|r| r == want);
+
+    if !branch.is_empty() && has(&format!("origin/{branch}")) {
+        return RemoteRef { name: Some(format!("origin/{branch}")), source: RefSource::OriginBranch };
     }
-    if ok(&["rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD"]) {
+    if has("origin/HEAD") {
         // origin/HEAD is a symbolic ref: say the name it points at ("origin/main"),
         // which is the name the user sees on GitHub and the one git prints back
-        let name = git_in(repo, &["rev-parse", "--abbrev-ref", "origin/HEAD"]);
-        return Some(if name.is_empty() { "origin/HEAD".into() } else { name });
+        let full = git_in(repo, &["symbolic-ref", "-q", "refs/remotes/origin/HEAD"]);
+        let name = full.trim().strip_prefix("refs/remotes/").unwrap_or("").to_string();
+        let name = if name.is_empty() { "origin/HEAD".to_string() } else { name };
+        return RemoteRef { name: Some(name), source: RefSource::OriginHead };
     }
-    None
+    // THE BUG: `publish_kind` answered "ok" off a `--contains` hit while this
+    // returned None, and the panel showed a published branch against an empty ref.
+    // If a remote branch holds this HEAD, that branch IS the ref to name.
+    if !refs.is_empty() {
+        if let Some(r) = git_in(repo, &["branch", "-r", "--contains", "HEAD"])
+            .lines().map(str::trim).find(|l| !l.is_empty() && !l.contains(" -> "))
+        {
+            return RemoteRef { name: Some(r.to_string()), source: RefSource::OriginContaining };
+        }
+    }
+    RemoteRef { name: None, source: RefSource::Nothing }
 }
 
 /// `no-remote` when nothing is configured, `never-published` only when NOTHING of
-/// this history is on the remote, `ok` otherwise. Three questions, cheapest first:
+/// this history is on the remote, `ok` otherwise.
 ///
-/// 1. Does `origin/<branch>` exist? Then this branch is published, however far
-///    ahead it has run since. (`--contains HEAD` alone said "never published" the
-///    moment there was one local save on top of what was pushed.)
-/// 2. Does any remote ref contain HEAD? Then it is published under another name.
-/// 3. Does any remote ref contain where this branch FORKED from published history?
-///    A new branch in a clone is not "never published" — its base is on the remote,
-///    only its new saves are not. Nothing remote at all is what "never" means.
-///
-/// The exact `origin/<branch>` lookup is deliberate: `remote_ref`'s `origin/HEAD`
-/// fallback answers for a branch that was never pushed, which is right for "what do
-/// I measure ahead/behind against" and wrong for "was this published".
-pub(crate) fn publish_kind(repo: &Path, branch: &str, remote_url: &str) -> &'static str {
+/// Three of the four ref sources have already answered it: an upstream or an
+/// `origin/<branch>` means this branch is on the remote however far ahead it has run
+/// since (`--contains HEAD` alone said "never published" the moment there was one
+/// local save on top of what was pushed), and a containing branch means HEAD itself
+/// is up there. Only `origin/HEAD` and `nothing` pay for a probe, and it is now ONE:
+/// how many of HEAD's commits sit on no remote ref at all. Fewer than all of them
+/// means this history came off the remote and only the new saves are local — a fresh
+/// branch in a clone is not "never published". All of them is what "never" means.
+pub(crate) fn publish_kind(repo: &Path, rref: &RemoteRef, remote_url: &str, commits: u32) -> &'static str {
     if remote_url.is_empty() { return "no-remote"; }
-    let rev = |args: &[&str]| {
-        let out = git_in(repo, args);
-        if out.trim().is_empty() { None } else { Some(out.trim().to_string()) }
-    };
-    let contained = |rev: &str| git_in(repo, &["branch", "-r", "--contains", rev])
-        .lines().any(|l| !l.trim().is_empty());
-
-    if !branch.is_empty()
-        && rev(&["rev-parse", "--verify", "--quiet", &format!("refs/remotes/origin/{branch}")]).is_some() {
+    if matches!(rref.source,
+        RefSource::Upstream | RefSource::OriginBranch | RefSource::OriginContaining) {
         return "ok";
     }
-    if contained("HEAD") { return "ok"; }
-    // the fork point: origin/HEAD if the clone set one, else any remote ref at all
-    let anchor = rev(&["rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD"])
-        .or_else(|| rev(&["for-each-ref", "--count=1", "--format=%(objectname)", "refs/remotes/"]));
-    match anchor.and_then(|a| rev(&["merge-base", "HEAD", &a])) {
-        Some(base) if contained(&base) => "ok",
-        _ => "never-published",
-    }
+    if commits == 0 { return "never-published"; } // nothing to have published
+    let unpublished: u32 = git_in(repo, &["rev-list", "--count", "HEAD", "--not", "--remotes"])
+        .trim().parse().unwrap_or(commits);
+    if unpublished < commits { "ok" } else { "never-published" }
 }
 
 /// `(ahead, behind)` — how many saves are here that the remote ref lacks, and
@@ -1283,6 +1338,23 @@ async fn init_status(roots: State<'_, OpenRoots>, init: State<'_, InitState>, di
     }
 }
 
+/// Set by `quit_app` once the frontend's unsaved-file guard has passed, and by the
+/// window teardown (a closed window has nothing left to ask about). Everything else
+/// that asks the app to exit is turned back at `RunEvent::ExitRequested`.
+static REALLY_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The last step of quitting, and the only one that ends the process. The frontend
+/// calls this after ⌘Q's guard finds nothing unsaved (or the user says go ahead);
+/// until then `ExitRequested` keeps turning the exit back.
+///
+/// Synchronous on purpose: an async command answers on a worker thread and the
+/// caller's promise would race the shutdown.
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    REALLY_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
+    app.exit(0);
+}
+
 fn state_for_project(p: &Project) -> Value {
     let ctx = Ctx::build(p);
 
@@ -1293,10 +1365,10 @@ fn state_for_project(p: &Project) -> Value {
     // does this project have an online home at all? (no network — just the configured remote)
     let remote_url = git_in(&p.repo, &["remote", "get-url", "origin"]);
     let commits: u32 = git_in(&p.repo, &["rev-list", "--count", "HEAD"]).parse().unwrap_or(0);
-    let rref = remote_ref(&p.repo, &branch);
-    let upstream = rref.is_some();
-    let (ahead, behind) = rref.as_deref().map(|r| ahead_behind(&p.repo, r)).unwrap_or((0, 0));
-    let published = publish_kind(&p.repo, &branch, &remote_url);
+    let rref = remote_ref_of(&p.repo, &branch);
+    let upstream = rref.name.is_some();
+    let (ahead, behind) = rref.name.as_deref().map(|r| ahead_behind(&p.repo, r)).unwrap_or((0, 0));
+    let published = publish_kind(&p.repo, &rref, &remote_url, commits);
     let dirty = dirty_set(&p.repo);
     let worktrees: Vec<Worktree> = git_in(&p.repo, &["worktree", "list", "--porcelain"])
         .split("\n\n").filter(|b| !b.trim().is_empty())
@@ -1369,7 +1441,7 @@ fn state_for_project(p: &Project) -> Value {
         "is_git": is_git, "git_degraded": git_degraded,
         "branch": branch, "upstream": upstream, "ahead": ahead, "behind": behind,
         "remote_url": remote_url, "commits": commits,
-        "published": published, "remote_ref": rref.clone().unwrap_or_default(),
+        "published": published, "remote_ref": rref.name.clone().unwrap_or_default(),
         "last_commit": git_in(&p.repo, &["log", "-1", "--format=%h · %s"]),
         "tags": tags_sorted,
         "worktrees": worktrees, "dirty": dirty,
@@ -1662,7 +1734,10 @@ fn fs_event_matters(path: &std::path::Path) -> bool {
     let s = path.to_string_lossy();
     if s.contains("/node_modules/") || s.contains("/target/") || s.contains("/dist/")
         || s.ends_with(".DS_Store") || s.contains("/.chronicle/journal.jsonl")
-        || s.ends_with(".tmp") {
+        // the atomic-write temps: `.tmp` is the notes vault's, `.chronicle-tmp` is
+        // what `files::write_at` names its own — every save wrote one and every
+        // save woke the whole poll
+        || s.ends_with(".tmp") || s.ends_with(".chronicle-tmp") {
         return false;
     }
     if let Some(idx) = s.find("/.git/") {
@@ -3079,6 +3154,9 @@ fn main() {
             // shell and every background roadmap session.
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 let app = window.app_handle();
+                // the window is closed: there is no buffer left to ask about, so the
+                // exit that follows must NOT be turned back
+                REALLY_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
                 if let Some(pty) = app.try_state::<PtyState>() {
                     if let Ok(mut g) = pty.sessions.lock() {
                         for (_, h) in g.drain() { reap_pty(h); }
@@ -3120,15 +3198,30 @@ fn main() {
             journal_append, journal_read, notify, draft_save_message,
             global_search, status_report,
             github_repos, github_clone, github_create,
-            watch_project, unwatch_project, launch_open_dir,
+            watch_project, unwatch_project, launch_open_dir, quit_app,
             power::get_power_source, power::set_ui_visible,
             web::web_open_file, web::web_tabs_load, web::web_tabs_save,
             web::web_tab_open, web::web_tab_close, web::web_tab_show, web::web_hide_all,
             web::web_set_bounds, web::web_tab_navigate, web::web_tab_back, web::web_tab_forward, web::web_tab_reload,
             blocklists::web_blocklists_prepare, blocklists::web_blocklists_info
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Chronicle");
+        .build(tauri::generate_context!())
+        .expect("error while building Chronicle")
+        // ⌘Q is a menu row of ours now (menu.rs), but the Dock's Quit, `osascript
+        // quit` and "Quit" from the app switcher still come straight here — and used
+        // to take an edited buffer with them. Turn every one of them back and replay
+        // the same chord the menu emits, so the ONE guard in the frontend runs; it
+        // calls `quit_app` when it is done, and that is what gets past this.
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = &event {
+                if !REALLY_QUIT.load(std::sync::atomic::Ordering::SeqCst) {
+                    api.prevent_exit();
+                    if let Some(k) = menu::key_for("go-quit") {
+                        let _ = app.emit_to(tauri::EventTarget::webview("main"), "menu-key", k);
+                    }
+                }
+            }
+        });
 }
 
 /* ================= R1 gate tests (the jail, the allowlist, the reaper) ================= */
@@ -3680,6 +3773,17 @@ mod history_tests {
         d
     }
 
+    fn commits_of(d: &Path) -> u32 {
+        git_in(d, &["rev-list", "--count", "HEAD"]).trim().parse().unwrap_or(0)
+    }
+    /// What `state_for_project` asks, in one line the assertions can read.
+    fn kind(d: &Path, branch: &str, url: &str) -> &'static str {
+        publish_kind(d, &remote_ref_of(d, branch), url, commits_of(d))
+    }
+    fn rref(d: &Path, branch: &str) -> Option<String> {
+        remote_ref_of(d, branch).name
+    }
+
     /// THE BUG: `.trim()` ate the leading space of the first porcelain line, so
     /// " M a.txt" parsed as code "M" over path "xt". Only the trailing newline goes.
     #[test]
@@ -3788,13 +3892,13 @@ mod history_tests {
         git(&d, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
 
         // a remote is configured but nothing was ever pushed
-        assert_eq!(publish_kind(&d, "main", "url"), "never-published");
-        assert_eq!(remote_ref(&d, "main"), None);
+        assert_eq!(kind(&d, "main", "url"), "never-published");
+        assert_eq!(rref(&d, "main"), None);
 
         // pushed WITHOUT -u: no @{u}, but refs/remotes/origin/main exists
         git(&d, &["push", "-q", "origin", "main"]);
-        assert_eq!(remote_ref(&d, "main").as_deref(), Some("origin/main"));
-        assert_eq!(publish_kind(&d, "main", "url"), "ok");
+        assert_eq!(rref(&d, "main").as_deref(), Some("origin/main"));
+        assert_eq!(kind(&d, "main", "url"), "ok");
         assert_eq!(ahead_behind(&d, "origin/main"), (0, 0));
 
         // one local save on top
@@ -3819,7 +3923,7 @@ mod history_tests {
 
         assert!(git_in(&d, &["branch", "-r", "--contains", "HEAD"]).trim().is_empty(),
                 "the premise: no remote ref contains HEAD anymore");
-        assert_eq!(publish_kind(&d, "main", "url"), "ok");
+        assert_eq!(kind(&d, "main", "url"), "ok");
         assert_eq!(ahead_behind(&d, "origin/main"), (1, 0));
     }
 
@@ -3830,8 +3934,8 @@ mod history_tests {
         let d = repo("up");
         git(&d, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
         git(&d, &["push", "-qu", "origin", "main"]);
-        assert_eq!(remote_ref(&d, "main").as_deref(), Some("origin/main"));
-        assert_eq!(publish_kind(&d, "main", "url"), "ok");
+        assert_eq!(rref(&d, "main").as_deref(), Some("origin/main"));
+        assert_eq!(kind(&d, "main", "url"), "ok");
     }
 
     /// A branch made in a clone has no `origin/<branch>` and no remote ref contains
@@ -3858,9 +3962,9 @@ mod history_tests {
         assert!(git_in(&d, &["rev-parse", "--verify", "--quiet", "refs/remotes/origin/feature"]).is_empty());
         assert!(git_in(&d, &["branch", "-r", "--contains", "HEAD"]).trim().is_empty());
 
-        assert_eq!(publish_kind(&d, "feature", "url"), "ok");
+        assert_eq!(kind(&d, "feature", "url"), "ok");
         // and it is named the way the user would name it, not "origin/HEAD"
-        assert_eq!(remote_ref(&d, "feature").as_deref(), Some("origin/main"));
+        assert_eq!(rref(&d, "feature").as_deref(), Some("origin/main"));
         assert_eq!(ahead_behind(&d, "origin/main"), (1, 0));
     }
 
@@ -3871,13 +3975,117 @@ mod history_tests {
         let d = repo("no-refs");
         git(&d, &["remote", "add", "origin", "https://example.invalid/x.git"]);
         assert!(git_in(&d, &["for-each-ref", "refs/remotes/"]).trim().is_empty());
-        assert_eq!(publish_kind(&d, "main", "url"), "never-published");
+        assert_eq!(kind(&d, "main", "url"), "never-published");
+    }
+
+    /// THE BUG: the watcher ignored `.tmp` (the notes vault's temp) but not
+    /// `.chronicle-tmp`, the name `files::write_at` gives its own. So every save of
+    /// every file woke a full ground-truth poll TWICE — once for the temp, once for
+    /// the rename — on top of the 8-second one.
+    #[test]
+    fn the_watcher_ignores_both_atomic_write_temps() {
+        let m = |s: &str| fs_event_matters(std::path::Path::new(s));
+        assert!(!m("/p/.chronicle/notes/Tasks/A.md.tmp"));
+        assert!(!m("/p/src/.main.rs.4821-7.chronicle-tmp"));
+        assert!(!m("/p/.git/objects/ab/cd"));
+        assert!(!m("/p/node_modules/x/index.js"));
+        assert!(!m("/p/target/debug/x"));
+        assert!(!m("/p/.DS_Store"));
+        assert!(!m("/p/.chronicle/journal.jsonl"));
+        // and the writes that DO move the roadmap still do
+        assert!(m("/p/src/main.rs"));
+        assert!(m("/p/chronicle.json"));
+        assert!(m("/p/.git/HEAD"));
+        assert!(m("/p/.git/refs/heads/main"));
+        // a real file that merely ends in those words is still the user's
+        assert!(m("/p/docs/chronicle-tmp"));
     }
 
     #[test]
     fn no_remote_is_not_never_published() {
         let d = repo("solo");
-        assert_eq!(publish_kind(&d, "main", ""), "no-remote");
-        assert_eq!(remote_ref(&d, "main"), None);
+        assert_eq!(kind(&d, "main", ""), "no-remote");
+        assert_eq!(rref(&d, "main"), None);
+    }
+
+    /// THE BUG: a branch published under another name answered "ok" while the ref
+    /// came back None, and the panel drew "Published to " with nothing after it.
+    /// The `--contains` hit names the branch it found — that IS the ref.
+    #[test]
+    fn a_branch_published_under_another_name_is_named_not_left_blank() {
+        let origin = tmp("alias-origin");
+        git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+        let d = repo("alias");
+        git(&d, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
+        // pushed to a DIFFERENT remote branch name, and no origin/HEAD in a repo
+        // that was never cloned
+        git(&d, &["push", "-q", "origin", "main:release"]);
+        git(&d, &["fetch", "-q", "origin"]);
+        assert!(git_in(&d, &["rev-parse", "--verify", "--quiet", "refs/remotes/origin/HEAD"]).is_empty(),
+                "the premise: no origin/HEAD to fall back to");
+
+        let r = remote_ref_of(&d, "main");
+        assert_eq!(r.source, RefSource::OriginContaining);
+        assert_eq!(r.name.as_deref(), Some("origin/release"));
+        assert_eq!(publish_kind(&d, &r, "url", commits_of(&d)), "ok");
+    }
+
+    /// THE COST: `get_state` runs this per open project on every 8-second
+    /// heartbeat. Resolving the ref and the publish state used to re-probe the same
+    /// refs up to eleven times over — three `rev-parse --verify` for the ref, then
+    /// `--contains`, another `rev-parse`, a `for-each-ref` and a `merge-base` to ask
+    /// again. On the shape Chronicle's own repo has — a work branch with no
+    /// `origin/<branch>`, an `origin/HEAD` to measure against — it is five.
+    #[test]
+    fn the_remote_block_costs_five_git_spawns() {
+        let origin = tmp("cost-origin");
+        git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+        let seed = repo("cost-seed");
+        git(&seed, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
+        git(&seed, &["push", "-q", "origin", "main"]);
+        let work = tmp("cost-work");
+        git(&work, &["clone", "-q", origin.to_string_lossy().as_ref(), "c"]);
+        let d = work.join("c");
+        git(&d, &["config", "user.email", "t@t"]);
+        git(&d, &["config", "user.name", "t"]);
+        git(&d, &["checkout", "-qb", "work"]);
+        std::fs::write(d.join("a.txt"), "two\n").unwrap();
+        git(&d, &["commit", "-qam", "fix: a local save"]);
+        let commits = commits_of(&d);
+
+        let (out, spawns) = git_spawns(|| {
+            let r = remote_ref_of(&d, "work");
+            let ab = r.name.as_deref().map(|n| ahead_behind(&d, n)).unwrap_or((0, 0));
+            let k = publish_kind(&d, &r, "url", commits);
+            (r, ab, k)
+        });
+        let (r, ab, k) = out;
+        assert_eq!(spawns, 5,
+            "@{{u}}, for-each-ref, symbolic-ref, rev-list --left-right, rev-list --not --remotes");
+        assert_eq!(r.source, RefSource::OriginHead);
+        assert_eq!(r.name.as_deref(), Some("origin/main"));
+        assert_eq!(ab, (1, 0));
+        assert_eq!(k, "ok");
+    }
+
+    /// The cheapest shape, and the common one: a branch with an upstream needs the
+    /// ref and the counts, and nothing may ask whether it is published — the
+    /// upstream already said so.
+    #[test]
+    fn an_upstream_branch_costs_two() {
+        let origin = tmp("cheap-origin");
+        git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+        let d = repo("cheap");
+        git(&d, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
+        git(&d, &["push", "-qu", "origin", "main"]);
+        let commits = commits_of(&d);
+
+        let (k, spawns) = git_spawns(|| {
+            let r = remote_ref_of(&d, "main");
+            let _ = r.name.as_deref().map(|n| ahead_behind(&d, n));
+            publish_kind(&d, &r, "url", commits)
+        });
+        assert_eq!(spawns, 2, "rev-parse @{{u}} and one rev-list for the counts");
+        assert_eq!(k, "ok");
     }
 }
