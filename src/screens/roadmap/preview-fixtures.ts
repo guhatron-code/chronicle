@@ -9,7 +9,7 @@ import type { BuildingCardProps } from "./BuildingCard";
 import type { ConsentCardProps } from "./ConsentCard";
 import type { CurrentStateBannerProps } from "./CurrentStateBanner";
 import type { DocumentsPanelProps } from "./DocumentsPanel";
-import type { HistoryPanelProps, HistoryStatus } from "./HistoryPanel";
+import type { HistoryPanelProps } from "./HistoryPanel";
 import type { NeedsYouProps } from "./NeedsYou";
 import type { PhaseDetailProps, DetailSaves } from "./PhaseDetail";
 import type { PhaseRailProps } from "./PhaseRail";
@@ -123,24 +123,41 @@ export const problemBasicView: ProblemCardProps = { kind: "basic-view" };
 
 export const historyPanel: HistoryPanelProps = {
   kind: "panel",
-  status: { kind: "waiting", label: "2 saves waiting to publish" },
-  nodes: [
-    { label: "Edits on disk", count: "4 files", marker: "dot" },
-    { label: "Saved to history", count: "2 waiting", marker: "done" },
-    { label: "Published online", count: "behind by 2", marker: "pending" },
-  ],
-  arrowsActive: [true, false],
-  milestones: ["phase-0", "phase-1"],
-  files: [
-    { path: "src/screens/Pricing.tsx", badge: "new" },
-    { path: "src/screens/Home.tsx", badge: "edited" },
-    { path: "docs/PLAN.md", badge: "edited" },
-  ],
-  moreCount: 3,
+  lastSave: { ago: "3 hours ago", subject: "fix(pricing): the tier card wraps at 320px" },
+  uncommitted: {
+    open: true,
+    files: [
+      { path: "src/screens/Pricing.tsx", badge: "new" },
+      { path: "src/screens/Home.tsx", badge: "edited" },
+      { path: "docs/PLAN.md", badge: "edited" },
+      { path: "src/old/Legacy.tsx", badge: "deleted" },
+    ],
+  },
+  remote: { kind: "counts", ahead: 2, behind: 0, refName: "origin/main", checked: "20 minutes ago" },
+  lastPublish: { ago: "3 weeks ago", tag: "v0.7.0" },
 };
 
-export const historyStatusPublished: HistoryStatus = { kind: "published" };
-export const historyStatusUntracked: HistoryStatus = { kind: "untracked" };
+export const historyEverythingSaved: HistoryPanelProps = {
+  ...historyPanel,
+  uncommitted: { open: false, files: [] },
+  remote: { kind: "counts", ahead: 0, behind: 0, refName: "origin/main", checked: "just now" },
+};
+
+export const historyOffline: HistoryPanelProps = {
+  ...historyPanel,
+  remote: {
+    kind: "counts", ahead: 2, behind: 0, refName: "origin/main",
+    checked: "20 minutes ago", error: "Could not resolve host: github.com",
+  },
+};
+
+export const historyNeverChecked: HistoryPanelProps = {
+  ...historyPanel,
+  remote: { kind: "never-published" },
+  lastPublish: null,
+};
+
+export const historyDegraded: HistoryPanelProps = { kind: "degraded" };
 
 export const historyNoHistory: HistoryPanelProps = { kind: "no-history" };
 

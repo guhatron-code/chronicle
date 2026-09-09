@@ -568,6 +568,14 @@ export const focusMainWebview = () => getCurrentWebview().setFocus();
 /* ---------- window chrome + dialogs (frameless window) ---------- */
 export const pickFolder = () => openDialog({ directory: true });
 
+/** The window is closing. Return false to hold it open (an unsaved buffer);
+ *  return true to let it go. Register ONCE at app scope and return the
+ *  UnlistenFn from the effect's cleanup. */
+export const onWindowClose = (cb: () => Promise<boolean> | boolean): Promise<UnlistenFn> =>
+  getCurrentWindow().onCloseRequested(async (e) => {
+    if (!(await cb())) e.preventDefault();
+  });
+
 export function windowControls() {
   const w = getCurrentWindow();
   return {

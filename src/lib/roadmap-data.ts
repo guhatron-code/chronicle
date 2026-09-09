@@ -4,7 +4,7 @@
  * arrive through the context — this module never touches IPC.
  */
 import { createElement } from "react";
-import type { StateData, ManifestPhase, PhaseStatus } from "./ipc";
+import type { StateData, ManifestPhase, PhaseStatus, HistoryFacts } from "./ipc";
 import { sentence } from "./utils";
 import { indexFor } from "./notes-store";
 import type { RoadmapProps } from "@/screens/roadmap/Roadmap";
@@ -12,9 +12,78 @@ import type { NeedsYouRow } from "@/screens/roadmap/NeedsYou";
 import type { RailPhase, RailStage, RailChip } from "@/screens/roadmap/PhaseRail";
 import type { DocChipProps } from "@/screens/roadmap/DocumentsPanel";
 import type { CurrentStateBannerProps } from "@/screens/roadmap/CurrentStateBanner";
-import type { HistoryPanelProps, PipelineNode } from "@/screens/roadmap/HistoryPanel";
+import type { HistoryLineFile, HistoryPanelProps, RemoteLine } from "@/screens/roadmap/HistoryPanel";
 import type { ProblemCardProps } from "@/screens/roadmap/ProblemCard";
 import { CodeGlyph, FolderSimpleGlyph, UploadGlyph } from "@/components/chrome/icons";
+
+/* ---------- the history section: facts in, four lines out ---------- */
+
+/** The plainest true wording for a moment in the past. `nowMs` is passed in so
+ *  the function is pure and the panel never claims more precision than the
+ *  next render can honour. Never says a time in the future — a clock skew
+ *  reads as "just now" rather than "in 8 minutes". */
+export function ago(nowMs: number, tsSeconds: number): string {
+  const s = Math.max(0, Math.floor(nowMs / 1000) - tsSeconds);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
+  const h = Math.floor(s / 3600);
+  if (h < 24) return `${h} hour${h === 1 ? "" : "s"} ago`;
+  const d = Math.floor(s / 86_400);
+  if (d === 1) return "yesterday";
+  if (d < 7) return `${d} days ago`;
+  const w = Math.floor(d / 7);
+  if (d < 60) return `${w} week${w === 1 ? "" : "s"} ago`;
+  const mo = Math.floor(d / 30);
+  if (mo < 12) return `${mo} month${mo === 1 ? "" : "s"} ago`;
+  const y = Math.floor(d / 365);
+  return `${y} year${y === 1 ? "" : "s"} ago`;
+}
+
+/** get_state told us whether there is a repo; history_facts tells us what it
+ *  says. Everything here is a fact with its own timestamp — nothing is
+ *  computed by subtracting one count from another. */
+export function historyPanelFrom(
+  f: HistoryFacts | null,
+  nowMs: number,
+  ctx: {
+    uncommittedOpen: boolean;
+    checking: boolean;
+    onCheckNow: () => void;
+    onToggleUncommitted: () => void;
+    onViewDetails: () => void;
+    onStartHistory: () => void;
+  },
+): HistoryPanelProps {
+  if (f?.degraded) return { kind: "degraded" };
+  if (f && !f.is_git) return { kind: "no-history", onStartHistory: ctx.onStartHistory };
+  const remote: RemoteLine = !f || f.remote.kind === "no-remote"
+    ? { kind: "no-remote" }
+    : f.remote.kind === "never-published"
+      ? { kind: "never-published" }
+      : {
+          kind: "counts",
+          ahead: f.remote.ahead,
+          behind: f.remote.behind,
+          refName: f.remote.ref_name,
+          checked: f.remote.checked_ms === null ? "never checked" : ago(nowMs, Math.floor(f.remote.checked_ms / 1000)),
+          error: f.remote.error ?? undefined,
+        };
+  return {
+    kind: "panel",
+    lastSave: f?.last_save ? { ago: ago(nowMs, f.last_save.ts), subject: f.last_save.subject } : null,
+    uncommitted: {
+      files: (f?.dirty ?? []).map((d): HistoryLineFile => ({ path: d.path, badge: d.badge })),
+      open: ctx.uncommittedOpen,
+    },
+    remote,
+    lastPublish: f?.last_publish ? { ago: ago(nowMs, f.last_publish.ts), tag: f.last_publish.tag } : null,
+    checking: ctx.checking,
+    onCheckNow: ctx.onCheckNow,
+    onToggleUncommitted: ctx.onToggleUncommitted,
+    onViewDetails: ctx.onViewDetails,
+  };
+}
 
 /* ---------- the app-local slice the mapper needs ---------- */
 
@@ -48,7 +117,10 @@ export interface RoadmapCtx {
   /** A phase that flipped to done during this session — the quiet ring moment. */
   justDoneId?: string | null;
   justSwitched: boolean;
-  publishing: boolean; // a publish/pull one-click is in flight
+  /** The history section's facts — null until the first history_facts lands. */
+  historyFacts: HistoryFacts | null;
+  historyChecking: boolean;
+  uncommittedOpen: boolean;
   handlers: {
     onAgentChange: (a: "claude" | "codex") => void;
     onBuild: () => void;
@@ -76,6 +148,8 @@ export interface RoadmapCtx {
     onViewDetails: (id: string) => void;
     onHistoryDetails: () => void;
     onStartHistory: () => void;
+    onCheckNow: () => void;
+    onToggleUncommitted: () => void;
     onAddNext: () => void;
     onReadDecision: (id: string) => void;
   };
@@ -397,45 +471,15 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     }
   }
 
-  /* -- history panel -- */
-  if (!s.is_git) {
-    props.history = { kind: "no-history", onStartHistory: H.onStartHistory };
-  } else {
-    const published = Math.max(0, s.commits - s.ahead);
-    const nodes: [PipelineNode, PipelineNode, PipelineNode] = [
-      // deck F18: neutral dot = content waiting at this stage · green check = stage satisfied · hollow = pending
-      { label: "Edits on disk", count: `${s.dirty.length} file${s.dirty.length === 1 ? "" : "s"}`, marker: s.dirty.length > 0 ? "dot" : "done" },
-      {
-        label: "Saved to history",
-        count: s.ahead > 0 ? `${s.ahead} waiting` : `${s.commits} save${s.commits === 1 ? "" : "s"}`,
-        marker: s.commits > 0 ? "done" : "pending",
-      },
-      !s.upstream
-        ? { label: "Published online", count: s.remote_url ? "never published" : "not on GitHub", marker: "pending" }
-        : s.behind > 0
-          ? { label: "Published online", count: `behind by ${s.behind}`, marker: "pending" }
-          : { label: "Published online", count: `${published} up`, marker: s.ahead > 0 ? "pending" : "done" },
-    ];
-    for (const n of nodes) n.onClick = H.onHistoryDetails;
-    const status =
-      !s.upstream ? ({ kind: "untracked" } as const)
-      : s.ahead > 0 ? ({ kind: "waiting", label: `${s.ahead} save${s.ahead > 1 ? "s" : ""} waiting to publish` } as const)
-      : ({ kind: "published" } as const);
-    const files = s.dirty.slice(0, 4).map((d) => ({
-      path: d.path,
-      badge: d.code === "?" || d.code === "A" ? "new" : "edited",
-    }));
-    props.history = {
-      kind: "panel",
-      status,
-      nodes,
-      arrowsActive: [false, ctx.publishing],
-      milestones: s.tags.slice(-3),
-      files,
-      moreCount: Math.max(0, s.dirty.length - 4) || undefined,
-      onViewDetails: H.onHistoryDetails,
-    } satisfies HistoryPanelProps;
-  }
+  /* -- history panel: four facts, no pipeline, no milestones, no save count -- */
+  props.history = historyPanelFrom(ctx.historyFacts, Date.now(), {
+    uncommittedOpen: ctx.uncommittedOpen,
+    checking: ctx.historyChecking,
+    onCheckNow: H.onCheckNow,
+    onToggleUncommitted: H.onToggleUncommitted,
+    onViewDetails: H.onHistoryDetails,
+    onStartHistory: H.onStartHistory,
+  });
 
   /* -- what needs you -- */
   if (s.manifest_present || s.is_git) {

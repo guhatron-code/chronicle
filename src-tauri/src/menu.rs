@@ -68,9 +68,11 @@ const GO: &[Go] = &[
     Go { id: "go-agent",    text: "Toggle Agent",    accel: "Alt+Cmd+Digit2", key: "2", code: "Digit2", alt: true, shift: false, group: 3 },
     Go { id: "go-terminal", text: "Toggle Terminal", accel: "Alt+Cmd+Digit3", key: "3", code: "Digit3", alt: true, shift: false, group: 3 },
     Go { id: "go-help", text: "Keyboard Shortcuts", accel: "Cmd+Slash", key: "/", code: "Slash", alt: false, shift: false, group: 4 },
-    // the Notes pane
-    Go { id: "go-new-note",  text: "New Note",     accel: "Cmd+KeyN", key: "n", code: "KeyN", alt: false, shift: false, group: 5 },
-    Go { id: "go-jump-note", text: "Jump to Note", accel: "Cmd+KeyP", key: "p", code: "KeyP", alt: false, shift: false, group: 5 },
+    // the Notes and Repo panes — ⌘N means "new note" on Notes and "new file" on
+    // Repo, and App.tsx branches on the active pane; ⌘S saves the open file
+    Go { id: "go-new-note",  text: "New Note or File", accel: "Cmd+KeyN", key: "n", code: "KeyN", alt: false, shift: false, group: 5 },
+    Go { id: "go-jump-note", text: "Jump to Note",     accel: "Cmd+KeyP", key: "p", code: "KeyP", alt: false, shift: false, group: 5 },
+    Go { id: "go-save",      text: "Save",             accel: "Cmd+KeyS", key: "s", code: "KeyS", alt: false, shift: false, group: 5 },
     // jump to an open project by position — plain ⌘, no ⌥
     Go { id: "go-project-1", text: "Project 1", accel: "Cmd+Digit1", key: "1", code: "Digit1", alt: false, shift: false, group: 6 },
     Go { id: "go-project-2", text: "Project 2", accel: "Cmd+Digit2", key: "2", code: "Digit2", alt: false, shift: false, group: 6 },
@@ -247,12 +249,13 @@ mod tests {
 
     #[test]
     fn the_notes_chords_are_new_and_plain() {
-        for id in ["go-new-note", "go-jump-note"] {
+        for id in ["go-new-note", "go-jump-note", "go-save"] {
             let k = key_for(id).unwrap();
             assert!(k.meta && !k.alt && !k.shift, "{id} is a plain Cmd chord");
         }
         assert_eq!(key_for("go-new-note").unwrap().key, "n");
         assert_eq!(key_for("go-jump-note").unwrap().key, "p");
+        assert_eq!(key_for("go-save").unwrap().key, "s");
     }
 
     #[test]

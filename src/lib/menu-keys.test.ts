@@ -35,6 +35,7 @@ describe("reclaimsFocus", () => {
     for (const k of [
       cmd("k", "KeyK"), cmd("t", "KeyT"), cmd("l", "KeyL"), cmd("w", "KeyW"),
       cmd("j", "KeyJ"), cmd("/", "Slash"), cmd("o", "KeyO"), cmd("5", "Digit5"),
+      cmd("s", "KeyS"), cmd("n", "KeyN"), cmd("p", "KeyP"),
     ])
       expect(reclaimsFocus(k)).toBe(true);
     expect(reclaimsFocus(altCmd("1", "Digit1"))).toBe(true);

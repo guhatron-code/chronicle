@@ -21,18 +21,22 @@ import {
   focusMainWebview,
   getPicker,
   getState,
+  historyFacts,
   onMenuKey,
   onNotesMigrated,
+  onWindowClose,
   openProject,
   pickFolder,
   removeRecent,
   windowControls,
+  type HistoryFacts,
   type PickerRecent,
 } from "@/lib/ipc";
 import { keydownInit, reclaimsFocus } from "@/lib/menu-keys";
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
 import { RoadmapPane } from "@/screens/roadmap/RoadmapPane";
-import { RepoPane, evictRepo, openHistoryView } from "@/screens/repo/RepoPane";
+import { RepoPane, confirmDirty, evictRepo, openHistoryView, saveActiveFile } from "@/screens/repo/RepoPane";
+import { anyDirty, dirtyPathsFor } from "@/lib/repo-editor";
 import { openFileInRepo } from "@/screens/repo/RepoPane";
 import { SearchOverlay } from "@/overlays/SearchOverlay";
 import {
@@ -62,6 +66,7 @@ import { isHtmlPath, isClaudeArtifactUrl } from "@/lib/web-url";
 import {
   createNote,
   evictNotes,
+  flushSave,
   followLinkUnderCaret,
   noteGeneration,
   noteHistoryBack,
@@ -159,12 +164,19 @@ export default function App() {
   const [newProjOpen, setNewProjOpen] = useState(false);
   const [newProjError, setNewProjError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmSpec | null>(null);
+  /* The roadmap's history section. history_facts costs ~10 git spawns, so it is
+     asked for ONLY while the roadmap is the pane on screen: once when it opens,
+     then on the poll below (the 60s heartbeat + the fs watcher). A hidden pane
+     asks for nothing and asks again when it comes back. It never fetches. */
+  const [histFacts, setHistFacts] = useState<{ dir: string; facts: HistoryFacts } | null>(null);
   const devPreset = useRef<RecentProject[] | null>(null);
   const [, bump] = useState(0);
   const projectsRef = useRef(projects);
   projectsRef.current = projects;
   const activeRef = useRef(activeDir);
   activeRef.current = activeDir;
+  const roadmapOnScreenRef = useRef(false);
+  roadmapOnScreenRef.current = pane === "road" && paneLayout.content;
 
   const refreshPicker = useCallback(() => {
     getPicker()
@@ -212,9 +224,10 @@ export default function App() {
             announce(dir, "phase-done", `${st.id} is done`, name);
           }
         }
-        if ((before.state.ahead ?? 0) > 0 && (s.ahead ?? 0) === 0 && s.upstream) {
-          announce(dir, "published", "Everything is published", name);
-        }
+        // a counter falling from 2 to 0 is NOT evidence of a publish — the branch
+        // could have been rebased, the remote ref could have moved, the count
+        // could simply have been wrong. Only a push that returned says "published",
+        // and it says so from where the push happened.
       }
       setProjects((prev) => {
         const next = new Map(prev);
@@ -235,6 +248,12 @@ export default function App() {
     } catch {
       /* transient failures keep the last-known state (honesty: checked_at stays old) */
     }
+    // the history section's four facts, on the same cadence and only while the
+    // roadmap is the pane on screen — history_facts reads git and never fetches
+    if (dir === activeRef.current && roadmapOnScreenRef.current) {
+      const f = await historyFacts(dir).catch(() => null);
+      if (f && dir === activeRef.current) setHistFacts({ dir, facts: f });
+    }
   }, []);
 
   /* the ground-truth heartbeat: 60s through the scheduler (hidden pauses it,
@@ -245,6 +264,19 @@ export default function App() {
     if (projects.size === 0) return;
     return every(60_000, () => { for (const dir of projectsRef.current.keys()) void pollOne(dir); });
   }, [projects.size, pollOne]);
+
+  /* the history section, once, when the roadmap comes on screen (and once per
+     project switch). No timer of its own: the poll above keeps it fresh while
+     it is visible, and a hidden roadmap asks for nothing. */
+  useEffect(() => {
+    if (!activeDir || pane !== "road" || !paneLayout.content) return;
+    const dir = activeDir;
+    let dead = false;
+    void historyFacts(dir)
+      .then((f) => { if (!dead) setHistFacts({ dir, facts: f }); })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, [activeDir, pane, paneLayout.content]);
 
   /* fs events → an immediate ground-truth poll (debounced per project: agent
      sessions write in bursts, and pollOne is single-flight anyway) */
@@ -580,21 +612,29 @@ export default function App() {
       });
     };
     const live = liveCount(dir) + (agentRunning ? 1 : 0);
-    if (live > 0) {
+    // unsaved buffers are asked about first, and only once — same prompt as a
+    // project switch. A second dialog can only be raised after this one has
+    // closed itself, or its onClose would wipe the new spec on the same tick.
+    let askedAboutSaves = false;
+    const afterSaves = () => {
+      if (live === 0) { doClose(); return; }
       const body = agentRunning && liveCount(dir) === 0
         ? "The agent is still running here. Closing the project stops it — its changes stay reviewable when you come back."
         : agentRunning
           ? `${live} sessions are still running here (including the agent). Closing the project stops them.`
           : `${live === 1 ? "A session is" : `${live} sessions are`} still running in its terminal. Closing the project stops ${live === 1 ? "it" : "them"}.`;
-      setConfirm({
+      const spec: ConfirmSpec = {
         title: "Close this project?",
         body,
         cancelLabel: "Keep it running",
         confirmLabel: live === 1 ? "Close and stop the session" : "Close and stop the sessions",
         danger: true,
         onConfirm: doClose,
-      });
-    } else doClose();
+      };
+      if (askedAboutSaves) setTimeout(() => setConfirm(spec), 0);
+      else setConfirm(spec);
+    };
+    confirmDirty(dir, (spec) => { askedAboutSaves = true; setConfirm(spec); }, afterSaves);
   }, []);
 
   /* the palette's GitHub group — fetched once per session, on first open */
@@ -707,6 +747,15 @@ export default function App() {
         e.preventDefault();
         void createNote(activeRef.current, "", "");
       }
+      else if (mod && e.key === "s" && activeRef.current) {
+        // the editor's own Mod-s already saved and called preventDefault (it does
+        // not stopPropagation, so the chord still bubbles up here) — saving twice
+        // would race two writes at the same path
+        if (e.defaultPrevented) return;
+        e.preventDefault();
+        if (pane === "repo") saveActiveFile(activeRef.current);
+        else if (pane === "notes") void flushSave(activeRef.current);
+      }
       else if (mod && e.key === "p" && activeRef.current) {
         e.preventDefault();
         setSearchScope("notes");
@@ -765,6 +814,38 @@ export default function App() {
       if (fromPage) (document.activeElement as HTMLElement | null)?.blur?.();
       document.body.dispatchEvent(new KeyboardEvent("keydown", keydownInit(k)));
       if (fromPage && reclaimsFocus(k)) void focusMainWebview();
+    }).then((u) => { if (dead) u(); else un = u; });
+    return () => { dead = true; un?.(); };
+  }, []);
+
+  /* ---- quitting with unsaved work asks once ----
+     The window is held open until the dialog is answered. Save and Discard let
+     it go; Cancel, Escape and a click outside all mean "don't quit", which is
+     why the promise resolves false from onCancel (onClose fires on every path,
+     including the two that already said yes). */
+  useEffect(() => {
+    let un: UnlistenFn | undefined;
+    let dead = false;
+    void onWindowClose(async () => {
+      if (!anyDirty()) return true;
+      return await new Promise<boolean>((resolve) => {
+        // one prompt per project that still has unsaved work, the open one
+        // first; a project is asked about once, so Discard can't loop
+        const asked = new Set<string>();
+        const askNext = () => {
+          const dirs = [activeRef.current, ...projectsRef.current.keys()];
+          const dir = dirs.find((d): d is string => !!d && !asked.has(d) && dirtyPathsFor(d).length > 0);
+          if (!dir) { resolve(true); return; }
+          asked.add(dir);
+          confirmDirty(
+            dir,
+            (spec) => setConfirm({ ...spec, onCancel: () => resolve(false) }),
+            // the answered dialog is still closing — a tick lets the next one open
+            () => setTimeout(askNext, 0),
+          );
+        };
+        askNext();
+      });
     }).then((u) => { if (dead) u(); else un = u; });
     return () => { dead = true; un?.(); };
   }, []);
@@ -1049,6 +1130,8 @@ export default function App() {
             onConfirm={setConfirm}
             onPollNow={() => void pollOne(active.dir)}
             onStartPhaseWithAgent={startPhaseWithAgent}
+            historyFacts={histFacts?.dir === active.dir ? histFacts.facts : null}
+            onHistoryFacts={(f) => setHistFacts({ dir: active.dir, facts: f })}
           />
         ) : pane === "repo" ? (
           <RepoPane

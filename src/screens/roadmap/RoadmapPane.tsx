@@ -11,6 +11,7 @@ import {
   copyFile,
   copyText,
   gitCheckout,
+  gitFetch,
   gitInitHere,
   gitPull,
   gitPush,
@@ -27,6 +28,7 @@ import {
   runCommand,
   setDefaultAgent,
   setInitConsent,
+  type HistoryFacts,
   type StateData,
 } from "@/lib/ipc";
 import {
@@ -62,6 +64,8 @@ export function RoadmapPane({
   onConfirm,
   onPollNow,
   onStartPhaseWithAgent,
+  historyFacts,
+  onHistoryFacts,
 }: {
   dir: string;
   state: StateData | null;
@@ -77,6 +81,11 @@ export function RoadmapPane({
   onPollNow: () => void;
   /** F38 — reveal the agent pane and preload this phase's prompt as a draft. */
   onStartPhaseWithAgent: (phaseId: string, promptPath: string | null) => void;
+  /** The history section's four facts — App asks for them only while this pane
+   *  is the one on screen, so a hidden roadmap costs no git. */
+  historyFacts: HistoryFacts | null;
+  /** "Check now" fetched: hand the fresher facts back to the owner. */
+  onHistoryFacts: (f: HistoryFacts) => void;
 }) {
   const [initRun, setInitRunRaw] = useState<InitRun | null>(null);
   const setInitRun = useCallback((v: InitRun | null | ((prev: InitRun | null) => InitRun | null)) => {
@@ -111,6 +120,8 @@ export function RoadmapPane({
     prevDone.current = done;
   }, [state?.statuses]);
   const [publishing, setPublishing] = useState(false);
+  const [historyChecking, setHistoryChecking] = useState(false);
+  const [uncommittedOpen, setUncommittedOpen] = useState(false);
   const [warningDismissed, setWarningDismissed] = useState(false);
   const [consentLocal, setConsentLocal] = useState<"auto" | "manual" | "basic" | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -411,7 +422,9 @@ export function RoadmapPane({
     expandedId,
     justDoneId,
     justSwitched,
-    publishing,
+    historyFacts,
+    historyChecking,
+    uncommittedOpen,
     warningDismissed,
     handlers: {
       onAgentChange: (a) => {
@@ -531,7 +544,11 @@ export function RoadmapPane({
             onConfirm: () => {
               setPublishing(true);
               githubCreate(dir)
-                .then((name) => { toastSuccess("Published online", `${name} — private, under your account`); onPollNow(); })
+                .then((name) => {
+                  toastSuccess("Published online", `${name} — private, under your account`);
+                  announce(dir, "published", `Published online — ${name}`, "Chronicle");
+                  onPollNow();
+                })
                 .catch((e) => toastError("That didn't finish", humanGitError(e)))
                 .finally(() => setPublishing(false));
             },
@@ -541,7 +558,14 @@ export function RoadmapPane({
         const run = async () => {
           setPublishing(true);
           try {
-            if (id === "push" || id === "publish-first") { toastRemoteOutcome(await gitPush(dir)); }
+            if (id === "push" || id === "publish-first") {
+              // the ONLY thing that announces a publish is a push that returned —
+              // and only when it carried something ("Already published — nothing
+              // new" is the one push outcome that is not a publish)
+              const r = await gitPush(dir);
+              toastRemoteOutcome(r);
+              if (!/nothing new/i.test(r.headline)) announce(dir, "published", r.headline, "Chronicle");
+            }
             else if (id === "pull") { toastRemoteOutcome(await gitPull(dir)); }
             else if (id === "branch") { await gitCheckout(dir, arg); toastSuccess(`Switched to ${arg}`); }
             else if (id === "prune") { await gitWorktreePrune(dir); toastSuccess("Cleaned up"); }
@@ -595,6 +619,17 @@ export function RoadmapPane({
           .then(() => { toastSuccess("History started"); onPollNow(); })
           .catch((e) => toastError("Couldn't start history", String(e).slice(0, 90)));
       },
+      /* the only fetch in the app, and it is a click. A failed fetch keeps the
+         numbers and the time it last really checked — git_fetch returns the
+         same facts with `error` set, so the line says why instead of lying. */
+      onCheckNow: () => {
+        setHistoryChecking(true);
+        gitFetch(dir)
+          .then((f) => onHistoryFacts(f))
+          .catch((e) => toastError("Couldn't check", humanGitError(e)))
+          .finally(() => setHistoryChecking(false));
+      },
+      onToggleUncommitted: () => setUncommittedOpen((o) => !o),
       onAddNext: onGoNotes,
       onReadDecision: setDetailId,
     },
