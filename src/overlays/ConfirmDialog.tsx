@@ -36,9 +36,13 @@ export function ConfirmDialog({
   spec: ConfirmSpec | null;
   onClose: () => void;
 }) {
+  /* onClose (which clears the spec) runs BEFORE the answer's handler, so a
+   * handler that raises the next dialog — closing a project asks about unsaved
+   * files first, then about live sessions — wins the tick instead of being
+   * wiped by this dialog's own dismissal. Nothing here reads state after. */
   const dismiss = () => {
-    spec?.onCancel?.();
     onClose();
+    spec?.onCancel?.();
   };
 
   return (
@@ -56,8 +60,8 @@ export function ConfirmDialog({
             {spec.altLabel && (
               <BtnSecondary
                 onClick={() => {
-                  spec.onAlt?.();
                   onClose();
+                  spec.onAlt?.();
                 }}
               >
                 {spec.altLabel}
@@ -68,8 +72,8 @@ export function ConfirmDialog({
                 spec.danger && "bg-state-error text-primary-foreground hover:bg-state-error hover:opacity-90",
               )}
               onClick={() => {
-                spec.onConfirm();
                 onClose();
+                spec.onConfirm();
               }}
             >
               {spec.confirmLabel}

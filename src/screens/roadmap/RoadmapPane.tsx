@@ -112,7 +112,7 @@ export function RoadmapPane({
       const fresh = [...done].find((id) => !prevDone.current!.has(id));
       if (fresh) {
         setJustDoneId(fresh);
-        const t = setTimeout(() => setJustDoneId(null), 4000);
+        const t = setTimeout(() => setJustDoneId(null), 4000); // timer-ok: one-shot, ends the "just done" ring
         prevDone.current = done;
         return () => clearTimeout(t);
       }
@@ -354,7 +354,7 @@ export function RoadmapPane({
       .then((n) => {
         setCopiedPath(path);
         if (copyTimer.current) clearTimeout(copyTimer.current);
-        copyTimer.current = setTimeout(() => setCopiedPath(null), 1800);
+        copyTimer.current = setTimeout(() => setCopiedPath(null), 1800); // timer-ok: one-shot, ends the copied flash
         toastSuccess(
           `Copied ${path.split("/").pop()}`,
           pasteHint ?? `${Number(n).toLocaleString()} characters`,

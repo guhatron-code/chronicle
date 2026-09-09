@@ -74,6 +74,7 @@ import {
   type DirLoad,
   type GitStatus,
 } from "@/lib/repo-data";
+import { announce } from "@/lib/journal";
 import { sanitizeTitle } from "@/lib/notes-model";
 import { isHtmlPath } from "@/lib/web-url";
 import { toastError, toastRemoteOutcome, toastSuccess } from "@/overlays/toasts";
@@ -142,6 +143,28 @@ function stateFor(dir: string): RepoState {
     CACHE.set(dir, s);
   }
   return s;
+}
+
+/* A mounted pane rerenders when something outside it moves the cached state —
+ * ⌘N from the App keymap is the only such mutation today. (The tabs already
+ * follow the buffer store through subscribeBuffers.) */
+const repoSubs = new Set<() => void>();
+function bumpRepo(): void { for (const cb of repoSubs) cb(); }
+export function subscribeRepo(cb: () => void): () => void {
+  repoSubs.add(cb);
+  return () => { repoSubs.delete(cb); };
+}
+
+/** ⌘N on the Repo pane: start a new file in the selected folder. */
+export function newFileInRepo(dir: string): void {
+  const s = CACHE.get(dir);
+  if (!s) return;
+  const id = s.selectedId;
+  const parent = id ? (s.loads.has(id) ? id : splitName(id).dir) : "";
+  s.pending = { parent, kind: "file" };
+  s.renaming = null;
+  s.nameError = null;
+  bumpRepo();
 }
 
 /** Drop a closed project's cached tree/tab state (memory hygiene). */
@@ -363,7 +386,7 @@ export function RepoPane({
     void listen<string>("project-fs-changed", (ev) => {
       if (ev.payload !== dir) return;
       if (t) clearTimeout(t);
-      t = setTimeout(() => {
+      t = setTimeout(() => { // timer-ok: the watcher's 450ms debounce, cleared on every event and on unmount
         refreshTree();
         checkFreshness();
         // every open buffer reconciles: clean reloads silently, dirty raises
@@ -379,6 +402,7 @@ export function RepoPane({
   /* the buffer store lives outside React: its save-state changes are what move
      the header word and the tab's dot */
   useEffect(() => subscribeBuffers(rerender), [rerender]);
+  useEffect(() => subscribeRepo(rerender), [rerender]);
 
   /* ---- the viewer: open / load / mode / freshness ---- */
 
@@ -772,7 +796,15 @@ export function RepoPane({
         },
         onPush: () => {
           gitPush(dir)
-            .then((r) => { toastRemoteOutcome(r); refreshGit(); onPollNow(); })
+            .then((r) => {
+              toastRemoteOutcome(r);
+              // the ONLY thing that announces a publish is a push that returned,
+              // and only when it carried something ("Already published — nothing
+              // new" is the one push outcome that is not a publish)
+              if (!/nothing new/i.test(r.headline)) announce(dir, "published", r.headline, slug);
+              refreshGit();
+              onPollNow();
+            })
             .catch(opError("Couldn't publish"));
         },
         onPull: () => {
@@ -789,7 +821,10 @@ export function RepoPane({
             confirmLabel: "Create and publish",
             onConfirm: () => {
               githubCreate(dir)
-                .then((name) => afterGitOp(`Published online — ${name}`))
+                .then((name) => {
+                  afterGitOp(`Published online — ${name}`);
+                  announce(dir, "published", `Published online — ${name}`, slug);
+                })
                 .catch(opError("Couldn't publish"));
             },
           });

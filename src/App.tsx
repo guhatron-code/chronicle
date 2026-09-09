@@ -35,7 +35,7 @@ import {
 import { keydownInit, reclaimsFocus } from "@/lib/menu-keys";
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
 import { RoadmapPane } from "@/screens/roadmap/RoadmapPane";
-import { RepoPane, confirmDirty, evictRepo, openHistoryView, saveActiveFile } from "@/screens/repo/RepoPane";
+import { RepoPane, confirmDirty, evictRepo, newFileInRepo, openHistoryView, saveActiveFile } from "@/screens/repo/RepoPane";
 import { anyDirty, dirtyPathsFor } from "@/lib/repo-editor";
 import { openFileInRepo } from "@/screens/repo/RepoPane";
 import { SearchOverlay } from "@/overlays/SearchOverlay";
@@ -290,7 +290,7 @@ export default function App() {
       if (prev) clearTimeout(prev);
       fsTimers.current.set(
         dir,
-        setTimeout(() => {
+        setTimeout(() => { // timer-ok: the fs-burst debounce, cleared on every event and on unmount
           fsTimers.current.delete(dir);
           void pollOne(dir);
           reloadProjectFiles(dir);
@@ -613,9 +613,8 @@ export default function App() {
     };
     const live = liveCount(dir) + (agentRunning ? 1 : 0);
     // unsaved buffers are asked about first, and only once — same prompt as a
-    // project switch. A second dialog can only be raised after this one has
-    // closed itself, or its onClose would wipe the new spec on the same tick.
-    let askedAboutSaves = false;
+    // project switch. ConfirmDialog clears its spec before it calls the answer's
+    // handler, so the live-session prompt below can be raised straight from here.
     const afterSaves = () => {
       if (live === 0) { doClose(); return; }
       const body = agentRunning && liveCount(dir) === 0
@@ -631,10 +630,9 @@ export default function App() {
         danger: true,
         onConfirm: doClose,
       };
-      if (askedAboutSaves) setTimeout(() => setConfirm(spec), 0);
-      else setConfirm(spec);
+      setConfirm(spec);
     };
-    confirmDirty(dir, (spec) => { askedAboutSaves = true; setConfirm(spec); }, afterSaves);
+    confirmDirty(dir, setConfirm, afterSaves);
   }, []);
 
   /* the palette's GitHub group — fetched once per session, on first open */
@@ -743,9 +741,11 @@ export default function App() {
       }
       else if (mod && e.key === "o") { e.preventDefault(); openDialog(); }
       else if (mod && e.key === "/") { e.preventDefault(); setHelpOpen(true); }
-      else if (mod && e.key === "n" && activeRef.current && pane === "notes") {
+      else if (mod && e.key === "n" && activeRef.current) {
         e.preventDefault();
-        void createNote(activeRef.current, "", "");
+        // one chord, two meanings — the Go menu row says "New Note or File"
+        if (pane === "notes") void createNote(activeRef.current, "", "");
+        else if (pane === "repo") newFileInRepo(activeRef.current);
       }
       else if (mod && e.key === "s" && activeRef.current) {
         // the editor's own Mod-s already saved and called preventDefault (it does
@@ -840,8 +840,7 @@ export default function App() {
           confirmDirty(
             dir,
             (spec) => setConfirm({ ...spec, onCancel: () => resolve(false) }),
-            // the answered dialog is still closing — a tick lets the next one open
-            () => setTimeout(askNext, 0),
+            askNext,
           );
         };
         askNext();
@@ -888,7 +887,7 @@ export default function App() {
     if (!at) return;
     const left = at + 2000 - Date.now();
     if (left <= 0) return;
-    const id = setTimeout(() => termBump((n) => n + 1), left + 50);
+    const id = setTimeout(() => termBump((n) => n + 1), left + 50); // timer-ok: one-shot, repaints the terminal tab when its grace window ends
     return () => clearTimeout(id);
   }, [active?.justSwitchedAt]);
   const termSessions = active ? termsFor(active.dir) : [];

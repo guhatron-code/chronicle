@@ -113,7 +113,7 @@ export function AccBody({
     if (first.current) { first.current = false; return; }
     if (open) {
       setRows("1fr");
-      const t = setTimeout(() => setRows("auto"), 230);
+      const t = setTimeout(() => setRows("auto"), 230); // timer-ok: one-shot, releases a measured height after the expand animation
       return () => clearTimeout(t);
     }
     setRows("1fr");
