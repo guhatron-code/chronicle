@@ -238,3 +238,10 @@ describe("the pure helpers", () => {
     expect(ed.bufferKey("/p", "a.ts")).toBe(ed.bufferKey("/p", "a.ts"));
   });
 });
+
+describe("bufferKey", () => {
+  it("cannot collide across a dir/path boundary that contains spaces", async () => {
+    const { bufferKey } = await import("./repo-editor");
+    expect(bufferKey("/a", "b c/d.ts")).not.toBe(bufferKey("/a b", "c/d.ts"));
+  });
+});

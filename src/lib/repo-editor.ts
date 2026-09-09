@@ -27,7 +27,10 @@ export interface Buffer {
   savedAt: number | null;
 }
 
-export function bufferKey(dir: string, path: string): string { return `${dir} ${path}`; }
+/** NUL cannot appear in a path on any platform, so it is the one separator that
+ *  cannot collide ("/a" + "b c/d.ts" vs "/a b" + "c/d.ts"). Written as the
+ *  escape so the source file stays text. */
+export function bufferKey(dir: string, path: string): string { return `${dir}\0${path}`; }
 
 const buffers = new Map<string, Buffer>();
 const subs = new Set<() => void>();
