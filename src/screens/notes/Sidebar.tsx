@@ -5,7 +5,7 @@
  * down. `Row` is the only thing that draws a line of text, so nothing here
  * wraps either.
  */
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -35,7 +35,16 @@ function rowStatus(entry: NoteEntry): { label: string; tone: string } | null {
   return null;
 }
 
-export function Sidebar({
+/*
+ * Memoised: `NotesPane` re-renders on every keystroke (the store notifies on
+ * every editBody), and this tree can be 100+ rows deep on a real vault. Every
+ * prop below is either a primitive or a reference NotesPane only replaces
+ * when the underlying data actually changes (notes/roundOpen track the
+ * index's cache object, not the open note's mutated body; the callbacks are
+ * useCallback'd) — so the default shallow-equal comparator is exactly right,
+ * and typing in the editor no longer re-reconciles the whole tree.
+ */
+export const Sidebar = memo(function Sidebar({
   dir, notes, openPath, onOpenNote, onNewNote, onOpenSearch, onRevealVault,
   queued, roundOpen, generating, onStartRound,
 }: {
@@ -236,4 +245,4 @@ export function Sidebar({
       </div>
     </div>
   );
-}
+});

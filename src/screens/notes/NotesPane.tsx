@@ -91,7 +91,11 @@ export function NotesPane({
 
   const entry = open ? noteEntry(dir, open.path) : undefined;
   const queued = queuedCountFor(dir);
-  const roundOpen = openRoundFor(dir);
+  /* `index` (indexFor's cache object) keeps its reference across a body edit —
+     refreshNotes is the only thing that replaces it — so memoising on it means
+     Sidebar's `roundOpen` prop stays referentially stable while the user types,
+     and only actually changes when the index itself does. */
+  const roundOpen = useMemo(() => openRoundFor(dir), [dir, index]);
   const generating = roundGenerating(dir);
 
   const openNoteHere = useCallback((path: string) => { void openNote(dir, path); }, [dir]);
@@ -102,8 +106,15 @@ export function NotesPane({
     const folder = entry?.folder ?? "";
     createNote(dir, folder, title.split("/").pop() ?? title).catch((e) => toastError("Couldn't create the note", String(e).slice(0, 90)));
   }, [dir, entry?.folder]);
+  const onOpenSearch = useCallback(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, shiftKey: true }));
+  }, []);
+  const onRevealVault = useCallback(() => {
+    runCommand(dir, 'open ".chronicle/notes"').catch((e) => toastError("Couldn't reveal it", String(e).slice(0, 90)));
+  }, [dir]);
 
   const roundFlowRef = useRef<RoundFlowHandle>(null);
+  const onStartRound = useCallback(() => roundFlowRef.current?.start(), []);
 
   /* stamp data-missing on every rendered wikilink after each commit */
   const docRef = useRef<HTMLDivElement | null>(null);
@@ -140,14 +151,12 @@ export function NotesPane({
         openPath={open?.path ?? null}
         onOpenNote={openNoteHere}
         onNewNote={newNoteIn}
-        onOpenSearch={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, shiftKey: true }))}
-        onRevealVault={() => {
-          runCommand(dir, 'open ".chronicle/notes"').catch((e) => toastError("Couldn't reveal it", String(e).slice(0, 90)));
-        }}
+        onOpenSearch={onOpenSearch}
+        onRevealVault={onRevealVault}
         queued={queued}
         roundOpen={roundOpen}
         generating={generating}
-        onStartRound={() => roundFlowRef.current?.start()}
+        onStartRound={onStartRound}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -178,6 +187,7 @@ export function NotesPane({
             <div ref={docRef} className="min-h-0 flex-1 overflow-y-auto">
               <div className={docClasses}>
                 <NoteEditor
+                  key={open.path}
                   dir={dir}
                   path={open.path}
                   body={open.body}

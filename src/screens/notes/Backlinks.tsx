@@ -2,13 +2,18 @@
  * The footer: what links here, and what this note links to (mock frame 1's
  * footer). Two groups side by side, each a stack of `Row`.
  */
+import { memo } from "react";
 import { DocGlyph } from "@/components/chrome/icons";
 import { Eyebrow } from "@/components/chrome/atoms";
 import { backlinksFor, outlinksFor } from "@/lib/notes-model";
 import type { NoteEntry } from "@/lib/ipc";
 import { Row } from "./Row";
 
-export function Backlinks({
+/* Memoised for the same reason Sidebar is: NotesPane re-renders on every
+ * keystroke, but `notes`/`path` only change when the index or the open note
+ * itself changes, and the callbacks are useCallback'd — so a body edit no
+ * longer re-runs backlinksFor/outlinksFor or reconciles this footer. */
+export const Backlinks = memo(function Backlinks({
   notes, path, onOpenNote, onCreateNote,
 }: {
   notes: NoteEntry[];
@@ -53,4 +58,4 @@ export function Backlinks({
       </div>
     </div>
   );
-}
+});

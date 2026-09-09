@@ -40,7 +40,7 @@ const STATUS_ROWS: { value: NoteStatus | null; label: string }[] = [
 
 const PILL_TONE: Record<string, string> = {
   none: "border-border-hairline text-text-dim",
-  queued: "border-border-strong text-text-secondary",
+  queued: "border-state-warn text-state-warn",
   progress: "border-border-strong text-text-primary",
   done: "border-border-strong text-text-secondary",
   unknown: "border-border-hairline text-text-dim",
