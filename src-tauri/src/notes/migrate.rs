@@ -1,7 +1,9 @@
 //! One-way, one-time: the kanban board becomes notes. Runs on the first
 //! heartbeat of a project that still has tasks in `.chronicle/kanban.json` and
-//! no `.chronicle/notes/` yet. Nothing is renamed unless every note landed, so a
-//! failed migration leaves the board working and the next heartbeat retries.
+//! no `.chronicle/notes/` yet. All-or-nothing: every note and `rounds.json` are
+//! written into a staging directory first, and only once every write has landed
+//! does the vault and the board move — so a failure mid-run leaves no partial
+//! vault and the board intact for the next heartbeat to retry.
 
 use super::{index, parse};
 use serde_json::{json, Value};
@@ -19,7 +21,8 @@ pub fn map_status(column: &str) -> (&'static str, Option<&'static str>) {
 }
 
 pub fn note_file_name(id: &str, title: &str) -> String {
-    format!("{id} {}.md", parse::sanitize_title(title))
+    let name = parse::sanitize_title(title);
+    if id.is_empty() { format!("{name}.md") } else { format!("{id} {name}.md") }
 }
 
 fn iso_from_ms(ms: u64) -> String {
@@ -69,6 +72,8 @@ pub fn map_task(task: &Value) -> MigratedNote {
 }
 
 fn board_path(dir: &Path) -> PathBuf { dir.join(".chronicle/kanban.json") }
+fn staging_dir(dir: &Path) -> PathBuf { dir.join(".chronicle/notes.migrating") }
+fn rounds_staging(dir: &Path) -> PathBuf { dir.join(".chronicle/rounds.json.migrating") }
 
 pub fn needs_migration(dir: &Path) -> bool {
     // a vault that exists but holds no notes is not a migrated vault — an
@@ -79,37 +84,60 @@ pub fn needs_migration(dir: &Path) -> bool {
     v.get("tasks").and_then(|t| t.as_array()).map(|a| !a.is_empty()).unwrap_or(false)
 }
 
+/// Move the staged notes into place. Refuses if the vault has notes in it right
+/// now (checked again here, not just by `needs_migration` earlier — something
+/// else may have written into it in the meantime); an empty leftover `notes/`
+/// (e.g. a stray mkdir) is simply replaced.
+fn commit_vault(vault: &Path, staging: &Path) -> Result<(), String> {
+    if vault.exists() {
+        if !index::walk(vault).is_empty() { return Err("the vault already holds notes".into()); }
+        std::fs::remove_dir_all(vault).map_err(|e| e.to_string())?;
+    }
+    std::fs::rename(staging, vault).map_err(|e| e.to_string())
+}
+
 pub fn run(dir: &Path) -> Result<usize, String> {
     if !needs_migration(dir) { return Err("nothing to migrate".into()); }
     let text = std::fs::read_to_string(board_path(dir)).map_err(|e| e.to_string())?;
     let store: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
     let tasks = store.get("tasks").and_then(|t| t.as_array()).cloned().unwrap_or_default();
-
+    let rounds_src = store.get("rounds").and_then(|r| r.as_array()).cloned().unwrap_or_default();
     let mapped: Vec<MigratedNote> = tasks.iter().map(map_task).collect();
-    let vault = index::vault_dir(dir);
-    for n in &mapped {
-        let full = vault.join(&n.path);
-        std::fs::create_dir_all(full.parent().ok_or("bad note path")?).map_err(|e| e.to_string())?;
-        std::fs::write(&full, parse::join_front_matter(&n.front, &n.body)).map_err(|e| e.to_string())?;
-    }
+
+    let staging = staging_dir(dir);
+    let rounds_tmp = rounds_staging(dir);
+    let cleanup = |s: &Path, r: &Path| { let _ = std::fs::remove_dir_all(s); let _ = std::fs::remove_file(r); };
+    cleanup(&staging, &rounds_tmp); // a stray staging dir from a crashed run never blocks a retry
 
     // ids → new paths, so a round keeps pointing at its work
     let by_id: std::collections::HashMap<&str, &str> = tasks.iter().zip(&mapped)
         .filter_map(|(t, n)| t.get("id").and_then(|v| v.as_str()).map(|i| (i, n.path.as_str())))
         .collect();
-    let rounds: Vec<Value> = store.get("rounds").and_then(|r| r.as_array()).cloned().unwrap_or_default()
-        .into_iter().map(|mut r| {
-            let paths: Vec<String> = r.get("task_ids").and_then(|v| v.as_array())
-                .map(|a| a.iter().filter_map(|x| x.as_str()).filter_map(|i| by_id.get(i).map(|p| p.to_string())).collect())
-                .unwrap_or_default();
-            if let Some(o) = r.as_object_mut() { o.insert("note_paths".into(), json!(paths)); }
-            r
-        }).collect();
-    std::fs::write(dir.join(".chronicle/rounds.json"),
-        serde_json::to_string_pretty(&json!({ "version": 1, "rounds": rounds })).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    let rounds: Vec<Value> = rounds_src.into_iter().map(|mut r| {
+        let paths: Vec<String> = r.get("task_ids").and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|x| x.as_str()).filter_map(|i| by_id.get(i).map(|p| p.to_string())).collect())
+            .unwrap_or_default();
+        if let Some(o) = r.as_object_mut() { o.insert("note_paths".into(), json!(paths)); }
+        r
+    }).collect();
 
-    // last, and only once everything above landed
+    let staged = (|| -> Result<(), String> {
+        for n in &mapped {
+            let full = staging.join(&n.path);
+            std::fs::create_dir_all(full.parent().ok_or("bad note path")?).map_err(|e| e.to_string())?;
+            std::fs::write(&full, parse::join_front_matter(&n.front, &n.body)).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&rounds_tmp,
+            serde_json::to_string_pretty(&json!({ "version": 1, "rounds": rounds })).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())
+    })();
+    if let Err(e) = staged { cleanup(&staging, &rounds_tmp); return Err(e); }
+
+    // everything landed in staging — commit: the vault, then rounds.json, then
+    // the board rename. Nothing above this line ever touched notes/ or kanban.json.
+    let vault = index::vault_dir(dir);
+    if let Err(e) = commit_vault(&vault, &staging) { cleanup(&staging, &rounds_tmp); return Err(e); }
+    std::fs::rename(&rounds_tmp, dir.join(".chronicle/rounds.json")).map_err(|e| e.to_string())?;
     std::fs::rename(board_path(dir), dir.join(".chronicle/kanban.json.migrated")).map_err(|e| e.to_string())?;
     Ok(mapped.len())
 }
@@ -143,6 +171,8 @@ mod tests {
         assert_eq!(note_file_name("T-001", ""), "T-001 Untitled.md");
         let long = note_file_name("T-002", &"w".repeat(200));
         assert!(long.len() <= 80 + "T-002 ".len() + ".md".len(), "{long}");
+        assert_eq!(note_file_name("", "Standalone note"), "Standalone note.md",
+                   "an empty id must not leave a leading space in the file name");
     }
 
     #[test]
@@ -210,6 +240,47 @@ mod tests {
 
         assert!(!needs_migration(&d), "idempotent: the vault holds notes now");
         assert!(run(&d).is_err(), "and a second run refuses rather than duplicating");
+    }
+
+    #[test]
+    fn a_partial_write_failure_leaves_no_vault_and_the_board_intact() {
+        let d = tmp("partial-failure");
+        std::fs::write(d.join(".chronicle/kanban.json"), json!({
+            "version": 1, "next_id": 2,
+            "tasks": [ { "id": "T-001", "title": "One", "column": "queued" } ], "rounds": []
+        }).to_string()).unwrap();
+        // block the staging directory itself so no note can ever be written under it
+        std::fs::write(d.join(".chronicle/notes.migrating"), b"not a directory").unwrap();
+
+        assert!(run(&d).is_err(), "staging cannot be created, so the whole migration must fail");
+        assert!(!d.join(".chronicle/notes").exists(), "no partial vault is left behind");
+        assert!(d.join(".chronicle/kanban.json").exists(), "the board is untouched");
+        assert!(!d.join(".chronicle/kanban.json.migrated").exists());
+
+        // once the underlying problem is gone, the next heartbeat's retry can succeed
+        std::fs::remove_file(d.join(".chronicle/notes.migrating")).unwrap();
+        assert!(needs_migration(&d), "the board still has work to do");
+        assert_eq!(run(&d).unwrap(), 1);
+    }
+
+    #[test]
+    fn a_stale_staging_dir_from_a_crashed_run_is_cleaned_up_and_does_not_leak() {
+        let d = tmp("stale-staging");
+        std::fs::write(d.join(".chronicle/kanban.json"), json!({
+            "version": 1, "next_id": 2,
+            "tasks": [ { "id": "T-001", "title": "One", "column": "queued" } ], "rounds": []
+        }).to_string()).unwrap();
+        // simulate a crash mid-run: leftover staging content from an earlier attempt
+        std::fs::create_dir_all(d.join(".chronicle/notes.migrating/Tasks")).unwrap();
+        std::fs::write(d.join(".chronicle/notes.migrating/Tasks/Stale.md"), "leftover").unwrap();
+        std::fs::write(d.join(".chronicle/rounds.json.migrating"), "not valid json").unwrap();
+
+        assert_eq!(run(&d).unwrap(), 1);
+        assert!(!d.join(".chronicle/notes/Tasks/Stale.md").exists(),
+                 "stale staging content must never leak into the committed vault");
+        assert!(d.join(".chronicle/notes/Tasks/T-001 One.md").exists());
+        assert!(!d.join(".chronicle/notes.migrating").exists(), "staging is gone once committed");
+        assert!(!d.join(".chronicle/rounds.json.migrating").exists());
     }
 
     #[test]

@@ -862,6 +862,28 @@ async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: St
     let marker = p.dir.join(".chronicle-blank");
     let blank = marker.exists();
     if blank && p.manifest.is_some() { let _ = std::fs::remove_file(&marker); } // roadmap arrived
+    // one-time: a project that still has a board and no vault moves across now.
+    // The write itself runs off the async pool (spawn_blocking) so a big board's
+    // file IO never stalls a worker thread. A failure is silent here — the board
+    // keeps working and the next heartbeat retries; the toast comes from the
+    // event, not from get_state's result.
+    if notes::migrate::needs_migration(&p.dir) {
+        let mig_dir = p.dir.clone();
+        let outcome = tauri::async_runtime::spawn_blocking(move || notes::migrate::run(&mig_dir))
+            .await
+            .unwrap_or_else(|e| Err(e.to_string()));
+        match outcome {
+            Ok(count) => {
+                notes::index::refresh(&notes, &p.dir);
+                let _ = app.emit_to(tauri::EventTarget::webview("main"), "notes-migrated",
+                    json!({ "dir": dir, "count": count }));
+            }
+            Err(e) => {
+                let _ = app.emit_to(tauri::EventTarget::webview("main"), "notes-migrated",
+                    json!({ "dir": dir, "count": 0, "error": e }));
+            }
+        }
+    }
     if let Some(obj) = s.as_object_mut() {
         // the MERGED manifest (kanban rounds injected) — statuses are derived from it,
         // so the phase list and the status list must describe the same document
@@ -881,22 +903,6 @@ async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: St
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64).unwrap_or(0);
         obj.insert("kanban_mtime".into(), json!(kmt));
-        // one-time: a project that still has a board and no vault moves across now.
-        // A failure is silent here — the board keeps working and the next heartbeat
-        // retries; the toast comes from the event, not from get_state's result.
-        if notes::migrate::needs_migration(&p.dir) {
-            match notes::migrate::run(&p.dir) {
-                Ok(count) => {
-                    notes::index::refresh(&notes, &p.dir);
-                    let _ = app.emit_to(tauri::EventTarget::webview("main"), "notes-migrated",
-                        json!({ "dir": dir, "count": count }));
-                }
-                Err(e) => {
-                    let _ = app.emit_to(tauri::EventTarget::webview("main"), "notes-migrated",
-                        json!({ "dir": dir, "count": 0, "error": e }));
-                }
-            }
-        }
         // the vault's generation lets the pane skip re-reading an unchanged index
         // on every heartbeat — the same discipline kanban_mtime gave the board
         notes::rounds::settle_done(&p.dir);
