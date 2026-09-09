@@ -107,7 +107,9 @@ pub fn write_note(p: &Project, rel: &str, text: &str) -> Result<(), String> {
 }
 
 /// Rename or move, then rewrite every link that resolved to the old path.
-/// Best-effort per file: a note that cannot be rewritten is returned, not fatal.
+/// Best-effort per file: a note that cannot be rewritten is returned, not fatal
+/// — and a note a live round has locked is one of those: the agent is reading
+/// it right now, so its links are left stale and its path comes back in the list.
 pub fn move_note(p: &Project, from: &str, to: &str) -> Result<Vec<String>, String> {
     let src = note_file(p, from)?;
     let dst = note_file(p, to)?;
@@ -127,6 +129,9 @@ pub fn move_note(p: &Project, from: &str, to: &str) -> Result<Vec<String>, Strin
         let (fm, body) = parse::split_front_matter(&text);
         let (new_body, n) = parse::rewrite_links(&body, rel, from, to, &before, &after);
         if n == 0 { continue; }
+        // a live round's note belongs to the agent: leave the stale link and
+        // report the path, rather than writing under the session's feet
+        if rounds::is_locked(&p.dir, rel) { failed.push(rel.clone()); continue; }
         let tmp = vault.join(rel).with_extension("md.tmp");
         let joined = parse::join_front_matter(&fm, &new_body);
         if std::fs::write(&tmp, joined).is_err() || std::fs::rename(&tmp, vault.join(rel)).is_err() {
@@ -136,6 +141,24 @@ pub fn move_note(p: &Project, from: &str, to: &str) -> Result<Vec<String>, Strin
     Ok(failed)
 }
 
+/// `<ms>-<name>.md`, and `<ms>-<name>-2.md`, `-3`… when that is already taken.
+/// `rename` REPLACES on macOS, so two same-named notes deleted inside one
+/// millisecond would leave only the second — the probe is the same one `attach`
+/// runs, and trash is the one place a silent overwrite is unrecoverable.
+fn trash_target(trash: &Path, ms: u64, name: &str) -> PathBuf {
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s, format!(".{e}")),
+        _ => (name, String::new()),
+    };
+    let mut cand = trash.join(format!("{ms}-{stem}{ext}"));
+    let mut n = 2usize;
+    while cand.exists() {
+        cand = trash.join(format!("{ms}-{stem}-{n}{ext}"));
+        n += 1;
+    }
+    cand
+}
+
 /// Never unlinks: the file moves to `.chronicle/trash/<epoch ms>-<name>.md`.
 pub fn delete_note(p: &Project, rel: &str) -> Result<String, String> {
     let full = note_file(p, rel)?;
@@ -143,8 +166,9 @@ pub fn delete_note(p: &Project, rel: &str) -> Result<String, String> {
     let name = rel.rsplit('/').next().unwrap_or(rel);
     let trash = p.dir.join(".chronicle/trash");
     std::fs::create_dir_all(&trash).map_err(|e| e.to_string())?;
-    let out_rel = format!(".chronicle/trash/{}-{}", epoch_ms(), name);
-    std::fs::rename(&full, p.dir.join(&out_rel)).map_err(|e| e.to_string())?;
+    let dst = trash_target(&trash, epoch_ms(), name);
+    let out_rel = format!(".chronicle/trash/{}", dst.file_name().unwrap_or_default().to_string_lossy());
+    std::fs::rename(&full, &dst).map_err(|e| e.to_string())?;
     Ok(out_rel)
 }
 
@@ -193,7 +217,55 @@ pub fn attach(p: &Project, slug: &str, ext: &str, bytes: &[u8]) -> Result<String
     Ok(format!("../attachments/{name}"))
 }
 
+/// The argv for a Finder reveal — never a shell line. The pane used to build
+/// `open -R "<path>"` and hand it to `run_command`, which runs it through
+/// `/bin/zsh -lc`: a note called ``Fix `rm -rf ~`.md`` executed on click.
+/// Here the whole path is ONE argument and no shell is involved at all.
+pub fn reveal_args(full: &Path) -> Vec<String> {
+    vec!["-R".to_string(), full.to_string_lossy().to_string()]
+}
+
+/// What `notes_reveal` decides before anything is spawned: the vault jail, then
+/// the file has to actually be there.
+pub fn reveal_note_args(dir: &Path, rel: &str) -> Result<Vec<String>, String> {
+    let full = note_file_in(dir, rel)?;
+    if !full.exists() { return Err("that note isn't there anymore".into()); }
+    Ok(reveal_args(&full))
+}
+
+/// The vault folder itself. Creates nothing: a project that has never written a
+/// note has no `.chronicle/notes`, and making one here would tell
+/// `migrate::needs_migration` the board had already moved.
+pub fn reveal_vault_args(dir: &Path) -> Result<Vec<String>, String> {
+    let vault = index::vault_dir(dir);
+    if !vault.exists() { return Err("there's no notes folder yet".into()); }
+    Ok(reveal_args(&vault))
+}
+
+fn run_open(args: &[String]) -> Result<(), String> {
+    std::process::Command::new("open")
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /* ---------- the commands ---------- */
+
+/// Show a note in Finder.
+#[tauri::command]
+pub async fn notes_reveal(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    run_open(&reveal_note_args(&p.dir, &path)?)
+}
+
+/// Show the notes folder in Finder.
+#[tauri::command]
+pub async fn notes_reveal_vault(roots: State<'_, OpenRoots>, dir: String) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    run_open(&reveal_vault_args(&p.dir)?)
+}
 
 #[tauri::command]
 pub async fn notes_index(roots: State<'_, OpenRoots>, notes: State<'_, NotesState>, dir: String) -> Result<NotesIndex, String> {
@@ -350,6 +422,35 @@ mod tests {
     }
 
     #[test]
+    fn reveal_goes_through_the_jail_and_never_becomes_a_shell_line() {
+        let (root, _p) = proj("reveal");
+        let evil = "Tasks/Fix `rm -rf ~` $(whoami).md";
+        put(&root, evil, "boom\n");
+        let args = reveal_note_args(&root, evil).unwrap();
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "-R");
+        assert_eq!(args[1], root.join(".chronicle/notes").join(evil).to_string_lossy(),
+                   "the whole name is ONE argv element — no quoting, no shell, no substitution");
+
+        assert_eq!(reveal_note_args(&root, "Tasks/Gone.md").unwrap_err(), "that note isn't there anymore");
+        assert_eq!(reveal_note_args(&root, "../../etc/passwd.md").unwrap_err(),
+                   "that path isn't inside the notes vault");
+        assert_eq!(reveal_note_args(&root, "/etc/passwd.md").unwrap_err(),
+                   "that path isn't inside the notes vault");
+        assert_eq!(reveal_note_args(&root, "Tasks/A.txt").unwrap_err(), "only .md files live in the vault");
+
+        assert_eq!(reveal_vault_args(&root).unwrap(),
+                   vec!["-R".to_string(), root.join(".chronicle/notes").to_string_lossy().to_string()]);
+        // and asking about a vault-less project makes no vault (that would tell
+        // the migration the board had already moved)
+        let empty = std::env::temp_dir().join(format!("chronicle-cmd-novault-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&empty);
+        std::fs::create_dir_all(&empty).unwrap();
+        assert_eq!(reveal_vault_args(&empty).unwrap_err(), "there's no notes folder yet");
+        assert!(!empty.join(".chronicle/notes").exists());
+    }
+
+    #[test]
     fn delete_moves_the_file_to_trash_and_leaves_the_link_dangling() {
         let (root, p) = proj("delete");
         put(&root, "A.md", "a\n");
@@ -386,6 +487,50 @@ mod tests {
         // the lock lifts with the round
         rounds::save(&root, &[record("done")]).unwrap();
         assert!(delete_note(&p, "Tasks/A.md").is_ok());
+    }
+
+    #[test]
+    fn two_deletes_in_one_millisecond_both_survive_in_trash() {
+        let (root, p) = proj("trash-collide");
+        let trash = root.join(".chronicle/trash");
+        std::fs::create_dir_all(&trash).unwrap();
+        // the exact collision: same name, same epoch ms — rename() would REPLACE
+        assert_eq!(trash_target(&trash, 7, "A.md"), trash.join("7-A.md"));
+        std::fs::write(trash.join("7-A.md"), "first").unwrap();
+        assert_eq!(trash_target(&trash, 7, "A.md"), trash.join("7-A-2.md"));
+        std::fs::write(trash.join("7-A-2.md"), "second").unwrap();
+        assert_eq!(trash_target(&trash, 7, "A.md"), trash.join("7-A-3.md"));
+        assert_eq!(trash_target(&trash, 8, "A.md"), trash.join("8-A.md"), "a new ms starts clean");
+        assert_eq!(trash_target(&trash, 7, "noext"), trash.join("7-noext"));
+
+        // end to end: delete, recreate, delete again — both copies are still there
+        put(&root, "A.md", "first\n");
+        let one = delete_note(&p, "A.md").unwrap();
+        put(&root, "A.md", "second\n");
+        let two = delete_note(&p, "A.md").unwrap();
+        assert_ne!(one, two);
+        assert_eq!(std::fs::read_to_string(root.join(&one)).unwrap(), "first\n");
+        assert_eq!(std::fs::read_to_string(root.join(&two)).unwrap(), "second\n");
+    }
+
+    #[test]
+    fn a_move_reports_the_locked_notes_it_would_not_rewrite() {
+        let (root, p) = proj("move-locked");
+        put(&root, "A.md", "a\n");
+        put(&root, "Tasks/Locked.md", "---\nstatus: in_progress\nround: 1\n---\n\nSee [[A]].\n");
+        put(&root, "Free.md", "See [[A]].\n");
+        rounds::save(&root, &[rounds::Round {
+            n: 1, state: "ready".into(), kind: None, task_ids: vec![],
+            note_paths: vec!["Tasks/Locked.md".into()], created_at: 0,
+            plan_path: String::new(), prompt_path: String::new(),
+        }]).unwrap();
+
+        let failed = move_note(&p, "A.md", "B.md").unwrap();
+        assert_eq!(failed, vec!["Tasks/Locked.md"], "reported, not silently skipped");
+        assert!(std::fs::read_to_string(root.join(".chronicle/notes/Tasks/Locked.md")).unwrap()
+                    .contains("See [[A]]."), "the agent's file is byte-for-byte untouched");
+        assert_eq!(std::fs::read_to_string(root.join(".chronicle/notes/Free.md")).unwrap(),
+                   "See [[B]].\n", "every other note is rewritten as before");
     }
 
     #[test]

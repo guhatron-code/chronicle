@@ -94,14 +94,24 @@ fn front_of(dir: &Path, rel: &str) -> Option<parse::FrontMatter> {
     Some(parse::split_front_matter(&text).0)
 }
 
-/// True while the note's round is `generating` or `ready` — the editor refuses
-/// to write, move or delete it, and the agent's own edits are untouched.
+/// A round that still owns its notes: the editor refuses to write, move or
+/// delete them, and the agent's own edits are untouched.
+fn live(r: &Round) -> bool { r.state == "generating" || r.state == "ready" }
+
+/// True while the note's round is `generating` or `ready`. Two ways in, because
+/// there is a window between them: `fixes_generate` saves the round record
+/// FIRST and only then stamps `round:` into each note's front matter, so during
+/// that window the record is the only place the ownership is written down.
+/// The record's own list is therefore checked first, and the front matter
+/// second (a note the round took whose stamp outlives a rewritten record).
 /// An unreadable rounds.json locks nothing: the alternative would strand every
 /// note that ever carried a `round:` key.
 pub fn is_locked(dir: &Path, rel: &str) -> bool {
+    let rounds = load_or_none(dir);
+    if rounds.iter().any(|r| live(r) && r.note_paths.iter().any(|p| p == rel)) { return true; }
     let Some(fm) = front_of(dir, rel) else { return false };
     let Some(n) = parse::round_of(&fm) else { return false };
-    load_or_none(dir).iter().any(|r| r.n == n && (r.state == "generating" || r.state == "ready"))
+    rounds.iter().any(|r| r.n == n && live(r))
 }
 
 pub fn statuses_for(dir: &Path, paths: &[String]) -> HashMap<String, Option<String>> {
@@ -205,6 +215,26 @@ mod tests {
         for state in ["done", "failed"] {
             save(&d, &[round(1, state, &["Tasks/A.md"])]).unwrap();
             assert!(!is_locked(&d, "Tasks/A.md"), "the lock lifts on {state}");
+        }
+    }
+
+    #[test]
+    fn the_round_record_locks_before_the_front_matter_is_stamped() {
+        // fixes_generate saves the round, THEN writes `round: n` into each note.
+        // A save in that window used to slip through and clobber the agent's input.
+        let d = tmp("window");
+        note(&d, "Tasks/A.md", "status: queued\n", "a\n");
+        save(&d, &[round(1, "generating", &["Tasks/A.md"])]).unwrap();
+        assert!(is_locked(&d, "Tasks/A.md"), "the record alone is enough");
+        save(&d, &[round(1, "ready", &["Tasks/A.md"])]).unwrap();
+        assert!(is_locked(&d, "Tasks/A.md"));
+        // and a listed note that was never written still answers, rather than panicking
+        save(&d, &[round(1, "ready", &["Tasks/Gone.md"])]).unwrap();
+        assert!(is_locked(&d, "Tasks/Gone.md"));
+        assert!(!is_locked(&d, "Tasks/A.md"), "a note no round lists and no round stamped is free");
+        for state in ["done", "failed"] {
+            save(&d, &[round(1, state, &["Tasks/A.md"])]).unwrap();
+            assert!(!is_locked(&d, "Tasks/A.md"), "and the record's lock lifts on {state} too");
         }
     }
 

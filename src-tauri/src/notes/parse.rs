@@ -15,6 +15,15 @@ pub struct RawLink { pub target: String, pub label: Option<String> }
 /// raw text: the app only ever reads a handful of keys, and anything it does not
 /// understand has to survive a round trip untouched.
 pub fn split_front_matter(text: &str) -> (FrontMatter, String) {
+    // CRLF parses exactly like LF. Without this a `---\r\n` opener misses the
+    // prefix, the whole file reads as body, and the next `write_note` prepends a
+    // SECOND front-matter block. Line endings are normalised to `\n` here, so a
+    // note that arrives with CRLF leaves the app with LF on its first write.
+    let normalised;
+    let text = if text.contains("\r\n") {
+        normalised = text.replace("\r\n", "\n");
+        normalised.as_str()
+    } else { text };
     let rest = match text.strip_prefix("---\n") {
         Some(r) => r,
         None => return (FrontMatter::default(), text.to_string()),
@@ -282,6 +291,22 @@ mod tests {
         let (fm2, body2) = split_front_matter("text\n\n---\n\nmore\n");
         assert!(fm2.entries.is_empty());
         assert_eq!(body2, "text\n\n---\n\nmore\n");
+    }
+
+    #[test]
+    fn a_crlf_file_has_front_matter_and_never_grows_a_second_block() {
+        let (fm, body) = split_front_matter("---\r\nstatus: queued\r\nround: 2\r\n---\r\n\r\nBody one.\r\nBody two.\r\n");
+        assert_eq!(fm.get("status"), Some("queued"), "a \\r\\n file is not one big body");
+        assert_eq!(round_of(&fm), Some(2), "and no value carries a stray \\r");
+        assert_eq!(body, "Body one.\nBody two.\n", "endings are normalised, once");
+        // the round trip a write does: split, then join — exactly one --- block
+        let joined = join_front_matter(&fm, &body);
+        assert_eq!(joined, "---\nstatus: queued\nround: 2\n---\n\nBody one.\nBody two.\n");
+        assert_eq!(split_front_matter(&joined), (fm, body), "and it is stable from there on");
+        // a lone \r (classic Mac) is left alone rather than mangled
+        let (fm3, body3) = split_front_matter("---\nstatus: queued\n---\n\na\rb\n");
+        assert_eq!(fm3.get("status"), Some("queued"));
+        assert_eq!(body3, "a\rb\n");
     }
 
     #[test]

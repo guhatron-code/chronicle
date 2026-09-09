@@ -101,6 +101,10 @@ fn staging_dir(dir: &Path) -> PathBuf { dir.join(".chronicle/notes.migrating") }
 pub fn needs_migration(dir: &Path) -> bool {
     let vault = index::vault_dir(dir);
     if staging_dir(dir).join(MARKER).exists() || vault.join(MARKER).exists() { return true; }
+    // no board, nothing to move — and this is the answer every poll after the
+    // migration gets, so it must not cost a walk of the whole vault (a migrated
+    // project's board is `kanban.json.migrated`, so this is one stat forever)
+    if !board_path(dir).exists() { return false; }
     // a vault that exists but holds no notes is not a migrated vault — an
     // ordinary jail check or a stray mkdir must never strand the board
     if !index::walk(&vault).is_empty() { return false; }
@@ -397,6 +401,22 @@ mod tests {
         std::fs::create_dir_all(d.join(".chronicle/notes")).unwrap();
         assert!(needs_migration(&d));
         assert_eq!(run(&d).unwrap(), Some(1));
+    }
+
+    #[test]
+    fn a_migrated_project_answers_without_walking_the_vault() {
+        let d = tmp("cheap-heartbeat");
+        // the state every 8s poll sees once the migration has landed: the board
+        // retired, the vault full. The answer comes off the board's stat alone.
+        std::fs::write(d.join(".chronicle/kanban.json.migrated"), "{}").unwrap();
+        std::fs::create_dir_all(d.join(".chronicle/notes/Tasks")).unwrap();
+        for i in 0..25 {
+            std::fs::write(d.join(format!(".chronicle/notes/Tasks/N{i}.md")), "---\nstatus: queued\n---\n\nn\n").unwrap();
+        }
+        assert!(!needs_migration(&d));
+        // and the marker still wins over the shortcut: a half-committed run resumes
+        std::fs::write(d.join(".chronicle/notes/.complete"), "").unwrap();
+        assert!(needs_migration(&d), "the commit still has a step left");
     }
 
     #[test]

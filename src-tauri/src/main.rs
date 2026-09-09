@@ -888,8 +888,14 @@ async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: St
     if let Some(obj) = s.as_object_mut() {
         // the MERGED manifest (fix rounds injected) — statuses are derived from it,
         // so the phase list and the status list must describe the same document
-        obj.insert("manifest".into(), p.manifest.as_ref()
-            .map(|m| inject_rounds(&p.dir, m)).unwrap_or(Value::Null));
+        obj.insert("manifest".into(), match p.manifest.as_ref() {
+            // inject_rounds settles the rounds itself. The poll used to settle a
+            // SECOND time further down, re-reading rounds.json and every ready
+            // round's notes; a project with no roadmap keeps its own settle,
+            // since nothing else in the poll would lift its locks.
+            Some(m) => inject_rounds(&p.dir, m),
+            None => { notes::rounds::settle_done(&p.dir); Value::Null }
+        });
         obj.insert("blank".into(), json!(blank && p.manifest.is_none()));
         if p.manifest.is_none() {
             obj.insert("misplaced".into(), json!(misplaced_manifest(&p.dir)));
@@ -899,7 +905,6 @@ async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: St
         obj.insert("init_consent".into(), init_consent_for(&p.dir));
         // the vault's generation lets the pane skip re-reading an unchanged index
         // on every heartbeat (energy: no parse, no re-render, unless it moved)
-        notes::rounds::settle_done(&p.dir);
         obj.insert("notes_generation".into(), json!(notes::index::generation(&notes, &p.dir)));
     }
     Ok(s)
@@ -1454,10 +1459,16 @@ fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
     for r in settled {
         let n = r.n;
         let kind = r.kind.clone().unwrap_or_else(|| "bug fixes".into());
-        let st = notes::rounds::statuses_for(dir, &r.note_paths);
         let total = r.note_paths.len();
-        let done = total > 0 && r.note_paths.iter().all(|p| st.get(p).and_then(|s| s.as_deref()) == Some("done"));
-        let in_progress = r.note_paths.iter().any(|p| st.get(p).and_then(|s| s.as_deref()) == Some("in_progress"));
+        // a `done` round is done by definition — settle_done only moves a round
+        // there once every note said so, and a finished round's notes cannot go
+        // back. Re-deriving it would read every note of every past round on
+        // every poll; a ready round still gets the real answer from disk.
+        let (done, in_progress) = if r.state == "done" { (true, false) } else {
+            let st = notes::rounds::statuses_for(dir, &r.note_paths);
+            (total > 0 && r.note_paths.iter().all(|p| st.get(p).and_then(|s| s.as_deref()) == Some("done")),
+             r.note_paths.iter().any(|p| st.get(p).and_then(|s| s.as_deref()) == Some("in_progress")))
+        };
         let title = {
             let cap = { let mut c = kind.chars(); match c.next() { Some(f) => f.to_uppercase().collect::<String>() + c.as_str(), None => String::new() } };
             if n > 1 { format!("{cap} · round {n}") } else { cap }
@@ -2944,6 +2955,7 @@ fn main() {
             agent_attach, agent_attach_path,
             notes::notes_index, notes::notes_read, notes::notes_write, notes::notes_move,
             notes::notes_delete, notes::notes_search, notes::notes_attach, notes::notes_detach,
+            notes::notes_reveal, notes::notes_reveal_vault,
             fixes_log_path, fixes_generate, fixes_status, fixes_cancel,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
@@ -3434,6 +3446,27 @@ mod r4_tests {
         let fx = derive_statuses(&ctx, &merged).into_iter().find(|s| s.id == "FX-1").unwrap();
         assert_eq!(fx.state, "done");
         assert_eq!(notes::rounds::load(&d).unwrap()[0].state, "done", "settle_done ran and lifted the lock");
+    }
+
+    #[test]
+    fn a_settled_round_is_not_re_derived_from_its_notes_on_every_poll() {
+        let d = tmp("settled-overlay");
+        let manifest = json!({"name": "x", "stages": [{"title": "S", "phases": []}]});
+        vault_round(&d, &["done", "done"], "done");
+        // the notes are gone — archived, deleted, moved out in Finder. A done
+        // round still reads done: its state IS the answer, no note is opened.
+        std::fs::remove_dir_all(d.join(".chronicle/notes/Tasks")).unwrap();
+
+        let merged = inject_rounds(&d, &manifest);
+        let fix = &merged["stages"][1]["phases"][0];
+        assert_eq!(fix["fixRoundState"]["done"], json!(true));
+        assert_eq!(fix["fixRoundState"]["label"], "done");
+        // a ready round still gets the real answer from disk
+        vault_round(&d, &["in_progress", "done"], "ready");
+        let merged = inject_rounds(&d, &manifest);
+        let fix = &merged["stages"][1]["phases"][0];
+        assert_eq!(fix["fixRoundState"]["done"], json!(false));
+        assert_eq!(fix["fixRoundState"]["label"], "being fixed");
     }
 
     #[test]
