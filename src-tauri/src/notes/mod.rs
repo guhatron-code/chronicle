@@ -4,4 +4,5 @@
 //! `parse` lands ahead of its consumers (the index and commands come in later
 //! tasks), so nothing here is called yet — allow dead_code until they are.
 #![allow(dead_code)]
+pub mod index;
 pub mod parse;

@@ -106,6 +106,7 @@ export interface StateData {
   misplaced?: string | null;
   checked_at: string;
   kanban_mtime?: number; // epoch ms of .chronicle/kanban.json, 0 when absent
+  notes_generation?: number; // bumps whenever the vault index changes
 }
 export interface InitStatusData {
   running?: boolean;

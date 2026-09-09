@@ -846,7 +846,7 @@ async fn open_project(roots: State<'_, OpenRoots>, path: String) -> Result<Value
 /// while the project is open (e.g. by a background /chronicle-init) is picked up on the
 /// next poll or refresh, no reopen needed.
 #[tauri::command]
-async fn get_state(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
+async fn get_state(roots: State<'_, OpenRoots>, notes: State<'_, notes::index::NotesState>, dir: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
     let mut s = state_for_project(&p);
     let marker = p.dir.join(".chronicle-blank");
@@ -871,6 +871,9 @@ async fn get_state(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, St
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64).unwrap_or(0);
         obj.insert("kanban_mtime".into(), json!(kmt));
+        // the vault's generation lets the pane skip re-reading an unchanged index
+        // on every heartbeat — the same discipline kanban_mtime gave the board
+        obj.insert("notes_generation".into(), json!(notes::index::generation(&notes, &p.dir)));
     }
     Ok(s)
 }
@@ -1631,10 +1634,17 @@ fn watch_project(app: tauri::AppHandle, roots: State<OpenRoots>, watch: State<Wa
     let mut map = watch.watchers.lock().map_err(|e| e.to_string())?;
     if map.contains_key(&key) { return Ok(()); }
     let emit_dir = dir.clone();
+    let watch_dir = p.dir.clone();
     let mut w = notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
         if let Ok(ev) = res {
             if ev.paths.iter().any(|pa| fs_event_matters(pa)) {
                 let _ = app.emit("project-fs-changed", emit_dir.clone());
+            }
+            if ev.paths.iter().any(|pa| pa.to_string_lossy().contains("/.chronicle/notes/")) {
+                if let Some(st) = app.try_state::<notes::index::NotesState>() {
+                    let (changed, gen) = notes::index::refresh(&st, &watch_dir);
+                    if !changed.is_empty() { notes::index::emit_changed(&app, &emit_dir, &changed, gen); }
+                }
             }
         }
     }).map_err(|e| e.to_string())?;
@@ -1647,9 +1657,10 @@ fn watch_project(app: tauri::AppHandle, roots: State<OpenRoots>, watch: State<Wa
 }
 
 #[tauri::command]
-fn unwatch_project(watch: State<WatchState>, dir: String) -> Result<(), String> {
+fn unwatch_project(watch: State<WatchState>, notes: State<notes::index::NotesState>, dir: String) -> Result<(), String> {
     let (key, _) = canon_key(&dir)?;
     watch.watchers.lock().map_err(|e| e.to_string())?.remove(&key); // drop stops it
+    if let Ok(p) = PathBuf::from(&dir).canonicalize() { notes::index::evict(&notes, &p); }
     Ok(())
 }
 
@@ -2988,6 +2999,7 @@ fn main() {
         .manage(LaunchOpen(Mutex::new(launch_open)))
         .manage(web::WebState::new())
         .manage(blocklists::BlockState::new())
+        .manage(notes::index::NotesState::new())
         // Asynchronous on purpose: the synchronous form runs on the main thread,
         // so reading a big artifact off disk would stall the whole UI. Here the
         // read happens on a spawned thread and the responder answers when it is
