@@ -95,7 +95,7 @@ export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
       <TabStrip
         tabs={p.tabs.map((tab) => {
           const label = tab.title || displayAddress(tab.url) || "New tab";
-          return { id: String(tab.id), label, title: label, dirty: tab.loading };
+          return { id: String(tab.id), label, title: label, dot: tab.loading ? ("loading" as const) : undefined };
         })}
         activeId={t ? String(t.id) : null}
         onSelect={(id) => { const i = p.tabs.findIndex((x) => String(x.id) === id); if (i >= 0) activate(dir, i); }}
