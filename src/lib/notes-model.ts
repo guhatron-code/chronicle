@@ -130,3 +130,36 @@ export function newNotePath(folder: string, title: string, taken: Set<string>): 
   if (!taken.has(at(base))) return at(base);
   for (let n = 2; ; n++) if (!taken.has(at(`${base} ${n}`))) return at(`${base} ${n}`);
 }
+
+/* ---------- the round log panel (pure parts) ---------- */
+
+export type RoundPhase = "generating" | "executing";
+
+/** The panel never grows without bound: a long round's tail is thousands of
+ *  lines nobody scrolls back through, and the DOM pays for every one. The
+ *  session carries the WHOLE last 30 kB of the log on each event rather than a
+ *  delta, so this is a re-split of the tail, not an append. */
+export const LOG_MAX_LINES = 400;
+export function tailLines(tail: string, max = LOG_MAX_LINES): string[] {
+  const all: string[] = [];
+  for (const raw of tail.split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    if (line.length > 0) all.push(line);
+  }
+  return all.length > max ? all.slice(all.length - max) : all;
+}
+
+/** Auto-scroll follows the tail until the reader scrolls up to read something,
+ *  and picks it up again when they scroll back down. A few pixels of rounding
+ *  (and the browser's sub-pixel scrollTop) is not "scrolled up". */
+export const STICK_SLOP = 24;
+export function stickToBottom(scrollTop: number, scrollHeight: number, clientHeight: number): boolean {
+  return scrollHeight - clientHeight - scrollTop <= STICK_SLOP;
+}
+
+/** The one line at the top of the panel. Executing counts what has actually
+ *  landed in the notes' front matter — the same truth the round card shows. */
+export function roundLogHeader(phase: RoundPhase, n: number, done: number, total: number): string {
+  if (phase === "generating") return `Round ${n} · writing the plan`;
+  return `Round ${n} · executing · ${done} of ${total} done`;
+}

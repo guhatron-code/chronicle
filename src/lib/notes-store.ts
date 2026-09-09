@@ -20,6 +20,7 @@ import {
   type NoteEntry, type NoteStatus, type NotesIndex,
 } from "./ipc";
 import { joinFrontMatter, newNotePath, setStatusInFront, splitFrontMatter, type SaveState } from "./notes-model";
+import { evictRoundLog } from "./round-log";
 import { toastError } from "@/overlays/toasts";
 
 export interface OpenNote {
@@ -240,6 +241,7 @@ export async function deleteNote(dir: string, path: string): Promise<void> {
 
 export function evictNotes(dir: string): void {
   disarm(dir);
+  evictRoundLog(dir);
   indexes.delete(dir);
   opens.delete(dir);
   lastEdit.delete(dir);
@@ -279,6 +281,12 @@ export function openRoundFor(dir: string): OpenRound | null {
  *  round" for both, and `notes_write` refuses for both. Derived from the record
  *  on disk, so reopening the app mid-round says so instead of letting the user
  *  type into a note whose every save fails with a raw `locked`. */
+/** The round whose plan is being written, if any — the log panel's first phase.
+ *  Read from the record, so a restart mid-generation still finds it. */
+export function generatingRoundFor(dir: string): number | null {
+  return indexFor(dir).rounds.find((r) => r.state === "generating")?.n ?? null;
+}
+
 export function roundStateFor(dir: string, round: number | null | undefined): "generating" | "ready" | null {
   if (round == null) return null;
   const state = indexFor(dir).rounds.find((r) => r.n === round)?.state;

@@ -1071,6 +1071,7 @@ export default function App() {
             onOpenSearch={() => { setSearchScope("notes"); setSearchOpen(true); }}
             onOpenFile={(path) => { openFileInRepo(active.dir, path); goPane("repo"); }}
             onOpenUrl={(url) => { void openInWeb(active.dir, { url }); goPane("web"); }}
+            onRevealTerminal={() => patchLayout({ terminal: true, terminalCollapsed: false })}
             onRunRoundInPane={(n, total) => {
               patchLayout({ agent: true, agentCollapsed: false });
               void startRoundInPane(active.dir, n, total).catch((e) =>

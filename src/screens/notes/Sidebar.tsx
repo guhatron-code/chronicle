@@ -26,6 +26,19 @@ function loadCollapsed(dir: string): Set<string> {
   } catch { return new Set(); }
 }
 
+/** "Is it actually working?" — the way into the log panel, from either phase. */
+function LogToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="shrink-0 rounded-[5px] border border-border-hairline px-[7px] py-[2px] text-[10.5px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
+    >
+      {open ? "Hide log" : "View log"}
+    </button>
+  );
+}
+
 function rowStatus(entry: NoteEntry): { label: string; tone: string } | null {
   if (entry.unreadable) return { label: "unreadable", tone: "unknown" };
   if (entry.status === "queued") return { label: "queued", tone: "queued" };
@@ -46,7 +59,7 @@ function rowStatus(entry: NoteEntry): { label: string; tone: string } | null {
  */
 export const Sidebar = memo(function Sidebar({
   dir, notes, openPath, onOpenNote, onNewNote, onOpenSearch, onRevealVault,
-  queued, roundOpen, generating, onStartRound,
+  queued, roundOpen, generating, generatingN, onStartRound, logOpen, onToggleLog,
 }: {
   dir: string;
   notes: NoteEntry[];
@@ -60,7 +73,11 @@ export const Sidebar = memo(function Sidebar({
   queued: number;
   roundOpen: OpenRound | null;
   generating: boolean;
+  /** the round whose plan is being written, when the record names one */
+  generatingN: number | null;
   onStartRound: () => void;
+  logOpen: boolean;
+  onToggleLog: () => void;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(dir));
   useEffect(() => setCollapsed(loadCollapsed(dir)), [dir]);
@@ -148,12 +165,32 @@ export const Sidebar = memo(function Sidebar({
       >
         <SearchGlyph size={12} className="shrink-0 text-text-dim" />
         <span className="flex-1 text-left">Search notes</span>
-        <span className="font-mono text-[10px] text-text-dimmer">⌘⇧F</span>
+        <span className="font-mono text-[10px] text-text-dimmer">⌘P</span>
       </button>
+
+      {/* the plan is being written and there is no card yet — after a restart
+          mid-round there is no RoundFlow dialog either, so this is the only way
+          back to the log */}
+      {!roundOpen && generating && (
+        <div className="mx-2.5 mb-2 mt-1 flex items-center gap-2 rounded-lg border border-border-strong bg-surface-card px-3 py-2">
+          <span
+            aria-hidden
+            className="size-[5px] shrink-0 rounded-full bg-state-neutral"
+            style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }}
+          />
+          <span className="min-w-0 flex-1 truncate text-[11.5px] text-text-secondary">
+            {generatingN != null ? `Round ${generatingN} · writing the plan` : "Writing the plan"}
+          </span>
+          <LogToggle open={logOpen} onClick={onToggleLog} />
+        </div>
+      )}
 
       {roundOpen && (
         <div className="mx-2.5 mb-2 mt-1 rounded-lg border border-border-strong bg-surface-card px-3 py-2.5">
-          <div className="text-[12.5px] font-semibold text-text-primary">Round {roundOpen.n} · fixes</div>
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-text-primary">Round {roundOpen.n} · fixes</span>
+            <LogToggle open={logOpen} onClick={onToggleLog} />
+          </div>
           <div className="mt-0.5 text-[11px] text-text-muted">
             {roundOpen.total} {roundOpen.total === 1 ? "note" : "notes"} · {roundOpen.done} done · headless session
           </div>

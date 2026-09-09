@@ -17,16 +17,22 @@ import { Sidebar } from "./Sidebar";
 import { NoteHeader } from "./NoteHeader";
 import { Backlinks } from "./Backlinks";
 import { RoundFlow, type RoundFlowHandle } from "./RoundFlow";
+import { RoundLog } from "./RoundLog";
 import { BtnPrimary } from "@/components/chrome/atoms";
 import { runCommand, type NoteEntry } from "@/lib/ipc";
 import {
-  createNote, editBody, flushSave, indexFor, noteEntry, openFor, openNote, openRoundFor,
-  queuedCountFor, roundGenerating, setNotesOnScreen, subscribeNotes, takePendingOpenNote,
+  createNote, editBody, flushSave, generatingRoundFor, indexFor, noteEntry, openFor, openNote,
+  openRoundFor, queuedCountFor, roundGenerating, setNotesOnScreen, subscribeNotes, takePendingOpenNote,
 } from "@/lib/notes-store";
 import { toastError } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
 const OPEN_KEY = (dir: string) => `chronicle.notes.open.${dir}`;
+/* beside the tree's collapsed state, and remembered the same way */
+const LOG_KEY = (dir: string) => `chronicle.notes.log.${dir}`;
+function loadLogOpen(dir: string): boolean {
+  try { return localStorage.getItem(LOG_KEY(dir)) === "1"; } catch { return false; }
+}
 
 /** Same resolution rule NoteEditor's handleClickOn uses: the first link in
  *  this note whose raw target text matches the span. */
@@ -43,7 +49,8 @@ function markMissingLinks(container: HTMLElement, notes: NoteEntry[], path: stri
 }
 
 export function NotesPane({
-  dir, agent, onScreen, onConfirm, onGoRoadmap, onOpenSearch, onOpenFile, onOpenUrl, onRunRoundInPane,
+  dir, agent, onScreen, onConfirm, onGoRoadmap, onOpenSearch, onOpenFile, onOpenUrl,
+  onRunRoundInPane, onRevealTerminal,
 }: {
   dir: string;
   agent: "claude" | "codex";
@@ -55,6 +62,8 @@ export function NotesPane({
   onOpenFile: (path: string) => void;
   onOpenUrl: (url: string) => void;
   onRunRoundInPane?: (n: number, total: number) => void;
+  /** "Open full log" tails the real file in a terminal tab — show the column */
+  onRevealTerminal?: () => void;
 }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeNotes(() => bump((n) => n + 1)), []);
@@ -99,6 +108,24 @@ export function NotesPane({
      and only actually changes when the index itself does. */
   const roundOpen = useMemo(() => openRoundFor(dir), [dir, index]);
   const generating = roundGenerating(dir);
+  const generatingN = generatingRoundFor(dir);
+
+  /* the log panel: the writing phase wins while it lasts, then the running
+     round's own output. No round, no panel — and no subscription either. */
+  const logPhase = generating ? "generating" as const : roundOpen ? "executing" as const : null;
+  const [logOpen, setLogOpen] = useState(() => loadLogOpen(dir));
+  useEffect(() => setLogOpen(loadLogOpen(dir)), [dir]);
+  const toggleLog = useCallback(() => {
+    setLogOpen((o) => {
+      try { localStorage.setItem(LOG_KEY(dir), o ? "0" : "1"); } catch { /* private mode */ }
+      return !o;
+    });
+  }, [dir]);
+  const closeLog = useCallback(() => {
+    setLogOpen(false);
+    try { localStorage.setItem(LOG_KEY(dir), "0"); } catch { /* private mode */ }
+  }, [dir]);
+  const showLog = logOpen && logPhase !== null;
 
   const openNoteHere = useCallback((path: string) => { void openNote(dir, path); }, [dir]);
   const newNoteIn = useCallback((folder: string) => {
@@ -111,6 +138,12 @@ export function NotesPane({
   const onRevealVault = useCallback(() => {
     runCommand(dir, 'open ".chronicle/notes"').catch((e) => toastError("Couldn't reveal it", String(e).slice(0, 90)));
   }, [dir]);
+
+  /* App re-renders on every keystroke, so an inline prop would give RoundLog a
+     new callback identity each time and defeat its memo — the ref keeps it stable */
+  const revealRef = useRef(onRevealTerminal);
+  revealRef.current = onRevealTerminal;
+  const revealTerminal = useCallback(() => revealRef.current?.(), []);
 
   const roundFlowRef = useRef<RoundFlowHandle>(null);
   const onStartRound = useCallback(() => roundFlowRef.current?.start(), []);
@@ -155,7 +188,10 @@ export function NotesPane({
         queued={queued}
         roundOpen={roundOpen}
         generating={generating}
+        generatingN={generatingN}
         onStartRound={onStartRound}
+        logOpen={logOpen}
+        onToggleLog={toggleLog}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -201,8 +237,21 @@ export function NotesPane({
                 />
               </div>
             </div>
-            <Backlinks notes={index.notes} path={open.path} onOpenNote={openNoteHere} onCreateNote={createMissing} />
+            {!showLog && (
+              <Backlinks notes={index.notes} path={open.path} onOpenNote={openNoteHere} onCreateNote={createMissing} />
+            )}
           </>
+        )}
+        {showLog && logPhase && (
+          <RoundLog
+            dir={dir}
+            phase={logPhase}
+            n={logPhase === "generating" ? (generatingN ?? roundOpen?.n ?? 0) : (roundOpen?.n ?? 0)}
+            done={roundOpen?.done ?? 0}
+            total={roundOpen?.total ?? 0}
+            onClose={closeLog}
+            onRevealTerminal={revealTerminal}
+          />
         )}
       </div>
 
