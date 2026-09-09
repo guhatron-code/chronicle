@@ -132,32 +132,44 @@ export function newNotePath(folder: string, title: string, taken: Set<string>): 
 
 /* ---------- the round log panel (pure parts) ---------- */
 
-export type RoundPhase = "generating" | "plan-ready" | "executing";
+export type RoundPhase = "generating" | "plan-ready" | "executing" | "finished" | "failed";
 
 /** Just the fields the phase model needs off `.chronicle/rounds.json`. */
 export interface RoundRecord { n: number; state: string }
 
 /**
- * Which phase a project's newest live round is in, and its number.
+ * Which phase a project's newest round is in, and its number.
  *
  * The record cannot answer this on its own: it says `ready` from the moment
  * the plan is written until the last note is done, which covers both "written,
  * nothing has run" and "the executor is working". Only a live session tells
  * them apart — the headless `exec` session, or (for the agent-pane route,
  * which has no session and no log) this session's own record of the click.
+ *
+ * A round that has ENDED still answers, until `dismissed` catches up with its
+ * number: the run you have just watched is the one you most want to read back,
+ * and the card vanishing the moment the last note ticked took the log with it.
+ * A newer round always outranks a dismissed one.
  */
 export function roundPhaseOf(
   rounds: RoundRecord[],
   execRunning: boolean,
   agentRound: number | null,
+  dismissed = 0,
 ): { phase: RoundPhase; n: number } | null {
   const newest = (rs: RoundRecord[]) => rs.reduce((m, r) => Math.max(m, r.n), 0);
   const generating = rounds.filter((r) => r.state === "generating");
   if (generating.length > 0) return { phase: "generating", n: newest(generating) };
   const ready = rounds.filter((r) => r.state === "ready");
-  if (ready.length === 0) return null; // done, failed, or nothing at all
-  const n = newest(ready);
-  return { phase: execRunning || agentRound === n ? "executing" : "plan-ready", n };
+  if (ready.length > 0) {
+    const n = newest(ready);
+    return { phase: execRunning || agentRound === n ? "executing" : "plan-ready", n };
+  }
+  const over = rounds.filter((r) => r.state === "done" || r.state === "failed");
+  if (over.length === 0) return null;
+  const n = newest(over);
+  if (n <= dismissed) return null;
+  return { phase: over.find((r) => r.n === n)?.state === "failed" ? "failed" : "finished", n };
 }
 
 /** The panel never grows without bound: a long round's tail is thousands of
@@ -192,6 +204,8 @@ export function roundSubline(
   const notes = `${total} ${total === 1 ? "note" : "notes"}`;
   if (phase === "generating") return `${notes} · writing the plan…`;
   if (phase === "plan-ready") return `${notes} · plan ready · not started`;
+  if (phase === "finished") return `${notes} · done · ${done} of ${total}`;
+  if (phase === "failed") return `${notes} · didn't finish · ${done} of ${total} done`;
   return `${notes} · executing · ${done} of ${total} done · ${route === "agent" ? "in the agent pane" : "headless"}`;
 }
 
@@ -200,5 +214,7 @@ export function roundSubline(
 export function roundLogHeader(phase: RoundPhase, n: number, done: number, total: number): string {
   if (phase === "generating") return `Round ${n} · writing the plan`;
   if (phase === "plan-ready") return `Round ${n} · plan ready · not started`;
+  if (phase === "finished") return `Round ${n} · done · ${done} of ${total}`;
+  if (phase === "failed") return `Round ${n} · didn't finish · ${done} of ${total} done`;
   return `Round ${n} · executing · ${done} of ${total} done`;
 }

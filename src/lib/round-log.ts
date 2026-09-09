@@ -113,15 +113,21 @@ const watches = new Map<string, () => void>();
 export function execRunning(dir: string): boolean { return running.get(dir)?.exec ?? false; }
 export function fixesRunning(dir: string): boolean { return running.get(dir)?.fixes ?? false; }
 
+/**
+ * Arm or release the two session listeners. Disarming deliberately KEEPS what
+ * they last reported: an unarmed watch has no news, not the news that nothing
+ * is running, and forgetting would demote a live `executing` round to
+ * `plan-ready` — which is the card offering "Run headless" for a round that is
+ * already running. Only closing the project clears it (evictRoundLog).
+ */
 export function armRoundWatch(dir: string, on: boolean): void {
   if (on === watches.has(dir)) return;
   if (!on) {
     watches.get(dir)?.();
     watches.delete(dir);
-    if (running.delete(dir)) notifySession();
     return;
   }
-  running.set(dir, { fixes: false, exec: false });
+  if (!running.has(dir)) running.set(dir, { fixes: false, exec: false });
   const setRun = (k: RoundLogKind, v: boolean) => {
     const cur = running.get(dir);
     if (!cur || cur[k] === v) return;
@@ -142,19 +148,53 @@ export function armRoundWatch(dir: string, on: boolean): void {
  *  thread, which writes no log file. Remembering the click is the only way the
  *  card can say the round is running at all. Session-local on purpose: after a
  *  restart the card falls back to "plan ready · not started", which is at
- *  worst incomplete, where claiming an executor log would be a lie. */
+ *  worst incomplete, where claiming an executor log would be a lie.
+ *
+ *  The mark has to be cleared, or a round that failed in the thread reads as
+ *  running forever: agent-session clears it when the turn ends, and the card
+ *  offers the user the same escape. */
 const agentRuns = new Map<string, number>();
 export function markAgentRound(dir: string, n: number): void {
   if (agentRuns.get(dir) === n) return;
   agentRuns.set(dir, n);
   notifySession();
 }
+export function clearAgentRound(dir: string): void {
+  if (agentRuns.delete(dir)) notifySession();
+}
 export function agentRoundFor(dir: string): number | null { return agentRuns.get(dir) ?? null; }
+
+/* ---------- the round the user has finished reading ---------- */
+
+/** A round that has ended keeps its card and its log until it is dismissed —
+ *  the run you just watched is the one you most want to read back. Remembered
+ *  per project so a restart does not resurrect it; a newer round outranks it
+ *  by number, so starting one is also a dismissal. */
+const DISMISS_KEY = (dir: string) => `chronicle.notes.round-seen.${dir}`;
+const dismissed = new Map<string, number>();
+
+export function dismissedRoundFor(dir: string): number {
+  const held = dismissed.get(dir);
+  if (held !== undefined) return held;
+  let n = 0;
+  try { n = Number(localStorage.getItem(DISMISS_KEY(dir))) || 0; } catch { /* private mode */ }
+  dismissed.set(dir, n);
+  return n;
+}
+
+export function dismissRound(dir: string, n: number): void {
+  if (dismissedRoundFor(dir) >= n) return;
+  dismissed.set(dir, n);
+  try { localStorage.setItem(DISMISS_KEY(dir), String(n)); } catch { /* private mode */ }
+  notifySession();
+}
 
 /** Project close — drop both listeners and everything they filled in. */
 export function evictRoundLog(dir: string): void {
   armRoundLog(dir, null);
   armRoundWatch(dir, false);
+  running.delete(dir);
   agentRuns.delete(dir);
+  dismissed.delete(dir);
   for (const k of [...logs.keys()]) if (k.startsWith(`${dir}::`)) logs.delete(k);
 }

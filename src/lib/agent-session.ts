@@ -23,6 +23,7 @@ import {
   type AcpUpdate,
   type AgentEditFile,
 } from "./ipc";
+import { clearAgentRound } from "./round-log";
 
 export type AgentPhase =
   | "none" // never started (or explicitly reset)
@@ -354,11 +355,13 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       s.errorMessage = str(params.message) || "The agent bridge stopped.";
       s.turnActive = false;
       settleStreaming(s);
+      clearAgentRound(dir); // a dead bridge is not running anyone's round
     } else if (state === "ended") {
       // needs-login/error keep their more specific face over the shutdown event
       if (s.phase !== "needs-login" && s.phase !== "error") s.phase = "ended";
       s.turnActive = false;
       settleStreaming(s);
+      clearAgentRound(dir);
     }
     notify();
     return;
@@ -401,6 +404,10 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       if (e.kind === "round" && !e.ended) {
         e.ended = true;
         e.stopReason = params.error != null ? "error" : str(params.stopReason) || null;
+        // the Notes card has no session to watch for this route — the thread IS
+        // the round — so the turn ending is the only thing that can tell it the
+        // round is no longer running, however it ended
+        clearAgentRound(dir);
         break;
       }
     }

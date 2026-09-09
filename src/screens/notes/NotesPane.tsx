@@ -116,15 +116,19 @@ export function NotesPane({
      written plan from a running one, so the live session decides. The card and
      the log panel both read this, so they can never disagree again. */
   const live = hasLiveRound(dir);
+  // NOT gated on onScreen: an overlay hides the pane, and a watch that dropped
+  // what it knew would demote a running round to "plan ready" — offering to
+  // start a second executor. Two push listeners, no polling; the pane unmounts
+  // when another pane takes over, and closing the project evicts everything.
   useEffect(() => {
-    armRoundWatch(dir, onScreen && live);
+    armRoundWatch(dir, live);
     return () => armRoundWatch(dir, false);
-  }, [dir, onScreen, live]);
+  }, [dir, live]);
 
   const ph = roundPhase(dir);
   const phase = ph?.phase ?? null;
   const roundN = ph?.n ?? null;
-  const route = roundRoute(dir);
+  const route = roundN == null ? null : roundRoute(dir, roundN);
   const roundNotes = useMemo(
     () => (roundN == null ? [] : roundNotesFor(dir, roundN)),
     [dir, index, roundN],
@@ -148,7 +152,9 @@ export function NotesPane({
     setLogOpen(false);
     try { localStorage.setItem(LOG_KEY(dir), "0"); } catch { /* private mode */ }
   }, [dir]);
-  const showLog = logOpen && round !== null;
+  // the log tail IS worth dropping off screen — unlike the phase, a stale one
+  // costs nothing and the panel is not being looked at
+  const showLog = logOpen && round !== null && onScreen;
 
   const openNoteHere = useCallback((path: string) => { void openNote(dir, path); }, [dir]);
   const newNoteIn = useCallback((folder: string) => {

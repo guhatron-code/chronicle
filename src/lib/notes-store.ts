@@ -23,7 +23,7 @@ import {
   joinFrontMatter, newNotePath, roundPhaseOf, setStatusInFront, splitFrontMatter,
   type RoundPhase, type SaveState,
 } from "./notes-model";
-import { agentRoundFor, evictRoundLog, execRunning } from "./round-log";
+import { agentRoundFor, dismissedRoundFor, evictRoundLog, execRunning } from "./round-log";
 import { toastError } from "@/overlays/toasts";
 
 export interface OpenNote {
@@ -294,14 +294,15 @@ export function generatingRoundFor(dir: string): number | null {
  *  The record says `ready` for both "the plan is written, nothing has run" and
  *  "the executor is working"; the live session is what tells them apart. */
 export function roundPhase(dir: string): { phase: RoundPhase; n: number } | null {
-  return roundPhaseOf(indexFor(dir).rounds, execRunning(dir), agentRoundFor(dir));
+  return roundPhaseOf(indexFor(dir).rounds, execRunning(dir), agentRoundFor(dir), dismissedRoundFor(dir));
 }
 
-/** How the round is being run, when it is: the headless session, or the agent
- *  pane (which has no session of its own). */
-export function roundRoute(dir: string): "headless" | "agent" | null {
+/** How round `n` is being run, when it is: the headless session, or the agent
+ *  pane (which has no session of its own). The mark names one round, so an old
+ *  one must never make a newer round look like it is in the thread. */
+export function roundRoute(dir: string, n: number): "headless" | "agent" | null {
   if (execRunning(dir)) return "headless";
-  return agentRoundFor(dir) != null ? "agent" : null;
+  return agentRoundFor(dir) === n ? "agent" : null;
 }
 
 /** "bug fixes" / "feature additions" — what the plan's first line declared. */

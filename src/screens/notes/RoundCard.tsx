@@ -19,7 +19,7 @@ import { DocGlyph } from "@/components/chrome/icons";
 import {
   copyText, fixesCancel, readFile, roundExecCancel, roundExecute, type NoteEntry,
 } from "@/lib/ipc";
-import { markAgentRound } from "@/lib/round-log";
+import { clearAgentRound, dismissRound, markAgentRound } from "@/lib/round-log";
 import { refreshNotes, setRoundGenerating } from "@/lib/notes-store";
 import { roundSubline, type RoundPhase } from "@/lib/notes-model";
 import { toastError, toastSuccess } from "@/overlays/toasts";
@@ -38,10 +38,12 @@ export interface RoundCardData {
   route: "headless" | "agent" | null;
 }
 
-/** A note's row label. Before anything runs, "working" would be a lie. */
+/** A note's row label. Before anything runs, "working" would be a lie; after
+ *  the round is over, so would "in round". */
 function rowStatus(note: NoteEntry, phase: RoundPhase): { label: string; tone: string } {
   if (note.status === "done") return { label: "done", tone: "done" };
   if (phase === "executing") return { label: "working", tone: "progress" };
+  if (phase === "finished" || phase === "failed") return { label: "not done", tone: "unknown" };
   return { label: "in round", tone: "queued" };
 }
 
@@ -85,6 +87,11 @@ export const RoundCard = memo(function RoundCard({
       .catch((e) => toastError("Couldn't copy the prompt", String(e).slice(0, 90)));
   };
 
+  /* The ACP route has no session to cancel — the thread is the round. All the
+     card can do is stop claiming it is running, which is what the user needs
+     when the turn died without the pane hearing about it. */
+  const forgetAgentRun = () => clearAgentRound(dir);
+
   const cancel = () => {
     setBusy(true);
     const stop = phase === "generating" ? fixesCancel(dir) : roundExecCancel(dir);
@@ -114,7 +121,7 @@ export const RoundCard = memo(function RoundCard({
         {roundSubline(phase, route, done, total)}
       </div>
 
-      {phase !== "plan-ready" && total > 0 && (
+      {(phase === "generating" || phase === "executing") && total > 0 && (
         <div className="my-2.5 h-[2px] overflow-hidden rounded-[1px] bg-fill-subtle">
           <div
             className="h-full rounded-[1px] bg-state-neutral"
@@ -152,6 +159,21 @@ export const RoundCard = memo(function RoundCard({
       {(phase === "generating" || (phase === "executing" && route === "headless")) && (
         <div className="mt-2.5 flex gap-1.5">
           <button type="button" disabled={busy} onClick={cancel} className={BTN}>Cancel</button>
+        </div>
+      )}
+
+      {phase === "executing" && route === "agent" && (
+        <div className="mt-2.5 flex gap-1.5">
+          <button type="button" onClick={forgetAgentRun} className={BTN}>Not running anymore</button>
+        </div>
+      )}
+
+      {(phase === "finished" || phase === "failed") && (
+        <div className="mt-2.5 flex gap-1.5">
+          <button type="button" onClick={() => dismissRound(dir, n)} className={BTN}>Dismiss</button>
+          {phase === "failed" && (
+            <button type="button" onClick={copyPrompt} className={BTN}>Copy the prompt</button>
+          )}
         </div>
       )}
     </div>

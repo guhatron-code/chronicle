@@ -41,8 +41,10 @@ export const RoundLog = memo(function RoundLog({
   onClose: () => void;
   onRevealTerminal?: () => void;
 }) {
-  // the log that exists for this phase: the executor only has one once it runs
-  const kind = phase === "executing" ? "exec" : "fixes";
+  // the log that exists for this phase. A round that finished ran an executor,
+  // so its log is the exec one; a `failed` round never got past generation, so
+  // its log — the one that says why — is the generation session's.
+  const kind = phase === "executing" || phase === "finished" ? "exec" : "fixes";
   const [, bump] = useState(0);
   useEffect(() => subscribeRoundLog(() => bump((x) => x + 1)), []);
   // the only thing that keeps the listener alive: no panel, no subscription
@@ -121,7 +123,9 @@ export const RoundLog = memo(function RoundLog({
                 ? "Nothing logged yet — the session is starting."
                 : phase === "plan-ready"
                   ? "The plan is written. Run the round to see the executor here."
-                  : "Nothing logged yet. A round you sent to the agent pane reports in the agent thread, not here."}
+                  : phase === "finished" || phase === "failed"
+                    ? "This round left no log — it ran in the agent pane, or the log has been cleaned up since."
+                    : "Nothing logged yet. A round you sent to the agent pane reports in the agent thread, not here."}
           </div>
         ) : (
           lines.map((line, i) => <div key={i} className="whitespace-pre-wrap break-words">{line}</div>)
