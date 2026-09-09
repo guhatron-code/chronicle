@@ -1629,7 +1629,9 @@ fn watch_project(app: tauri::AppHandle, roots: State<OpenRoots>, watch: State<Wa
 fn unwatch_project(watch: State<WatchState>, notes: State<notes::index::NotesState>, dir: String) -> Result<(), String> {
     let (key, _) = canon_key(&dir)?;
     watch.watchers.lock().map_err(|e| e.to_string())?.remove(&key); // drop stops it
-    if let Ok(p) = PathBuf::from(&dir).canonicalize() { notes::index::evict(&notes, &p); }
+    // reuse the canonical path canon_key already resolved rather than
+    // re-canonicalising and silently skipping the evict if that second call failed
+    notes::index::evict(&notes, &PathBuf::from(&key));
     Ok(())
 }
 

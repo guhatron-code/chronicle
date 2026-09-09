@@ -8,7 +8,7 @@ use super::parse::{self, links_of, round_of, snippet_of, split_front_matter, sta
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{Emitter, EventTarget};
 
 const MAX_INDEXED: u64 = 4 * 1024 * 1024;
@@ -43,6 +43,12 @@ pub struct Vault {
 
 pub struct NotesState {
     pub vaults: Mutex<HashMap<PathBuf, Vault>>,
+    /// One mutex per vault, held across `refresh`'s walk+parse+swap — never the
+    /// same lock `vaults` uses. Readers (`snapshot`, `generation`) never wait on
+    /// this; it only serialises concurrent refreshers of the SAME vault so a
+    /// walk that started later can never lose a race and install a stale result
+    /// at a higher generation than a walk that started earlier already claimed.
+    refresh_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
 }
 
 pub fn vault_dir(dir: &Path) -> PathBuf { dir.join(".chronicle/notes") }
@@ -109,27 +115,57 @@ pub fn fill_resolved(notes: &mut [NoteEntry]) {
     }
 }
 
-impl NotesState { pub fn new() -> Self { Self { vaults: Mutex::new(HashMap::new()) } } }
+impl NotesState {
+    pub fn new() -> Self { Self { vaults: Mutex::new(HashMap::new()), refresh_locks: Mutex::new(HashMap::new()) } }
+}
 
+/// The per-vault refresh mutex, created on first use. Held by `refresh` for its
+/// whole body — the lock lives in its own map so acquiring it never contends
+/// with `vaults`, which readers need to stay fast.
+fn refresh_lock(state: &NotesState, dir: &Path) -> Arc<Mutex<()>> {
+    let mut g = match state.refresh_locks.lock() { Ok(g) => g, Err(e) => e.into_inner() };
+    g.entry(dir.to_path_buf()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+}
+
+/// Walk the vault and reparse whatever moved, then install the result. The walk
+/// and every `parse_note` call run with the `vaults` lock released — only the
+/// snapshot of the previous entries (cheap: a clone of what's already in memory)
+/// and the final swap take it, each briefly. The per-vault `refresh_lock` is
+/// held for the whole call so two concurrent refreshes of the same vault can
+/// never interleave: the second one's walk starts only after the first has
+/// already installed its result, so the index can never regress to an older
+/// snapshot at a newer generation.
 pub fn refresh(state: &NotesState, dir: &Path) -> (Vec<String>, u64) {
+    let serial = refresh_lock(state, dir);
+    let _serial = match serial.lock() { Ok(g) => g, Err(e) => e.into_inner() };
+
     let vault = vault_dir(dir);
     let on_disk = walk(&vault);
-    let mut guard = match state.vaults.lock() { Ok(g) => g, Err(e) => e.into_inner() };
-    let v = guard.entry(dir.to_path_buf()).or_insert(Vault { notes: vec![], generation: 0 });
-    let old: HashMap<String, &NoteEntry> = v.notes.iter().map(|n| (n.path.clone(), n)).collect();
+
+    let (old, prev_generation, prev_len): (HashMap<String, NoteEntry>, u64, usize) = {
+        let guard = match state.vaults.lock() { Ok(g) => g, Err(e) => e.into_inner() };
+        match guard.get(dir) {
+            Some(v) => (v.notes.iter().map(|n| (n.path.clone(), n.clone())).collect(), v.generation, v.notes.len()),
+            None => (HashMap::new(), 0, 0),
+        }
+    };
+
     let mut changed: Vec<String> = Vec::new();
     let mut next: Vec<NoteEntry> = Vec::with_capacity(on_disk.len());
     for (rel, mtime, size) in &on_disk {
         match old.get(rel) {
-            Some(prev) if prev.mtime == *mtime && prev.size == *size => next.push((*prev).clone()),
+            Some(prev) if prev.mtime == *mtime && prev.size == *size => next.push(prev.clone()),
             _ => { changed.push(rel.clone()); next.push(parse_note(&vault, rel, *mtime, *size)); }
         }
     }
     let seen: std::collections::HashSet<&String> = on_disk.iter().map(|(r, _, _)| r).collect();
-    for gone in v.notes.iter().filter(|n| !seen.contains(&n.path)) { changed.push(gone.path.clone()); }
-    if changed.is_empty() && next.len() == v.notes.len() { return (vec![], v.generation); }
+    for gone in old.keys().filter(|p| !seen.contains(p)) { changed.push((*gone).clone()); }
+    if changed.is_empty() && next.len() == prev_len { return (vec![], prev_generation); }
     fill_resolved(&mut next);
     next.sort_by(|a, b| a.path.cmp(&b.path));
+
+    let mut guard = match state.vaults.lock() { Ok(g) => g, Err(e) => e.into_inner() };
+    let v = guard.entry(dir.to_path_buf()).or_insert_with(|| Vault { notes: vec![], generation: 0 });
     v.notes = next;
     v.generation += 1;
     (changed, v.generation)
@@ -251,6 +287,35 @@ mod tests {
         assert_eq!(paths3, vec!["A.md"]);
         assert_eq!(g3, 2);
         assert_eq!(snapshot(&st, &d).notes[0].snippet, "one and two");
+    }
+
+    /// Two threads racing `refresh` on the same vault must never let the one
+    /// that started first (and so may still be walking/parsing) install its
+    /// result AFTER the one that started second and already has the newer
+    /// body — that would regress the index to stale content at a higher
+    /// generation, with nothing to repair it. The per-vault `refresh_lock`
+    /// (index.rs) exists to rule this out: it serialises the whole
+    /// walk+parse+swap, so whichever refresh finishes last always finishes
+    /// having walked the vault after the other one's swap completed.
+    #[test]
+    fn two_concurrent_refreshes_after_a_write_leave_the_newer_body_in_the_index() {
+        let d = tmp("racing-refresh");
+        write(&d, "A.md", "one\n");
+        let st = Arc::new(NotesState::new());
+        refresh(&st, &d);
+        std::thread::sleep(std::time::Duration::from_millis(1100)); // mtime has 1s resolution on some fs
+        write(&d, "A.md", "one and two\n");
+
+        let handles: Vec<_> = (0..2).map(|_| {
+            let st = st.clone();
+            let d = d.clone();
+            std::thread::spawn(move || refresh(&st, &d))
+        }).collect();
+        for h in handles { h.join().unwrap(); }
+
+        let idx = snapshot(&st, &d);
+        assert_eq!(idx.notes[0].snippet, "one and two",
+                   "the newer body must survive two concurrent refreshes, never regress to the older one");
     }
 
     #[test]
