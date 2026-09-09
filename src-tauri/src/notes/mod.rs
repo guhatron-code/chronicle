@@ -29,15 +29,20 @@ pub struct SearchHit { pub path: String, pub title: String, pub kind: String, pu
 /// `.md`, and — after canonicalising every component that exists — still sits
 /// under `.chronicle/notes`. The file itself need not exist: `notes_write`
 /// creates new notes.
-pub fn note_file(p: &Project, rel: &str) -> Result<PathBuf, String> {
+pub fn note_file(p: &Project, rel: &str) -> Result<PathBuf, String> { note_file_in(&p.dir, rel) }
+
+/// The same jail, addressed by project dir alone — `rounds` resolves the note
+/// paths it reads out of `.chronicle/rounds.json` through this, since that file
+/// is user-editable and a hand-written `../..` must not escape.
+pub fn note_file_in(dir: &Path, rel: &str) -> Result<PathBuf, String> {
     if !rel.ends_with(".md") { return Err("only .md files live in the vault".into()); }
     // the vault is created on the first WRITE, never on a read or a jail check —
     // creating it here would make migrate::needs_migration answer "already done"
     // for a project that has only ever been looked at (spec: error handling)
-    let raw = index::vault_dir(&p.dir);
+    let raw = index::vault_dir(dir);
     let vault = match raw.canonicalize() {
         Ok(v) => v,
-        Err(_) => p.dir.canonicalize().map_err(|e| e.to_string())?.join(".chronicle/notes"),
+        Err(_) => dir.canonicalize().map_err(|e| e.to_string())?.join(".chronicle/notes"),
     };
     if rel.starts_with('/') || rel.contains('\0') || rel.split('/').any(|s| s == "..") {
         return Err("that path isn't inside the notes vault".into());
@@ -106,6 +111,9 @@ pub fn write_note(p: &Project, rel: &str, text: &str) -> Result<(), String> {
 pub fn move_note(p: &Project, from: &str, to: &str) -> Result<Vec<String>, String> {
     let src = note_file(p, from)?;
     let dst = note_file(p, to)?;
+    // the same refusal `write_note` gives: a live round's notes are the agent's
+    // until it finishes, and renaming one would strand the round's other notes
+    if rounds::is_locked(&p.dir, from) { return Err("locked".into()); }
     if dst.exists() { return Err("a note with that name is already there".into()); }
     if !src.exists() { return Err("that note isn't there anymore".into()); }
     let vault = index::vault_dir(&p.dir);
@@ -131,6 +139,7 @@ pub fn move_note(p: &Project, from: &str, to: &str) -> Result<Vec<String>, Strin
 /// Never unlinks: the file moves to `.chronicle/trash/<epoch ms>-<name>.md`.
 pub fn delete_note(p: &Project, rel: &str) -> Result<String, String> {
     let full = note_file(p, rel)?;
+    if rounds::is_locked(&p.dir, rel) { return Err("locked".into()); }
     let name = rel.rsplit('/').next().unwrap_or(rel);
     let trash = p.dir.join(".chronicle/trash");
     std::fs::create_dir_all(&trash).map_err(|e| e.to_string())?;
@@ -351,6 +360,32 @@ mod tests {
         assert!(root.join(&rel).exists());
         assert!(!root.join(".chronicle/notes/A.md").exists());
         assert_eq!(std::fs::read_to_string(root.join(".chronicle/notes/B.md")).unwrap(), "[[A]]\n");
+    }
+
+    #[test]
+    fn a_live_round_locks_write_move_and_delete_alike() {
+        let (root, p) = proj("locked");
+        put(&root, "Tasks/A.md", "---\nstatus: in_progress\nround: 1\n---\n\na\n");
+        put(&root, "Tasks/Free.md", "---\nstatus: queued\n---\n\nfree\n");
+        let record = |state: &str| rounds::Round {
+            n: 1, state: state.into(), kind: None, task_ids: vec![],
+            note_paths: vec!["Tasks/A.md".into()], created_at: 0,
+            plan_path: "fixes/phase_1_fixes_plan.md".into(),
+            prompt_path: "fixes/phase_1_fixes_prompt.md".into(),
+        };
+        rounds::save(&root, &[record("ready")]).unwrap();
+
+        assert_eq!(write_note(&p, "Tasks/A.md", "clobbered\n").unwrap_err(), "locked");
+        assert_eq!(move_note(&p, "Tasks/A.md", "Tasks/Renamed.md").unwrap_err(), "locked",
+                   "renaming a note out from under a round would strand the round's other notes");
+        assert_eq!(delete_note(&p, "Tasks/A.md").unwrap_err(), "locked");
+        assert!(root.join(".chronicle/notes/Tasks/A.md").exists(), "and nothing moved");
+
+        // a note the round never took is ordinary
+        assert!(move_note(&p, "Tasks/Free.md", "Tasks/Moved.md").is_ok());
+        // the lock lifts with the round
+        rounds::save(&root, &[record("done")]).unwrap();
+        assert!(delete_note(&p, "Tasks/A.md").is_ok());
     }
 
     #[test]

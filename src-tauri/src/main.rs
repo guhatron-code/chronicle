@@ -1366,12 +1366,12 @@ async fn fixes_generate(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init
     }
     let picked = notes::rounds::queued_notes(&p.dir);
     if picked.is_empty() { return Err("no queued notes to execute".into()); }
-    let mut rounds = notes::rounds::load(&p.dir);
+    // a rounds.json we cannot read stops the round here — saving over it would
+    // restart the numbering at 1 and drop every round the user already ran
+    let mut rounds = notes::rounds::load(&p.dir)?;
     let round_n = rounds.iter().map(|r| r.n).max().unwrap_or(0) + 1;
-    // the round takes them: status in_progress, round N, written into the files
-    for rel in &picked {
-        notes::rounds::set_status(&p.dir, rel, Some("in_progress"), Some(round_n))?;
-    }
+    // the record goes down BEFORE the notes are frozen: if a set_status then
+    // fails, cancel and settle both know which notes to release
     rounds.push(notes::rounds::Round {
         n: round_n, state: "generating".into(), kind: None,
         task_ids: vec![], note_paths: picked.clone(), created_at: epoch_ms(),
@@ -1379,6 +1379,10 @@ async fn fixes_generate(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init
         prompt_path: format!("fixes/phase_{round_n}_fixes_prompt.md"),
     });
     notes::rounds::save(&p.dir, &rounds)?;
+    // the round takes them: status in_progress, round N, written into the files
+    for rel in &picked {
+        notes::rounds::set_status(&p.dir, rel, Some("in_progress"), Some(round_n))?;
+    }
 
     // spawn the generation session (same machinery + lifecycle as /chronicle-init).
     // the notes go via a file — a big round would blow ARG_MAX as an argv string (H7)
@@ -1460,14 +1464,13 @@ async fn fixes_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, d
     let entry = init.runs.lock().map_err(|e| e.to_string())?.remove(&key);
     if let Some((mut child, _, _)) = entry { term_then_kill(&mut child); }
     // a cancelled generating round unfreezes its notes
-    let mut rounds = notes::rounds::load(&p.dir);
-    if let Some(last) = rounds.last() {
-        if last.state == "generating" {
-            let paths = last.note_paths.clone();
-            rounds.pop();
-            for rel in &paths { let _ = notes::rounds::set_status(&p.dir, rel, Some("queued"), None); }
-            let _ = notes::rounds::save(&p.dir, &rounds);
-        }
+    let mut rounds = notes::rounds::load(&p.dir)?;
+    // the newest GENERATING round, exactly as settle_round picks it — never
+    // assume it is last() (audit B1)
+    if let Some(i) = rounds.iter().rposition(|r| r.state == "generating") {
+        let paths = rounds.remove(i).note_paths;
+        for rel in &paths { let _ = notes::rounds::set_status(&p.dir, rel, Some("queued"), None); }
+        let _ = notes::rounds::save(&p.dir, &rounds);
     }
     Ok(())
 }
@@ -1475,7 +1478,7 @@ async fn fixes_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, d
 /// After a generation session exits: read what it actually wrote and record the truth —
 /// the plan file's first line names the round kind; both files must exist or it failed.
 fn settle_round(dir: &Path) {
-    let mut rounds = notes::rounds::load(dir);
+    let Ok(mut rounds) = notes::rounds::load(dir) else { return }; // never write over corrupt
     let Some(i) = rounds.iter().rposition(|r| r.state == "generating") else { return };
     let n = rounds[i].n;
     let plan = dir.join(format!("fixes/phase_{n}_fixes_plan.md"));
@@ -1498,7 +1501,7 @@ fn settle_round(dir: &Path) {
 /// from the notes' front matter on disk) that derive_statuses honors.
 fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
     notes::rounds::settle_done(dir);
-    let rounds = notes::rounds::load(dir);
+    let rounds = notes::rounds::load(dir).unwrap_or_default(); // unreadable => no overlay
     let settled: Vec<&notes::rounds::Round> = rounds.iter()
         .filter(|r| r.state == "ready" || r.state == "done").collect();
     if settled.is_empty() { return manifest.clone(); }
@@ -1723,6 +1726,9 @@ async fn round_execute(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init:
     if !p.dir.join(&prompt_rel).exists() {
         return Err("that round's prompt file isn't there anymore".into());
     }
+    // read the store before spawning: the agent is about to edit note front
+    // matter and settle_done has to be able to read the round back afterwards
+    notes::rounds::load(&p.dir)?;
     let (key, log) = exec_run_key(&dir)?;
     let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
     if let Some((child, _, _)) = runs.get_mut(&key) {
@@ -1808,7 +1814,7 @@ async fn round_exec_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitStat
 #[tauri::command]
 async fn round_retro(roots: State<'_, OpenRoots>, dir: String, n: u64) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
-    let created = notes::rounds::load(&p.dir).iter().find(|r| r.n == n)
+    let created = notes::rounds::load(&p.dir)?.iter().find(|r| r.n == n)
         .map(|r| r.created_at).filter(|c| *c > 0)
         .ok_or("that round isn't in this project")?;
     let since = format!("--since={}", created / 1000); // git accepts epoch seconds
@@ -3430,7 +3436,7 @@ mod r4_tests {
         let d = tmp("settle");
         vault_round(&d, &["in_progress"], "generating");
         settle_round(&d); // no plan files → failed, and the notes go back to queued
-        assert_eq!(notes::rounds::load(&d)[0].state, "failed");
+        assert_eq!(notes::rounds::load(&d).unwrap()[0].state, "failed");
         let text = std::fs::read_to_string(d.join(".chronicle/notes/Tasks/N0.md")).unwrap();
         let (fm, _) = notes::parse::split_front_matter(&text);
         assert_eq!(notes::parse::status_of(&fm).as_deref(), Some("queued"));
@@ -3441,7 +3447,7 @@ mod r4_tests {
         std::fs::write(d.join("fixes/phase_1_fixes_plan.md"), "Round kind: feature additions\n\n- item").unwrap();
         std::fs::write(d.join("fixes/phase_1_fixes_prompt.md"), "Execute the plan.").unwrap();
         settle_round(&d);
-        let r = notes::rounds::load(&d);
+        let r = notes::rounds::load(&d).unwrap();
         assert_eq!(r[0].state, "ready");
         assert_eq!(r[0].kind.as_deref(), Some("feature additions"));
     }
@@ -3476,7 +3482,7 @@ mod r4_tests {
         let merged = inject_rounds(&d, &manifest);
         let fx = derive_statuses(&ctx, &merged).into_iter().find(|s| s.id == "FX-1").unwrap();
         assert_eq!(fx.state, "done");
-        assert_eq!(notes::rounds::load(&d)[0].state, "done", "settle_done ran and lifted the lock");
+        assert_eq!(notes::rounds::load(&d).unwrap()[0].state, "done", "settle_done ran and lifted the lock");
     }
 
     #[test]
