@@ -50,6 +50,11 @@ import { toastError, toastSuccess, toastRemoteOutcome } from "@/overlays/toasts"
 import { humanError, humanGitError } from "@/lib/utils";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
+/** The last Check now failure per project. Lives outside the component because
+ *  the pane remounts on every pane switch and the spec keeps the sentence until
+ *  the next successful check or a project switch. */
+const lastCheckError = new Map<string, string>();
+
 export function RoadmapPane({
   dir,
   state,
@@ -123,7 +128,11 @@ export function RoadmapPane({
   const [historyChecking, setHistoryChecking] = useState(false);
   /* the last Check now that failed. history_facts never carries an error, so
      without this the sentence would be gone on the very next poll. */
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyError, setHistoryErrorState] = useState<string | null>(() => lastCheckError.get(dir) ?? null);
+  const setHistoryError = (e: string | null) => {
+    if (e) lastCheckError.set(dir, e); else lastCheckError.delete(dir);
+    setHistoryErrorState(e);
+  };
   const [uncommittedOpen, setUncommittedOpen] = useState(false);
   const [warningDismissed, setWarningDismissed] = useState(false);
   const [consentLocal, setConsentLocal] = useState<"auto" | "manual" | "basic" | null>(null);
