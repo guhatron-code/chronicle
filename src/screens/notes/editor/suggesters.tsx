@@ -215,9 +215,11 @@ export function tagSuggest(tags: () => TagSuggestion[]): Extension {
         editor: this.editor,
         char: "#",
         pluginKey: tagKey,
-        // `# ` at the start of a line is a heading, never a tag: block the menu
-        // when the `#` is the first character of its block.
-        allow: ({ state, range }) => state.doc.resolve(range.from).parentOffset > 0,
+        // `# ` at the start of a line is a heading, never a tag: a bare `#`
+        // opening its block stays silent, but `#b` there is already a tag.
+        allow: ({ state, range }) =>
+          state.doc.resolve(range.from).parentOffset > 0
+          || state.doc.textBetween(range.from, range.to).length > 1,
         items: ({ query }) => tagItems(tags(), query),
         command: ({ editor, range, props }) =>
           editor.chain().focus().deleteRange(range)

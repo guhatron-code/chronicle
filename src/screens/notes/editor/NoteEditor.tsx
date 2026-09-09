@@ -11,29 +11,13 @@
  */
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { notesAttach, type NoteEntry } from "@/lib/ipc";
 import { cachedImageSrc, noteImageSrc, setCaretLinkResolver } from "@/lib/notes-store";
 import { slugFor, tagCounts } from "@/lib/notes-model";
+import { seedImageRefs, toDisplay, toFile } from "./images";
 import { NOTE_EXTENSIONS, finishMarkdown } from "./nodes";
 import { slashSuggest, tagSuggest, wikiLinkSuggest } from "./suggesters";
-
-const REF = /!\[([^\]]*)\]\((\.\.\/attachments\/[^)\s]+)\)/g;
-
-/** `![](../attachments/x.png)` → `![](data:…)` for everything already cached. */
-function toDisplay(md: string, dir: string): string {
-  return md.replace(REF, (whole, alt: string, ref: string) => {
-    const src = cachedImageSrc(dir, ref);
-    return src ? `![${alt}](${src})` : whole;
-  });
-}
-/** …and back, so the file never holds a data: URI. */
-function toFile(md: string, srcToRef: Map<string, string>): string {
-  return md.replace(/!\[([^\]]*)\]\((data:[^)\s]+)\)/g, (whole, alt: string, src: string) => {
-    const ref = srcToRef.get(src);
-    return ref ? `![${alt}](${ref})` : whole;
-  });
-}
 
 export function NoteEditor({
   dir, path, body, readOnly, notes, onChange, onBlur, onOpenNote, onCreateNote, onOpenFile, onOpenUrl,
@@ -57,18 +41,20 @@ export function NoteEditor({
   const folderRef = useRef(folder); folderRef.current = folder;
   const editorRef = useRef<Editor | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const cached = useCallback((ref: string) => cachedImageSrc(dir, ref), [dir]);
 
-  /* every attachment the body names is fetched once, then the body is re-set */
+  /* Every reference the body names gets its way back from the data: URI —
+   * including the ones the image cache already holds, since this editor may be
+   * a remount against a warm cache. Only what is genuinely missing is fetched. */
   const [imagesReady, setImagesReady] = useState(0);
   useEffect(() => {
-    const refs = [...body.matchAll(REF)].map((m) => m[2]);
-    const missing = refs.filter((r) => !cachedImageSrc(dir, r));
+    const missing = seedImageRefs(body, cached, srcToRef);
     if (missing.length === 0) return;
     let live = true;
     void Promise.all(missing.map((r) => noteImageSrc(dir, r).then((src) => { if (src) srcToRef.set(src, r); })))
       .then(() => { if (live) setImagesReady((n) => n + 1); });
     return () => { live = false; };
-  }, [body, dir, srcToRef]);
+  }, [body, dir, cached, srcToRef]);
 
   /** Images land in .chronicle/attachments and come straight back as a data URI. */
   const handleFiles = useCallback((files: FileList | null | undefined): boolean => {
@@ -102,7 +88,7 @@ export function NoteEditor({
 
   const editor = useEditor({
     extensions: [...NOTE_EXTENSIONS, ...suggesters],
-    content: toDisplay(body, dir),
+    content: toDisplay(body, cached),
     contentType: "markdown",
     editable: !readOnly,
     immediatelyRender: false,
@@ -124,22 +110,25 @@ export function NoteEditor({
         const href = (event.target as HTMLElement).closest("a")?.getAttribute("href");
         if (!href) return false;
         if (/^https?:\/\//i.test(href)) { cb.current.onOpenUrl(href); return true; }
-        // relative repo paths open in the Repo pane; a scheme or an absolute
-        // path is inert, exactly as the spec says
-        if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("/")) return true;
+        // relative repo paths open in the Repo pane; a scheme, an absolute
+        // path, a `#anchor` and a bare `?query` are inert, as the spec says
+        if (/^[a-z][a-z0-9+.-]*:/i.test(href) || /^[/#?]/.test(href)) return true;
         cb.current.onOpenFile(href);
         return true;
       },
     },
   }, [path, readOnly, suggesters]);
-  editorRef.current = editor;
+  /* handlePaste and handleDrop are frozen at creation time (useEditor only
+   * re-reads its options when deps change), so they reach the live editor
+   * through this ref — set before paint, never during render. */
+  useLayoutEffect(() => { editorRef.current = editor; }, [editor]);
 
   /* the note changed under us (open, reload, or an image just arrived) */
   const lastSet = useRef("");
   const lastImages = useRef(0);
   useEffect(() => {
     if (!editor) return;
-    const wanted = toDisplay(body, dir);
+    const wanted = toDisplay(body, cached);
     const fresh = imagesReady !== lastImages.current;
     if (wanted === lastSet.current && !fresh) return;
     // the editor is where this body came from: record it, never re-set it —
@@ -151,7 +140,7 @@ export function NoteEditor({
     lastSet.current = wanted;
     lastImages.current = imagesReady;
     editor.commands.setContent(wanted, { contentType: "markdown" });
-  }, [editor, body, dir, imagesReady, srcToRef]);
+  }, [editor, body, cached, imagesReady, srcToRef]);
 
   /* ⌘] needs to know what the caret is on */
   useEffect(() => {
