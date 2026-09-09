@@ -244,6 +244,7 @@ export function evictNotes(dir: string): void {
   opens.delete(dir);
   lastEdit.delete(dir);
   history.delete(dir);
+  generating.delete(dir);
   for (const k of [...imageCache.keys()]) if (k.startsWith(`${dir}::`)) imageCache.delete(k);
 }
 
@@ -254,6 +255,31 @@ export function takePendingOpenNote(): string | null { const p = pending; pendin
 
 export function noteEntry(dir: string, path: string): NoteEntry | undefined {
   return indexFor(dir).notes.find((n) => n.path === path);
+}
+
+/* ---------- the open round, pinned above the tree ---------- */
+
+export interface OpenRound { n: number; notes: NoteEntry[]; done: number; total: number }
+
+/** The round the pane pins above the tree: the highest round number that still
+ *  has a note sitting at `in_progress`. A round whose notes are all `done` is
+ *  finished and shows nothing (Rust's settle_done agrees on the next heartbeat). */
+export function openRoundFor(dir: string): OpenRound | null {
+  const notes = indexFor(dir).notes;
+  const live = notes.filter((n) => n.round != null && n.status === "in_progress");
+  if (live.length === 0) return null;
+  const n = live.reduce((m, x) => Math.max(m, x.round ?? 0), 0);
+  const mine = notes.filter((x) => x.round === n).sort((a, b) => a.path.localeCompare(b.path));
+  return { n, notes: mine, done: mine.filter((x) => x.status === "done").length, total: mine.length };
+}
+
+/** True while the fixes session is writing a plan — the sidebar's button and the
+ *  roadmap's mirrored card both ask this instead of reading the board. */
+const generating = new Set<string>();
+export function roundGenerating(dir: string): boolean { return generating.has(dir); }
+export function setRoundGenerating(dir: string, on: boolean): void {
+  if (on) generating.add(dir); else generating.delete(dir);
+  notify();
 }
 
 /* ---------- images ----------

@@ -356,6 +356,15 @@ html { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent;
 @keyframes wv-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @keyframes wv-arrow { to { background-position: 12px 0; } }
 
+/* Notes rows never wrap: a name that overflows scrolls once on hover and back. */
+@keyframes note-marquee {
+  0%, 12% { transform: translateX(0); }
+  55%, 67% { transform: translateX(calc(-1 * var(--marquee, 0px))); }
+  100% { transform: translateX(0); }
+}
+.note-marquee > span { display: inline-block; animation: note-marquee 4.5s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .note-marquee > span { animation: none; } }
+
 /* Idle (unfocused or hidden — <html data-idle>, set by src/lib/activity.ts):
    the looping status animations stop repainting. Transitions are untouched. */
 [data-idle="true"] [style*="wv-spin"],

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NoteEntry } from "./ipc";
 import {
   backlinksFor, buildTree, joinFrontMatter, marqueeDistance, needsMarquee, newNotePath,
-  outlinksFor, pillFor, setStatusInFront, slugFor, splitFrontMatter, statusInFront, tagCounts,
+  outlinksFor, pillFor, rowNameStyle, setStatusInFront, slugFor, splitFrontMatter, statusInFront, tagCounts,
 } from "./notes-model";
 
 const note = (path: string, p: Partial<NoteEntry> = {}): NoteEntry => ({
@@ -101,6 +101,24 @@ describe("rows never wrap", () => {
     expect(needsMarquee(122, 120)).toBe(false); // a 2px rounding wobble is not an overflow
     expect(marqueeDistance(200, 120)).toBe(80);
     expect(marqueeDistance(100, 120)).toBe(0);
+  });
+});
+
+describe("rowNameStyle", () => {
+  it("always truncates and never wraps", () => {
+    for (const [sw, cw, hov] of [[100, 120, false], [200, 120, true], [200, 120, false]] as const) {
+      expect(rowNameStyle(sw, cw, hov).className).toContain("whitespace-nowrap");
+      expect(rowNameStyle(sw, cw, hov).className).toContain("text-ellipsis");
+    }
+  });
+  it("marquees only on hover, only when it overflows, and carries the distance", () => {
+    expect(rowNameStyle(200, 120, true)).toEqual({
+      className: "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis note-marquee",
+      style: { "--marquee": "80px" },
+    });
+    expect(rowNameStyle(200, 120, false).className).not.toContain("note-marquee");
+    expect(rowNameStyle(122, 120, true).className).not.toContain("note-marquee");
+    expect(rowNameStyle(100, 120, true).style).toEqual({});
   });
 });
 

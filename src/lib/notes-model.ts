@@ -109,6 +109,15 @@ export function marqueeDistance(scrollWidth: number, clientWidth: number): numbe
   return Math.max(0, scrollWidth - clientWidth);
 }
 
+export interface RowNameStyle { className: string; style: Record<string, string> }
+/** Everything Row decides about its name span: ellipsis always, marquee only
+ *  when the text really overflows and the pointer is on the row. */
+export function rowNameStyle(scrollWidth: number, clientWidth: number, hovered: boolean): RowNameStyle {
+  const base = "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis";
+  if (!hovered || !needsMarquee(scrollWidth, clientWidth)) return { className: base, style: {} };
+  return { className: `${base} note-marquee`, style: { "--marquee": `${marqueeDistance(scrollWidth, clientWidth)}px` } };
+}
+
 export function slugFor(path: string): string {
   const title = (path.split("/").pop() ?? path).replace(/\.md$/, "");
   return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
