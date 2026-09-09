@@ -298,12 +298,22 @@ body {
 }
 
 /* Chrome is not selectable — labels, rows, headers, pills read as controls, not
-   text. Content opts back in: fields, the editor, the terminal, code, and any
-   region marked data-selectable (file viewer, transcripts, logs). */
-body {
+   text. It is opted IN per container with `data-chrome`, never set on <body>:
+   WebKit refuses native editing operations inside a contenteditable whose
+   ancestors are `user-select: none`, so a body-level rule left the notes editor
+   accepting typed characters but silently swallowing Backspace. A descendant's
+   `user-select: text` does not undo that — the ancestor chain has to be clean —
+   which is why this rule names containers and never wraps an editable region.
+   (Pinned by chrome-select.test.ts.)
+
+   Order matters: `[data-chrome]` comes FIRST so the content opt-ins below, at
+   the same specificity, win on any element that is both. */
+[data-chrome] {
   -webkit-user-select: none;
   user-select: none;
 }
+/* Content opts back in: fields, the editor, the terminal, code, and any region
+   marked data-selectable (file viewer, transcripts, logs). */
 input,
 textarea,
 [contenteditable="true"],
@@ -321,6 +331,7 @@ code,
    above is unlayered, so it beats Tailwind's own `.select-none`; without this
    the code viewer's line-number gutter copies along with the code. */
 [data-selectable] .select-none,
+[data-selectable] [data-chrome],
 [data-selectable] [aria-hidden="true"] {
   -webkit-user-select: none;
   user-select: none;

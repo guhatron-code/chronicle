@@ -182,7 +182,7 @@ export function Viewer(p: ViewerProps) {
 
       {/* actions bar */}
       {showActions && (
-        <div className="flex items-center gap-3 border-b border-divider px-3.5 py-[9px]">
+        <div data-chrome className="flex items-center gap-3 border-b border-divider px-3.5 py-[9px]">
           <span className="overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[11.5px] text-text-dim">
             {p.path}
           </span>
@@ -262,7 +262,7 @@ export function Viewer(p: ViewerProps) {
 
       {/* file changed on disk */}
       {p.changedOnDisk && (
-        <div className="flex items-center gap-2.5 border-b border-divider bg-fill-subtle px-3.5 py-[7px]">
+        <div data-chrome className="flex items-center gap-2.5 border-b border-divider bg-fill-subtle px-3.5 py-[7px]">
           <ClockGlyph size={12} className="shrink-0 text-text-subtle" />
           <span className="text-[11.5px] text-text-secondary">
             File changed on disk while you were reading.

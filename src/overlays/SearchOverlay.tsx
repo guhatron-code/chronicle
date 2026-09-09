@@ -88,6 +88,7 @@ export function SearchOverlay({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        data-chrome
         showCloseButton={false}
         className="max-w-[600px] gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 [box-shadow:var(--shadow-overlay)] sm:max-w-[600px]"
       >

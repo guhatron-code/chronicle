@@ -81,7 +81,7 @@ export function Rail({
 }) {
   return (
     <TooltipProvider delayDuration={400}>
-    <div className="flex w-[52px] shrink-0 flex-col items-center gap-1.5 border-r border-divider py-2.5">
+    <div data-chrome className="flex w-[52px] shrink-0 flex-col items-center gap-1.5 border-r border-divider py-2.5">
       <RailButton label="Roadmap" tooltip="Roadmap" mono="⌘J to cycle"
         selected={pane === "road"} onClick={() => onPane("road")}>
         <RoadmapGlyph />

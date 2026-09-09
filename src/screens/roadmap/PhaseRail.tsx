@@ -195,6 +195,7 @@ function WindowCard({ phase }: { phase: Extract<RailPhase, { kind: "window" }> }
 export function PhaseRail({ stages, className }: PhaseRailProps) {
   return (
     <div
+      data-chrome
       className={cn(
         "flex flex-col py-[28px]",
         className,

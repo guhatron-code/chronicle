@@ -48,7 +48,7 @@ function digestAgo(ts: number): string {
 
 export function Roadmap(p: RoadmapProps) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div data-chrome className="min-h-0 flex-1 overflow-y-auto">
       <div
         className={cn(
           "mx-auto flex max-w-[900px] flex-col divide-y divide-divider px-7 py-1.5",

@@ -127,6 +127,7 @@ export function TitleBar({
 
   return (
     <div
+      data-chrome
       data-tauri-drag-region
       onDoubleClick={(e) => {
         // macOS quirk: the native drag session that starts on the first press

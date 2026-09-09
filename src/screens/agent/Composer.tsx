@@ -420,7 +420,7 @@ export function Composer({
       }}
     >
       {s.draft && text === s.draft.text && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div data-chrome className="flex flex-wrap items-center gap-2">
           <span data-draft-chip className="inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-fill-subtle px-2.5 text-[11px] text-text-subtle">
             {s.draft.label}
             <span className="inline-flex items-center gap-1 text-text-dim">
@@ -439,7 +439,7 @@ export function Composer({
         </div>
       )}
       {attachments.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5">
+        <div data-chrome className="flex flex-wrap items-center gap-1.5">
           {attachments.map((a) => (
             <span
               key={a.id}
@@ -527,7 +527,7 @@ export function Composer({
         )}
       />
       </div>
-      <div className="flex items-center gap-[9px]">
+      <div data-chrome className="flex items-center gap-[9px]">
         {!disabled && (
           <button
             data-agent-attach

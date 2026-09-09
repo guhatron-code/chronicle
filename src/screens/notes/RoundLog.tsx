@@ -76,7 +76,7 @@ export const RoundLog = memo(function RoundLog({
 
   return (
     <div className="flex h-[240px] flex-none flex-col border-t border-border-hairline bg-surface-card">
-      <div className="flex h-8 flex-none items-center gap-2.5 border-b border-border-hairline pl-4 pr-2">
+      <div data-chrome className="flex h-8 flex-none items-center gap-2.5 border-b border-border-hairline pl-4 pr-2">
         <span
           aria-hidden
           className="size-[5px] shrink-0 rounded-full bg-state-neutral"

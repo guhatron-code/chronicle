@@ -110,7 +110,7 @@ export function WebPane({ dir, onScreen }: { dir: string; onScreen: boolean }) {
         onNew={() => { void newTab(dir); requestAnimationFrame(() => input.current?.focus()); }}
       />
       {/* address bar */}
-      <div className="flex items-center gap-1.5 border-b border-divider bg-surface-sidebar px-2 py-1.5">
+      <div data-chrome className="flex items-center gap-1.5 border-b border-divider bg-surface-sidebar px-2 py-1.5">
         <button aria-label="Back" disabled={!t?.canBack} onClick={() => t && back(t)} className="size-6 rounded-md text-text-subtle disabled:text-text-dimmer hover:bg-fill-hover">‹</button>
         <button aria-label="Forward" disabled={!t?.canForward} onClick={() => t && forward(t)} className="size-6 rounded-md text-text-subtle disabled:text-text-dimmer hover:bg-fill-hover">›</button>
         <button aria-label="Reload" disabled={!t} onClick={() => t && reload(t)} className="size-6 rounded-md text-text-subtle disabled:text-text-dimmer hover:bg-fill-hover">↻</button>

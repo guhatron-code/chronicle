@@ -26,7 +26,7 @@ export function Picker({
   update?: import("@/components/chrome/TitleBar").UpdateLineProps | null;
 }) {
   return (
-    <div className="relative h-full overflow-y-auto">
+    <div data-chrome className="relative h-full overflow-y-auto">
       {update && update.phase !== "checking" && (
         <div className="flex items-center justify-center gap-3 border-b border-divider px-6 py-2">
           {update.phase === "downloading" ? (

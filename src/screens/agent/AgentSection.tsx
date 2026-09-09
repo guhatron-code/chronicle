@@ -56,6 +56,7 @@ function HistoryPopover({
   return (
     <div
       ref={ref}
+      data-chrome
       data-agent-history
       className="absolute right-2 top-9 z-20 flex w-[320px] flex-col rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
     >
@@ -188,7 +189,7 @@ export function AgentSection({
 
   return (
     <div data-agent-section className="relative flex min-h-0 flex-1 flex-col">
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b border-divider px-3">
+      <div data-chrome className="flex h-9 shrink-0 items-center gap-2 border-b border-divider px-3">
         <Chronigirl size={16} />
         <span className="text-[12.5px] font-medium text-text-primary">Chronigirl</span>
         <span data-agent-state className={cn("inline-flex items-center gap-[5px] whitespace-nowrap text-xs", c.text)}>

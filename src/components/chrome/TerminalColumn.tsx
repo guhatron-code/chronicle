@@ -222,6 +222,7 @@ export function TerminalColumn({
   if (collapsed) {
     return (
       <button
+        data-chrome
         data-terminal-strip
         onClick={onToggleCollapsed}
         className="flex h-7 shrink-0 items-center gap-2 border-t border-divider px-3 text-left hover:bg-fill-subtle"
@@ -244,7 +245,7 @@ export function TerminalColumn({
   return (
     <div data-terminal-section className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* tab strip — the C2 h-10 row (operator-aligned with the viewer bar) */}
-      <div role="tablist" className="flex h-10 shrink-0 items-center gap-0.5 border-b border-divider px-3">
+      <div data-chrome role="tablist" className="flex h-10 shrink-0 items-center gap-0.5 border-b border-divider px-3">
         {tabs.map((t) =>
           renamingId === t.id ? (
             <RenameInput

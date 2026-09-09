@@ -187,7 +187,7 @@ function Row({
 export function FileTree(p: FileTreeProps) {
   const n = p.rootsCount ?? 1;
   return (
-    <div className={cn("flex h-full min-h-0 flex-col", p.className)}>
+    <div data-chrome className={cn("flex h-full min-h-0 flex-col", p.className)}>
       <TreeHeader label={`Explorer · ${n} ${n === 1 ? "root" : "roots"}`}>
         <TreeIconButton
           aria-label="Project history"

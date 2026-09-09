@@ -27,7 +27,7 @@ export const Backlinks = memo(function Backlinks({
   const outlinks = outlinksFor(notes, path);
 
   return (
-    <div className="flex flex-none gap-7 border-t border-border-hairline px-4 py-2.5">
+    <div data-chrome className="flex flex-none gap-7 border-t border-border-hairline px-4 py-2.5">
       <div className="min-w-0 flex-1">
         <Eyebrow className="mb-1.5 block">Linked from · {backlinks.length}</Eyebrow>
         <div className="flex flex-col text-[12.5px] text-text-secondary">

@@ -162,7 +162,7 @@ export const Sidebar = memo(function Sidebar({
       : null;
 
   return (
-    <div className="flex h-full w-[232px] flex-none flex-col border-r border-border-hairline">
+    <div data-chrome className="flex h-full w-[232px] flex-none flex-col border-r border-border-hairline">
       <TreeHeader label={`Notes · ${notes.length}`} className="h-10 flex-none border-b border-border-hairline">
         <TreeIconButton aria-label="New note" onClick={() => onNewNote(activeFolder)}>
           <PlusGlyph size={13} />

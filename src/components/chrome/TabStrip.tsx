@@ -84,7 +84,7 @@ export function TabStrip({ tabs, activeId, onSelect, onClose, onNew, trailing, l
   };
 
   return (
-    <div className={cn("relative flex h-10 min-w-0 shrink-0", className)}>
+    <div data-chrome className={cn("relative flex h-10 min-w-0 shrink-0", className)}>
       <div
         ref={stripRef}
         role="tablist"

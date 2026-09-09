@@ -77,7 +77,7 @@ export function NoteHeader({
   };
 
   return (
-    <div className="flex flex-none flex-col">
+    <div data-chrome className="flex flex-none flex-col">
       {open.conflict && (
         <div className="flex items-center gap-3 border-b border-border-hairline bg-fill-subtle px-4 py-2">
           <span className="text-[12px] text-text-primary">This note changed on disk.</span>

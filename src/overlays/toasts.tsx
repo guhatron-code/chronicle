@@ -25,7 +25,7 @@ const pill =
 
 export function toastSuccess(message: string, monoDetail?: string) {
   toast.custom(() => (
-    <div className={pill}>
+    <div data-chrome className={pill}>
       <span className="text-state-success">
         <CheckGlyph size={13} />
       </span>
@@ -40,7 +40,7 @@ export function toastSuccess(message: string, monoDetail?: string) {
 /** E — a success pill with one action button (the PR hint). */
 export function toastAction(message: string, actionLabel: string, onAction: () => void, monoDetail?: string) {
   toast.custom((id) => (
-    <div className={pill.replace("px-4", "py-2 pl-4 pr-2.5")}>
+    <div data-chrome className={pill.replace("px-4", "py-2 pl-4 pr-2.5")}>
       <span className="text-state-success">
         <CheckGlyph size={13} />
       </span>
@@ -60,7 +60,7 @@ export function toastAction(message: string, actionLabel: string, onAction: () =
 
 export function toastError(message: string, detail?: string) {
   toast.custom(() => (
-    <div className={pill}>
+    <div data-chrome className={pill}>
       <span className="text-state-error">
         <ErrorGlyph size={13} />
       </span>
