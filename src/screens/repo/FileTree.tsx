@@ -3,16 +3,19 @@
  * 28px rows (chevron · icon · name · git letter badge), nested divider-faint guide
  * lines, the selected inset bar, dir-with-changes tint + dot, loading / error /
  * empty-dir rows, workspace-root label. Presentational only; values transcribed 1:1.
+ *
+ * The row/folder/guide/head parts themselves live in components/chrome/Tree —
+ * this tree and the Notes sidebar draw with the same ones.
  */
-import { Eyebrow, Spinner } from "@/components/chrome/atoms";
+import { Spinner } from "@/components/chrome/atoms";
 import {
-  ChevronDownGlyph,
-  ChevronRightGlyph,
-  DocGlyph,
-  ErrorGlyph,
-  FolderSimpleGlyph,
-  HistoryClockGlyph,
-} from "@/components/chrome/icons";
+  TreeFolderRow,
+  TreeGuide,
+  TreeHeader,
+  TreeIconButton,
+  TreeRow,
+} from "@/components/chrome/Tree";
+import { DocGlyph, ErrorGlyph, HistoryClockGlyph } from "@/components/chrome/icons";
 import { cn, sentence } from "@/lib/utils";
 import { AccBody } from "@/screens/roadmap/bits";
 
@@ -118,82 +121,51 @@ function Row({
     const selected = node.id === selectedId;
     const deleted = node.git === "D";
     return (
-      <button
-        onClick={() => onSelect?.(node.id)}
-        className={cn(
-          "relative flex h-7 w-full items-center gap-1.5 rounded-sm px-1.5 text-left",
-          selected ? "bg-fill-hover text-text-primary" : "hover:bg-fill-hover",
-          deleted && !selected && "text-text-dim",
-        )}
-      >
-        {selected && (
-          <span
-            className={cn(
-              "absolute bottom-[5px] top-[5px] w-0.5 rounded-[1px] bg-text-primary",
-              depth === 0 ? "-left-2" : "-left-[11px]", // the px-2 container clips past -8px
-            )}
+      <TreeRow
+        depth={depth}
+        name={node.name}
+        selected={selected}
+        dimmed={deleted}
+        struck={deleted}
+        icon={
+          <DocGlyph
+            size={13}
+            strokeWidth={1.2}
+            className={cn("shrink-0", deleted && !selected ? "text-current" : "text-text-subtle")}
           />
-        )}
-        <DocGlyph
-          size={13}
-          strokeWidth={1.2}
-          className={cn("shrink-0", deleted && !selected ? "text-current" : "text-text-subtle")}
-        />
-        <span
-          className={cn("min-w-0 truncate", selected && "font-medium", deleted && "line-through")}
-          title={node.name}
-        >
-          {node.name}
-        </span>
-        <span className="flex-1" />
-        {node.git && <GitBadge letter={node.git} />}
-      </button>
+        }
+        trailing={node.git ? <GitBadge letter={node.git} /> : undefined}
+        onClick={() => onSelect?.(node.id)}
+      />
     );
   }
 
   // dir
   return (
     <div>
-      <button
+      <TreeFolderRow
+        depth={depth}
+        name={node.name}
+        open={node.open}
+        dimmed={node.empty}
+        tint={node.hasChanges}
+        className={cn(notFirstRoot && "mt-1")}
+        after={
+          <>
+            {node.workspace && <span className="shrink-0 text-[10.5px] text-text-dimmer">workspace</span>}
+            {node.empty && <span className="ml-1 text-[11px] italic text-text-dimmer">Empty</span>}
+          </>
+        }
+        trailing={
+          node.hasChanges ? (
+            <span title="Contains changes" className="size-[5px] rounded-full bg-text-subtle" />
+          ) : undefined
+        }
         onClick={() => onToggleDir?.(node.id)}
-        className={cn(
-          "flex h-7 w-full items-center gap-1.5 rounded-sm px-1.5 text-left",
-          node.empty ? "text-text-dim" : "hover:bg-fill-hover",
-          node.hasChanges && "bg-fill-subtle",
-          notFirstRoot && "mt-1",
-        )}
-      >
-        {node.open ? (
-          <ChevronDownGlyph
-            size={10}
-            className={cn("shrink-0", node.empty ? "text-current" : "text-text-dim")}
-          />
-        ) : (
-          <ChevronRightGlyph
-            size={10}
-            className={cn("shrink-0", node.empty ? "text-current" : "text-text-dim")}
-          />
-        )}
-        <FolderSimpleGlyph
-          size={13}
-          strokeWidth={1.3}
-          className={cn("shrink-0", node.empty ? "text-current" : "text-text-subtle")}
-        />
-        <span className="min-w-0 truncate" title={node.name}>
-          {node.name}
-        </span>
-        {node.workspace && (
-          <span className="shrink-0 text-[10.5px] text-text-dimmer">workspace</span>
-        )}
-        {node.empty && <span className="ml-1 text-[11px] italic text-text-dimmer">Empty</span>}
-        <span className="flex-1" />
-        {node.hasChanges && (
-          <span title="Contains changes" className="size-[5px] rounded-full bg-text-subtle" />
-        )}
-      </button>
+      />
       {(node.children.length > 0 || node.open) && (
         <AccBody open={node.open}>
-          <div className="relative ml-[13px] border-l border-divider-faint pl-2.5">
+          <TreeGuide>
             {node.children.map((child) => (
               <Row
                 key={child.id}
@@ -205,7 +177,7 @@ function Row({
                 onRetry={onRetry}
               />
             ))}
-          </div>
+          </TreeGuide>
         </AccBody>
       )}
     </div>
@@ -216,19 +188,15 @@ export function FileTree(p: FileTreeProps) {
   const n = p.rootsCount ?? 1;
   return (
     <div className={cn("flex h-full min-h-0 flex-col", p.className)}>
-      <div className="flex items-center justify-between pb-1.5 pl-3.5 pr-2 pt-2">
-        <Eyebrow>
-          Explorer · {n} {n === 1 ? "root" : "roots"}
-        </Eyebrow>
-        <button
+      <TreeHeader label={`Explorer · ${n} ${n === 1 ? "root" : "roots"}`}>
+        <TreeIconButton
           aria-label="Project history"
           title="Project history — saves, publish, bring down"
           onClick={p.onOpenHistory}
-          className="flex size-[26px] items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover hover:text-text-secondary"
         >
           <HistoryClockGlyph size={13} />
-        </button>
-      </div>
+        </TreeIconButton>
+      </TreeHeader>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 text-[12.5px] text-text-secondary">
         {p.roots.map((node, i) => (
           <Row

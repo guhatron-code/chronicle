@@ -2,20 +2,21 @@
  * The tree, the tags, the open round card, and "Start a round ▸" — the left
  * column of the pane (mock frames 1 and 2). Collapse state and the tag
  * filter are the sidebar's own; everything else is the index NotesPane hands
- * down. `Row` is the only thing that draws a line of text, so nothing here
- * wraps either.
+ * down. Every line of text is a chrome/Tree row — the same folder, note, guide
+ * and head parts the Repo pane's explorer draws with — so nothing here wraps
+ * and nothing here drifts from the explorer.
  */
 import { memo, useEffect, useMemo, useState } from "react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Eyebrow } from "@/components/chrome/atoms";
-import { ChevronDownGlyph, ChevronRightGlyph, DocGlyph, PlusGlyph, SearchGlyph } from "@/components/chrome/icons";
-import { buildTree, tagCounts } from "@/lib/notes-model";
+import { TreeFolderRow, TreeGuide, TreeHeader, TreeIconButton, TreeRow } from "@/components/chrome/Tree";
+import { ChevronRightGlyph, DocGlyph, PlusGlyph, SearchGlyph } from "@/components/chrome/icons";
+import { buildTree, nestTree, tagCounts, type TreeBranch } from "@/lib/notes-model";
 import type { OpenRound } from "@/lib/notes-store";
 import type { NoteEntry } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
-import { Row } from "./Row";
 
 const COLLAPSE_KEY = (dir: string) => `chronicle.notes.tree.${dir}`;
 
@@ -39,6 +40,21 @@ function LogToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
   );
 }
 
+const TONE: Record<string, string> = {
+  none: "text-text-dim", queued: "text-state-warn", progress: "text-state-neutral",
+  done: "text-state-success", unknown: "text-text-dim",
+};
+
+/** The trailing chip on a note row: a dot and a word, never colour alone. */
+function StatusChip({ label, tone }: { label: string; tone: string }) {
+  return (
+    <span className={cn("flex shrink-0 items-center gap-[5px] font-mono text-[10.5px]", TONE[tone] ?? "text-text-dim")}>
+      <i className="size-[5px] shrink-0 rounded-full bg-current" />
+      {label}
+    </span>
+  );
+}
+
 function rowStatus(entry: NoteEntry): { label: string; tone: string } | null {
   if (entry.unreadable) return { label: "unreadable", tone: "unknown" };
   if (entry.status === "queued") return { label: "queued", tone: "queued" };
@@ -46,6 +62,59 @@ function rowStatus(entry: NoteEntry): { label: string; tone: string } | null {
   if (entry.status === "done") return { label: "done", tone: "done" };
   if (entry.status) return { label: "unknown", tone: "unknown" };
   return null;
+}
+
+/** One node of the notes tree, drawn with the explorer's parts: a folder is a
+ *  chevron + folder glyph with its children inside one guide line, a note is a
+ *  file row with the status chip in the trailing slot. */
+function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote }: {
+  node: TreeBranch;
+  depth: number;
+  collapsed: Set<string>;
+  openPath: string | null;
+  onOpenFolder: (path: string) => void;
+  onOpenNote: (node: TreeBranch) => void;
+}) {
+  if (node.kind === "note") {
+    const status = node.entry ? rowStatus(node.entry) : null;
+    return (
+      <TreeRow
+        depth={depth}
+        name={node.name}
+        marquee
+        icon={<DocGlyph size={13} strokeWidth={1.2} className="shrink-0 text-text-subtle" />}
+        selected={node.path === openPath}
+        trailing={status ? <StatusChip {...status} /> : undefined}
+        onClick={() => onOpenNote(node)}
+      />
+    );
+  }
+  return (
+    <div>
+      <TreeFolderRow
+        depth={depth}
+        name={node.name}
+        open={!collapsed.has(node.path)}
+        marquee
+        onClick={() => onOpenFolder(node.path)}
+      />
+      {node.children.length > 0 && (
+        <TreeGuide>
+          {node.children.map((child) => (
+            <Branch
+              key={child.path}
+              node={child}
+              depth={depth + 1}
+              collapsed={collapsed}
+              openPath={openPath}
+              onOpenFolder={onOpenFolder}
+              onOpenNote={onOpenNote}
+            />
+          ))}
+        </TreeGuide>
+      )}
+    </div>
+  );
 }
 
 /*
@@ -96,7 +165,7 @@ export const Sidebar = memo(function Sidebar({
     () => (tagFilter ? notes.filter((n) => n.tags.includes(tagFilter)) : notes),
     [notes, tagFilter],
   );
-  const tree = useMemo(() => buildTree(filtered, collapsed), [filtered, collapsed]);
+  const tree = useMemo(() => nestTree(buildTree(filtered, collapsed)), [filtered, collapsed]);
   const tags = useMemo(() => tagCounts(notes), [notes]);
 
   const disabledReason = roundOpen
@@ -109,36 +178,24 @@ export const Sidebar = memo(function Sidebar({
 
   return (
     <div className="flex h-full w-[232px] flex-none flex-col border-r border-border-hairline">
-      <div className="flex h-10 flex-none items-center gap-2 border-b border-border-hairline pl-3.5 pr-2">
-        <Eyebrow className="flex-1">Notes · {notes.length}</Eyebrow>
-        <button
-          type="button"
-          aria-label="New note"
-          onClick={() => onNewNote(activeFolder)}
-          className="flex size-[22px] items-center justify-center rounded-[5px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
-        >
+      <TreeHeader label={`Notes · ${notes.length}`} className="h-10 flex-none border-b border-border-hairline">
+        <TreeIconButton aria-label="New note" onClick={() => onNewNote(activeFolder)}>
           <PlusGlyph size={13} />
-        </button>
+        </TreeIconButton>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label="More"
-              className="flex size-[22px] items-center justify-center rounded-[5px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
-            >
-              ⋯
-            </button>
+            <TreeIconButton aria-label="More">⋯</TreeIconButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-[210px]">
             <DropdownMenuItem onSelect={onRevealVault}>Reveal the vault in Finder</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setNewFolder("")}>New folder</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
+      </TreeHeader>
 
       {newFolder !== null && (
         <form
-          className="mx-2.5 mb-1 mt-2"
+          className="mx-2 mb-1 mt-2"
           onSubmit={(e) => {
             e.preventDefault();
             const name = newFolder.trim();
@@ -161,7 +218,7 @@ export const Sidebar = memo(function Sidebar({
       <button
         type="button"
         onClick={onOpenSearch}
-        className="mx-2.5 mb-1 mt-2 flex h-[26px] items-center gap-1.5 rounded-md border border-border-hairline bg-surface-input px-2 text-[11.5px] text-text-dim hover:text-text-secondary"
+        className="mx-2 mb-1 mt-2 flex h-[26px] items-center gap-1.5 rounded-md border border-border-hairline bg-surface-input px-2 text-[11.5px] text-text-dim hover:text-text-secondary"
       >
         <SearchGlyph size={12} className="shrink-0 text-text-dim" />
         <span className="flex-1 text-left">Search notes</span>
@@ -172,7 +229,7 @@ export const Sidebar = memo(function Sidebar({
           mid-round there is no RoundFlow dialog either, so this is the only way
           back to the log */}
       {!roundOpen && generating && (
-        <div className="mx-2.5 mb-2 mt-1 flex items-center gap-2 rounded-lg border border-border-strong bg-surface-card px-3 py-2">
+        <div className="mx-2 mb-2 mt-1 flex items-center gap-2 rounded-lg border border-border-strong bg-surface-card px-3 py-2">
           <span
             aria-hidden
             className="size-[5px] shrink-0 rounded-full bg-state-neutral"
@@ -186,7 +243,7 @@ export const Sidebar = memo(function Sidebar({
       )}
 
       {roundOpen && (
-        <div className="mx-2.5 mb-2 mt-1 rounded-lg border border-border-strong bg-surface-card px-3 py-2.5">
+        <div className="mx-2 mb-2 mt-1 rounded-lg border border-border-strong bg-surface-card px-3 py-2.5">
           <div className="flex items-center gap-2">
             <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-text-primary">Round {roundOpen.n} · fixes</span>
             <LogToggle open={logOpen} onClick={onToggleLog} />
@@ -200,14 +257,15 @@ export const Sidebar = memo(function Sidebar({
               style={{ width: `${roundOpen.total ? Math.round((roundOpen.done / roundOpen.total) * 100) : 0}%` }}
             />
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col text-[12.5px] text-text-secondary">
             {roundOpen.notes.map((n) => (
-              <Row
+              <TreeRow
                 key={n.path}
                 name={n.title}
-                icon={<DocGlyph size={12} className="shrink-0 text-text-dim" />}
+                marquee
+                icon={<DocGlyph size={13} strokeWidth={1.2} className="shrink-0 text-text-subtle" />}
                 selected={n.path === openPath}
-                status={n.status === "done" ? { label: "done", tone: "done" } : { label: "working", tone: "progress" }}
+                trailing={<StatusChip {...(n.status === "done" ? { label: "done", tone: "done" } : { label: "working", tone: "progress" })} />}
                 onClick={() => onOpenNote(n.path)}
               />
             ))}
@@ -215,35 +273,18 @@ export const Sidebar = memo(function Sidebar({
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1">
-        {tree.map((node) =>
-          node.kind === "folder" ? (
-            <Row
-              key={node.path}
-              name={node.name}
-              indent={node.depth}
-              icon={
-                collapsed.has(node.path)
-                  ? <ChevronRightGlyph size={10} className="shrink-0 text-text-dim" />
-                  : <ChevronDownGlyph size={10} className="shrink-0 text-text-dim" />
-              }
-              onClick={() => { toggle(node.path); setActiveFolder(node.path); }}
-            />
-          ) : (
-            <Row
-              key={node.path}
-              name={node.name}
-              indent={node.depth}
-              icon={<DocGlyph size={12} className="shrink-0 text-text-dim" />}
-              selected={node.path === openPath}
-              status={node.entry ? rowStatus(node.entry) : null}
-              onClick={() => {
-                setActiveFolder(node.entry?.folder ?? "");
-                onOpenNote(node.path);
-              }}
-            />
-          ),
-        )}
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1 text-[12.5px] text-text-secondary">
+        {tree.map((node) => (
+          <Branch
+            key={node.path}
+            node={node}
+            depth={0}
+            collapsed={collapsed}
+            openPath={openPath}
+            onOpenFolder={(path) => { toggle(path); setActiveFolder(path); }}
+            onOpenNote={(n) => { setActiveFolder(n.entry?.folder ?? ""); onOpenNote(n.path); }}
+          />
+        ))}
       </div>
 
       {tags.length > 0 && (

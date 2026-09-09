@@ -67,6 +67,23 @@ export function buildTree(notes: NoteEntry[], collapsed: Set<string>): TreeNode[
   return out;
 }
 
+/** buildTree hands back a flat pre-order list with a depth on every node; the
+ *  sidebar draws it nested, so an open folder's children sit inside a single
+ *  guide line — the shape the Repo pane's explorer has. A collapsed folder has
+ *  no children in the flat list, so it gets none here either. */
+export interface TreeBranch extends TreeNode { children: TreeBranch[] }
+export function nestTree(flat: TreeNode[]): TreeBranch[] {
+  const roots: TreeBranch[] = [];
+  const stack: TreeBranch[] = [];
+  for (const node of flat) {
+    const branch: TreeBranch = { ...node, children: [] };
+    while (stack.length > node.depth) stack.pop();
+    (stack[stack.length - 1]?.children ?? roots).push(branch);
+    stack.push(branch);
+  }
+  return roots;
+}
+
 export function backlinksFor(notes: NoteEntry[], path: string): Backlink[] {
   return notes
     .filter((n) => n.path !== path && n.resolved.includes(path))
@@ -98,24 +115,6 @@ export function pillFor(status: string | null, round: number | null, roundState:
   if (status === "in_progress") return { label: round != null ? `in progress · round ${round}` : "in progress", tone: "progress", locked };
   if (status === "done") return { label: "done", tone: "done", locked: false };
   return { label: "unknown", tone: "unknown", locked };
-}
-
-/** A couple of pixels of rounding is not an overflow worth animating. */
-const MARQUEE_SLOP = 3;
-export function needsMarquee(scrollWidth: number, clientWidth: number): boolean {
-  return scrollWidth - clientWidth > MARQUEE_SLOP;
-}
-export function marqueeDistance(scrollWidth: number, clientWidth: number): number {
-  return Math.max(0, scrollWidth - clientWidth);
-}
-
-export interface RowNameStyle { className: string; style: Record<string, string> }
-/** Everything Row decides about its name span: ellipsis always, marquee only
- *  when the text really overflows and the pointer is on the row. */
-export function rowNameStyle(scrollWidth: number, clientWidth: number, hovered: boolean): RowNameStyle {
-  const base = "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis";
-  if (!hovered || !needsMarquee(scrollWidth, clientWidth)) return { className: base, style: {} };
-  return { className: `${base} note-marquee`, style: { "--marquee": `${marqueeDistance(scrollWidth, clientWidth)}px` } };
 }
 
 export function slugFor(path: string): string {

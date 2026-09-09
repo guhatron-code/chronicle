@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { NoteEntry } from "./ipc";
 import {
-  backlinksFor, buildTree, joinFrontMatter, marqueeDistance, needsMarquee, newNotePath,
-  outlinksFor, pillFor, roundLogHeader, rowNameStyle, setStatusInFront, slugFor, splitFrontMatter,
+  backlinksFor, buildTree, joinFrontMatter, nestTree, newNotePath,
+  outlinksFor, pillFor, roundLogHeader, setStatusInFront, slugFor, splitFrontMatter,
   statusInFront, stickToBottom, tagCounts, tailLines, LOG_MAX_LINES, STICK_SLOP,
 } from "./notes-model";
 
@@ -95,31 +95,25 @@ describe("pillFor", () => {
   });
 });
 
-describe("rows never wrap", () => {
-  it("marquees only when the name really overflows", () => {
-    expect(needsMarquee(200, 120)).toBe(true);
-    expect(needsMarquee(120, 120)).toBe(false);
-    expect(needsMarquee(122, 120)).toBe(false); // a 2px rounding wobble is not an overflow
-    expect(marqueeDistance(200, 120)).toBe(80);
-    expect(marqueeDistance(100, 120)).toBe(0);
+describe("nestTree", () => {
+  it("hangs each node off the last one a level above it", () => {
+    const tree = nestTree(buildTree(
+      [note("a/b/deep.md"), note("a/top.md"), note("root.md")],
+      new Set(),
+    ));
+    expect(tree.map((n) => [n.kind, n.name])).toEqual([["folder", "a"], ["note", "root"]]);
+    expect(tree[0].children.map((n) => [n.kind, n.name])).toEqual([["note", "top"], ["folder", "b"]]);
+    expect(tree[0].children[1].children.map((n) => n.name)).toEqual(["deep"]);
+    expect(tree[1].children).toEqual([]);
   });
-});
-
-describe("rowNameStyle", () => {
-  it("always truncates and never wraps", () => {
-    for (const [sw, cw, hov] of [[100, 120, false], [200, 120, true], [200, 120, false]] as const) {
-      expect(rowNameStyle(sw, cw, hov).className).toContain("whitespace-nowrap");
-      expect(rowNameStyle(sw, cw, hov).className).toContain("text-ellipsis");
-    }
+  it("gives a collapsed folder no children, because buildTree emitted none", () => {
+    const tree = nestTree(buildTree([note("a/b/deep.md")], new Set(["a"])));
+    expect(tree.map((n) => n.name)).toEqual(["a"]);
+    expect(tree[0].children).toEqual([]);
   });
-  it("marquees only on hover, only when it overflows, and carries the distance", () => {
-    expect(rowNameStyle(200, 120, true)).toEqual({
-      className: "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis note-marquee",
-      style: { "--marquee": "80px" },
-    });
-    expect(rowNameStyle(200, 120, false).className).not.toContain("note-marquee");
-    expect(rowNameStyle(122, 120, true).className).not.toContain("note-marquee");
-    expect(rowNameStyle(100, 120, true).style).toEqual({});
+  it("keeps a flat list flat", () => {
+    expect(nestTree(buildTree([note("one.md"), note("two.md")], new Set())).map((n) => n.name))
+      .toEqual(["one", "two"]);
   });
 });
 
