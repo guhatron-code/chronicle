@@ -10,7 +10,8 @@
  *
  * The tail the session carries is capped at 30 kB by Rust, and again at
  * LOG_MAX_LINES here; "Open full log" tails the real file in a terminal tab,
- * exactly as the roadmap's View-full-log does.
+ * exactly as the roadmap's View-full-log does. The line area is marked
+ * `data-selectable` so the text can be copied — the header row is chrome.
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LOG_MAX_LINES, roundLogHeader, stickToBottom, tailLines, type RoundPhase } from "@/lib/notes-model";
@@ -88,8 +89,11 @@ export const RoundLog = memo(function RoundLog({
           <XGlyph size={10} />
         </button>
       </div>
+      {/* the lines are text worth copying — the header and its buttons above
+          stay chrome, and chrome is not selectable (src/index.css) */}
       <div
         ref={boxRef}
+        data-selectable
         onScroll={(e) => {
           const el = e.currentTarget;
           stick.current = stickToBottom(el.scrollTop, el.scrollHeight, el.clientHeight);
