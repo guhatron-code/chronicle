@@ -36,3 +36,13 @@ describe("treeBarOffset", () => {
     expect(treeBarOffset(4)).toBe("-left-[11px]");
   });
 });
+
+describe("marquee pace", () => {
+  it("takes longer for a longer overflow, never under the floor", async () => {
+    const { marqueeDuration, rowNameStyle } = await import("./tree-row");
+    expect(marqueeDuration(20)).toBe(4.5);
+    expect(marqueeDuration(400)).toBeGreaterThan(marqueeDuration(200));
+    expect(marqueeDuration(400)).toBeCloseTo(400 / 40 / 0.43, 1);
+    expect(rowNameStyle(600, 200, true).style["--marquee-dur"]).toBe(`${marqueeDuration(400).toFixed(2)}s`);
+  });
+});

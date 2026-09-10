@@ -16,10 +16,20 @@ export function marqueeDistance(scrollWidth: number, clientWidth: number): numbe
 export interface RowNameStyle { className: string; style: Record<string, string> }
 /** Everything a row decides about its name span: ellipsis always, marquee only
  *  when the text really overflows and the pointer is on the row. */
+/** Reading pace for the marquee: pixels per second of travel. */
+export const MARQUEE_PX_PER_S = 40;
+/** The travel is ~43% of the loop (the rest is the pause at each end and the
+ *  return), so the loop is sized from the distance at reading pace, never
+ *  shorter than 4.5 s. */
+export function marqueeDuration(distance: number): number {
+  return Math.max(4.5, (distance / MARQUEE_PX_PER_S) / 0.43);
+}
+
 export function rowNameStyle(scrollWidth: number, clientWidth: number, hovered: boolean): RowNameStyle {
   const base = "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis";
   if (!hovered || !needsMarquee(scrollWidth, clientWidth)) return { className: base, style: {} };
-  return { className: `${base} note-marquee`, style: { "--marquee": `${marqueeDistance(scrollWidth, clientWidth)}px` } };
+  const d = marqueeDistance(scrollWidth, clientWidth);
+  return { className: `${base} note-marquee`, style: { "--marquee": `${d}px`, "--marquee-dur": `${marqueeDuration(d).toFixed(2)}s` } };
 }
 
 /** The selected row's inset bar hangs outside the row, into the scroller's own
