@@ -6,6 +6,7 @@
  */
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { cn } from "@/lib/utils";
+import { SplitHandle } from "@/components/chrome/SplitHandle";
 import { FileTree, type FileTreeProps } from "./FileTree";
 import { HistoryPane, type HistoryPaneProps } from "./HistoryPane";
 import { Viewer, type ViewerProps } from "./Viewer";
@@ -36,15 +37,7 @@ export function Repo({ view, treeWidth = 230, onTreeSplitterDown, className }: R
       <div className="shrink-0 border-r border-divider" style={{ width: treeWidth }}>
         <FileTree {...view.tree} />
       </div>
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize the file tree"
-        onPointerDown={onTreeSplitterDown}
-        className="flex w-[7px] shrink-0 cursor-col-resize items-center justify-center hover:bg-fill-subtle"
-      >
-        <span className="h-[34px] w-0.5 rounded-[1px] bg-border-strong" />
-      </div>
+      <SplitHandle aria-label="Resize the file tree" onPointerDown={onTreeSplitterDown} />
       <Viewer {...view.viewer} className={cn("min-w-0 flex-1", view.viewer.className)} />
     </div>
   );

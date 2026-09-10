@@ -11,7 +11,7 @@
  * raw text matches). `[data-missing="true"]` is already styled dashed
  * (src/index.css, added with the node).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { NoteEditor } from "./editor/NoteEditor";
 import { Sidebar } from "./Sidebar";
 import { NoteHeader } from "./NoteHeader";
@@ -19,6 +19,7 @@ import { Backlinks } from "./Backlinks";
 import { RoundFlow, type RoundFlowHandle } from "./RoundFlow";
 import { RoundLog } from "./RoundLog";
 import { BtnPrimary } from "@/components/chrome/atoms";
+import { SplitHandle } from "@/components/chrome/SplitHandle";
 import { notesRevealVault, type NoteEntry } from "@/lib/ipc";
 import {
   createNote, editBody, flushSave, hasLiveRound, indexFor, noteEntry, openFor, openNote,
@@ -35,6 +36,18 @@ const OPEN_KEY = (dir: string) => `chronicle.notes.open.${dir}`;
 const LOG_KEY = (dir: string) => `chronicle.notes.log.${dir}`;
 function loadLogOpen(dir: string): boolean {
   try { return localStorage.getItem(LOG_KEY(dir)) === "1"; } catch { return false; }
+}
+
+/* the sidebar width — global, not per-vault, exactly like the explorer's own
+   `chronicle.treew` (one tree width across every project, not one per repo) */
+const SIDEBARW_KEY = "chronicle.notes.sidebarw";
+const SIDEBARW_MIN = 170;
+const SIDEBARW_MAX = 480;
+function loadSidebarWidth(): number {
+  try {
+    const v = Number(localStorage.getItem(SIDEBARW_KEY));
+    return Number.isFinite(v) && v >= SIDEBARW_MIN && v <= SIDEBARW_MAX ? v : 232;
+  } catch { return 232; }
 }
 
 /** Same resolution rule NoteEditor's handleClickOn uses: the first link in
@@ -142,6 +155,31 @@ export function NotesPane({
   );
   const [logOpen, setLogOpen] = useState(() => loadLogOpen(dir));
   useEffect(() => setLogOpen(loadLogOpen(dir)), [dir]);
+
+  /* the sidebar splitter — same drag math as the Repo pane's tree splitter
+     (RepoPane's onTreeSplitterDown), same bounds, its own global width key */
+  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
+  const onSidebarSplitterDown = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = sidebarWidth;
+    const move = (ev: PointerEvent) => {
+      const w = Math.min(SIDEBARW_MAX, Math.max(SIDEBARW_MIN, startW + ev.clientX - startX));
+      setSidebarWidth(w);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      setSidebarWidth((w) => {
+        try { localStorage.setItem(SIDEBARW_KEY, String(w)); } catch { /* private mode */ }
+        return w;
+      });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }, [sidebarWidth]);
   const toggleLog = useCallback(() => {
     setLogOpen((o) => {
       try { localStorage.setItem(LOG_KEY(dir), o ? "0" : "1"); } catch { /* private mode */ }
@@ -221,7 +259,10 @@ export function NotesPane({
         onRunRoundInPane={onRunRoundInPane}
         logOpen={logOpen}
         onToggleLog={toggleLog}
+        width={sidebarWidth}
       />
+
+      <SplitHandle aria-label="Resize the notes sidebar" onPointerDown={onSidebarSplitterDown} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         {index.notes.length === 0 ? (

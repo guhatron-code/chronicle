@@ -109,6 +109,7 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote }: 
 export const Sidebar = memo(function Sidebar({
   dir, notes, openPath, onOpenNote, onNewNote, onOpenSearch, onRevealVault,
   queued, round, agent, onStartRound, onRunRoundInPane, logOpen, onToggleLog,
+  width = 232,
 }: {
   dir: string;
   notes: NoteEntry[];
@@ -127,6 +128,8 @@ export const Sidebar = memo(function Sidebar({
   onRunRoundInPane?: (n: number, total: number) => void;
   logOpen: boolean;
   onToggleLog: () => void;
+  /** column width in px (L3: 232px) — the splitter next door in NotesPane drives it */
+  width?: number;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed(dir));
   useEffect(() => setCollapsed(loadCollapsed(dir)), [dir]);
@@ -162,7 +165,7 @@ export const Sidebar = memo(function Sidebar({
       : null;
 
   return (
-    <div data-chrome className="flex h-full w-[232px] flex-none flex-col border-r border-border-hairline">
+    <div data-chrome style={{ width }} className="flex h-full flex-none flex-col border-r border-border-hairline">
       <TreeHeader label={`Notes · ${notes.length}`} className="h-10 flex-none border-b border-border-hairline">
         <TreeIconButton aria-label="New note" onClick={() => onNewNote(activeFolder)}>
           <PlusGlyph size={13} />
