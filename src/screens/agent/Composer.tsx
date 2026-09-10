@@ -105,6 +105,69 @@ function ConfigSelect({ dir, optionId, title }: { dir: string; optionId: string;
   );
 }
 
+/** The permission mode as a dropdown — same shape as the model and effort
+ *  selects. The one-time confirms live in `switchMode`, not here. */
+function ModeSelect({
+  current, options, disabled, onPick,
+}: {
+  current: string;
+  options: { value: string; name: string; description: string }[];
+  disabled: boolean;
+  onPick: (modeId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [open]);
+  const cur = options.find((o) => o.value === current);
+  return (
+    <div ref={ref} className="relative" data-mode-control>
+      <button
+        data-config-select="mode"
+        title={cur?.description ?? "How much the agent asks before acting"}
+        disabled={disabled}
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
+      >
+        {cur?.name ?? "Plan"}
+        <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="m3 4.5 3 3 3-3" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          data-config-menu="mode"
+          className="absolute bottom-8 left-0 z-20 flex w-[300px] flex-col rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
+        >
+          {options.map((o) => (
+            <button
+              key={o.value}
+              onClick={() => { setOpen(false); onPick(o.value); }}
+              className="flex flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left hover:bg-fill-hover"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-[12.5px] text-text-primary">{o.name}</span>
+                {o.value === current && (
+                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="var(--state-success)" strokeWidth="1.6" className="shrink-0">
+                    <path d="M2 6.5 5 9.5 10 3" />
+                  </svg>
+                )}
+              </div>
+              <span className="text-[11px] leading-snug text-text-dim">{o.description}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Composer({
   dir,
   disabled,
@@ -539,56 +602,17 @@ export function Composer({
           </button>
         )}
         {asksFirst && worksFreely && (
-          <div className="flex overflow-hidden rounded-md border border-border-hairline" data-mode-control>
-            <button
-              title="The agent asks before editing files or running commands."
-              disabled={disabled}
-              onClick={() => switchMode("default")}
-              className={cn(
-                "h-[26px] px-2.5 text-[11.5px]",
-                current === "default" ? "bg-fill-hover font-medium text-text-primary" : "text-text-muted hover:text-text-primary",
-              )}
-            >
-              Plan
-            </button>
-            <button
-              title="File edits happen without asking. Commands still ask."
-              disabled={disabled}
-              onClick={() => switchMode("acceptEdits")}
-              className={cn(
-                "h-[26px] border-l border-border-hairline px-2.5 text-[11.5px]",
-                current === "acceptEdits" ? "bg-fill-hover font-medium text-text-primary" : "text-text-muted hover:text-text-primary",
-              )}
-            >
-              Execute
-            </button>
-            {autoMode && (
-              <button
-                title="The agent approves routine edits and commands itself and still asks about risky ones."
-                disabled={disabled}
-                onClick={() => switchMode("auto")}
-                className={cn(
-                  "h-[26px] border-l border-border-hairline px-2.5 text-[11.5px]",
-                  current === "auto" ? "bg-fill-hover font-medium text-text-primary" : "text-text-muted hover:text-text-primary",
-                )}
-              >
-                Auto
-              </button>
-            )}
-            {fullAuto && (
-              <button
-                title="Edits and commands both run without asking — nothing is confirmed."
-                disabled={disabled}
-                onClick={() => switchMode("bypassPermissions")}
-                className={cn(
-                  "h-[26px] border-l border-border-hairline px-2.5 text-[11.5px]",
-                  current === "bypassPermissions" ? "bg-fill-hover font-medium text-text-primary" : "text-text-muted hover:text-text-primary",
-                )}
-              >
-                Unattended
-              </button>
-            )}
-          </div>
+          <ModeSelect
+            current={current ?? "default"}
+            disabled={disabled}
+            onPick={switchMode}
+            options={[
+              { value: "default", name: "Plan", description: "The agent asks before editing files or running commands." },
+              { value: "acceptEdits", name: "Execute", description: "File edits happen without asking. Commands still ask." },
+              ...(autoMode ? [{ value: "auto", name: "Auto", description: "The agent approves routine edits and commands itself and still asks about risky ones." }] : []),
+              ...(fullAuto ? [{ value: "bypassPermissions", name: "Unattended", description: "Edits and commands both run without asking — nothing is confirmed." }] : []),
+            ]}
+          />
         )}
         {!disabled && <ConfigSelect dir={dir} optionId="model" title="The model the agent uses" />}
         {!disabled && <ConfigSelect dir={dir} optionId="effort" title="How hard the model thinks" />}
