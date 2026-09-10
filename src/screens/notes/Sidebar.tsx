@@ -44,9 +44,11 @@ function rowStatus(entry: NoteEntry): { label: string; tone: string } | null {
 /** One node of the notes tree, drawn with the explorer's parts: a folder is a
  *  chevron + folder glyph with its children inside one guide line, a note is a
  *  file row with the status chip in the trailing slot. */
-function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote }: {
+function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, notFirstRoot }: {
   node: TreeBranch;
   depth: number;
+  /** the explorer's 4 px breath above every root folder after the first */
+  notFirstRoot?: boolean;
   collapsed: Set<string>;
   openPath: string | null;
   onOpenFolder: (path: string) => void;
@@ -70,6 +72,7 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote }: 
   return (
     <div>
       <TreeFolderRow
+        className={cn(notFirstRoot && "mt-1")}
         depth={depth}
         name={node.name}
         open={open}
@@ -228,12 +231,13 @@ export const Sidebar = memo(function Sidebar({
         />
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 py-1 text-[12.5px] text-text-secondary">
-        {tree.map((node) => (
+      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 text-[12.5px] text-text-secondary">
+        {tree.map((node, i) => (
           <Branch
             key={node.path}
             node={node}
             depth={0}
+            notFirstRoot={i > 0}
             collapsed={collapsed}
             openPath={openPath}
             onOpenFolder={(path) => { toggle(path); setActiveFolder(path); }}
