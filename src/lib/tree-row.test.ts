@@ -21,7 +21,7 @@ describe("rowNameStyle", () => {
   it("marquees only on hover, only when it overflows, and carries the distance", () => {
     expect(rowNameStyle(200, 120, true)).toEqual({
       className: "min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis note-marquee",
-      style: { "--marquee": "80px" },
+      style: { "--marquee": "80px", "--marquee-dur": "4.65s" },
     });
     expect(rowNameStyle(200, 120, false).className).not.toContain("note-marquee");
     expect(rowNameStyle(122, 120, true).className).not.toContain("note-marquee");
