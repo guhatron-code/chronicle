@@ -3150,6 +3150,18 @@ fn main() {
             // reaches us while the Web pane's native page is first responder (menu.rs)
             app.set_menu(menu::build(app.handle())?)?;
             app.on_menu_event(menu::handle);
+            // Opaque titled window: the OS draws corners and shadow, React draws the
+            // title bar, so the three standard buttons must not be drawn twice.
+            #[cfg(target_os = "macos")]
+            if let Some(win) = app.get_webview_window("main") {
+                if let Ok(ptr) = win.ns_window() {
+                    use objc2_app_kit::{NSWindow, NSWindowButton};
+                    let ns: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+                    for b in [NSWindowButton::CloseButton, NSWindowButton::MiniaturizeButton, NSWindowButton::ZoomButton] {
+                        if let Some(btn) = ns.standardWindowButton(b) { btn.setHidden(true); }
+                    }
+                }
+            }
             Ok(())
         })
         .on_window_event(|window, event| {

@@ -30,6 +30,7 @@ core-foundation = "0.10"      # CFString → Rust string for the IOKit power-sou
 core-foundation-sys = "0.8"   # CFRunLoop + CFRelease for the power-source notification
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", features = ["NSString", "NSURL", "NSError", "NSObject"] }
+objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKWebViewConfiguration", "WKUserContentController", "WKContentRuleList", "WKContentRuleListStore", "WKNavigation", "block2"] }
 block2 = "0.6"
 flate2 = "1" # the bundled block-list chunks ship gzipped
