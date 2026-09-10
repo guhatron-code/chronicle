@@ -551,10 +551,17 @@ pub(crate) fn parse_porcelain(raw: &str) -> Vec<DirtyEntry> {
     out
 }
 
-/// `-uall` so a new folder lists its files instead of one "dir/" row, and
+/// default untracked mode so a new folder is one "dir/" row ("new folder"), and
 /// `core.quotePath=false` so a non-ASCII name is not returned as `"\303\251..."`.
 pub(crate) fn dirty_set(repo: &Path) -> Vec<DirtyEntry> {
-    parse_porcelain(&git_in(repo, &["-c", "core.quotePath=false", "status", "--porcelain", "-uall"]))
+    // default untracked mode: a new folder is one "dir/" row badged "new folder",
+    // not one row per file inside it (an untracked build output folder would
+    // otherwise read as hundreds of "uncommitted files")
+    let mut out = parse_porcelain(&git_in(repo, &["-c", "core.quotePath=false", "status", "--porcelain"]));
+    for e in out.iter_mut() {
+        if e.badge == "new" && e.path.ends_with('/') { e.badge = "new folder".into(); }
+    }
+    out
 }
 
 struct Ctx {
@@ -1352,6 +1359,19 @@ static LAST_EXIT_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sy
 ///
 /// Synchronous on purpose: an async command answers on a worker thread and the
 /// caller's promise would race the shutdown.
+/// Paint the window's own backing in the app surface colour. An opaque titled
+/// window shows its backing wherever WebKit has not repainted yet (a zoom, a fast
+/// resize); in the surface colour that lag is invisible, in AppKit grey it is not.
+#[tauri::command]
+fn set_window_background(app: tauri::AppHandle, hex: String) -> Result<(), String> {
+    let h = hex.trim().trim_start_matches('#');
+    if h.len() != 6 || !h.chars().all(|c| c.is_ascii_hexdigit()) { return Err("that isn't a #rrggbb colour".into()); }
+    let v = u32::from_str_radix(h, 16).map_err(|e| e.to_string())?;
+    let color = tauri::window::Color(((v >> 16) & 0xff) as u8, ((v >> 8) & 0xff) as u8, (v & 0xff) as u8, 255);
+    let win = app.get_webview_window("main").ok_or("no main window")?;
+    win.set_background_color(Some(color)).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     REALLY_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -3151,9 +3171,14 @@ fn main() {
             app.set_menu(menu::build(app.handle())?)?;
             app.on_menu_event(menu::handle);
             // Opaque titled window: the OS draws corners and shadow, React draws the
-            // title bar, so the three standard buttons must not be drawn twice.
+            // title bar, so the three standard buttons must not be drawn twice. The
+            // backing takes the surface colour of the OS appearance before the first
+            // paint; the frontend re-paints it whenever the theme resolves.
             #[cfg(target_os = "macos")]
             if let Some(win) = app.get_webview_window("main") {
+                let dark = !matches!(win.theme(), Ok(tauri::Theme::Light));
+                let c = if dark { tauri::window::Color(0x0a, 0x0a, 0x0a, 255) } else { tauri::window::Color(0xe9, 0xe9, 0xec, 255) };
+                let _ = win.set_background_color(Some(c));
                 if let Ok(ptr) = win.ns_window() {
                     use objc2_app_kit::{NSWindow, NSWindowButton};
                     let ns: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
@@ -3188,6 +3213,7 @@ fn main() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            set_window_background,
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
             init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
             agent_attach, agent_attach_path,

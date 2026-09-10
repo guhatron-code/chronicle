@@ -200,7 +200,7 @@ export const gitPush = (dir: string) => invoke<RemoteOutcome>("git_push", { dir 
 export const gitPull = (dir: string) => invoke<RemoteOutcome>("git_pull", { dir });
 
 /* ---------- the history section (src-tauri/src/history.rs) ---------- */
-export type DirtyBadge = "new" | "edited" | "deleted" | "renamed";
+export type DirtyBadge = "new" | "new folder" | "edited" | "deleted" | "renamed";
 export type PublishKind = "no-remote" | "never-published" | "ok";
 /** The two facts only `git log` can answer, plus when the remote was last
  *  really checked. Everything else the panel says — the Remote counts and the
@@ -576,6 +576,8 @@ export const onWindowClose = (cb: () => Promise<boolean> | boolean): Promise<Unl
  *  run the dirty-buffer guard first and then come here; the backend refuses
  *  every other exit, so unsaved work cannot leave by a side door. */
 export const quitApp = () => invoke<void>("quit_app");
+/** Paint the window backing in a #rrggbb colour (the app surface) — see window-backing.ts. */
+export const setWindowBackground = (hex: string) => invoke<void>("set_window_background", { hex });
 
 export function windowControls() {
   const w = getCurrentWindow();
