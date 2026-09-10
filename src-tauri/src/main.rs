@@ -496,7 +496,9 @@ pub(crate) fn is_runtime_path(rel: &str) -> bool {
     let segs: Vec<&str> = rel.split('/').collect();
     for (i, seg) in segs.iter().enumerate() {
         if *seg != ".chronicle" { continue; }
-        let Some(next) = segs.get(i + 1) else { continue };
+        // a wholly untracked ".chronicle/" (one "dir/" row) is runtime too
+        let Some(next) = segs.get(i + 1) else { return true };
+        if next.is_empty() && segs.len() == i + 2 { return true; }
         // a runtime folder counts only for what is INSIDE it; a runtime file is the leaf
         if RUNTIME_DIRS.contains(next) && segs.len() > i + 2 { return true; }
         if RUNTIME_FILES.contains(next) && segs.len() == i + 2 { return true; }
@@ -1353,12 +1355,6 @@ static REALLY_QUIT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBoo
 /// seconds is the user insisting past a frontend that cannot answer.
 static LAST_EXIT_REQUEST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
-/// The last step of quitting, and the only one that ends the process. The frontend
-/// calls this after ⌘Q's guard finds nothing unsaved (or the user says go ahead);
-/// until then `ExitRequested` keeps turning the exit back.
-///
-/// Synchronous on purpose: an async command answers on a worker thread and the
-/// caller's promise would race the shutdown.
 /// Paint the window's own backing in the app surface colour. An opaque titled
 /// window shows its backing wherever WebKit has not repainted yet (a zoom, a fast
 /// resize); in the surface colour that lag is invisible, in AppKit grey it is not.
@@ -1372,6 +1368,12 @@ fn set_window_background(app: tauri::AppHandle, hex: String) -> Result<(), Strin
     win.set_background_color(Some(color)).map_err(|e| e.to_string())
 }
 
+/// The last step of quitting, and the only one that ends the process. The frontend
+/// calls this after ⌘Q's guard finds nothing unsaved (or the user says go ahead);
+/// until then `ExitRequested` keeps turning the exit back.
+///
+/// Synchronous on purpose: an async command answers on a worker thread and the
+/// caller's promise would race the shutdown.
 #[tauri::command]
 fn quit_app(app: tauri::AppHandle) {
     REALLY_QUIT.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -3176,8 +3178,10 @@ fn main() {
             // paint; the frontend re-paints it whenever the theme resolves.
             #[cfg(target_os = "macos")]
             if let Some(win) = app.get_webview_window("main") {
-                let dark = !matches!(win.theme(), Ok(tauri::Theme::Light));
-                let c = if dark { tauri::window::Color(0x0a, 0x0a, 0x0a, 255) } else { tauri::window::Color(0xe9, 0xe9, 0xec, 255) };
+                // the app is pinned dark (index.html data-theme) until a real theme
+                // switcher exists, so the backing is the dark surface regardless of the
+                // OS appearance; window-backing.ts repaints it if that ever changes
+                let c = tauri::window::Color(0x0a, 0x0a, 0x0a, 255);
                 let _ = win.set_background_color(Some(c));
                 if let Ok(ptr) = win.ns_window() {
                     use objc2_app_kit::{NSWindow, NSWindowButton};

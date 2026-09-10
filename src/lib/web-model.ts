@@ -143,10 +143,11 @@ export function deleteFolder<T extends TabLike>(
   folders: readonly WebFolder[],
   id: string,
 ): { tabs: T[]; folders: WebFolder[] } {
-  return {
-    tabs: tabs.map((t) => (t.folder === id ? ({ ...t, folder: undefined } as T) : t)),
-    folders: folders.filter((f) => f.id !== id),
-  };
+  // its tabs move out to the top of the root list, in their own order — what
+  // the delete confirm promises
+  const freed = tabs.filter((t) => t.folder === id).map((t) => ({ ...t, folder: undefined } as T));
+  const rest = tabs.filter((t) => t.folder !== id);
+  return { tabs: [...freed, ...rest], folders: folders.filter((f) => f.id !== id) };
 }
 
 /* ---------- persistence ---------- */
@@ -167,7 +168,8 @@ export function normalizeSaved(value: unknown): SavedShape {
   if (!value) return empty;
   const rawTabs = Array.isArray(value) ? value : Array.isArray((value as SavedShape).tabs) ? (value as SavedShape).tabs : null;
   if (!rawTabs) return empty;
-  const rawFolders = Array.isArray(value) ? [] : ((value as SavedShape).folders ?? []);
+  const rawFoldersRaw = Array.isArray(value) ? [] : (value as SavedShape).folders;
+  const rawFolders = Array.isArray(rawFoldersRaw) ? rawFoldersRaw : [];
 
   const folders: WebFolder[] = [];
   const seen = new Set<string>();

@@ -142,13 +142,13 @@ describe("folders", () => {
     expect(setFolderCollapsed(fs, "a", true).map((f) => f.collapsed)).toEqual([true, false]);
   });
 
-  it("delete moves its tabs to the root in place, and closes nothing", () => {
+  it("delete moves its tabs out to the top of the root list, and closes nothing", () => {
     const tabs = [tab(1), tab(2, "a"), tab(3, "a"), tab(4, "b")];
     const fs = [folder("a"), folder("b")];
     const out = deleteFolder(tabs, fs, "a");
     expect(out.folders).toEqual([folder("b")]);
-    expect(filed(out.tabs)).toEqual(["1", "2", "3", "4@b"]);
-    expect(ids(tabsIn(out.tabs, out.folders, null))).toEqual([1, 2, 3]);
+    expect(filed(out.tabs)).toEqual(["2", "3", "1", "4@b"]);
+    expect(ids(tabsIn(out.tabs, out.folders, null))).toEqual([2, 3, 1]);
   });
 
   it("deleting a folder that is not there changes nothing", () => {
@@ -223,5 +223,21 @@ describe("the row's label and dot", () => {
     expect(tabDot({ loading: false, url: "chronicle-file://h/a.html" })).toBe("local");
     expect(tabDot({ loading: false, url: "http://a" })).toBe("live");
     expect(tabDot({ loading: false, url: "about:blank" })).toBeNull();
+  });
+});
+
+describe("hardening", () => {
+  it("tolerates a folders value that is not an array", async () => {
+    const { normalizeSaved } = await import("./web-model");
+    const r = normalizeSaved({ tabs: [{ id: 1, url: "https://a" }], folders: {} } as unknown);
+    expect(r.tabs.length).toBe(1);
+    expect(r.folders).toEqual([]);
+  });
+  it("a deleted folder's tabs land at the top of the root, in order", async () => {
+    const { deleteFolder } = await import("./web-model");
+    const tabs = [{ id: 1, folder: undefined }, { id: 2, folder: "f" }, { id: 3, folder: "f" }, { id: 4, folder: undefined }];
+    const r = deleteFolder(tabs, [{ id: "f", name: "F", collapsed: false }], "f");
+    expect(r.tabs.map((t) => t.id)).toEqual([2, 3, 1, 4]);
+    expect(r.tabs.every((t) => t.folder === undefined)).toBe(true);
   });
 });

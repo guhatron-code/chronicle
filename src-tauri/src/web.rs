@@ -66,7 +66,7 @@ pub struct SavedTab {
 
 /// A sidebar folder. The order of the vec is the order the folders draw in.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct SavedFolder { pub id: String, pub name: String, #[serde(default)] pub collapsed: bool }
+pub struct SavedFolder { #[serde(default)] pub id: String, #[serde(default)] pub name: String, #[serde(default)] pub collapsed: bool }
 
 /// What `<app data>/web-tabs/<hash>.json` holds now: the flat tab order plus the
 /// folders they are filed under.
@@ -138,10 +138,17 @@ pub fn web_open_file(roots: State<crate::OpenRoots>, web: State<WebState>, dir: 
 pub fn web_tabs_load(roots: State<crate::OpenRoots>, dir: String) -> Result<SavedTabs, String> {
     let p = crate::project_for(&roots, &dir)?;
     let file = tabs_dir().join(format!("{}.json", project_hash(&p.dir)));
-    Ok(std::fs::read_to_string(file).ok()
-        .and_then(|s| serde_json::from_str::<SavedFile>(&s).ok())
-        .map(SavedTabs::from)
-        .unwrap_or_default())
+    let Ok(text) = std::fs::read_to_string(&file) else { return Ok(SavedTabs::default()) };
+    match serde_json::from_str::<SavedFile>(&text) {
+        Ok(f) => Ok(SavedTabs::from(f)),
+        Err(_) => {
+            // a file we cannot read is set aside, never silently overwritten by the
+            // next save — the user can still recover the addresses from it
+            let bad = file.with_extension("json.bad");
+            let _ = std::fs::rename(&file, &bad);
+            Ok(SavedTabs::default())
+        }
+    }
 }
 
 #[tauri::command]
