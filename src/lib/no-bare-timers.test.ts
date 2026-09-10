@@ -52,7 +52,6 @@ const ALLOWED = [
   'src/screens/roadmap/RoadmapPane.tsx — one-shot, ends the copied flash',
   'src/screens/roadmap/RoadmapPane.tsx — one-shot, ends the "just done" ring',
   'src/screens/roadmap/bits.tsx — one-shot, releases a measured height after the expand animation',
-  'src/screens/web/WebPane.tsx — one-shot, focuses the address bar after a new tab opens',
 ];
 
 const TIMER = /\b(setTimeout|setInterval)\(/;

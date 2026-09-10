@@ -1194,7 +1194,7 @@ export default function App() {
             }}
           />
         ) : (
-          <WebPane key={active.dir} dir={active.dir} onScreen={paneLayout.content && !overlayOpen} />
+          <WebPane key={active.dir} dir={active.dir} onScreen={paneLayout.content && !overlayOpen} onConfirm={setConfirm} />
         )}
       </Shell>
       {overlays}
