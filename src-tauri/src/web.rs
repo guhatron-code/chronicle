@@ -56,7 +56,40 @@ pub fn mime_for(p: &Path) -> &'static str {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct SavedTab { pub url: String, pub title: String }
+pub struct SavedTab {
+    pub url: String,
+    pub title: String,
+    /// id of the folder the tab sits in; absent = the root of the sidebar
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
+}
+
+/// A sidebar folder. The order of the vec is the order the folders draw in.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SavedFolder { pub id: String, pub name: String, #[serde(default)] pub collapsed: bool }
+
+/// What `<app data>/web-tabs/<hash>.json` holds now: the flat tab order plus the
+/// folders they are filed under.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct SavedTabs {
+    #[serde(default)] pub tabs: Vec<SavedTab>,
+    #[serde(default)] pub folders: Vec<SavedFolder>,
+}
+
+/// Files written before folders existed are a bare array of tabs; they load as
+/// that array with no folders, so every tab lands at the root in order.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum SavedFile { Modern(SavedTabs), Legacy(Vec<SavedTab>) }
+
+impl From<SavedFile> for SavedTabs {
+    fn from(f: SavedFile) -> Self {
+        match f {
+            SavedFile::Modern(m) => m,
+            SavedFile::Legacy(tabs) => SavedTabs { tabs, folders: Vec::new() },
+        }
+    }
+}
 
 /// Everything the Web pane's backend keeps between commands.
 pub struct WebState {
@@ -102,14 +135,17 @@ pub fn web_open_file(roots: State<crate::OpenRoots>, web: State<WebState>, dir: 
 }
 
 #[tauri::command]
-pub fn web_tabs_load(roots: State<crate::OpenRoots>, dir: String) -> Result<Vec<SavedTab>, String> {
+pub fn web_tabs_load(roots: State<crate::OpenRoots>, dir: String) -> Result<SavedTabs, String> {
     let p = crate::project_for(&roots, &dir)?;
     let file = tabs_dir().join(format!("{}.json", project_hash(&p.dir)));
-    Ok(std::fs::read_to_string(file).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default())
+    Ok(std::fs::read_to_string(file).ok()
+        .and_then(|s| serde_json::from_str::<SavedFile>(&s).ok())
+        .map(SavedTabs::from)
+        .unwrap_or_default())
 }
 
 #[tauri::command]
-pub fn web_tabs_save(roots: State<crate::OpenRoots>, dir: String, tabs: Vec<SavedTab>) -> Result<(), String> {
+pub fn web_tabs_save(roots: State<crate::OpenRoots>, dir: String, tabs: SavedTabs) -> Result<(), String> {
     let p = crate::project_for(&roots, &dir)?;
     let d = tabs_dir();
     std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;

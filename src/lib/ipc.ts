@@ -404,7 +404,13 @@ export const setUiVisible = (visible: boolean) => invoke<void>("set_ui_visible",
 /* ---------- the Web pane (src-tauri/src/web.rs, blocklists.rs) ---------- */
 export interface WebTabStatus { label: string; url: string; title: string; loading: boolean; can_back: boolean; can_forward: boolean }
 export interface BlockInfo { status: "idle" | "compiling" | "ready" | "partial" | "missing"; lists: number; total: number; fetched_at: string; failed: string[]; /** the filter lists behind the blocking, named by the manifest; empty before prepare */ sources?: string[] }
-export interface SavedWebTab { url: string; title: string }
+/** A persisted tab; `folder` names the sidebar folder it is filed under (absent = the root). */
+export interface SavedWebTab { url: string; title: string; folder?: string }
+/** A persisted sidebar folder; the array's order is the order they draw in. */
+export interface SavedWebFolder { id: string; name: string; collapsed: boolean }
+/** The whole file. Pre-folders files were a bare SavedWebTab[]; Rust migrates
+ *  them on load, and web-model's normalizeSaved covers the shape again here. */
+export interface SavedWebTabs { tabs: SavedWebTab[]; folders: SavedWebFolder[] }
 export const webTabOpen = (dir: string, url?: string) => invoke<string>("web_tab_open", { dir, url: url ?? null });
 export const webTabClose = (label: string) => invoke<void>("web_tab_close", { label });
 export const webTabShow = (label: string) => invoke<void>("web_tab_show", { label });
@@ -415,8 +421,8 @@ export const webTabBack = (label: string) => invoke<void>("web_tab_back", { labe
 export const webTabForward = (label: string) => invoke<void>("web_tab_forward", { label });
 export const webTabReload = (label: string) => invoke<void>("web_tab_reload", { label });
 export const webOpenFile = (dir: string, path: string) => invoke<string>("web_open_file", { dir, path });
-export const webTabsLoad = (dir: string) => invoke<SavedWebTab[]>("web_tabs_load", { dir });
-export const webTabsSave = (dir: string, tabs: SavedWebTab[]) => invoke<void>("web_tabs_save", { dir, tabs });
+export const webTabsLoad = (dir: string) => invoke<SavedWebTabs>("web_tabs_load", { dir });
+export const webTabsSave = (dir: string, tabs: SavedWebTabs) => invoke<void>("web_tabs_save", { dir, tabs });
 export const webBlocklistsPrepare = () => invoke<void>("web_blocklists_prepare");
 export const webBlocklistsInfo = () => invoke<BlockInfo>("web_blocklists_info");
 export const onWebTabChanged = (cb: (s: WebTabStatus) => void): Promise<UnlistenFn> => listen<WebTabStatus>("web-tab-changed", (e) => cb(e.payload));

@@ -9,6 +9,10 @@
 import { every, subscribeActivity, getActivity } from "./scheduler";
 import { toAddress } from "./web-url";
 import {
+  createFolder, deleteFolder as dropFolder, moveTab, normalizeSaved, renameFolder,
+  setFolderCollapsed, type WebFolder,
+} from "./web-model";
+import {
   onWebBlocklistsChanged, onWebDownload, onWebOpenTab, onWebTabChanged,
   webBlocklistsInfo, webBlocklistsPrepare, webHideAll, webOpenFile, webSetBounds,
   webTabBack, webTabClose, webTabForward, webTabNavigate, webTabOpen, webTabReload, webTabShow,
@@ -22,10 +26,19 @@ export interface WebTab {
   label: string | null;       // null = evicted or not yet restored; recreated on activation
   url: string; title: string; loading: boolean; canBack: boolean; canForward: boolean;
   hiddenSince: number | null;
+  /** the sidebar folder it is filed under; undefined = the root */
+  folder?: string;
   /** in-flight web_tab_open, so two overlapping callers share one native view */
   opening?: Promise<string | null>;
 }
-export interface WebProject { tabs: WebTab[]; active: number; restored: boolean }
+export interface WebProject {
+  /** one flat array in sidebar order; `folder` on each tab does the grouping */
+  tabs: WebTab[];
+  /** sidebar folders, in the order they draw */
+  folders: WebFolder[];
+  active: number;
+  restored: boolean;
+}
 
 /** Tab identity, monotonic for the life of the process. */
 let nextTabId = 1;
@@ -36,7 +49,7 @@ const notify = () => { for (const cb of subs) cb(); };
 export function subscribeWeb(cb: () => void): () => void { subs.add(cb); return () => { subs.delete(cb); }; }
 export function webFor(dir: string): WebProject {
   let p = projects.get(dir);
-  if (!p) { p = { tabs: [], active: -1, restored: false }; projects.set(dir, p); }
+  if (!p) { p = { tabs: [], folders: [], active: -1, restored: false }; projects.set(dir, p); }
   return p;
 }
 
@@ -68,7 +81,7 @@ function ensure() {
     Object.assign(f.t, { url: s.url || f.t.url, title: s.title || f.t.title, loading: s.loading, canBack: s.can_back, canForward: s.can_forward });
     schedulePersist(f.dir); notify();
   });
-  void onWebOpenTab((p) => { const f = findTab(p.from_label); if (f) void newTab(f.dir, p.url); });
+  void onWebOpenTab((p) => { const f = findTab(p.from_label); if (f) void newTab(f.dir, p.url, f.t.folder ?? null); });
   void onWebDownload((p) => { p.ok ? toastSuccess("Saved to Downloads") : toastError("The download didn't finish"); });
   void onWebBlocklistsChanged((i) => {
     block = i;
@@ -91,7 +104,10 @@ function ensure() {
 
 async function persist(dir: string) {
   const p = projects.get(dir); if (!p) return;
-  await webTabsSave(dir, p.tabs.map((t) => ({ url: t.url, title: t.title }))).catch(() => {});
+  await webTabsSave(dir, {
+    tabs: p.tabs.map((t) => ({ url: t.url, title: t.title, ...(t.folder ? { folder: t.folder } : {}) })),
+    folders: p.folders,
+  }).catch(() => {});
 }
 
 /** Trailing debounce: bursts of tab-changed events (loading, title, URL) collapse to one write. */
@@ -109,8 +125,9 @@ export async function prepare(dir: string): Promise<void> {
   const p = webFor(dir);
   if (p.restored) return;
   p.restored = true;
-  const saved = await webTabsLoad(dir).catch(() => [] as { url: string; title: string }[]);
-  const restored: WebTab[] = saved.map((s) => ({ id: nextTabId++, label: null, url: s.url, title: s.title, loading: false, canBack: false, canForward: false, hiddenSince: null }));
+  const saved = normalizeSaved(await webTabsLoad(dir).catch(() => null));
+  p.folders = saved.folders;
+  const restored: WebTab[] = saved.tabs.map((s) => ({ id: nextTabId++, label: null, url: s.url, title: s.title, loading: false, canBack: false, canForward: false, hiddenSince: null, folder: s.folder }));
   // a tab opened before the restore finished (e.g. via openInWeb) must survive the merge
   const existing = p.tabs;
   p.tabs = [...restored, ...existing];
@@ -165,10 +182,13 @@ export function pushBounds(r: DOMRect): void {
   void webSetBounds(x, y, w, h).catch(() => {});
 }
 
-export async function newTab(dir: string, url = "about:blank"): Promise<void> {
+/** A new tab joins the active tab's folder — opening a page while reading one
+ *  folder should not scatter it to the root — unless a folder is named. */
+export async function newTab(dir: string, url = "about:blank", folder?: string | null): Promise<void> {
   ensure();
   const p = webFor(dir);
-  p.tabs.push({ id: nextTabId++, label: null, url, title: "", loading: false, canBack: false, canForward: false, hiddenSince: null });
+  const into = folder === undefined ? p.tabs[p.active]?.folder : (folder ?? undefined);
+  p.tabs.push({ id: nextTabId++, label: null, url, title: "", loading: false, canBack: false, canForward: false, hiddenSince: null, folder: into });
   p.active = p.tabs.length - 1;
   notify(); schedulePersist(dir);
   await applyVisibility();
@@ -188,6 +208,80 @@ export async function closeTab(dir: string, index: number): Promise<void> {
   p.active = wasActive && wasActive !== t ? p.tabs.indexOf(wasActive) : Math.min(index, p.tabs.length - 1);
   notify(); schedulePersist(dir);
   await applyVisibility();
+}
+
+/* ---------- the sidebar: folders, and moving tabs between them ---------- */
+
+/** Every mutator below keeps `active` on the same TAB. `active` is an index,
+ *  and a reorder, a delete or a re-file shifts indexes under it — pinning the
+ *  identity is the only way the page on screen survives a drag. */
+function keepActive(p: WebProject, fn: () => void): void {
+  const was = p.active >= 0 ? p.tabs[p.active]?.id : undefined;
+  fn();
+  p.active = was === undefined ? -1 : p.tabs.findIndex((t) => t.id === was);
+}
+
+/** The sidebar holds tab ids, not indexes — the array shifts under it. */
+export function activateId(dir: string, id: number): void {
+  const p = webFor(dir); const i = p.tabs.findIndex((t) => t.id === id);
+  if (i >= 0) activate(dir, i);
+}
+export async function closeTabId(dir: string, id: number): Promise<void> {
+  const p = webFor(dir); const i = p.tabs.findIndex((t) => t.id === id);
+  if (i >= 0) await closeTab(dir, i);
+}
+
+/** The model works on copies; the store cannot. A tab object carries its
+ *  native `label` and any in-flight `opening` promise, and a closure already
+ *  holding the old object would write the label into a copy nothing reads —
+ *  so the model decides the ORDER and the live objects are what gets stored. */
+function relive<T extends { id: number; folder?: string | null }>(live: WebTab[], ordered: readonly T[]): WebTab[] {
+  const byId = new Map(live.map((t) => [t.id, t]));
+  const out: WebTab[] = [];
+  for (const t of ordered) {
+    const tab = byId.get(t.id); if (!tab) continue;
+    tab.folder = t.folder ?? undefined;
+    out.push(tab);
+  }
+  return out;
+}
+
+/** Drag/drop and the "Move to ▸" menu land here. `index` counts the
+ *  destination's own tabs, after this one has been lifted out. */
+export function moveWebTab(dir: string, tabId: number, folderId: string | null, index: number): void {
+  const p = webFor(dir);
+  const ordered = moveTab(p.tabs, p.folders, tabId, folderId, index);
+  keepActive(p, () => { p.tabs = relive(p.tabs, ordered); });
+  notify(); schedulePersist(dir);
+}
+
+export function addWebFolder(dir: string, name: string): WebFolder {
+  const p = webFor(dir);
+  const { folders, folder } = createFolder(p.folders, name);
+  p.folders = folders;
+  notify(); schedulePersist(dir);
+  return folder;
+}
+
+export function renameWebFolder(dir: string, id: string, name: string): void {
+  const p = webFor(dir);
+  p.folders = renameFolder(p.folders, id, name);
+  notify(); schedulePersist(dir);
+}
+
+/** The folder goes; its tabs stay open and land at the root, in place. */
+export function deleteWebFolder(dir: string, id: string): void {
+  const p = webFor(dir);
+  const out = dropFolder(p.tabs, p.folders, id);
+  keepActive(p, () => { p.tabs = relive(p.tabs, out.tabs); p.folders = out.folders; });
+  notify(); schedulePersist(dir);
+}
+
+export function toggleWebFolder(dir: string, id: string): void {
+  const p = webFor(dir);
+  const f = p.folders.find((x) => x.id === id); if (!f) return;
+  p.folders = setFolderCollapsed(p.folders, id, !f.collapsed);
+  notify(); schedulePersist(dir);
 }
 
 /** Address-bar submit: URL or search per web-url rules; javascript: is refused here. */
