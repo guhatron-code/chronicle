@@ -15,13 +15,11 @@ import { HistoryPanel, type HistoryPanelProps } from "./HistoryPanel";
 import { NeedsYou, type NeedsYouProps } from "./NeedsYou";
 import { PhaseRail, type PhaseRailProps } from "./PhaseRail";
 import { ProblemCard, type ProblemCardProps } from "./ProblemCard";
-import { StaleAlert, type StaleAlertProps } from "./StaleAlert";
 import { WarningBanner, type WarningBannerProps } from "./WarningBanner";
 
 export type RoadmapProps = {
   warning?: WarningBannerProps;
   banner?: CurrentStateBannerProps;
-  stale?: StaleAlertProps;
   problem?: ProblemCardProps;
   consent?: ConsentCardProps;
   building?: BuildingCardProps;
@@ -85,7 +83,6 @@ export function Roadmap(p: RoadmapProps) {
         {p.building && <BuildingCard {...p.building} />}
         {p.warning && <WarningBanner {...p.warning} />}
         {p.banner && <CurrentStateBanner {...p.banner} />}
-        {p.stale && <StaleAlert {...p.stale} />}
         {p.problem && <ProblemCard {...p.problem} />}
         {p.consent && <ConsentCard {...p.consent} />}
         {p.history && <HistoryPanel {...p.history} />}

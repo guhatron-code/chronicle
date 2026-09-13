@@ -45,6 +45,8 @@ export interface PhaseStatus {
   id: string;
   state: "done" | "now" | "later" | "window" | "pool";
   label: string;
+  /** What proved a done phase ("marker f8a0e01", "ledger user", "tag v0.3.0"…). */
+  proof?: string;
 }
 
 /** A manifest phase as the MERGED manifest carries it (incl. fix-round overlays). */
@@ -100,6 +102,12 @@ export interface StateData {
   statuses: PhaseStatus[];
   docs: Record<string, boolean>;
   stale: string[];
+  /** Plan/spec files newer than the roadmap that it never mentions. */
+  new_plans: string[];
+  /** [newest tag in git, newest tag the roadmap mentions] when the repo moved past it. */
+  newer_release: [string, string] | null;
+  /** True on the scan that found a corrupt ledger and moved it aside. */
+  ledger_set_aside?: boolean;
   custom_actions: { text?: string; cmd?: string; level?: string }[];
   manifest_warnings: string[];
   work_branch: string | null;
@@ -165,10 +173,13 @@ export const launchOpenDir = () => invoke<string | null>("launch_open_dir");
 export const openProject = (path: string) =>
   invoke<ProjectData>("open_project", { path });
 export const getState = (dir: string) => invoke<StateData>("get_state", { dir });
-export const initStart = (dir: string, agent: string | null, fresh = false) =>
-  invoke<void>("init_start", { dir, agent, fresh });
+export const initStart = (dir: string, agent: string | null, fresh = false, note?: string) =>
+  invoke<void>("init_start", { dir, agent, fresh, note: note ?? null });
 export const initStatus = (dir: string) =>
   invoke<InitStatusData>("init_status", { dir });
+/** Phase detail's Mark done / Mark not done — writes or removes a user ledger entry. */
+export const ledgerMark = (dir: string, id: string, done: boolean) =>
+  invoke<void>("ledger_mark", { dir, id, done });
 /** Stop a running roadmap session (SIGTERM → grace → SIGKILL, always reaped). */
 export const initCancel = (dir: string) => invoke<void>("init_cancel", { dir });
 /** The init/rebuild session's log file — for the View-full-log terminal tab. */

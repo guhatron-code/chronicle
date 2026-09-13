@@ -359,10 +359,10 @@ export function RoadmapPane({
 
   /** fresh: an explicit Rebuild re-derives chronicle.json from scratch; a first
    *  build (or a plan-drift refresh) keeps the skill's diff-and-patch mode. */
-  const startInit = useCallback((fresh = false) => {
+  const startInit = useCallback((fresh = false, note?: string) => {
     const startedAt = Date.now();
     setInitRun({ running: true, startedAt, logLines: [], activeLine: "Starting the session…", progress: 0.06, code: null, elapsedS: 0 });
-    initStart(dir, agent, fresh).catch((e) => {
+    initStart(dir, agent, fresh, note).catch((e) => {
       setInitRun(null);
       toastError("Couldn't start the session", String(e).slice(0, 90));
     });
@@ -532,6 +532,14 @@ export function RoadmapPane({
           cancelLabel: "Not yet",
           confirmLabel: "Rebuild",
           onConfirm: () => startInit(true), // Rebuild = from scratch, not refresh
+        }),
+      onRefreshRoadmap: (note: string) =>
+        onConfirm({
+          title: "Bring the roadmap up to date?",
+          body: `${agent === "codex" ? "A Codex" : "A Claude"} session reads what changed and updates only those phases. Your files aren't changed; review the roadmap diff in Repo before you save anything else.`,
+          cancelLabel: "Not now",
+          confirmLabel: "Update",
+          onConfirm: () => startInit(false, note),
         }),
       onRebuild: () =>
         onConfirm({

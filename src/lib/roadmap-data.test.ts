@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { ago, historyPanelFrom, mapRoadmap, type RoadmapCtx } from "./roadmap-data";
+import { describe, expect, it, vi } from "vitest";
+import { ago, behindNote, historyPanelFrom, mapRoadmap, needsYouRows, type RoadmapCtx } from "./roadmap-data";
 import type { HistoryFacts, StateData } from "./ipc";
 
 const NOW = 1_757_500_000_000; // ms
@@ -33,6 +33,7 @@ function repo(over: Partial<StateData> = {}): StateData {
     commits: 12, last_commit: "", tags: [], worktrees: [],
     dirty: [], published: "ok", remote_ref: "origin/react-shadcn",
     statuses: [], docs: {}, stale: [], custom_actions: [], manifest_warnings: [],
+    new_plans: [], newer_release: null,
     work_branch: null, init_consent: null, checked_at: "",
     ...over,
   };
@@ -194,5 +195,55 @@ describe("the history section while the facts are still on their way", () => {
     expect(p?.kind).toBe("panel");
     if (p?.kind !== "panel") throw new Error("expected the panel");
     expect(p.lastSave?.subject).toBe("fix(notes): keep the caret in place");
+  });
+});
+
+describe("a roadmap that fell behind", () => {
+  const handlers = { onRefreshRoadmap: vi.fn() };
+  const ctx = { ...CTX, handlers } as unknown as RoadmapCtx;
+
+  it("names each thing the roadmap never saw, one row each, sharing one action", () => {
+    const s = repo({
+      manifest_present: true,
+      stale: ["PRODUCT.md"],
+      new_plans: ["docs/superpowers/specs/2026-09-09-notes-design.md"],
+      newer_release: ["v0.8.1", "v0.5.1"],
+    });
+    const rows = needsYouRows(s, ctx).filter((r) => r.id.startsWith("behind"));
+    expect(rows.map((r) => r.title)).toEqual([
+      "PRODUCT.md changed since the roadmap was written",
+      "2026-09-09-notes-design.md is not on the roadmap",
+      "v0.8.1 shipped, the roadmap ends at v0.5.1",
+    ]);
+    for (const r of rows) {
+      expect(r.kind).toBe("one-click");
+      if (r.kind === "one-click") expect(r.actionLabel).toBe("Bring it up to date");
+    }
+    if (rows[0].kind === "one-click") rows[0].onAction?.();
+    expect(handlers.onRefreshRoadmap).toHaveBeenCalledWith(behindNote(s));
+  });
+
+  it("caps the plan rows at five and counts the rest", () => {
+    const s = repo({ manifest_present: true, new_plans: ["a.md", "b.md", "c.md", "d.md", "e.md", "f.md", "g.md"] });
+    const rows = needsYouRows(s, ctx).filter((r) => r.id.startsWith("behind"));
+    expect(rows).toHaveLength(6);
+    expect(rows[5].title).toBe("and 2 more plan files are not on the roadmap");
+  });
+
+  it("says nothing when nothing is behind, and nothing without a roadmap", () => {
+    expect(needsYouRows(repo({ manifest_present: true }), ctx).filter((r) => r.id.startsWith("behind"))).toEqual([]);
+    expect(needsYouRows(repo({ new_plans: ["x.md"] }), ctx).filter((r) => r.id.startsWith("behind"))).toEqual([]);
+  });
+
+  it("the note lists every finding in one sentence each", () => {
+    const s = repo({ manifest_present: true, stale: ["PRODUCT.md"], new_plans: ["docs/a.md"], newer_release: ["v2.0.0", "v1.0.0"] });
+    expect(behindNote(s)).toBe(
+      "PRODUCT.md changed. New plan files: docs/a.md. The newest release is v2.0.0 but the roadmap ends at v1.0.0.",
+    );
+  });
+
+  it("an unreadable ledger is reported, not hidden", () => {
+    const rows = needsYouRows(repo({ manifest_present: true, ledger_set_aside: true }), ctx);
+    expect(rows.find((r) => r.id === "ledger-bad")?.title).toBe("The done ledger was unreadable and set aside");
   });
 });

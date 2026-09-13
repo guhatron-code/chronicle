@@ -14,7 +14,7 @@ import type { DocChipProps } from "@/screens/roadmap/DocumentsPanel";
 import type { CurrentStateBannerProps } from "@/screens/roadmap/CurrentStateBanner";
 import type { HistoryLineFile, HistoryPanelProps, RemoteLine } from "@/screens/roadmap/HistoryPanel";
 import type { ProblemCardProps } from "@/screens/roadmap/ProblemCard";
-import { CodeGlyph, FolderSimpleGlyph, UploadGlyph } from "@/components/chrome/icons";
+import { ClockGlyph, CodeGlyph, FolderSimpleGlyph, UploadGlyph } from "@/components/chrome/icons";
 
 /* ---------- the history section: facts in, four lines out ---------- */
 
@@ -169,6 +169,7 @@ export interface RoadmapCtx {
     onToggleUncommitted: () => void;
     onAddNext: () => void;
     onReadDecision: (id: string) => void;
+    onRefreshRoadmap: (note: string) => void;
   };
   warningDismissed: boolean;
 }
@@ -256,6 +257,15 @@ const fmtElapsed = (s: number) =>
 
 /* ---------- needs-you synthesis (the buildActs port, R2 one-clicks) ---------- */
 
+/** The one-paragraph diff handed to the chronicle-init refresh. */
+export function behindNote(s: StateData): string {
+  const parts: string[] = [];
+  for (const d of s.stale) parts.push(`${d} changed.`);
+  if (s.new_plans.length > 0) parts.push(`New plan files: ${s.new_plans.join(", ")}.`);
+  if (s.newer_release) parts.push(`The newest release is ${s.newer_release[0]} but the roadmap ends at ${s.newer_release[1]}.`);
+  return parts.join(" ");
+}
+
 export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
   const rows: NeedsYouRow[] = [];
   const H = ctx.handlers;
@@ -322,6 +332,39 @@ export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
         command: "git worktree prune",
         kind: "one-click", actionLabel: "Remove it",
         onAction: () => H.onAction("prune", ""),
+      });
+    }
+  }
+  if (s.manifest_present) {
+    const note = behindNote(s);
+    const behind = (id: string, title: string, sub: string): NeedsYouRow => ({
+      id, icon: createElement(ClockGlyph, { size: 14 }), title, sub, command: "",
+      kind: "one-click", actionLabel: "Bring it up to date",
+      onAction: () => H.onRefreshRoadmap(note),
+    });
+    for (const d of s.stale) {
+      rows.push(behind(`behind-doc-${d}`, `${d} changed since the roadmap was written`,
+        "A refresh reads it again and updates only what changed. You review the diff before anything lands."));
+    }
+    const plans = s.new_plans.slice(0, 5);
+    for (const p of plans) {
+      rows.push(behind(`behind-plan-${p}`, `${p.split("/").pop()} is not on the roadmap`,
+        "A plan file newer than the roadmap that it never mentions."));
+    }
+    if (s.new_plans.length > 5) {
+      rows.push(behind("behind-plan-more", `and ${s.new_plans.length - 5} more plan files are not on the roadmap`,
+        "The refresh reads all of them."));
+    }
+    if (s.newer_release) {
+      rows.push(behind("behind-release", `${s.newer_release[0]} shipped, the roadmap ends at ${s.newer_release[1]}`,
+        "Releases after the last phase the roadmap knows about."));
+    }
+    if (s.ledger_set_aside) {
+      rows.push({
+        id: "ledger-bad", icon: createElement(ClockGlyph, { size: 14 }),
+        title: "The done ledger was unreadable and set aside",
+        sub: "It is next to the original as roadmap-ledger.json.bad. Phases re-prove themselves from the rules; anything only the ledger knew will need Mark done again.",
+        command: "", kind: "copy-only",
       });
     }
   }
@@ -482,9 +525,6 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
           ? ({ kind: "just-switched", ...common } satisfies CurrentStateBannerProps)
           : ({ kind: "normal", running: /running|scanning|building/i.test(st.label), ...common } satisfies CurrentStateBannerProps);
       }
-    }
-    if (s.stale.length > 0) {
-      props.stale = { scanning: ctx.initRun?.running ?? false, onScan: H.onScan };
     }
   }
 

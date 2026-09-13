@@ -15,7 +15,6 @@ import type { PhaseDetailProps, DetailSaves } from "./PhaseDetail";
 import type { PhaseRailProps } from "./PhaseRail";
 import type { ProblemCardProps } from "./ProblemCard";
 import type { RoadmapProps } from "./Roadmap";
-import type { StaleAlertProps } from "./StaleAlert";
 import type { WarningBannerProps } from "./WarningBanner";
 
 /* ============ F12 · consent card ============ */
@@ -89,11 +88,6 @@ export const bannerAllDone: CurrentStateBannerProps = {
   kind: "all-done",
   body: "All 9 phases finished and published. The roadmap has nothing left to track.",
 };
-
-/* ============ F16 · stale alert ============ */
-
-export const staleAlert: StaleAlertProps = {};
-export const staleAlertScanning: StaleAlertProps = { scanning: true };
 
 /* ============ F17 · manifest-problem cards ============ */
 
@@ -333,7 +327,6 @@ export const roadmapL1: RoadmapProps = {
 export const roadmapEverything: RoadmapProps = {
   warning: warningBanner,
   banner: bannerNormal,
-  stale: staleAlert,
   history: historyPanel,
   needsYou,
   documents: documentsPanel,
