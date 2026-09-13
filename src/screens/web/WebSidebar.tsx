@@ -127,7 +127,7 @@ function RowAction({ label, onClick, className, children, onKeyDown, ...rest }: 
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onClick?.(); }
       }}
       className={cn(
-        "flex size-4 shrink-0 cursor-default items-center justify-center rounded-[4px] text-text-dim hover:bg-fill-hover hover:text-text-secondary",
+        "flex size-4 shrink-0 cursor-default items-center justify-center rounded-xs text-text-dim hover:bg-fill-hover hover:text-text-secondary",
         "outline-none focus-visible:[box-shadow:var(--focus-ring)]",
         className,
       )}
@@ -156,7 +156,7 @@ function NameInput({ initial, onDone }: { initial: string; onDone: (name: string
         // typed here is not a shortcut
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") finish(null); }}
         onBlur={() => finish(ref.current?.value ?? null)}
-        className="h-[26px] w-full rounded-[6px] border border-border-hairline bg-surface-input px-2 text-[11.5px] text-text-primary outline-none focus-visible:[box-shadow:var(--focus-ring)]"
+        className="h-[26px] w-full rounded-sm border border-border-hairline bg-surface-input px-2 text-[11.5px] text-text-primary outline-none focus-visible:[box-shadow:var(--focus-ring)]"
       />
     </form>
   );

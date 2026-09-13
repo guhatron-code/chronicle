@@ -64,7 +64,7 @@ export const Eyebrow = ({ className, children }: { className?: string; children:
 export const Kbd = ({ className, children }: { className?: string; children: ReactNode }) => (
   <span
     className={cn(
-      "rounded-[5px] bg-fill-subtle px-[5px] py-px font-mono text-[10.5px] text-text-dimmer",
+      "rounded-xs bg-fill-subtle px-[5px] py-px font-mono text-[10.5px] text-text-dimmer",
       className,
     )}
   >

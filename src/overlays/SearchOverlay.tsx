@@ -126,7 +126,7 @@ export function SearchOverlay({
               <CommandGroup heading="Saves">
                 {results.commits.map((c) => (
                   <CommandItem key={`c-${c.hash}`} value={`c-${c.hash}`} onSelect={() => go(onOpenHistory)}>
-                    <span className="shrink-0 rounded-[5px] bg-fill-subtle px-[5px] font-mono text-[10.5px] text-text-subtle">{c.hash}</span>
+                    <span className="shrink-0 rounded-xs bg-fill-subtle px-[5px] font-mono text-[10.5px] text-text-subtle">{c.hash}</span>
                     <span data-selectable className="min-w-0 truncate text-[12.5px] text-text-primary">{c.subject}</span>
                     <span className="flex-1" />
                     <span className="shrink-0 font-mono text-[10.5px] text-text-dim">{c.ago}</span>

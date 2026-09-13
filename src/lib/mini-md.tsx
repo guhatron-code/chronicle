@@ -19,7 +19,7 @@ function inline(text: string, key: number): ReactNode {
       parts.push(<strong key={`${key}-${i++}`} className="font-semibold text-text-primary">{tok.slice(2, -2)}</strong>);
     } else {
       parts.push(
-        <code key={`${key}-${i++}`} className="rounded-[4px] bg-fill-subtle px-1 font-mono text-[11px]">
+        <code key={`${key}-${i++}`} className="rounded-xs bg-fill-subtle px-1 font-mono text-[11px]">
           {tok.slice(1, -1)}
         </code>,
       );

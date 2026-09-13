@@ -67,7 +67,7 @@ function CheckpointRow({
         <button
           data-checkpoint-undo
           onClick={undo}
-          className="inline-flex h-[22px] items-center gap-[5px] rounded-[6px] bg-fill-hover px-2 text-[11px] text-text-secondary opacity-0 hover:text-text-primary focus-visible:opacity-100 group-hover:opacity-100"
+          className="inline-flex h-[22px] items-center gap-[5px] rounded-sm bg-fill-hover px-2 text-[11px] text-text-secondary opacity-0 hover:text-text-primary focus-visible:opacity-100 group-hover:opacity-100"
         >
           <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4">
             <path d="M4.5 2 2 4.5 4.5 7" />
@@ -264,7 +264,7 @@ function RoundCard({
   const allDone = total > 0 && done === total;
   const stopped = entry.ended && !allDone;
   return (
-    <div data-round-card className="flex flex-col gap-2 rounded-[10px] border border-border-hairline bg-surface-card-raised px-3.5 py-3">
+    <div data-round-card className="flex flex-col gap-2 rounded-lg border border-border-hairline bg-surface-card-raised px-3.5 py-3">
       <div className="flex items-center gap-2 whitespace-nowrap">
         <span className="text-[13px] font-semibold text-text-primary">
           Round {entry.n} · {total} {total === 1 ? "note" : "notes"}
@@ -327,7 +327,7 @@ function PlanCard({ entry }: { entry: Extract<AgentEntry, { kind: "plan" }> }) {
   if (entry.items.length === 0) return null;
   const done = entry.items.filter((i) => i.status === "completed").length;
   return (
-    <div data-plan-card className="flex flex-col gap-2 rounded-[10px] border border-border-hairline bg-surface-card-raised px-3.5 py-3">
+    <div data-plan-card className="flex flex-col gap-2 rounded-lg border border-border-hairline bg-surface-card-raised px-3.5 py-3">
       <div className="flex items-center gap-2 text-[11.5px] text-text-dim">
         <span className="font-medium text-text-secondary">Plan</span>
         <span className="tabular-nums">{done}/{entry.items.length}</span>
@@ -421,7 +421,7 @@ function QueuedMessages({ dir, queue }: { dir: string; queue: string[] }) {
           data-queued-message
           className="flex items-start gap-2 rounded-md border border-border-hairline bg-fill-subtle px-[11px] py-2"
         >
-          <span className="mt-[1px] shrink-0 rounded-[5px] bg-surface-card px-1.5 text-[10.5px] text-text-dim">queued</span>
+          <span className="mt-[1px] shrink-0 rounded-xs bg-surface-card px-1.5 text-[10.5px] text-text-dim">queued</span>
           <span data-selectable className="min-w-0 flex-1 whitespace-pre-wrap text-[12.5px] text-text-secondary [overflow-wrap:anywhere]">{text}</span>
           <button
             aria-label="Remove this queued message"
@@ -561,7 +561,7 @@ export function AgentPane({
             <div className="flex items-center gap-2">
               <Spinner size={11} />
               <span className="text-[11.5px] text-text-muted">Waiting for the sign-in to finish in</span>
-              <span className="rounded-[5px] bg-fill-subtle px-1.5 font-mono text-[10.5px] text-text-subtle">claude · sign-in</span>
+              <span className="rounded-xs bg-fill-subtle px-1.5 font-mono text-[10.5px] text-text-subtle">claude · sign-in</span>
             </div>
           )}
         </div>

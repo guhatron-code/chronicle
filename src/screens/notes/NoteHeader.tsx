@@ -106,7 +106,7 @@ export function NoteHeader({
                 if (e.key === "Enter") { e.preventDefault(); commitRename(); }
                 else if (e.key === "Escape") { e.preventDefault(); setEditing(null); }
               }}
-              className="w-[70%] rounded-[4px] border border-border-strong bg-surface-input px-1 py-px font-sans text-[12.5px] text-text-primary outline-none"
+              className="w-[70%] rounded-xs border border-border-strong bg-surface-input px-1 py-px font-sans text-[12.5px] text-text-primary outline-none"
             />
           ) : (
             <Hint label="Rename">
@@ -160,7 +160,7 @@ export function NoteHeader({
             <button
               type="button"
               aria-label="More"
-              className="flex size-[22px] shrink-0 items-center justify-center rounded-[5px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
+              className="flex size-[22px] shrink-0 items-center justify-center rounded-xs text-text-dim hover:bg-fill-hover hover:text-text-primary"
             >
               ⋯
             </button>

@@ -146,7 +146,7 @@ function GraphLanes({ commits, branches }: { commits: Commit[]; branches: Branch
 function AuthorTile({ author }: { author: CommitAuthor }) {
   return (
     <Hint label={author.kind === "agent" ? "Agent save" : "You"}>
-      <span className="flex size-4 items-center justify-center rounded-[5px] bg-surface-card-raised text-[8px] font-semibold text-text-subtle">
+      <span className="flex size-4 items-center justify-center rounded-xs bg-surface-card-raised text-[8px] font-semibold text-text-subtle">
         {author.kind === "agent" ? <AgentStarGlyph size={8} /> : author.initials}
       </span>
     </Hint>
@@ -174,14 +174,14 @@ function CommitRow({ commit, onCommit }: { commit: Commit; onCommit?: (hash: str
           ref.current ? (
             <span
               key={ref.label}
-              className="shrink-0 rounded-[5px] bg-selected-bg px-[5px] py-px font-mono text-[10.5px] text-selected-fg"
+              className="shrink-0 rounded-xs bg-selected-bg px-[5px] py-px font-mono text-[10.5px] text-selected-fg"
             >
               {ref.label}
             </span>
           ) : (
             <span
               key={ref.label}
-              className="shrink-0 rounded-[5px] bg-fill-subtle px-[5px] font-mono text-[10.5px] text-text-subtle"
+              className="shrink-0 rounded-xs bg-fill-subtle px-[5px] font-mono text-[10.5px] text-text-subtle"
             >
               {ref.label}
             </span>
@@ -206,7 +206,7 @@ function RowAction({ label, onClick }: { label: string; onClick?: () => void }) 
         e.stopPropagation();
         onClick?.();
       }}
-      className="h-[21px] shrink-0 rounded-[5px] border border-border-strong px-2 text-[10.5px] text-text-secondary opacity-0 hover:bg-fill-hover focus-visible:opacity-100 group-hover:opacity-100"
+      className="h-[21px] shrink-0 rounded-xs border border-border-strong px-2 text-[10.5px] text-text-secondary opacity-0 hover:bg-fill-hover focus-visible:opacity-100 group-hover:opacity-100"
     >
       {label}
     </button>
@@ -332,7 +332,7 @@ export function HistoryPane(p: HistoryPaneProps) {
           {(["60%", "82%", "47%"] as const).map((w, i) => (
             <div
               key={w}
-              className="h-3 rounded-[4px] bg-fill-hover"
+              className="h-3 rounded-xs bg-fill-hover"
               style={{ width: w, animation: `wv-pulse 1.4s ease-in-out ${i * 0.15}s infinite` }}
             />
           ))}
@@ -454,7 +454,7 @@ export function HistoryPane(p: HistoryPaneProps) {
                           <button
                             aria-label={`Discard changes to ${f.name}`}
                             onClick={() => p.onDiscard?.(f.path ?? f.name)}
-                            className="h-[21px] shrink-0 rounded-[5px] border border-border-hairline px-2 text-[10.5px] text-text-dim opacity-0 hover:border-border-strong hover:text-state-error focus-visible:opacity-100 group-hover:opacity-100"
+                            className="h-[21px] shrink-0 rounded-xs border border-border-hairline px-2 text-[10.5px] text-text-dim opacity-0 hover:border-border-strong hover:text-state-error focus-visible:opacity-100 group-hover:opacity-100"
                           >
                             Discard…
                           </button>

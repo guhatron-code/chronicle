@@ -152,7 +152,7 @@ export function TabStrip({ tabs, activeId, onSelect, onClose, onNew, trailing, l
                   onClose?.(tab.id);
                 }}
                 className={cn(
-                  "flex size-4 items-center justify-center rounded-[4px] text-text-dim hover:bg-fill-hover",
+                  "flex size-4 items-center justify-center rounded-xs text-text-dim hover:bg-fill-hover",
                   !active && "invisible group-hover/tab:visible group-focus-within/tab:visible",
                 )}
               >

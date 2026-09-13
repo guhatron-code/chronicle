@@ -104,12 +104,12 @@ export function RecentCard({
           <MarkTile mark={project.mark} label={project.markLabel} />
           <span className="text-sm font-medium text-text-primary">{project.name}</span>
           {project.openNow && (
-            <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-text-subtle">
+            <span className="rounded-xs bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-text-subtle">
               Open
             </span>
           )}
           {(project.liveSessions ?? 0) > 0 && (
-            <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-state-neutral">
+            <span className="rounded-xs bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-state-neutral">
               {project.agentRunning === "claude" ? "Claude running" : project.agentRunning === "codex" ? "Codex running" : "Session running"}
             </span>
           )}
@@ -161,12 +161,12 @@ export function RecentCard({
             <MarkTile mark={project.mark} label={project.markLabel} />
             <span className="text-sm font-medium text-text-primary">{project.name}</span>
           {project.openNow && (
-            <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-text-subtle">
+            <span className="rounded-xs bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-text-subtle">
               Open
             </span>
           )}
           {(project.liveSessions ?? 0) > 0 && (
-            <span className="rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-state-neutral">
+            <span className="rounded-xs bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-state-neutral">
               {project.agentRunning === "claude" ? "Claude running" : project.agentRunning === "codex" ? "Codex running" : "Session running"}
             </span>
           )}

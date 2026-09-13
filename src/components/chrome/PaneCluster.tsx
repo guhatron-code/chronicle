@@ -55,7 +55,7 @@ export function PaneCluster({
               disabled={last}
               onClick={() => onToggle(unit)}
               className={cn(
-                "flex size-6 items-center justify-center rounded-[6px]",
+                "flex size-6 items-center justify-center rounded-sm",
                 visible ? "bg-fill-hover text-text-primary" : "text-text-dimmer hover:bg-fill-subtle hover:text-text-secondary",
                 last && "cursor-default opacity-45",
               )}

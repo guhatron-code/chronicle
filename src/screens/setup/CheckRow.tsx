@@ -129,7 +129,7 @@ export function CheckRow({
           <div className="mt-0.5 flex items-center gap-2">
             <span aria-hidden className="inline-block size-[11px] shrink-0 rounded-full border-[1.5px] border-state-neutral" style={{ borderTopColor: "transparent", animation: "wv-spin 0.7s linear infinite" }} />
             <span className="text-[11.5px] text-text-muted">Waiting for you to finish signing in…</span>
-            <span className="rounded-[5px] bg-fill-subtle px-1.5 font-mono text-[10.5px] text-text-subtle">
+            <span className="rounded-xs bg-fill-subtle px-1.5 font-mono text-[10.5px] text-text-subtle">
               {check.id === "github" ? "github · sign-in" : "claude · sign-in"}
             </span>
           </div>

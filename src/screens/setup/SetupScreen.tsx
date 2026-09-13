@@ -50,7 +50,7 @@ function Checklist({ dir }: { dir: string | null }) {
 
   return (
     <>
-      <div className="flex items-center gap-[18px] rounded-[10px] border border-border-hairline bg-surface-card px-[17px] py-[15px]">
+      <div className="flex items-center gap-[18px] rounded-lg border border-border-hairline bg-surface-card px-[17px] py-[15px]">
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex items-baseline gap-2.5">
             <span className="text-[15px] font-semibold text-text-primary">

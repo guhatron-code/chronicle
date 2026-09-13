@@ -203,7 +203,7 @@ export const Sidebar = memo(function Sidebar({
             onKeyDown={(e) => { if (e.key === "Escape") setNewFolder(null); }}
             onBlur={() => setNewFolder(null)}
             placeholder="Folder name"
-            className="h-[26px] w-full rounded-[6px] border border-border-hairline bg-surface-input px-2 text-[11.5px] text-text-primary outline-none focus-visible:[box-shadow:var(--focus-ring)]"
+            className="h-[26px] w-full rounded-sm border border-border-hairline bg-surface-input px-2 text-[11.5px] text-text-primary outline-none focus-visible:[box-shadow:var(--focus-ring)]"
           />
         </form>
       )}
@@ -256,7 +256,7 @@ export const Sidebar = memo(function Sidebar({
                 type="button"
                 onClick={() => setTagFilter((cur) => (cur === t.tag ? null : t.tag))}
                 className={cn(
-                  "inline-flex items-center gap-1 rounded-[4px] border border-border-hairline bg-surface-input px-[7px] py-[2px] font-mono text-[10.5px] text-text-subtle",
+                  "inline-flex items-center gap-1 rounded-xs border border-border-hairline bg-surface-input px-[7px] py-[2px] font-mono text-[10.5px] text-text-subtle",
                   tagFilter === t.tag && "border-border-strong text-text-primary",
                 )}
               >
@@ -275,7 +275,7 @@ export const Sidebar = memo(function Sidebar({
           title={disabledReason ?? undefined}
           disabled={disabledReason !== null}
           onClick={onStartRound}
-          className="inline-flex items-center gap-[4px] rounded-[6px] bg-primary px-[11px] py-[5px] text-[11.5px] font-semibold text-primary-foreground hover:bg-(--primary-hover) disabled:bg-fill-subtle disabled:text-text-dimmer disabled:opacity-100"
+          className="inline-flex items-center gap-[4px] rounded-sm bg-primary px-[11px] py-[5px] text-[11.5px] font-semibold text-primary-foreground hover:bg-(--primary-hover) disabled:bg-fill-subtle disabled:text-text-dimmer disabled:opacity-100"
         >
           Start a round
           <ChevronRightGlyph size={11} className="shrink-0" />

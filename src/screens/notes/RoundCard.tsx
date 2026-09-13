@@ -47,7 +47,7 @@ function rowStatus(note: NoteEntry, phase: RoundPhase): { label: string; tone: s
   return { label: "in round", tone: "queued" };
 }
 
-const BTN = "shrink-0 rounded-[5px] border border-border-hairline px-[7px] py-[3px] text-[10.5px] text-text-dim hover:bg-fill-hover hover:text-text-primary disabled:opacity-50";
+const BTN = "shrink-0 rounded-xs border border-border-hairline px-[7px] py-[3px] text-[10.5px] text-text-dim hover:bg-fill-hover hover:text-text-primary disabled:opacity-50";
 
 export const RoundCard = memo(function RoundCard({
   dir, agent, round, openPath, onOpenNote, logOpen, onToggleLog, onRunInPane,
@@ -111,7 +111,7 @@ export const RoundCard = memo(function RoundCard({
         <button
           type="button"
           onClick={onToggleLog}
-          className="shrink-0 rounded-[5px] border border-border-hairline px-[7px] py-[2px] text-[10.5px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
+          className="shrink-0 rounded-xs border border-border-hairline px-[7px] py-[2px] text-[10.5px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
         >
           {logOpen ? "Hide log" : "View log"}
         </button>

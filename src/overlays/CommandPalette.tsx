@@ -158,7 +158,7 @@ export function CommandPalette({
                         {r.nameWithOwner}
                       </span>
                       {r.isPrivate && (
-                        <span className="shrink-0 rounded-[5px] bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-text-subtle">
+                        <span className="shrink-0 rounded-xs bg-fill-subtle px-1.5 text-[10.5px] leading-4 text-text-subtle">
                           Private
                         </span>
                       )}

@@ -74,7 +74,7 @@ function HistoryPopoverBody({ dir, onClose }: { dir: string; onClose: () => void
                     onClose();
                     void resumeAgentSession(dir, r.id).catch((e) => toastError("Couldn't resume it", String(e).slice(0, 110)));
                   }}
-                  className="h-6 rounded-[6px] border border-border-strong px-2.5 text-[11px] font-medium text-text-primary hover:bg-fill-hover"
+                  className="h-6 rounded-sm border border-border-strong px-2.5 text-[11px] font-medium text-text-primary hover:bg-fill-hover"
                 >
                   Resume
                 </button>
@@ -196,7 +196,7 @@ export function AgentSection({
             <PopoverTrigger asChild>
               <button
                 aria-label="Previous sessions"
-                className="flex size-6 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+                className="flex size-6 items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover hover:text-text-secondary"
               >
                 <HistoryClockGlyph size={12} />
               </button>
@@ -207,7 +207,7 @@ export function AgentSection({
         {live && (
           <button
             onClick={endSession}
-            className="h-6 rounded-[6px] px-2 text-[11.5px] text-text-muted hover:bg-fill-hover hover:text-text-secondary"
+            className="h-6 rounded-sm px-2 text-[11.5px] text-text-muted hover:bg-fill-hover hover:text-text-secondary"
           >
             End session
           </button>
@@ -216,7 +216,7 @@ export function AgentSection({
           <button
             aria-label="Collapse the agent section"
             onClick={onToggleCollapsed}
-            className="flex size-6 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+            className="flex size-6 items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover hover:text-text-secondary"
           >
             <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="m3 7.5 3-3 3 3" />

@@ -306,7 +306,7 @@ export function TerminalColumn({
                     e.stopPropagation();
                     onClose?.(t.id);
                   }}
-                  className="flex size-4 items-center justify-center rounded-[4px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+                  className="flex size-4 items-center justify-center rounded-xs text-text-dim hover:bg-fill-hover hover:text-text-secondary"
                 >
                   <XGlyph size={8} />
                 </button>
@@ -350,7 +350,7 @@ export function TerminalColumn({
             <button
               aria-label="Collapse the terminal section"
               onClick={onToggleCollapsed}
-              className="flex size-6 shrink-0 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-text-dim hover:bg-fill-hover hover:text-text-secondary"
             >
               <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="m3 4.5 3 3 3-3" />

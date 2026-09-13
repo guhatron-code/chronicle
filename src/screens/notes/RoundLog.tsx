@@ -90,7 +90,7 @@ export const RoundLog = memo(function RoundLog({
           <button
             type="button"
             onClick={openFullLog}
-            className="rounded-[5px] px-1.5 py-0.5 text-[11px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
+            className="rounded-xs px-1.5 py-0.5 text-[11px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
           >
             Open full log
           </button>
@@ -99,7 +99,7 @@ export const RoundLog = memo(function RoundLog({
           type="button"
           aria-label="Hide the log"
           onClick={onClose}
-          className="flex size-[22px] items-center justify-center rounded-[5px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
+          className="flex size-[22px] items-center justify-center rounded-xs text-text-dim hover:bg-fill-hover hover:text-text-primary"
         >
           <XGlyph size={10} />
         </button>

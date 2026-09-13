@@ -255,7 +255,9 @@
   --color-selected-bg: var(--selected-bg);
   --color-selected-fg: var(--selected-fg);
 
-  /* §1.7 Radius scale → rounded-* utilities. */
+  /* §1.7 Radius scale → rounded-* utilities. xs is the chip/tiny-button step;
+     it overrides Tailwind's own 2px default so `rounded-xs` means one thing. */
+  --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 10px;

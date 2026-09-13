@@ -119,7 +119,7 @@ export function ToolCard({ tool, dir, readOnly, onViewChanges }: { tool: Tool; d
         <span className="text-[12.5px] text-text-secondary">{verb(tool)}</span>
         <span className="overflow-hidden text-ellipsis font-mono text-[11.5px] text-text-primary">{detail}</span>
         {tool.diff && (
-          <span className="shrink-0 rounded-[5px] bg-fill-subtle px-1.5 font-mono text-[10.5px] tabular-nums">
+          <span className="shrink-0 rounded-xs bg-fill-subtle px-1.5 font-mono text-[10.5px] tabular-nums">
             <span className="text-state-success">+{tool.diff.plus}</span>{" "}
             <span className="text-state-error">−{tool.diff.minus}</span>
           </span>

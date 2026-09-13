@@ -82,7 +82,7 @@ export function GitBadge({ letter }: { letter: GitLetter }) {
     <Hint label={GIT_TITLE[letter]}>
     <span
       className={cn(
-        "flex size-[15px] items-center justify-center rounded-[4px] border font-mono text-[10px]",
+        "flex size-[15px] items-center justify-center rounded-xs border font-mono text-[10px]",
         letter === "A" && "border-border-strong bg-fill-hover text-text-primary",
         letter === "M" && "border-border-strong text-text-secondary",
         letter === "D" && "border-dashed border-border-strong text-text-dim",
@@ -121,7 +121,7 @@ function NameField({
           else if (e.key === "Escape") { e.preventDefault(); onCancel(); }
         }}
         className={cn(
-          "h-[24px] w-full rounded-[5px] border bg-surface-input px-1.5 text-[12px] text-text-primary outline-none",
+          "h-[24px] w-full rounded-xs border bg-surface-input px-1.5 text-[12px] text-text-primary outline-none",
           error ? "border-state-error" : "border-border-strong",
         )}
       />
@@ -187,7 +187,7 @@ function RowDots({ shown }: { shown: boolean }) {
           bubbles: true, clientX: box.right - 8, clientY: box.bottom,
         }));
       }}
-      className={cn("size-[18px] rounded-[4px] text-[11px]", !shown && "invisible group-hover/row:visible")}
+      className={cn("size-[18px] rounded-xs text-[11px]", !shown && "invisible group-hover/row:visible")}
     >
       ⋯
     </TreeIconButton>
@@ -234,7 +234,7 @@ function Row({
         <span className="min-w-0 flex-1 truncate text-[11.5px] text-state-error">{sentence(node.message)}</span>
         <button
           onClick={() => h.onRetry?.(node.id)}
-          className="h-5 shrink-0 rounded-[5px] border border-border-strong px-[7px] text-[10.5px] text-text-secondary hover:bg-fill-hover"
+          className="h-5 shrink-0 rounded-xs border border-border-strong px-[7px] text-[10.5px] text-text-secondary hover:bg-fill-hover"
         >
           Retry
         </button>

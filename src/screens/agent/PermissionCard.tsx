@@ -51,7 +51,7 @@ export function PermissionCard({ dir, perm }: { dir: string; perm: Perm }) {
   return (
     <div
       data-permission-card
-      className="flex flex-col gap-[9px] rounded-[10px] border border-border-strong bg-surface-card-raised px-3.5 py-3"
+      className="flex flex-col gap-[9px] rounded-lg border border-border-strong bg-surface-card-raised px-3.5 py-3"
     >
       <div className="flex items-center gap-2 whitespace-nowrap">
         <span
@@ -59,7 +59,7 @@ export function PermissionCard({ dir, perm }: { dir: string; perm: Perm }) {
           style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }}
         />
         <span className="text-[13px] font-medium text-text-primary">{perm.title}</span>
-        <span className="overflow-hidden text-ellipsis rounded-[5px] bg-fill-subtle px-1.5 py-px font-mono text-[11.5px] text-text-primary">
+        <span className="overflow-hidden text-ellipsis rounded-xs bg-fill-subtle px-1.5 py-px font-mono text-[11.5px] text-text-primary">
           {perm.detail}
         </span>
       </div>
