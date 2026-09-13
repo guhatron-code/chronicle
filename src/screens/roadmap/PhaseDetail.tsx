@@ -64,6 +64,15 @@ export type PhaseDetailProps = {
   onStartAgent?: () => void;
   onChip?: (name: string) => void;
   className?: string;
+  /** What proved a done phase, as a sentence — null/undefined when the phase isn't done. */
+  proof?: string | null;
+  /** The marker command for a phase that isn't proved done yet. */
+  markerCommand?: string;
+  onCopyCommand?: (cmd: string) => void;
+  onMarkDone?: () => void;
+  onMarkNotDone?: () => void;
+  /** Set when the repo itself still proves the phase, so "Mark not done" would just come back. */
+  markNotDoneBlocked?: string | null;
 };
 
 function StepRow({ step }: { step: DetailStep }) {
@@ -314,6 +323,37 @@ export function PhaseDetail(p: PhaseDetailProps) {
                   {chip.note && <span className="text-[11.5px] text-text-subtle">{chip.note}</span>}
                 </div>
               ))}
+            </div>
+          </div>
+          )}
+
+          {(p.proof || p.markerCommand) && (
+          <div className="flex flex-col gap-2">
+            <Eyebrow>{p.proof ? "Done because" : "To mark it done"}</Eyebrow>
+            {p.proof && <p className="text-[12.5px] text-text-secondary">{p.proof}</p>}
+            {!p.proof && p.markerCommand && (
+              <>
+                <p className="text-[12.5px] text-text-secondary">
+                  When the work is saved, the agent adds this line to the commit message. Or close it yourself:
+                </p>
+                <button
+                  type="button"
+                  onClick={() => p.onCopyCommand?.(p.markerCommand ?? "")}
+                  className="w-fit rounded-md bg-fill-subtle px-2.5 py-1.5 text-left font-mono text-[11.5px] text-text-primary hover:bg-fill-hover"
+                  title="Copy"
+                >
+                  {p.markerCommand}
+                </button>
+              </>
+            )}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {!p.proof && p.onMarkDone && (
+                <BtnSecondary size="sm" onClick={p.onMarkDone}>Mark done</BtnSecondary>
+              )}
+              {p.proof && p.onMarkNotDone && (
+                <BtnSecondary size="sm" onClick={p.onMarkNotDone} disabled={!!p.markNotDoneBlocked}>Mark not done</BtnSecondary>
+              )}
+              {p.markNotDoneBlocked && <span className="text-[11.5px] text-text-subtle">{p.markNotDoneBlocked}</span>}
             </div>
           </div>
           )}

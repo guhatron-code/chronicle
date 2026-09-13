@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ago, behindNote, historyPanelFrom, mapRoadmap, needsYouRows, type RoadmapCtx } from "./roadmap-data";
+import { ago, behindNote, historyPanelFrom, mapRoadmap, markerCommand, needsYouRows, proofSentence, type RoadmapCtx } from "./roadmap-data";
 import type { HistoryFacts, StateData } from "./ipc";
 
 const NOW = 1_757_500_000_000; // ms
@@ -245,5 +245,21 @@ describe("a roadmap that fell behind", () => {
   it("an unreadable ledger is reported, not hidden", () => {
     const rows = needsYouRows(repo({ manifest_present: true, ledger_set_aside: true }), ctx);
     expect(rows.find((r) => r.id === "ledger-bad")?.title).toBe("The done ledger was unreadable and set aside");
+  });
+});
+
+describe("what proved a phase", () => {
+  it("reads each proof as a sentence", () => {
+    expect(proofSentence("marker f8a0e01")).toBe("Proved by a marker commit (f8a0e01).");
+    expect(proofSentence("ledger commit_subject 1d75d57")).toBe("Recorded done on an earlier scan, from a save (1d75d57).");
+    expect(proofSentence("ledger user")).toBe("Marked done by you.");
+    expect(proofSentence("tag v0.3.0")).toBe("Proved by the tag v0.3.0.");
+    expect(proofSentence("commit_subject 1d75d57")).toBe("Proved by a save (1d75d57).");
+    expect(proofSentence("file_matches c-zed/PROGRESS.md")).toBe("Proved by c-zed/PROGRESS.md.");
+    expect(proofSentence("notes")).toBe("Every note in the round is done.");
+    expect(proofSentence(undefined)).toBeNull();
+  });
+  it("the marker command is the two-message form git parses", () => {
+    expect(markerCommand("M-1")).toBe('git commit --allow-empty -m "Close M-1" -m "Chronicle-Phase: M-1 done"');
   });
 });

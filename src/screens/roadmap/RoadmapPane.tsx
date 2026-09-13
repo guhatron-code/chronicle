@@ -25,6 +25,7 @@ import {
   roundExecStatus,
   initStart,
   initStatus,
+  ledgerMark,
   runCommand,
   setDefaultAgent,
   setInitConsent,
@@ -423,6 +424,21 @@ export function RoadmapPane({
               })
               .catch((e) => toastError("Couldn't start a terminal", String(e).slice(0, 90)));
           }}
+          onCopyCommand={(cmd) => { void copyText(cmd); toastSuccess("Copied"); }}
+          onMarkDone={() =>
+            onConfirm({
+              title: `Mark ${phase.id} done?`,
+              body: "Chronicle records it in the done ledger. Nothing in your project changes. You can undo this from the same place.",
+              cancelLabel: "Not yet", confirmLabel: "Mark done",
+              onConfirm: () => { ledgerMark(dir, phase.id ?? "?", true).catch((e) => toastError("Couldn't mark it", String(e).slice(0, 90))); },
+            })}
+          onMarkNotDone={() =>
+            onConfirm({
+              title: `Mark ${phase.id} not done?`,
+              body: "The ledger entry is removed. If a tag, marker or file still proves it, it comes straight back on the next scan.",
+              cancelLabel: "Keep it", confirmLabel: "Mark not done",
+              onConfirm: () => { ledgerMark(dir, phase.id ?? "?", false).catch((e) => toastError("Couldn't change it", String(e).slice(0, 90))); },
+            })}
         />
       );
     }

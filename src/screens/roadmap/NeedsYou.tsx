@@ -1,7 +1,9 @@
 /*
  * F19 (Deck 3) — the "What needs you" panel. One-click actions run for real;
- * roadmap-authored actions are copy-only, reviewed before running. The full command
- * is always WRAPPED, never truncated. Presentational only.
+ * roadmap-authored actions are copy-only, reviewed before running — the badge
+ * marks provenance (fromRoadmap), not the copy-only/one-click split, since a
+ * copy-only row can be Chronicle's own (the ledger-bad notice) rather than the
+ * manifest's. The full command is always WRAPPED, never truncated. Presentational only.
  */
 import type { ReactNode } from "react";
 import { BtnPrimary, BtnSecondary } from "@/components/chrome/atoms";
@@ -56,7 +58,7 @@ function Row({ row, last }: { row: NeedsYouRow; last: boolean }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="min-w-0 text-[13.5px] font-medium text-text-primary">{row.title}</span>
           {hi && <TinyBadge>Next up</TinyBadge>}
-          {(row.fromRoadmap || row.kind === "copy-only") && (
+          {row.fromRoadmap && (
             <DashedBadge>From the roadmap · review before running</DashedBadge>
           )}
         </div>

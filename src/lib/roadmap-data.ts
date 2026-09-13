@@ -266,6 +266,34 @@ export function behindNote(s: StateData): string {
   return parts.join(" ");
 }
 
+export function markerCommand(id: string): string {
+  return `git commit --allow-empty -m "Close ${id}" -m "Chronicle-Phase: ${id} done"`;
+}
+
+const BY_WORDS: Record<string, (p: string) => string> = {
+  marker: (p) => `a marker commit (${p})`,
+  tag: (p) => `the tag ${p}`,
+  commit_subject: (p) => `a save (${p})`,
+  file_exists: (p) => p,
+  file_matches: (p) => p,
+  file_glob: (p) => `a file in ${p}`,
+  worktree_branch: (p) => `the workspace on ${p}`,
+};
+
+export function proofSentence(proof: string | undefined): string | null {
+  if (!proof) return null;
+  if (proof === "notes") return "Every note in the round is done.";
+  const [head, ...rest] = proof.split(" ");
+  if (head === "ledger") {
+    const [by, ...p] = rest;
+    if (by === "user") return "Marked done by you.";
+    const words = BY_WORDS[by]?.(p.join(" ")) ?? by;
+    return `Recorded done on an earlier scan, from ${words}.`;
+  }
+  const words = BY_WORDS[head]?.(rest.join(" ")) ?? head;
+  return `Proved by ${words}.`;
+}
+
 export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
   const rows: NeedsYouRow[] = [];
   const H = ctx.handlers;
@@ -343,16 +371,16 @@ export function needsYouRows(s: StateData, ctx: RoadmapCtx): NeedsYouRow[] {
       onAction: () => H.onRefreshRoadmap(note),
     });
     for (const d of s.stale) {
-      rows.push(behind(`behind-doc-${d}`, `${d} changed since the roadmap was written`,
+      rows.push(behind(`behind-doc:${d}`, `${d} changed since the roadmap was written`,
         "A refresh reads it again and updates only what changed. You review the diff before anything lands."));
     }
     const plans = s.new_plans.slice(0, 5);
     for (const p of plans) {
-      rows.push(behind(`behind-plan-${p}`, `${p.split("/").pop()} is not on the roadmap`,
+      rows.push(behind(`behind-plan:${p}`, `${p.split("/").pop()} is not on the roadmap`,
         "A plan file newer than the roadmap that it never mentions."));
     }
     if (s.new_plans.length > 5) {
-      rows.push(behind("behind-plan-more", `and ${s.new_plans.length - 5} more plan files are not on the roadmap`,
+      rows.push(behind("behind-plan-more!", `and ${s.new_plans.length - 5} more plan files are not on the roadmap`,
         "The refresh reads all of them."));
     }
     if (s.newer_release) {

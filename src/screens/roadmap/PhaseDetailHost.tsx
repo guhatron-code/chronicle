@@ -9,6 +9,7 @@ import { PhaseDetail, type DetailDoc, type DetailSaves } from "./PhaseDetail";
 import type { ManifestPhase, PhaseStatus } from "@/lib/ipc";
 import { statFile, gitLogGraph, readFileText, roundRetro } from "@/lib/ipc";
 import { sentence } from "@/lib/utils";
+import { markerCommand, proofSentence } from "@/lib/roadmap-data";
 
 interface LogRow { hash?: string; subject?: string; author?: string; ago?: string }
 
@@ -21,6 +22,9 @@ export function PhaseDetailHost({
   onCopyDoc,
   onStart,
   onStartAgent,
+  onMarkDone,
+  onMarkNotDone,
+  onCopyCommand,
 }: {
   dir: string;
   phase: ManifestPhase;
@@ -32,6 +36,9 @@ export function PhaseDetailHost({
   onStart: () => void;
   /** F38 — primary: reveal the agent pane, preload the prompt as a draft. */
   onStartAgent: () => void;
+  onMarkDone?: () => void;
+  onMarkNotDone?: () => void;
+  onCopyCommand?: (cmd: string) => void;
 }) {
   const [saves, setSaves] = useState<DetailSaves>({ kind: "loading" });
   const [openDoc, setOpenDoc] = useState<string | null>(null);
@@ -187,6 +194,16 @@ export function PhaseDetailHost({
         const hit = (phase.paste ?? []).find((c) => (c.path ?? "").endsWith(n));
         if (hit?.path) onCopyDoc(hit.path);
       }}
+      proof={proofSentence(status?.proof)}
+      markerCommand={fixRound == null ? markerCommand(id) : undefined}
+      onCopyCommand={onCopyCommand}
+      onMarkDone={onMarkDone}
+      onMarkNotDone={onMarkNotDone}
+      markNotDoneBlocked={
+        status?.proof && !status.proof.startsWith("ledger ")
+          ? "Still proved by the repo: remove the tag, marker or file first."
+          : null
+      }
     />
   );
 }
