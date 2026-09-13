@@ -882,6 +882,58 @@ fn validate_manifest(m: &Value) -> Vec<String> {
     warns
 }
 
+/* ================= the roadmap-is-behind detector ================= */
+
+fn semver_of(s: &str) -> Option<(u64, u64, u64)> {
+    let t = s.strip_prefix('v').unwrap_or(s);
+    let mut it = t.split('.');
+    let a = it.next()?.parse().ok()?;
+    let b = it.next()?.parse().ok()?;
+    let c = it.next()?.parse().ok()?;
+    if it.next().is_some() { return None }
+    Some((a, b, c))
+}
+
+const DEFAULT_PLAN_DIRS: [&str; 2] = ["docs/superpowers/specs", "docs/superpowers/plans"];
+
+/// Plan or spec files written after the manifest that the manifest never mentions.
+/// Non-recursive, jailed to the roots, sorted for stable rows.
+fn newer_plans(ctx: &Ctx, manifest: &Value, manifest_mtime: std::time::SystemTime) -> Vec<String> {
+    let text = manifest.to_string();
+    let mut dirs: Vec<String> = DEFAULT_PLAN_DIRS.iter().map(|s| s.to_string()).collect();
+    if let Some(extra) = manifest.get("planDirs").and_then(|v| v.as_array()) {
+        dirs.extend(extra.iter().filter_map(|v| v.as_str()).map(String::from));
+    }
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Some(full) = ctx.resolve_jailed(&dir) else { continue };
+        let Ok(rd) = std::fs::read_dir(&full) else { continue };
+        for e in rd.flatten() {
+            let Ok(md) = e.metadata() else { continue };
+            if !md.is_file() { continue }
+            let Ok(mt) = md.modified() else { continue };
+            if mt <= manifest_mtime { continue }
+            let rel = format!("{}/{}", dir.trim_end_matches('/'), e.file_name().to_string_lossy());
+            if text.contains(&rel) { continue }
+            out.push(rel);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// `(newest semver tag in git, newest semver tag the manifest mentions)` when the
+/// repo has moved past the roadmap. None when the manifest mentions no tag at all.
+fn newer_release(ctx: &Ctx, manifest: &Value) -> Option<(String, String)> {
+    let re = Regex::new(r"v?\d+\.\d+\.\d+").ok()?;
+    let text = manifest.to_string();
+    let mentioned = re.find_iter(&text).map(|m| m.as_str().to_string())
+        .filter(|t| semver_of(t).is_some())
+        .max_by_key(|t| semver_of(t))?;
+    let newest = ctx.tags.iter().filter(|t| semver_of(t).is_some()).max_by_key(|t| semver_of(t))?.clone();
+    (semver_of(&newest) > semver_of(&mentioned)).then_some((newest, mentioned))
+}
+
 /* ================= status derivation ================= */
 
 #[derive(Serialize, Clone)]
@@ -1001,11 +1053,16 @@ fn derive_for_dir(dir: &Path, write: bool) -> Value {
             let mut l = ledger::load(&p.dir);
             let statuses = derive_statuses(&ctx, &merged, &l);
             if write { latch(&p.dir, &mut l, &statuses); }
+            let mtime = std::fs::metadata(p.dir.join("chronicle.json")).and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            let new_plans = newer_plans(&ctx, &merged, mtime);
+            let newer_rel = newer_release(&ctx, &merged).map(|(a, b)| json!([a, b])).unwrap_or(Value::Null);
             json!({
                 "name": m.get("name"),
                 "statuses": statuses,
                 "warnings": validate_manifest(m), // validate the REAL manifest, not the overlay
                 "ledger_set_aside": l.set_aside,
+                "new_plans": new_plans, "newer_release": newer_rel,
             })
         }
     }
@@ -1254,7 +1311,7 @@ async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: St
 /* ================= background /chronicle-init ================= */
 
 #[tauri::command]
-async fn init_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>, fresh: Option<bool>) -> Result<(), String> {
+async fn init_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>, fresh: Option<bool>, note: Option<String>) -> Result<(), String> {
     let dirp = project_for(&roots, &dir)?.dir; // only an OPENED project may run a session
     let (key, log) = canon_key(&dir)?; // canonical path key + hashed log name — no collisions
     let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
@@ -1269,9 +1326,11 @@ async fn init_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: St
     let (claude_bin, codex_bin) = agent_paths();
     let use_codex = agent.as_deref() == Some("codex")
         || (agent.is_none() && claude_bin.is_none() && codex_bin.is_some());
+    let note = note.filter(|n| !n.trim().is_empty())
+        .map(|n| format!("REFRESH MODE. Since this roadmap was written the repo moved on. Update only what changed, never drop a phase the plan still contains, and recompute every generatedFrom hash. What changed: {n}"));
     let child = if use_codex {
         let bin = codex_bin.ok_or("Codex isn't installed (couldn't find `codex`)")?;
-        let fresh_note = if fresh == Some(true) { format!("{FRESH_REBUILD_NOTE}\n\n") } else { String::new() };
+        let fresh_note = if fresh == Some(true) { format!("{FRESH_REBUILD_NOTE}\n\n") } else if let Some(n) = &note { format!("{n}\n\n") } else { String::new() };
         let prompt = format!("{}{}{}\n\n---\n\n{}",
             CODEX_INIT_PROMPT_HEAD,
             fresh_note,
@@ -1289,10 +1348,10 @@ async fn init_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: St
     } else {
         let bin = claude_bin.ok_or("couldn't find `claude` — if it's installed, make sure `command -v claude` works in a terminal, then reopen Chronicle")?;
         ensure_init_skill(); // /chronicle-init must resolve on THIS machine
-        let slash = if fresh == Some(true) {
-            format!("/chronicle-init {FRESH_REBUILD_NOTE}")
-        } else {
-            "/chronicle-init".to_string()
+        let slash = match (fresh == Some(true), &note) {
+            (true, _) => format!("/chronicle-init {FRESH_REBUILD_NOTE}"),
+            (false, Some(n)) => format!("/chronicle-init {n}"),
+            (false, None) => "/chronicle-init".to_string(),
         };
         std::process::Command::new(bin)
             .args(["-p", &slash, "--model", "opus", "--permission-mode", "bypassPermissions",
@@ -1521,8 +1580,8 @@ fn state_for_project(p: &Project) -> Value {
 
     let merged_manifest = p.manifest.as_ref().map(|m| inject_rounds(&p.dir, m));
     let mut ledger = ledger::load(&p.dir);
-    let (statuses, doc_existence, stale, custom_actions) = match &merged_manifest {
-        None => (Vec::new(), json!({}), json!([]), json!([])),
+    let (statuses, doc_existence, stale, custom_actions, new_plans, newer_rel) = match &merged_manifest {
+        None => (Vec::new(), json!({}), json!([]), json!([]), Vec::<String>::new(), Value::Null),
         Some(m) => {
             let statuses = derive_statuses(&ctx, m, &ledger);
             latch(&p.dir, &mut ledger, &statuses);
@@ -1568,7 +1627,11 @@ fn state_for_project(p: &Project) -> Value {
                     if action_fires(&ctx, a) { acts.push(a.clone()); }
                 }
             }
-            (statuses, Value::Object(docs), json!(stale), json!(acts))
+            let mtime = std::fs::metadata(p.dir.join("chronicle.json")).and_then(|m| m.modified())
+                .unwrap_or(std::time::UNIX_EPOCH);
+            let new_plans = newer_plans(&ctx, m, mtime);
+            let newer_rel = newer_release(&ctx, m).map(|(a, b)| json!([a, b])).unwrap_or(Value::Null);
+            (statuses, Value::Object(docs), json!(stale), json!(acts), new_plans, newer_rel)
         }
     };
 
@@ -1585,6 +1648,7 @@ fn state_for_project(p: &Project) -> Value {
         "tags": tags_sorted,
         "worktrees": worktrees, "dirty": dirty,
         "statuses": statuses, "docs": doc_existence, "stale": stale, "custom_actions": custom_actions,
+        "new_plans": new_plans, "newer_release": newer_rel,
         "ledger_set_aside": ledger.set_aside,
         "manifest_warnings": p.manifest.as_ref().map(validate_manifest).unwrap_or_default(),
         "work_branch": p.manifest.as_ref().and_then(|m| m.get("workBranch")).cloned().unwrap_or(Value::Null),
@@ -3964,6 +4028,63 @@ mod r3_tests {
         let out = derive_for_dir(&d, true);
         assert_eq!(out["statuses"][0]["state"], "done");
         assert!(d.join(ledger::FILE).exists(), "an explicit derive (the opened project, or --derive) latches");
+    }
+
+    #[test]
+    fn semver_tags_compare_numerically() {
+        assert_eq!(semver_of("v0.8.1"), Some((0, 8, 1)));
+        assert_eq!(semver_of("0.10.0"), Some((0, 10, 0)));
+        assert_eq!(semver_of("v2-merged"), None);
+        assert!(semver_of("v0.10.0") > semver_of("v0.9.9"));
+    }
+
+    #[test]
+    fn the_detector_sees_new_plans_and_newer_releases() {
+        let d = repo("behind");
+        std::fs::write(d.join("chronicle.json"), r#"{"chronicleVersion":1,"stages":[{"phases":[
+            {"id":"A","docs":[{"path":"docs/superpowers/specs/old.md"}],"status":{"done_when":[{"tag":"v0.5.1"}]}}]}]}"#).unwrap();
+        let mtime = std::fs::metadata(d.join("chronicle.json")).unwrap().modified().unwrap();
+        std::fs::create_dir_all(d.join("docs/superpowers/specs")).unwrap();
+        std::fs::create_dir_all(d.join("docs/superpowers/plans")).unwrap();
+        std::fs::create_dir_all(d.join("planning")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(d.join("docs/superpowers/specs/old.md"), "mentioned").unwrap();
+        std::fs::write(d.join("docs/superpowers/specs/new-design.md"), "not mentioned").unwrap();
+        std::fs::write(d.join("docs/superpowers/plans/new-plan.md"), "not mentioned").unwrap();
+        std::fs::write(d.join("planning/extra.md"), "in a planDirs folder").unwrap();
+        git(&d, &["tag", "v0.5.1"]);
+        git(&d, &["tag", "v0.8.1"]);
+        git(&d, &["tag", "v2-merged"]);
+        let p = load_project(&d);
+        let ctx = Ctx::build(&p);
+        let m = p.manifest.clone().unwrap();
+        assert_eq!(newer_plans(&ctx, &m, mtime),
+                   vec!["docs/superpowers/plans/new-plan.md".to_string(), "docs/superpowers/specs/new-design.md".to_string()],
+                   "newer AND unmentioned; the mentioned one is skipped even though it is newer");
+        let mut m2 = m.clone();
+        m2["planDirs"] = json!(["planning"]);
+        assert!(newer_plans(&ctx, &m2, mtime).contains(&"planning/extra.md".to_string()));
+        assert_eq!(newer_release(&ctx, &m), Some(("v0.8.1".into(), "v0.5.1".into())));
+        let st = state_for_project(&p);
+        assert_eq!(st["new_plans"].as_array().unwrap().len(), 2);
+        assert_eq!(st["newer_release"], json!(["v0.8.1", "v0.5.1"]));
+        // nothing behind: no rows
+        git(&d, &["tag", "-d", "v0.8.1"]);
+        let ctx = Ctx::build(&p);
+        assert_eq!(newer_release(&ctx, &m), None);
+        let old = std::fs::read_to_string(d.join("chronicle.json")).unwrap()
+            .replace("old.md", "old.md\"},{\"path\":\"docs/superpowers/specs/new-design.md\"},{\"path\":\"docs/superpowers/plans/new-plan.md");
+        std::fs::write(d.join("chronicle.json"), old).unwrap();
+        let p = load_project(&d);
+        assert!(state_for_project(&p)["new_plans"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_manifest_with_no_release_rule_is_not_behind_on_releases() {
+        let d = repo("norel");
+        git(&d, &["tag", "v0.1.0"]);
+        let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
+        assert_eq!(newer_release(&ctx, &json!({"stages": []})), None, "no tag mentioned means nothing to be behind");
     }
 }
 
