@@ -8,6 +8,7 @@
  */
 import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+import { MENU_HEADING } from "@/components/ui/dropdown-menu";
 
 export interface PickerItem {
   /** stable key + what gets inserted (the composer decides the exact text) */
@@ -72,9 +73,7 @@ export function Autocomplete({
         return (
           <div key={it.id} className="flex flex-col">
             {heading && (
-              <div className="px-2.5 pb-[5px] pt-2 text-[10px] uppercase tracking-[0.09em] text-text-dimmer">
-                {heading}
-              </div>
+              <div className={MENU_HEADING}>{heading}</div>
             )}
             <button
               data-row={i}

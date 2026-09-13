@@ -11,6 +11,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
+/* The palette row. Taller than a menu row (it carries a mark tile, a path and a
+ * state word) but the same fill, radius and selection model — the command
+ * palette and the global search used to repeat this string inline. */
+const COMMAND_ITEM =
+  "relative flex cursor-default items-center gap-2.5 rounded-md px-2.5 py-2 text-[12.5px] outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-fill-hover [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-text-dim"
+
+/* MENU_HEADING (dropdown-menu.tsx) written as a descendant variant: cmdk owns
+ * the heading element, so the ramp cannot sit on the group itself. */
+const COMMAND_GROUP =
+  "overflow-hidden p-1 text-text-secondary [&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pb-[5px] [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.09em] [&_[cmdk-group-heading]]:text-text-dimmer"
+
 function Command({
   className,
   ...props
@@ -19,7 +30,7 @@ function Command({
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        "flex h-full w-full flex-col overflow-hidden rounded-md bg-popover text-popover-foreground",
+        "flex h-full w-full flex-col overflow-hidden rounded-md bg-surface-overlay text-text-secondary",
         className
       )}
       {...props}
@@ -115,10 +126,7 @@ function CommandGroup({
   return (
     <CommandPrimitive.Group
       data-slot="command-group"
-      className={cn(
-        "overflow-hidden p-1 text-foreground [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground",
-        className
-      )}
+      className={cn(COMMAND_GROUP, className)}
       {...props}
     />
   )
@@ -131,7 +139,7 @@ function CommandSeparator({
   return (
     <CommandPrimitive.Separator
       data-slot="command-separator"
-      className={cn("-mx-1 h-px bg-border", className)}
+      className={cn("-mx-1 h-px bg-divider", className)}
       {...props}
     />
   )
@@ -144,10 +152,7 @@ function CommandItem({
   return (
     <CommandPrimitive.Item
       data-slot="command-item"
-      className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 [&_svg:not([class*='text-'])]:text-muted-foreground",
-        className
-      )}
+      className={cn(COMMAND_ITEM, className)}
       {...props}
     />
   )
@@ -160,10 +165,7 @@ function CommandShortcut({
   return (
     <span
       data-slot="command-shortcut"
-      className={cn(
-        "ml-auto text-xs tracking-widest text-muted-foreground",
-        className
-      )}
+      className={cn("ml-auto text-[10.5px] tracking-widest text-text-dimmer", className)}
       {...props}
     />
   )

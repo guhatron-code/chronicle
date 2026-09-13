@@ -20,10 +20,6 @@ import { Kbd } from "@/components/chrome/atoms";
 import { FolderGlyph, NotesGlyph, SearchGlyph } from "@/components/chrome/icons";
 import { globalSearch, notesSearch, type NoteSearchHit, type SearchResults } from "@/lib/ipc";
 
-const GROUP_HEAD =
-  "**:[[cmdk-group-heading]]:px-2.5 **:[[cmdk-group-heading]]:pb-[5px] **:[[cmdk-group-heading]]:pt-2.5 **:[[cmdk-group-heading]]:text-[10px] **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.09em] **:[[cmdk-group-heading]]:text-text-dimmer";
-const ITEM = "gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-fill-hover";
-
 /** `Tasks/Archive/Note.md` → `Tasks/Archive`; a note at the root says "vault". */
 const folderOf = (path: string) => path.split("/").slice(0, -1).join("/") || "vault";
 
@@ -116,9 +112,9 @@ export function SearchOverlay({
             )}
 
             {repo && needle.length >= 2 && results.files.length > 0 && (
-              <CommandGroup heading="Files" className={GROUP_HEAD}>
+              <CommandGroup heading="Files">
                 {results.files.map((f) => (
-                  <CommandItem key={`f-${f}`} value={`f-${f}`} onSelect={() => go(() => onOpenFile(f))} className={ITEM}>
+                  <CommandItem key={`f-${f}`} value={`f-${f}`} onSelect={() => go(() => onOpenFile(f))}>
                     <FolderGlyph size={13} className="shrink-0 text-text-dim" />
                     <span data-selectable className="min-w-0 truncate font-mono text-[12px] text-text-primary">{f}</span>
                   </CommandItem>
@@ -127,9 +123,9 @@ export function SearchOverlay({
             )}
 
             {repo && needle.length >= 2 && results.commits.length > 0 && (
-              <CommandGroup heading="Saves" className={GROUP_HEAD}>
+              <CommandGroup heading="Saves">
                 {results.commits.map((c) => (
-                  <CommandItem key={`c-${c.hash}`} value={`c-${c.hash}`} onSelect={() => go(onOpenHistory)} className={ITEM}>
+                  <CommandItem key={`c-${c.hash}`} value={`c-${c.hash}`} onSelect={() => go(onOpenHistory)}>
                     <span className="shrink-0 rounded-[5px] bg-fill-subtle px-[5px] font-mono text-[10.5px] text-text-subtle">{c.hash}</span>
                     <span data-selectable className="min-w-0 truncate text-[12.5px] text-text-primary">{c.subject}</span>
                     <span className="flex-1" />
@@ -140,9 +136,9 @@ export function SearchOverlay({
             )}
 
             {repo && needle.length >= 2 && results.docs.length > 0 && (
-              <CommandGroup heading="Plan documents" className={GROUP_HEAD}>
+              <CommandGroup heading="Plan documents">
                 {results.docs.map((d) => (
-                  <CommandItem key={`d-${d.path}`} value={`d-${d.path}`} onSelect={() => go(() => onOpenFile(d.path))} className={ITEM}>
+                  <CommandItem key={`d-${d.path}`} value={`d-${d.path}`} onSelect={() => go(() => onOpenFile(d.path))}>
                     <SearchGlyph size={12} className="shrink-0 text-text-dim" />
                     <span data-selectable className="shrink-0 font-mono text-[11px] text-text-secondary">{d.path}</span>
                     <span data-selectable className="min-w-0 truncate text-[12px] text-text-dim">{d.line}</span>
@@ -152,9 +148,9 @@ export function SearchOverlay({
             )}
 
             {needle.length >= 2 && notes.length > 0 && (
-              <CommandGroup heading="Notes" className={GROUP_HEAD}>
+              <CommandGroup heading="Notes">
                 {notes.map((n) => (
-                  <CommandItem key={`n-${n.path}`} value={`n-${n.path}`} onSelect={() => go(() => onOpenNote(n.path))} className={ITEM}>
+                  <CommandItem key={`n-${n.path}`} value={`n-${n.path}`} onSelect={() => go(() => onOpenNote(n.path))}>
                     <NotesGlyph size={13} className="shrink-0 text-text-dim" />
                     <span data-selectable className="min-w-0 truncate text-[12.5px] text-text-primary">{n.title}</span>
                     <span className="flex-1" />

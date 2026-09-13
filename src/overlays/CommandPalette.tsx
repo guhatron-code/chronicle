@@ -110,16 +110,12 @@ export function CommandPalette({
             </CommandEmpty>
 
             {openProjects.length > 0 && (
-              <CommandGroup
-                heading="Open — switch instantly"
-                className="**:[[cmdk-group-heading]]:px-2.5 **:[[cmdk-group-heading]]:pb-[5px] **:[[cmdk-group-heading]]:pt-2 **:[[cmdk-group-heading]]:text-[10px] **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.09em] **:[[cmdk-group-heading]]:text-text-dimmer"
-              >
+              <CommandGroup heading="Open — switch instantly">
                 {openProjects.map((p, i) => (
                   <CommandItem
                     key={p.path}
                     value={`open ${p.name} ${p.tildePath}`}
                     onSelect={() => onSwitch(p.path)}
-                    className="gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-fill-hover"
                   >
                     {row(p, i < 9 ? `⌘${i + 1}` : undefined)}
                   </CommandItem>
@@ -128,16 +124,12 @@ export function CommandPalette({
             )}
 
             {recents.length > 0 && (
-              <CommandGroup
-                heading="Recent — open"
-                className="**:[[cmdk-group-heading]]:px-2.5 **:[[cmdk-group-heading]]:pb-[5px] **:[[cmdk-group-heading]]:pt-2.5 **:[[cmdk-group-heading]]:text-[10px] **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.09em] **:[[cmdk-group-heading]]:text-text-dimmer"
-              >
+              <CommandGroup heading="Recent — open">
                 {recents.map((p) => (
                   <CommandItem
                     key={p.path}
                     value={`recent ${p.name} ${p.tildePath}`}
                     onSelect={() => onOpenRecent(p.path)}
-                    className="gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-fill-hover"
                   >
                     {row(p)}
                   </CommandItem>
@@ -146,15 +138,11 @@ export function CommandPalette({
             )}
 
             {(githubRepos?.length || githubError) && (
-              <CommandGroup
-                heading="GitHub — clone and open"
-                className="**:[[cmdk-group-heading]]:px-2.5 **:[[cmdk-group-heading]]:pb-[5px] **:[[cmdk-group-heading]]:pt-2.5 **:[[cmdk-group-heading]]:text-[10px] **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-[0.09em] **:[[cmdk-group-heading]]:text-text-dimmer"
-              >
+              <CommandGroup heading="GitHub — clone and open">
                 {githubError ? (
                   <CommandItem
                     value="github setup"
                     onSelect={onGithubSetup}
-                    className="gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-fill-hover"
                   >
                     <span data-selectable className="text-[12.5px] text-text-muted">{githubError}</span>
                   </CommandItem>
@@ -165,7 +153,6 @@ export function CommandPalette({
                       value={`gh ${r.nameWithOwner} ${r.description ?? ""}`}
                       disabled={cloningRepo != null}
                       onSelect={() => onCloneRepo?.(r.nameWithOwner)}
-                      className="gap-2.5 rounded-md px-2.5 py-2 data-[selected=true]:bg-fill-hover"
                     >
                       <span className="min-w-0 truncate text-[13px] font-medium text-text-primary">
                         {r.nameWithOwner}
@@ -194,7 +181,7 @@ export function CommandPalette({
               <CommandItem
                 value="open a project"
                 onSelect={onOpenDialog}
-                className="gap-2.5 rounded-md px-2.5 py-2 text-text-secondary data-[selected=true]:bg-fill-hover"
+                className="text-text-secondary"
               >
                 <FolderGlyph />
                 <span className="text-[13px]">Open a project…</span>
@@ -204,7 +191,7 @@ export function CommandPalette({
               <CommandItem
                 value="new blank project"
                 onSelect={onNewProject}
-                className="gap-2.5 rounded-md px-2.5 py-2 text-text-secondary data-[selected=true]:bg-fill-hover"
+                className="text-text-secondary"
               >
                 <PlusGlyph />
                 <span className="text-[13px]">New blank project…</span>
@@ -213,7 +200,7 @@ export function CommandPalette({
                 <CommandItem
                   value="check for updates"
                   onSelect={onCheckUpdates}
-                  className="gap-2.5 rounded-md px-2.5 py-2 text-text-secondary data-[selected=true]:bg-fill-hover"
+                  className="text-text-secondary"
                 >
                   <RefreshGlyph size={13} />
                   <span className="text-[13px]">Check for updates</span>

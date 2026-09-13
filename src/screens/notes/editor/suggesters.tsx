@@ -13,6 +13,8 @@ import Fuse from "fuse.js";
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
 import type { NoteEntry } from "@/lib/ipc";
 import { tagAllowed, tagItems, wikiLinkItems, type NoteSuggestion, type TagSuggestion } from "./items";
+import { MENU_HEADING } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
 export { tagAllowed, tagItems, wikiLinkItems };
 export type { NoteSuggestion, TagSuggestion };
@@ -43,7 +45,9 @@ const Menu = forwardRef<MenuHandle, MenuProps<unknown>>((p, ref) => {
   if (p.items.length === 0) return null;
   return (
     <div className="w-[340px] rounded-lg border border-border-strong bg-surface-overlay p-1.5 [box-shadow:var(--shadow-overlay)]">
-      <div className="px-2 pb-1 pt-0.5 text-[10px] uppercase tracking-[0.09em] text-text-dimmer">{p.heading}</div>
+      {/* the rows here sit at px-2, so the heading follows them in rather than
+          keeping MENU_HEADING's own gutter */}
+      <div className={cn(MENU_HEADING, "px-2 pb-1 pt-0.5")}>{p.heading}</div>
       {p.items.map((item, n) => (
         <button
           type="button"

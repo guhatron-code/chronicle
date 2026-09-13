@@ -38,8 +38,24 @@ function DropdownMenuTrigger({
  * top of everything (no rule in index.css strips a plain, non-:focus-visible
  * outline).
  */
-const MENU_SURFACE =
-  "z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border border-border-strong bg-surface-overlay p-1.5 text-text-secondary outline-none [box-shadow:var(--shadow-overlay)] data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+/* Everything about the surface that is NOT tied to one Radix primitive's own
+ * CSS variables. The context menu and the popover build their surface out of
+ * this plus their own `--radix-<primitive>-content-*` vars, so the four
+ * floating families stay one skin. The var-bearing utilities have to be
+ * written out literally in each file — Tailwind scans source text, it does not
+ * evaluate template strings. */
+export const MENU_SURFACE_BASE =
+  "min-w-[8rem] overflow-x-hidden overflow-y-auto rounded-lg border border-border-strong bg-surface-overlay p-1.5 text-text-secondary outline-none [box-shadow:var(--shadow-overlay)] data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
+
+export const MENU_SURFACE =
+  "z-50 max-h-(--radix-dropdown-menu-content-available-height) origin-(--radix-dropdown-menu-content-transform-origin) " +
+  MENU_SURFACE_BASE
+
+/* One group heading for every list that has them — the command palette, the
+ * global search, the composer's autocomplete and the note suggesters all used
+ * to declare this ramp as a literal of their own. */
+export const MENU_HEADING =
+  "px-2.5 pb-[5px] pt-2 text-[10px] uppercase tracking-[0.09em] text-text-dimmer"
 
 function DropdownMenuContent({
   className,
@@ -69,7 +85,7 @@ function DropdownMenuGroup({
 /* The item row: 12px (the app's menu-row size — see the suggesters' popup and
  * SearchOverlay's CommandItem), the app's hover fill instead of the shadcn
  * accent tokens, no focus ring. */
-const MENU_ITEM =
+export const MENU_ITEM =
   "relative flex h-[26px] cursor-default items-center gap-2 rounded-md px-2 text-[12px] outline-none select-none focus:bg-fill-hover focus:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive dark:data-[variant=destructive]:focus:bg-destructive/20 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-text-dim data-[variant=destructive]:*:[svg]:text-destructive!"
 
 function DropdownMenuItem({
@@ -92,6 +108,24 @@ function DropdownMenuItem({
   )
 }
 
+/* A row that reserves the left gutter for its check/dot indicator. */
+export const MENU_ITEM_INDICATED =
+  "relative flex h-[26px] cursor-default items-center gap-2 rounded-md py-1.5 pr-2 pl-8 text-[12px] outline-none select-none focus:bg-fill-hover focus:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
+
+/* The sub-menu's own trigger row — MENU_ITEM plus the open-state fill. */
+export const MENU_SUB_TRIGGER =
+  "flex h-[26px] cursor-default items-center gap-2 rounded-md px-2 text-[12px] outline-none select-none focus:bg-fill-hover focus:text-text-primary data-[inset]:pl-8 data-[state=open]:bg-fill-hover data-[state=open]:text-text-primary [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-text-dim"
+
+/** The hairline that separates two groups of rows. */
+export const MENU_SEPARATOR = "-mx-1 my-1 h-px bg-border-hairline"
+
+/** The muted label above a group of rows (inside a menu, not a list). */
+export const MENU_LABEL =
+  "px-2 py-1.5 text-[11px] font-medium text-text-dim data-[inset]:pl-8"
+
+/** The key hint parked at the right edge of a row. */
+export const MENU_SHORTCUT = "ml-auto text-[10.5px] tracking-widest text-text-dimmer"
+
 function DropdownMenuCheckboxItem({
   className,
   children,
@@ -101,10 +135,7 @@ function DropdownMenuCheckboxItem({
   return (
     <DropdownMenuPrimitive.CheckboxItem
       data-slot="dropdown-menu-checkbox-item"
-      className={cn(
-        "relative flex h-[26px] cursor-default items-center gap-2 rounded-md py-1.5 pr-2 pl-8 text-[12px] outline-none select-none focus:bg-fill-hover focus:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
-        className
-      )}
+      className={cn(MENU_ITEM_INDICATED, className)}
       checked={checked}
       {...props}
     >
@@ -137,10 +168,7 @@ function DropdownMenuRadioItem({
   return (
     <DropdownMenuPrimitive.RadioItem
       data-slot="dropdown-menu-radio-item"
-      className={cn(
-        "relative flex h-[26px] cursor-default items-center gap-2 rounded-md py-1.5 pr-2 pl-8 text-[12px] outline-none select-none focus:bg-fill-hover focus:text-text-primary data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
-        className
-      )}
+      className={cn(MENU_ITEM_INDICATED, className)}
       {...props}
     >
       <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
@@ -164,10 +192,7 @@ function DropdownMenuLabel({
     <DropdownMenuPrimitive.Label
       data-slot="dropdown-menu-label"
       data-inset={inset}
-      className={cn(
-        "px-2 py-1.5 text-[11px] font-medium text-text-dim data-[inset]:pl-8",
-        className
-      )}
+      className={cn(MENU_LABEL, className)}
       {...props}
     />
   )
@@ -180,7 +205,7 @@ function DropdownMenuSeparator({
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn("-mx-1 my-1 h-px bg-border-hairline", className)}
+      className={cn(MENU_SEPARATOR, className)}
       {...props}
     />
   )
@@ -193,10 +218,7 @@ function DropdownMenuShortcut({
   return (
     <span
       data-slot="dropdown-menu-shortcut"
-      className={cn(
-        "ml-auto text-[10.5px] tracking-widest text-text-dimmer",
-        className
-      )}
+      className={cn(MENU_SHORTCUT, className)}
       {...props}
     />
   )
@@ -220,10 +242,7 @@ function DropdownMenuSubTrigger({
     <DropdownMenuPrimitive.SubTrigger
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
-      className={cn(
-        "flex h-[26px] cursor-default items-center gap-2 rounded-md px-2 text-[12px] outline-none select-none focus:bg-fill-hover focus:text-text-primary data-[inset]:pl-8 data-[state=open]:bg-fill-hover data-[state=open]:text-text-primary [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5 [&_svg:not([class*='text-'])]:text-text-dim",
-        className
-      )}
+      className={cn(MENU_SUB_TRIGGER, className)}
       {...props}
     >
       {children}
