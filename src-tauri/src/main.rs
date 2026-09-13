@@ -904,14 +904,19 @@ fn derive_statuses(ctx: &Ctx, manifest: &Value) -> Vec<PhaseState> {
             let pool = phase.get("pool").and_then(|v| v.as_bool()).unwrap_or(false);
             let window = phase.get("window").and_then(|v| v.as_bool()).unwrap_or(false);
             let status = phase.get("status").cloned().unwrap_or(json!({}));
-            // order of truth: a marker commit, then the rules the manifest wrote
-            let proof: Option<String> = if let Some(h) = ctx.markers.get(&id) {
+            let marker = ctx.markers.get(&id);
+            // order of truth: a marker commit, then the rules the manifest wrote —
+            // but a pool phase is done ONLY by a marker; a done_when rule never
+            // lifts a pool phase out of the pool.
+            let proof: Option<String> = if let Some(h) = marker {
                 Some(format!("marker {}", &h[..h.len().min(7)]))
-            } else {
+            } else if !pool {
                 proving_cond(ctx, status.get("done_when")).map(|c| {
                     let (by, p) = proof_of(ctx, &c);
                     if p.is_empty() { by } else { format!("{by} {p}") }
                 })
+            } else {
+                None
             };
             let done = proof.is_some();
             let labels = status.get("current_labels").and_then(|v| v.as_array()).cloned().unwrap_or_default();
@@ -925,11 +930,13 @@ fn derive_statuses(ctx: &Ctx, manifest: &Value) -> Vec<PhaseState> {
             };
             // fix-round overlay phases carry their precomputed truth (from the notes)
             if let Some(frs) = phase.get("fixRoundState") {
-                let rdone = frs.get("done").and_then(|v| v.as_bool()).unwrap_or(false)
-                    || ctx.markers.contains_key(&id);
+                let rdone = frs.get("done").and_then(|v| v.as_bool()).unwrap_or(false) || marker.is_some();
                 let label = frs.get("label").and_then(|v| v.as_str()).unwrap_or("ready to run").to_string();
+                // a marker's proof outranks the notes' own verdict; only fall back
+                // to "notes" when no marker is what fired this done state
+                let p = proof.clone().filter(|p| p.starts_with("marker ")).or(Some("notes".into()));
                 let ps = if rdone {
-                    PhaseState { id, state: "done".into(), label: "done".into(), proof: Some("notes".into()) }
+                    PhaseState { id, state: "done".into(), label: "done".into(), proof: p }
                 } else if !current_taken {
                     current_taken = true;
                     PhaseState { id, state: "now".into(), label, proof: None }
@@ -3767,6 +3774,7 @@ mod r3_tests {
     #[test]
     fn a_marker_commit_proves_a_phase_with_no_rule() {
         let d = repo("marker");
+        git(&d, &["tag", "pool-tag"]);
         git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty",
                   "-m", "chore: close the slash menu phase", "-m", "Chronicle-Phase: M-1 done"]);
         let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
@@ -3774,7 +3782,8 @@ mod r3_tests {
         let m = json!({"stages": [{"phases": [
             {"id": "M-1", "status": {"done_when": [{"commit_subject": "never matches"}]}},
             {"id": "M-2", "status": {"done_when": [{"tag": "phase-1"}]}},
-            {"id": "ID", "pool": true}
+            {"id": "ID", "pool": true},
+            {"id": "PL", "pool": true, "status": {"done_when": [{"tag": "pool-tag"}]}}
         ]}]});
         let st = derive_statuses(&ctx, &m);
         assert_eq!(st[0].state, "done");
@@ -3782,11 +3791,38 @@ mod r3_tests {
         assert_eq!(st[1].state, "now");
         assert_eq!(st[1].proof, None);
         assert_eq!(st[2].state, "pool");
+        // a pool phase is done ONLY by a marker: a firing done_when rule never lifts it
+        assert_eq!(st[3].state, "pool", "a firing rule must not lift a pool phase");
+        assert_eq!(st[3].proof, None);
         // a pool phase with a marker is done too: the marker outranks any rule
         git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty",
                   "-m", "chore: the shelf item shipped", "-m", "Chronicle-Phase: ID done"]);
+        git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty",
+                  "-m", "chore: the other shelf item shipped", "-m", "Chronicle-Phase: PL done"]);
         let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
-        assert_eq!(derive_statuses(&ctx, &m)[2].state, "done");
+        let st = derive_statuses(&ctx, &m);
+        assert_eq!(st[2].state, "done");
+        assert_eq!(st[3].state, "done");
+        assert!(st[3].proof.as_deref().unwrap_or("").starts_with("marker "));
+    }
+
+    #[test]
+    fn a_round_phase_proved_by_a_marker_reports_the_marker_not_notes() {
+        let d = repo("round-marker");
+        git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty",
+                  "-m", "Close FX-1", "-m", "Chronicle-Phase: FX-1 done"]);
+        let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
+        assert!(ctx.markers.contains_key("FX-1"));
+        let m = json!({"stages": [{"phases": [
+            {"id": "FX-1", "fixRoundState": {"done": false, "label": "ready to run"}},
+            {"id": "FX-2", "fixRoundState": {"done": true}}
+        ]}]});
+        let st = derive_statuses(&ctx, &m);
+        assert_eq!(st[0].state, "done");
+        assert!(st[0].proof.as_deref().unwrap_or("").starts_with("marker "), "{:?}", st[0].proof);
+        // the notes said done but no marker fired it: proof falls back to "notes"
+        assert_eq!(st[1].state, "done");
+        assert_eq!(st[1].proof.as_deref(), Some("notes"));
     }
 
     #[test]
