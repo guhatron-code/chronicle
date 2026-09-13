@@ -14,6 +14,7 @@ mod history;
 mod files;
 mod menu;
 mod notes;
+mod ledger;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -894,7 +895,7 @@ struct PhaseState {
     proof: Option<String>,
 }
 
-fn derive_statuses(ctx: &Ctx, manifest: &Value) -> Vec<PhaseState> {
+fn derive_statuses(ctx: &Ctx, manifest: &Value, ledger: &ledger::Ledger) -> Vec<PhaseState> {
     let mut out = Vec::new();
     let mut current_taken = false;
     let stages = manifest.get("stages").and_then(|v| v.as_array()).cloned().unwrap_or_default();
@@ -905,11 +906,14 @@ fn derive_statuses(ctx: &Ctx, manifest: &Value) -> Vec<PhaseState> {
             let window = phase.get("window").and_then(|v| v.as_bool()).unwrap_or(false);
             let status = phase.get("status").cloned().unwrap_or(json!({}));
             let marker = ctx.markers.get(&id);
-            // order of truth: a marker commit, then the rules the manifest wrote —
-            // but a pool phase is done ONLY by a marker; a done_when rule never
-            // lifts a pool phase out of the pool.
+            // order of truth: a marker commit, then the ledger (a phase once done
+            // stays done even if the rule that proved it stops matching), then the
+            // rules the manifest wrote — but a pool phase is done ONLY by a marker
+            // or the ledger; a done_when rule never lifts a pool phase out of the pool.
             let proof: Option<String> = if let Some(h) = marker {
                 Some(format!("marker {}", &h[..h.len().min(7)]))
+            } else if let Some(e) = ledger.done.get(&id) {
+                Some(if e.proof.is_empty() { format!("ledger {}", e.by) } else { format!("ledger {} {}", e.by, e.proof) })
             } else if !pool {
                 proving_cond(ctx, status.get("done_when")).map(|c| {
                     let (by, p) = proof_of(ctx, &c);
@@ -930,11 +934,12 @@ fn derive_statuses(ctx: &Ctx, manifest: &Value) -> Vec<PhaseState> {
             };
             // fix-round overlay phases carry their precomputed truth (from the notes)
             if let Some(frs) = phase.get("fixRoundState") {
-                let rdone = frs.get("done").and_then(|v| v.as_bool()).unwrap_or(false) || marker.is_some();
+                let rdone = frs.get("done").and_then(|v| v.as_bool()).unwrap_or(false)
+                    || marker.is_some() || ledger.done.contains_key(&id);
                 let label = frs.get("label").and_then(|v| v.as_str()).unwrap_or("ready to run").to_string();
-                // a marker's proof outranks the notes' own verdict; only fall back
-                // to "notes" when no marker is what fired this done state
-                let p = proof.clone().filter(|p| p.starts_with("marker ")).or(Some("notes".into()));
+                // a marker's or ledger's proof outranks the notes' own verdict; only
+                // fall back to "notes" when neither is what fired this done state
+                let p = proof.clone().filter(|p| p.starts_with("marker ") || p.starts_with("ledger ")).or(Some("notes".into()));
                 let ps = if rdone {
                     PhaseState { id, state: "done".into(), label: "done".into(), proof: p }
                 } else if !current_taken {
@@ -964,6 +969,21 @@ fn derive_statuses(ctx: &Ctx, manifest: &Value) -> Vec<PhaseState> {
     out
 }
 
+/// Record every newly done phase whose proof is live evidence (a marker or a
+/// rule). Ledger-proven phases are already there; nothing is ever re-written.
+fn latch(dir: &Path, ledger: &mut ledger::Ledger, statuses: &[PhaseState]) {
+    let mut changed = false;
+    for s in statuses {
+        if s.state != "done" || ledger.done.contains_key(&s.id) { continue }
+        let Some(proof) = s.proof.as_deref() else { continue };
+        if proof.starts_with("ledger ") || proof == "notes" { continue }
+        let (by, p) = proof.split_once(' ').unwrap_or((proof, ""));
+        ledger.done.insert(s.id.clone(), ledger::Entry { by: by.into(), proof: p.into(), at: epoch_ms() });
+        changed = true;
+    }
+    if changed { let _ = ledger::save(dir, ledger); } // a failed write is retried next scan
+}
+
 fn derive_for_dir(dir: &Path) -> Value {
     let p = load_project(dir);
     match &p.manifest {
@@ -971,10 +991,14 @@ fn derive_for_dir(dir: &Path) -> Value {
         Some(m) => {
             let ctx = Ctx::build(&p);
             let merged = inject_rounds(&p.dir, m);
+            let mut l = ledger::load(&p.dir);
+            let statuses = derive_statuses(&ctx, &merged, &l);
+            latch(&p.dir, &mut l, &statuses);
             json!({
                 "name": m.get("name"),
-                "statuses": derive_statuses(&ctx, &merged),
+                "statuses": statuses,
                 "warnings": validate_manifest(m), // validate the REAL manifest, not the overlay
+                "ledger_set_aside": l.set_aside,
             })
         }
     }
@@ -1002,7 +1026,7 @@ async fn get_picker() -> Value {
                 let p = load_project(&dir);
                 if let Some(m) = &p.manifest {
                     let ctx = Ctx::build(&p);
-                    let statuses = derive_statuses(&ctx, m);
+                    let statuses = derive_statuses(&ctx, m, &ledger::load(&p.dir));
                     let mut flat: Vec<Value> = Vec::new();
                     if let Some(stages) = m.get("stages").and_then(|v| v.as_array()) {
                         for st in stages {
@@ -1494,10 +1518,12 @@ fn state_for_project(p: &Project) -> Value {
         }).collect();
 
     let merged_manifest = p.manifest.as_ref().map(|m| inject_rounds(&p.dir, m));
+    let mut ledger = ledger::load(&p.dir);
     let (statuses, doc_existence, stale, custom_actions) = match &merged_manifest {
         None => (Vec::new(), json!({}), json!([]), json!([])),
         Some(m) => {
-            let statuses = derive_statuses(&ctx, m);
+            let statuses = derive_statuses(&ctx, m, &ledger);
+            latch(&p.dir, &mut ledger, &statuses);
             // existence for every path the manifest references (paste + docs)
             let mut docs = serde_json::Map::new();
             let mut walk = |path: &str| {
@@ -1557,6 +1583,7 @@ fn state_for_project(p: &Project) -> Value {
         "tags": tags_sorted,
         "worktrees": worktrees, "dirty": dirty,
         "statuses": statuses, "docs": doc_existence, "stale": stale, "custom_actions": custom_actions,
+        "ledger_set_aside": ledger.set_aside,
         "manifest_warnings": p.manifest.as_ref().map(validate_manifest).unwrap_or_default(),
         "work_branch": p.manifest.as_ref().and_then(|m| m.get("workBranch")).cloned().unwrap_or(Value::Null),
         "checked_at": hhmmss_now(),
@@ -2160,6 +2187,15 @@ async fn journal_read(roots: State<'_, OpenRoots>, dir: String, since: u64) -> R
         .filter(|e| e.get("ts").and_then(|t| t.as_u64()).unwrap_or(0) >= since)
         .collect();
     Ok(json!(entries.into_iter().rev().collect::<Vec<_>>()))
+}
+
+/// Phase detail's "Mark done" / "Mark not done". `done` writes a user entry; `!done`
+/// removes the entry (the rules still speak next scan, so a phase with live proof
+/// comes straight back).
+#[tauri::command]
+async fn ledger_mark(roots: State<'_, OpenRoots>, dir: String, id: String, done: bool) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    if done { ledger::mark(&p.dir, &id, "user", "") } else { ledger::unmark(&p.dir, &id).map(|_| ()) }
 }
 
 /// A native notification posted under CHRONICLE'S own bundle identity — the
@@ -3326,7 +3362,7 @@ fn main() {
             agent_session_resume, agent_sessions_list, agent_history_read,
             setup_status, setup_install, setup_fix_terminal_path, setup_cancel,
             setup_run_all, setup_open_login,
-            journal_append, journal_read, notify, draft_save_message,
+            journal_append, journal_read, ledger_mark, notify, draft_save_message,
             global_search, status_report,
             github_repos, github_clone, github_create,
             watch_project, unwatch_project, launch_open_dir, quit_app,
@@ -3785,7 +3821,7 @@ mod r3_tests {
             {"id": "ID", "pool": true},
             {"id": "PL", "pool": true, "status": {"done_when": [{"tag": "pool-tag"}]}}
         ]}]});
-        let st = derive_statuses(&ctx, &m);
+        let st = derive_statuses(&ctx, &m, &ledger::load(&d));
         assert_eq!(st[0].state, "done");
         assert!(st[0].proof.as_deref().unwrap_or("").starts_with("marker "), "{:?}", st[0].proof);
         assert_eq!(st[1].state, "now");
@@ -3800,7 +3836,7 @@ mod r3_tests {
         git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty",
                   "-m", "chore: the other shelf item shipped", "-m", "Chronicle-Phase: PL done"]);
         let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
-        let st = derive_statuses(&ctx, &m);
+        let st = derive_statuses(&ctx, &m, &ledger::load(&d));
         assert_eq!(st[2].state, "done");
         assert_eq!(st[3].state, "done");
         assert!(st[3].proof.as_deref().unwrap_or("").starts_with("marker "));
@@ -3817,7 +3853,7 @@ mod r3_tests {
             {"id": "FX-1", "fixRoundState": {"done": false, "label": "ready to run"}},
             {"id": "FX-2", "fixRoundState": {"done": true}}
         ]}]});
-        let st = derive_statuses(&ctx, &m);
+        let st = derive_statuses(&ctx, &m, &ledger::load(&d));
         assert_eq!(st[0].state, "done");
         assert!(st[0].proof.as_deref().unwrap_or("").starts_with("marker "), "{:?}", st[0].proof);
         // the notes said done but no marker fired it: proof falls back to "notes"
@@ -3838,7 +3874,55 @@ mod r3_tests {
         assert_eq!(proof_of(&ctx, &json!({"file_matches": {"path": "REPORT.md", "pattern": "(?m)^## R-1"}})),
                    ("file_matches".to_string(), "REPORT.md".to_string()));
         let m = json!({"stages": [{"phases": [{"id": "A", "status": {"done_when": [{"tag": "nope"}, {"tag": "phase-1"}]}}]}]});
-        assert_eq!(derive_statuses(&ctx, &m)[0].proof.as_deref(), Some("tag phase-1"));
+        assert_eq!(derive_statuses(&ctx, &m, &ledger::load(&d))[0].proof.as_deref(), Some("tag phase-1"));
+    }
+
+    #[test]
+    fn the_ledger_keeps_a_phase_done_after_its_rule_stops_matching() {
+        let d = repo("latch");
+        std::fs::write(d.join("PROGRESS.md"), "## SE · done\n").unwrap();
+        let p = Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None };
+        let m = json!({"stages": [{"phases": [
+            {"id": "SE", "status": {"done_when": [{"file_matches": {"path": "PROGRESS.md", "pattern": "(?m)^## SE"}}]}},
+            {"id": "ID", "status": {"done_when": [{"tag": "never"}]}}
+        ]}]});
+        let mut l = ledger::load(&d);
+        let st = derive_statuses(&Ctx::build(&p), &m, &l);
+        assert_eq!(st[0].state, "done");
+        latch(&d, &mut l, &st);
+        assert_eq!(ledger::load(&d).done["SE"].by, "file_matches");
+        assert_eq!(ledger::load(&d).done["SE"].proof, "PROGRESS.md");
+        assert!(!ledger::load(&d).done.contains_key("ID"), "a not-done phase is never latched");
+        // the evidence disappears
+        std::fs::remove_file(d.join("PROGRESS.md")).unwrap();
+        let l = ledger::load(&d);
+        let st = derive_statuses(&Ctx::build(&p), &m, &l);
+        assert_eq!(st[0].state, "done", "the ledger holds");
+        assert_eq!(st[0].proof.as_deref(), Some("ledger file_matches PROGRESS.md"));
+        assert_eq!(st[1].state, "now");
+        // a user override reads as such, and unmarking lets the rules speak again
+        ledger::mark(&d, "ID", "user", "").unwrap();
+        let st = derive_statuses(&Ctx::build(&p), &m, &ledger::load(&d));
+        assert_eq!(st[1].proof.as_deref(), Some("ledger user"));
+        ledger::unmark(&d, "ID").unwrap();
+        assert_eq!(derive_statuses(&Ctx::build(&p), &m, &ledger::load(&d))[1].state, "now");
+    }
+
+    #[test]
+    fn latch_does_not_rewrite_an_unchanged_ledger() {
+        let d = repo("quiet");
+        git(&d, &["tag", "v1"]);
+        let p = Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None };
+        let m = json!({"stages": [{"phases": [{"id": "A", "status": {"done_when": [{"tag": "v1"}]}}]}]});
+        let mut l = ledger::load(&d);
+        let st = derive_statuses(&Ctx::build(&p), &m, &l);
+        latch(&d, &mut l, &st);
+        let first = std::fs::metadata(d.join(ledger::FILE)).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut l = ledger::load(&d);
+        let st = derive_statuses(&Ctx::build(&p), &m, &l);
+        latch(&d, &mut l, &st);
+        assert_eq!(std::fs::metadata(d.join(ledger::FILE)).unwrap().modified().unwrap(), first);
     }
 }
 
@@ -3911,7 +3995,7 @@ mod r4_tests {
         assert_eq!(fix["paste"][0]["path"], "fixes/phase_1_fixes_prompt.md");
 
         let ctx = Ctx { repo: d.clone(), extras: vec![], tags: HashSet::new(), subjects: vec![], markers: HashMap::new() };
-        let sts = derive_statuses(&ctx, &merged);
+        let sts = derive_statuses(&ctx, &merged, &ledger::load(&d));
         let m: std::collections::HashMap<&str, (&str, &str)> = sts.iter()
             .map(|s| (s.id.as_str(), (s.state.as_str(), s.label.as_str()))).collect();
         assert_eq!(m["P1"].0, "done");
@@ -3919,7 +4003,7 @@ mod r4_tests {
 
         vault_round(&d, &["done", "done"], "ready");
         let merged = inject_rounds(&d, &manifest);
-        let fx = derive_statuses(&ctx, &merged).into_iter().find(|s| s.id == "FX-1").unwrap();
+        let fx = derive_statuses(&ctx, &merged, &ledger::load(&d)).into_iter().find(|s| s.id == "FX-1").unwrap();
         assert_eq!(fx.state, "done");
         assert_eq!(notes::rounds::load(&d).unwrap()[0].state, "done", "settle_done ran and lifted the lock");
     }
