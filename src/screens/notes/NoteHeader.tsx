@@ -4,7 +4,8 @@
  */
 import { useState } from "react";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup,
+  DropdownMenuRadioItem, DropdownMenuSeparator,
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { BtnPrimary, BtnSecondary } from "@/components/chrome/atoms";
@@ -31,12 +32,16 @@ export function saveLabel(open: OpenNote, now: number): string {
   return `saved · ${Math.round(mins / 60)}h ago`;
 }
 
+/* The radio group speaks in strings, so "no status" travels as a sentinel
+   rather than as null — the current status is the one wearing the check. */
+const NO_STATUS = "none";
 const STATUS_ROWS: { value: NoteStatus | null; label: string }[] = [
   { value: null, label: "no status" },
   { value: "queued", label: "queued" },
   { value: "in_progress", label: "in progress" },
   { value: "done", label: "done" },
 ];
+const statusValue = (v: NoteStatus | null): string => v ?? NO_STATUS;
 
 const PILL_TONE: Record<string, string> = {
   none: "border-border-hairline text-text-dim",
@@ -63,7 +68,8 @@ export function NoteHeader({
   const filename = path.split("/").pop() ?? path;
 
   const roundState = roundStateFor(dir, entry?.round);
-  const pill = pillFor(statusInFront(open.front), entry?.round ?? null, roundState);
+  const status = statusInFront(open.front);
+  const pill = pillFor(status, entry?.round ?? null, roundState);
 
   const folders = [...new Set(notes.map((n) => n.folder))].sort();
   if (!folders.includes("")) folders.unshift("");
@@ -129,11 +135,16 @@ export function NoteHeader({
           </DropdownMenuTrigger>
           {!pill.locked && (
             <DropdownMenuContent align="end" className="w-[160px]">
-              {STATUS_ROWS.map((r) => (
-                <DropdownMenuItem key={r.label} onSelect={() => void setStatus(dir, r.value)}>
-                  {r.label}
-                </DropdownMenuItem>
-              ))}
+              <DropdownMenuRadioGroup
+                value={status ?? NO_STATUS}
+                onValueChange={(v) => void setStatus(dir, v === NO_STATUS ? null : (v as NoteStatus))}
+              >
+                {STATUS_ROWS.map((r) => (
+                  <DropdownMenuRadioItem key={r.label} value={statusValue(r.value)}>
+                    {r.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           )}
         </DropdownMenu>

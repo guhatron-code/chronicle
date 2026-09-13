@@ -6,7 +6,7 @@
  * title-bar toggle is what removes the unit entirely). The body is the
  * AgentPane, passed in by the wiring.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import {
   agentSessionFor,
@@ -23,6 +23,7 @@ import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { toastError } from "@/overlays/toasts";
 import { Chronigirl, HistoryClockGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 function fmtAgo(ms: number): string {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -32,33 +33,22 @@ function fmtAgo(ms: number): string {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
-/** F37 — previous sessions by date; Resume only where the adapter allows it. */
-function HistoryPopover({
-  dir,
-  onClose,
-}: {
-  dir: string;
-  onClose: () => void;
-}) {
+/** F37 — previous sessions by date; Resume only where the adapter allows it.
+ *  A Popover, not a menu: the rows carry their own buttons. Radix owns the
+ *  Escape key, the outside click and returning focus to the trigger. */
+function HistoryPopoverBody({ dir, onClose }: { dir: string; onClose: () => void }) {
   const [rows, setRows] = useState<AgentHistoryRow[] | null>(null);
-  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     listAgentSessions(dir).then(setRows).catch(() => setRows([]));
   }, [dir]);
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [onClose]);
   const anyReadOnly = (rows ?? []).some((r) => !r.resumable && !r.active);
   return (
-    <div
-      ref={ref}
+    <PopoverContent
       data-chrome
       data-agent-history
-      className="absolute right-2 top-9 z-20 flex w-[320px] flex-col rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
+      align="end"
+      sideOffset={6}
+      className="flex w-[320px] flex-col p-1"
     >
       {rows === null ? (
         <div className="px-2.5 py-2 text-xs text-text-dim">Looking…</div>
@@ -122,7 +112,7 @@ function HistoryPopover({
           Older sessions open read-only — this adapter can't resume them.
         </div>
       )}
-    </div>
+    </PopoverContent>
   );
 }
 
@@ -200,14 +190,18 @@ export function AgentSection({
           {word}
         </span>
         <span className="flex-1" />
-        <button
-          aria-label="Previous sessions"
-          title="Previous sessions"
-          onClick={() => setHistOpen((o) => !o)}
-          className="flex size-6 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
-        >
-          <HistoryClockGlyph size={12} />
-        </button>
+        <Popover open={histOpen} onOpenChange={setHistOpen}>
+          <PopoverTrigger asChild>
+            <button
+              aria-label="Previous sessions"
+              title="Previous sessions"
+              className="flex size-6 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+            >
+              <HistoryClockGlyph size={12} />
+            </button>
+          </PopoverTrigger>
+          {histOpen && <HistoryPopoverBody dir={dir} onClose={() => setHistOpen(false)} />}
+        </Popover>
         {live && (
           <button
             onClick={endSession}
@@ -227,7 +221,6 @@ export function AgentSection({
           </svg>
         </button>
       </div>
-      {histOpen && <HistoryPopover dir={dir} onClose={() => setHistOpen(false)} />}
       {children}
     </div>
   );

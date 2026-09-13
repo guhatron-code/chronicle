@@ -24,6 +24,13 @@ import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { Kbd } from "@/components/chrome/atoms";
 import { toastError } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { agentAttach, agentAttachPath, IMG_MIME } from "@/lib/ipc";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Autocomplete, findTrigger, handleKey, type PickerItem } from "./Autocomplete";
@@ -39,69 +46,58 @@ import {
 
 const fmtTokens = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
 
+/* The two-line row every config menu uses: the name on top, the agent's own
+ * description under it. The primitive's own check sits in the left gutter, so
+ * the row is a RadioItem rather than a hand-rolled button with a green tick. */
+const CONFIG_ROW = "h-auto flex-col items-start gap-0.5 py-1.5 pr-2.5";
+
 /** F32 addendum — a config dropdown for ONE of the agent's advertised select
  *  options (model, effort, …), read from the session and set via config.
  *  Hidden when the adapter offers no such option. */
 function ConfigSelect({ dir, optionId, title }: { dir: string; optionId: string; title: string }) {
   const s = agentSessionFor(dir);
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [open]);
 
   const opt = s.configOptions.find((o) => o.id === optionId);
   if (!opt || opt.options.length === 0) return null;
   const current = opt.options.find((o) => o.value === opt.currentValue);
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        data-config-select={optionId}
-        title={title}
-        onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          data-config-select={optionId}
+          title={title}
+          className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
+        >
+          {current?.name ?? opt.name}
+          <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="m3 4.5 3 3 3-3" />
+          </svg>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        data-config-menu={optionId}
+        align="start"
+        side="top"
+        className="w-[260px]"
       >
-        {current?.name ?? opt.name}
-        <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="m3 4.5 3 3 3-3" />
-        </svg>
-      </button>
-      {open && (
-        <div
-          data-config-menu={optionId}
-          className="absolute bottom-8 left-0 z-20 flex w-[260px] flex-col rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
+        <DropdownMenuRadioGroup
+          value={opt.currentValue}
+          onValueChange={(v) =>
+            void setAgentConfigOption(dir, optionId, v).catch((e) =>
+              toastError("Couldn't change the setting", String(e).slice(0, 90)),
+            )
+          }
         >
           {opt.options.map((o) => (
-            <button
-              key={o.value}
-              onClick={() => {
-                setOpen(false);
-                void setAgentConfigOption(dir, optionId, o.value).catch((e) =>
-                  toastError("Couldn't change the setting", String(e).slice(0, 90)),
-                );
-              }}
-              className="flex flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left hover:bg-fill-hover"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-[12.5px] text-text-primary">{o.name}</span>
-                {o.value === opt.currentValue && (
-                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="var(--state-success)" strokeWidth="1.6" className="shrink-0">
-                    <path d="M2 6.5 5 9.5 10 3" />
-                  </svg>
-                )}
-              </div>
+            <DropdownMenuRadioItem key={o.value} value={o.value} className={CONFIG_ROW}>
+              <span className="text-[12.5px] text-text-primary">{o.name}</span>
               {o.description && <span className="text-[11px] leading-snug text-text-dim">{o.description}</span>}
-            </button>
+            </DropdownMenuRadioItem>
           ))}
-        </div>
-      )}
-    </div>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -115,56 +111,34 @@ function ModeSelect({
   disabled: boolean;
   onPick: (modeId: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [open]);
   const cur = options.find((o) => o.value === current);
   return (
-    <div ref={ref} className="relative" data-mode-control>
-      <button
-        data-config-select="mode"
-        title={cur?.description ?? "How much the agent asks before acting"}
-        disabled={disabled}
-        onClick={() => setOpen((o) => !o)}
-        className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
-      >
-        {cur?.name ?? "Plan"}
-        <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="m3 4.5 3 3 3-3" />
-        </svg>
-      </button>
-      {open && (
-        <div
-          data-config-menu="mode"
-          className="absolute bottom-8 left-0 z-20 flex w-[300px] flex-col rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          data-config-select="mode"
+          data-mode-control
+          title={cur?.description ?? "How much the agent asks before acting"}
+          disabled={disabled}
+          className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
         >
+          {cur?.name ?? "Plan"}
+          <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="m3 4.5 3 3 3-3" />
+          </svg>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent data-config-menu="mode" align="start" side="top" className="w-[300px]">
+        <DropdownMenuRadioGroup value={current} onValueChange={onPick}>
           {options.map((o) => (
-            <button
-              key={o.value}
-              onClick={() => { setOpen(false); onPick(o.value); }}
-              className="flex flex-col gap-0.5 rounded-md px-2.5 py-1.5 text-left hover:bg-fill-hover"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-[12.5px] text-text-primary">{o.name}</span>
-                {o.value === current && (
-                  <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="var(--state-success)" strokeWidth="1.6" className="shrink-0">
-                    <path d="M2 6.5 5 9.5 10 3" />
-                  </svg>
-                )}
-              </div>
+            <DropdownMenuRadioItem key={o.value} value={o.value} className={CONFIG_ROW}>
+              <span className="text-[12.5px] text-text-primary">{o.name}</span>
               <span className="text-[11px] leading-snug text-text-dim">{o.description}</span>
-            </button>
+            </DropdownMenuRadioItem>
           ))}
-        </div>
-      )}
-    </div>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

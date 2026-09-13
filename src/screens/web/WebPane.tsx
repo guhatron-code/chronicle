@@ -17,6 +17,7 @@ import {
 import { SplitHandle } from "@/components/chrome/SplitHandle";
 import { WebSidebar } from "./WebSidebar";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso); return isNaN(d.getTime()) ? "unknown" : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
@@ -124,18 +125,6 @@ export function WebPane({ dir, onScreen, onConfirm }: { dir: string; onScreen: b
     return () => window.removeEventListener("keydown", onKey, true);
   }, [onScreen, dir, t, p.active, openTab]);
 
-  // the ⋯ menu closes on Escape or a click outside its wrapper — it does not
-  // otherwise have a way to close, so left open it would stay open forever
-  const menuWrap = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menu) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMenu(false); };
-    const onClick = (e: MouseEvent) => { if (menuWrap.current && !menuWrap.current.contains(e.target as Node)) setMenu(false); };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("mousedown", onClick);
-    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("mousedown", onClick); };
-  }, [menu]);
-
   const pill = block.status === "ready" ? `Blocking · ${block.lists} list${block.lists === 1 ? "" : "s"}`
     : block.status === "partial" ? "Blocking · partial"
     : block.status === "missing" ? "Blocking off — no lists shipped"
@@ -167,20 +156,22 @@ export function WebPane({ dir, onScreen, onConfirm }: { dir: string; onScreen: b
           <span className="flex h-6 items-center gap-1.5 whitespace-nowrap rounded-md border border-border-hairline px-2 text-[11px] text-text-subtle">
             <span className={cn("size-1.5 rounded-full", block.status === "ready" ? "bg-state-success" : block.status === "partial" ? "bg-state-error" : "bg-state-neutral")} />{pill}
           </span>
-          <div className="relative" ref={menuWrap}>
-            <button aria-label="More" onClick={() => setMenu((m) => !m)} className="h-6 rounded-md border border-border-hairline px-2 text-[11px] text-text-subtle hover:text-text-primary">⋯</button>
-            {menu && (
-              <div className="absolute right-0 top-7 z-10 w-72 rounded-md border border-border-strong bg-surface-overlay p-3 text-[11.5px] text-text-secondary [box-shadow:var(--shadow-overlay)]">
-                <div>Lists fetched {block.fetched_at ? fmtDate(block.fetched_at) : "—"}; they refresh with each release.</div>
-                {block.sources && block.sources.length > 0 && (
-                  <div className="mt-2 text-text-dim">From {block.sources.join(", ")}.</div>
-                )}
-                {block.failed.length > 0 && <div className="mt-2 text-state-error">Couldn't load: {block.failed.join("; ")}</div>}
-                <div className="mt-2 text-text-dim">Ads and trackers are blocked at the network level, the way uBlock's lists do it. Scriptlet tricks aren't possible in this engine.</div>
-                <div className="mt-2 text-text-dim">EasyList and EasyPrivacy are © the EasyList authors (CC BY-SA 3.0 / GPL-3.0); the uBlock Origin lists are GPL-3.0; Peter Lowe's list is free for personal use; converted with eyeo's abp2blocklist (GPL-3.0).</div>
-              </div>
-            )}
-          </div>
+          {/* Radix owns Escape, the outside click and focus return; `menu`
+              still drives `covered`, which hides the native page underneath. */}
+          <Popover open={menu} onOpenChange={setMenu}>
+            <PopoverTrigger asChild>
+              <button aria-label="More" className="h-6 rounded-md border border-border-hairline px-2 text-[11px] text-text-subtle hover:text-text-primary">⋯</button>
+            </PopoverTrigger>
+            <PopoverContent align="end" sideOffset={6} className="w-72 p-3 text-[11.5px] text-text-secondary">
+              <div>Lists fetched {block.fetched_at ? fmtDate(block.fetched_at) : "—"}; they refresh with each release.</div>
+              {block.sources && block.sources.length > 0 && (
+                <div className="mt-2 text-text-dim">From {block.sources.join(", ")}.</div>
+              )}
+              {block.failed.length > 0 && <div className="mt-2 text-state-error">Couldn't load: {block.failed.join("; ")}</div>}
+              <div className="mt-2 text-text-dim">Ads and trackers are blocked at the network level, the way uBlock's lists do it. Scriptlet tricks aren't possible in this engine.</div>
+              <div className="mt-2 text-text-dim">EasyList and EasyPrivacy are © the EasyList authors (CC BY-SA 3.0 / GPL-3.0); the uBlock Origin lists are GPL-3.0; Peter Lowe's list is free for personal use; converted with eyeo's abp2blocklist (GPL-3.0).</div>
+            </PopoverContent>
+          </Popover>
         </div>
         {/* the region the page covers; the cover shows while the page is hidden */}
         <div ref={region} className="relative min-h-0 flex-1 bg-surface-app">

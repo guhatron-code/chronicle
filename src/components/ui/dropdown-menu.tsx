@@ -1,5 +1,5 @@
 import * as React from "react"
-import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react"
+import { CheckIcon, ChevronRightIcon } from "lucide-react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
@@ -37,13 +37,14 @@ function DropdownMenuTrigger({
  * div on open; without it the browser draws its own default focus ring on
  * top of everything (no rule in index.css strips a plain, non-:focus-visible
  * outline).
+ *
+ * MENU_SURFACE_BASE is everything that is NOT tied to one Radix primitive's
+ * own CSS variables. The context menu and the popover build their surface out
+ * of it plus their own `--radix-<primitive>-content-*` vars, so the floating
+ * families stay one skin. Those var-bearing utilities have to be written out
+ * literally in each file — Tailwind scans source text, it does not evaluate
+ * template strings.
  */
-/* Everything about the surface that is NOT tied to one Radix primitive's own
- * CSS variables. The context menu and the popover build their surface out of
- * this plus their own `--radix-<primitive>-content-*` vars, so the four
- * floating families stay one skin. The var-bearing utilities have to be
- * written out literally in each file — Tailwind scans source text, it does not
- * evaluate template strings. */
 export const MENU_SURFACE_BASE =
   "min-w-[8rem] overflow-x-hidden overflow-y-auto rounded-lg border border-border-strong bg-surface-overlay p-1.5 text-text-secondary outline-none [box-shadow:var(--shadow-overlay)] data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
 
@@ -139,7 +140,7 @@ function DropdownMenuCheckboxItem({
       checked={checked}
       {...props}
     >
-      <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
+      <span className="pointer-events-none absolute left-2 top-1/2 flex size-3.5 -translate-y-1/2 items-center justify-center">
         <DropdownMenuPrimitive.ItemIndicator>
           <CheckIcon className="size-3.5" />
         </DropdownMenuPrimitive.ItemIndicator>
@@ -171,9 +172,9 @@ function DropdownMenuRadioItem({
       className={cn(MENU_ITEM_INDICATED, className)}
       {...props}
     >
-      <span className="pointer-events-none absolute left-2 flex size-3.5 items-center justify-center">
+      <span className="pointer-events-none absolute left-2 top-1/2 flex size-3.5 -translate-y-1/2 items-center justify-center">
         <DropdownMenuPrimitive.ItemIndicator>
-          <CircleIcon className="size-2 fill-current" />
+          <CheckIcon className="size-3.5" />
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
       {children}
