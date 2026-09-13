@@ -570,7 +570,9 @@ struct Ctx {
     repo: PathBuf,
     extras: Vec<(String, PathBuf)>,
     tags: HashSet<String>,
-    subjects: Vec<String>,
+    /// (short hash, subject) for EVERY commit on every branch, newest first.
+    /// Unbounded on purpose: a proving commit must never fall out of a window.
+    subjects: Vec<(String, String)>,
 }
 
 impl Ctx {
@@ -579,9 +581,13 @@ impl Ctx {
             repo: p.repo.clone(),
             extras: p.extras.clone(),
             tags: git_in(&p.repo, &["tag"]).lines().map(String::from).collect(),
-            // bounded + --all: the doc promises "the last 200 subjects", and the graph
-            // shows all branches — the rules must see the same history the user sees.
-            subjects: git_in(&p.repo, &["log", "--all", "-n", "200", "--format=%s"]).lines().map(String::from).collect(),
+            subjects: git_in(&p.repo, &["log", "--all", "--format=%h%x09%s"])
+                .lines()
+                .map(|l| match l.split_once('\t') {
+                    Some((h, s)) => (h.to_string(), s.to_string()),
+                    None => (String::new(), l.to_string()),
+                })
+                .collect(),
         }
     }
     fn resolve(&self, path: &str) -> PathBuf {
@@ -660,7 +666,7 @@ fn eval_cond(ctx: &Ctx, cond: &Value) -> Option<bool> {
         }
         if let Some(pat) = cond.get("commit_subject").and_then(|v| v.as_str()) {
             if let Ok(re) = Regex::new(pat) {
-                return Some(ctx.subjects.iter().any(|s| re.is_match(s)));
+                return Some(ctx.subjects.iter().any(|(_, s)| re.is_match(s)));
             }
             return Some(false);
         }
@@ -3660,6 +3666,19 @@ mod r3_tests {
         let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
         assert!(action_fires(&ctx, &json!({"text": "always on"})));
         assert!(!action_fires(&ctx, &json!({"text": "gated", "when": [{"tag": "nope"}]})));
+    }
+
+    #[test]
+    fn subject_evidence_never_falls_out_of_a_window() {
+        let d = repo("deep");
+        git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "feat: per-step evidence lands"]);
+        for i in 0..205 {
+            git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", &format!("chore: filler {i}")]);
+        }
+        let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
+        assert_eq!(ctx.subjects.len(), 207, "every commit, not the newest 200");
+        assert_eq!(eval_cond(&ctx, &json!({"commit_subject": "(?i)per-step evidence"})), Some(true));
+        assert!(ctx.subjects[0].0.len() >= 7, "each subject carries its short hash");
     }
 }
 

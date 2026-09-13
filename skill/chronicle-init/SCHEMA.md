@@ -80,7 +80,7 @@ Exactly one key per object, plus optional `"not": true` to invert:
 | `tag` | `"phase-2"` | a git tag with that exact name exists |
 | `file_exists` | `"progress/p3.md"` | the path exists (any root via `@alias/…`) |
 | `file_matches` | `{ "path": "REPORT.md", "pattern": "\\*\\*R-1\\*\\*.*CLOSED" }` | the file exists AND the regex matches its contents (multiline mode is ALWAYS on: `^`/`$` are line boundaries) |
-| `commit_subject` | `"(?i)phase[- ]3 sign-off"` | any of the last 200 commit subjects, across ALL branches (the same history the graph shows) |
+| `commit_subject` | `"(?i)phase[- ]3 sign-off"` | any commit subject on ANY branch, however old (the whole history the graph shows) |
 | `file_glob` | `{ "dir": "@canon", "contains": "handoff" }` | some filename directly in `dir` contains the substring (case-insensitive). `contains` is REQUIRED — without it the rule can't be checked |
 | `worktree_branch` | `"medan"` | a LINKED worktree (not the main checkout) is on that branch |
 
