@@ -55,17 +55,49 @@ pub fn save(dir: &Path, l: &Ledger) -> Result<(), String> {
     std::fs::rename(&tmp, &p).map_err(|e| e.to_string())
 }
 
+/// Serializes every load-mutate-save cycle in this module so a user's mark and a
+/// background poll's latch can never race and clobber one another.
+static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn locked<T>(f: impl FnOnce() -> T) -> T {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    f()
+}
+
 pub fn mark(dir: &Path, id: &str, by: &str, proof: &str) -> Result<(), String> {
-    let mut l = load(dir);
-    l.done.insert(id.to_string(), Entry { by: by.into(), proof: proof.into(), at: crate::epoch_ms() });
-    save(dir, &l)
+    locked(|| {
+        let mut l = load(dir);
+        l.done.insert(id.to_string(), Entry { by: by.into(), proof: proof.into(), at: crate::epoch_ms() });
+        save(dir, &l)
+    })
 }
 
 pub fn unmark(dir: &Path, id: &str) -> Result<bool, String> {
-    let mut l = load(dir);
-    let had = l.done.remove(id).is_some();
-    if had { save(dir, &l)?; }
-    Ok(had)
+    locked(|| {
+        let mut l = load(dir);
+        let had = l.done.remove(id).is_some();
+        if had { save(dir, &l)?; }
+        Ok(had)
+    })
+}
+
+/// Insert every `(id, Entry)` whose id the ledger doesn't already have, under the
+/// same lock `mark`/`unmark` take, and save if anything changed. Returns the
+/// ledger as saved (or as loaded, if nothing was new) so a caller like `latch`
+/// can adopt it instead of trusting its own possibly-stale copy.
+pub fn record(dir: &Path, new: Vec<(String, Entry)>) -> Result<Ledger, String> {
+    locked(|| {
+        let mut l = load(dir);
+        let mut changed = false;
+        for (id, entry) in new {
+            if !l.done.contains_key(&id) {
+                l.done.insert(id, entry);
+                changed = true;
+            }
+        }
+        if changed { save(dir, &l)?; }
+        Ok(l)
+    })
 }
 
 #[cfg(test)]

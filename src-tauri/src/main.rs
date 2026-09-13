@@ -971,20 +971,27 @@ fn derive_statuses(ctx: &Ctx, manifest: &Value, ledger: &ledger::Ledger) -> Vec<
 
 /// Record every newly done phase whose proof is live evidence (a marker or a
 /// rule). Ledger-proven phases are already there; nothing is ever re-written.
+/// Goes through `ledger::record`, which takes the same lock `ledger_mark` does,
+/// so a concurrent poll's latch can never race a user's mark and lose it.
 fn latch(dir: &Path, ledger: &mut ledger::Ledger, statuses: &[PhaseState]) {
-    let mut changed = false;
+    let mut new = Vec::new();
     for s in statuses {
         if s.state != "done" || ledger.done.contains_key(&s.id) { continue }
         let Some(proof) = s.proof.as_deref() else { continue };
         if proof.starts_with("ledger ") || proof == "notes" { continue }
         let (by, p) = proof.split_once(' ').unwrap_or((proof, ""));
-        ledger.done.insert(s.id.clone(), ledger::Entry { by: by.into(), proof: p.into(), at: epoch_ms() });
-        changed = true;
+        new.push((s.id.clone(), ledger::Entry { by: by.into(), proof: p.into(), at: epoch_ms() }));
     }
-    if changed { let _ = ledger::save(dir, ledger); } // a failed write is retried next scan
+    if new.is_empty() { return; }
+    if let Ok(recorded) = ledger::record(dir, new) { *ledger = recorded; } // a failed write is retried next scan
 }
 
-fn derive_for_dir(dir: &Path) -> Value {
+/// `write` gates the ledger latch: only the opened project's own scan
+/// (`state_for_project`) and an explicit `chronicle --derive <dir>` run should
+/// write `.chronicle/roadmap-ledger.json` into a project. A picker/recents
+/// preview must never write into a project the user hasn't opened this
+/// session — it still loads the ledger and derives with it, just doesn't latch.
+fn derive_for_dir(dir: &Path, write: bool) -> Value {
     let p = load_project(dir);
     match &p.manifest {
         None => json!({"error": p.manifest_error.unwrap_or_else(|| "no manifest".into())}),
@@ -993,7 +1000,7 @@ fn derive_for_dir(dir: &Path) -> Value {
             let merged = inject_rounds(&p.dir, m);
             let mut l = ledger::load(&p.dir);
             let statuses = derive_statuses(&ctx, &merged, &l);
-            latch(&p.dir, &mut l, &statuses);
+            if write { latch(&p.dir, &mut l, &statuses); }
             json!({
                 "name": m.get("name"),
                 "statuses": statuses,
@@ -1021,27 +1028,33 @@ async fn get_picker() -> Value {
                 .unwrap_or_default();
             if let Some(obj) = r.as_object_mut() { obj.insert("description".into(), json!(desc)); }
             if let Some(obj) = r.as_object_mut() { obj.insert("missing".into(), json!(!dir.exists())); }
-            // mission-control extras: the current phase, progress, and a needs-you count
+            // mission-control extras: the current phase, progress, needs-you, and the
+            // tile summary string. One derive_for_dir(.., false) call — one ledger::load
+            // — feeds all of it; a picker preview must never write the ledger.
+            let mut summary = json!("folder missing");
             if dir.exists() {
                 let p = load_project(&dir);
                 if let Some(m) = &p.manifest {
                     let ctx = Ctx::build(&p);
-                    let statuses = derive_statuses(&ctx, m, &ledger::load(&p.dir));
+                    let d = derive_for_dir(&dir, false);
+                    let statuses = d.get("statuses").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+                    let merged = inject_rounds(&p.dir, m);
                     let mut flat: Vec<Value> = Vec::new();
-                    if let Some(stages) = m.get("stages").and_then(|v| v.as_array()) {
+                    if let Some(stages) = merged.get("stages").and_then(|v| v.as_array()) {
                         for st in stages {
                             for ph in st.get("phases").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
                                 flat.push(ph);
                             }
                         }
                     }
-                    let real: Vec<&PhaseState> = statuses.iter()
-                        .filter(|x| matches!(x.state.as_str(), "done" | "now" | "later")).collect();
-                    let done = real.iter().filter(|x| x.state == "done").count();
-                    let cur = statuses.iter().position(|x| x.state == "now");
+                    let real: Vec<&Value> = statuses.iter()
+                        .filter(|x| matches!(x.get("state").and_then(|v| v.as_str()).unwrap_or(""), "done" | "now" | "later"))
+                        .collect();
+                    let done = real.iter().filter(|x| x.get("state").and_then(|v| v.as_str()) == Some("done")).count();
+                    let cur = statuses.iter().position(|x| x.get("state").and_then(|v| v.as_str()) == Some("now"));
                     let current = cur.and_then(|i| flat.get(i).map(|ph| json!({
                         "id": ph.get("id"), "name": ph.get("name"),
-                        "label": statuses[i].label,
+                        "label": statuses[i]["label"].clone(),
                     }))).unwrap_or(Value::Null);
                     // needs-you: firing custom actions + the built-in publish nags
                     let mut needs = 0usize;
@@ -1069,23 +1082,12 @@ async fn get_picker() -> Value {
                         obj.insert("total".into(), json!(real.len()));
                         obj.insert("needs".into(), json!(needs));
                     }
+                    summary = if done == real.len() && !real.is_empty() { json!(format!("done · all {} phases", real.len())) }
+                        else { json!(format!("phase {} of {}", done + 1, real.len())) };
+                } else {
+                    summary = json!("no manifest");
                 }
             }
-            let summary = if !dir.exists() { json!("folder missing") } else {
-                let d = derive_for_dir(&dir);
-                match d.get("statuses").and_then(|v| v.as_array()) {
-                    None => json!("no manifest"),
-                    Some(sts) => {
-                        let real: Vec<_> = sts.iter().filter(|s| {
-                            let st = s.get("state").and_then(|v| v.as_str()).unwrap_or("");
-                            st == "done" || st == "now" || st == "later"
-                        }).collect();
-                        let done = real.iter().filter(|s| s.get("state").and_then(|v| v.as_str()) == Some("done")).count();
-                        if done == real.len() && !real.is_empty() { json!(format!("done · all {} phases", real.len())) }
-                        else { json!(format!("phase {} of {}", done + 1, real.len())) }
-                    }
-                }
-            };
             if let Some(obj) = r.as_object_mut() { obj.insert("summary".into(), summary); }
         }
         r
@@ -3211,7 +3213,7 @@ fn main() {
     let launch_open = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1).cloned());
     if let Some(i) = args.iter().position(|a| a == "--derive") {
         let dir = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
-        let out = derive_for_dir(&dir);
+        let out = derive_for_dir(&dir, true);
         println!("{}", serde_json::to_string_pretty(&out).unwrap());
         // a missing/broken manifest is an ERROR exit — scripts must not read it as fine
         std::process::exit(if out.get("error").is_some() { 1 } else { 0 });
@@ -3909,6 +3911,30 @@ mod r3_tests {
     }
 
     #[test]
+    fn a_pool_phase_with_a_ledger_entry_is_done_with_no_marker() {
+        let d = repo("pool-ledger");
+        let p = Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None };
+        let m = json!({"stages": [{"phases": [{"id": "ID", "pool": true}]}]});
+        ledger::mark(&d, "ID", "user", "").unwrap();
+        let st = derive_statuses(&Ctx::build(&p), &m, &ledger::load(&d));
+        assert_eq!(st[0].state, "done");
+        assert_eq!(st[0].proof.as_deref(), Some("ledger user"));
+    }
+
+    #[test]
+    fn a_round_phase_with_a_ledger_entry_is_done_and_not_notes() {
+        let d = repo("round-ledger");
+        let p = Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None };
+        let m = json!({"stages": [{"phases": [
+            {"id": "FX-3", "fixRoundState": {"done": false, "label": "ready to run"}}
+        ]}]});
+        ledger::mark(&d, "FX-3", "user", "").unwrap();
+        let st = derive_statuses(&Ctx::build(&p), &m, &ledger::load(&d));
+        assert_eq!(st[0].state, "done");
+        assert!(st[0].proof.as_deref().unwrap_or("").starts_with("ledger "), "{:?}", st[0].proof);
+    }
+
+    #[test]
     fn latch_does_not_rewrite_an_unchanged_ledger() {
         let d = repo("quiet");
         git(&d, &["tag", "v1"]);
@@ -3923,6 +3949,21 @@ mod r3_tests {
         let st = derive_statuses(&Ctx::build(&p), &m, &l);
         latch(&d, &mut l, &st);
         assert_eq!(std::fs::metadata(d.join(ledger::FILE)).unwrap().modified().unwrap(), first);
+    }
+
+    #[test]
+    fn derive_for_dir_writes_the_ledger_only_when_asked() {
+        let d = repo("derive-write");
+        git(&d, &["tag", "v1"]);
+        std::fs::write(d.join("chronicle.json"), json!({"stages": [{"phases": [
+            {"id": "A", "status": {"done_when": [{"tag": "v1"}]}}
+        ]}]}).to_string()).unwrap();
+        let out = derive_for_dir(&d, false);
+        assert_eq!(out["statuses"][0]["state"], "done");
+        assert!(!d.join(ledger::FILE).exists(), "a preview (picker) must not write the ledger");
+        let out = derive_for_dir(&d, true);
+        assert_eq!(out["statuses"][0]["state"], "done");
+        assert!(d.join(ledger::FILE).exists(), "an explicit derive (the opened project, or --derive) latches");
     }
 }
 
