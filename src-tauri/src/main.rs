@@ -909,26 +909,33 @@ fn newer_plans(ctx: &Ctx, manifest: &Value, manifest_mtime: std::time::SystemTim
         let Some(full) = ctx.resolve_jailed(&dir) else { continue };
         let Ok(rd) = std::fs::read_dir(&full) else { continue };
         for e in rd.flatten() {
+            let name = e.file_name();
+            if name.to_string_lossy().starts_with('.') { continue } // .DS_Store etc — never a plan
             let Ok(md) = e.metadata() else { continue };
             if !md.is_file() { continue }
             let Ok(mt) = md.modified() else { continue };
             if mt <= manifest_mtime { continue }
-            let rel = format!("{}/{}", dir.trim_end_matches('/'), e.file_name().to_string_lossy());
+            let rel = format!("{}/{}", dir.trim_end_matches('/'), name.to_string_lossy());
             if text.contains(&rel) { continue }
             out.push(rel);
         }
     }
     out.sort();
+    out.dedup(); // planDirs may repeat a default dir
     out
 }
 
 /// `(newest semver tag in git, newest semver tag the manifest mentions)` when the
 /// repo has moved past the roadmap. None when the manifest mentions no tag at all.
+/// "Mentions" means the string is also an actual git tag — a version number in a
+/// note ("built on tauri 2.11.5") is not a roadmap release rule and must never
+/// count, or it would beat every real tag and silence the detector forever.
 fn newer_release(ctx: &Ctx, manifest: &Value) -> Option<(String, String)> {
     let re = Regex::new(r"v?\d+\.\d+\.\d+").ok()?;
     let text = manifest.to_string();
     let mentioned = re.find_iter(&text).map(|m| m.as_str().to_string())
         .filter(|t| semver_of(t).is_some())
+        .filter(|t| ctx.tags.contains(t) || ctx.tags.contains(&format!("v{}", t.strip_prefix('v').unwrap_or(t))))
         .max_by_key(|t| semver_of(t))?;
     let newest = ctx.tags.iter().filter(|t| semver_of(t).is_some()).max_by_key(|t| semver_of(t))?.clone();
     (semver_of(&newest) > semver_of(&mentioned)).then_some((newest, mentioned))
@@ -4041,7 +4048,7 @@ mod r3_tests {
     #[test]
     fn the_detector_sees_new_plans_and_newer_releases() {
         let d = repo("behind");
-        std::fs::write(d.join("chronicle.json"), r#"{"chronicleVersion":1,"stages":[{"phases":[
+        std::fs::write(d.join("chronicle.json"), r#"{"chronicleVersion":1,"desc":"built on tauri 2.11.5","stages":[{"phases":[
             {"id":"A","docs":[{"path":"docs/superpowers/specs/old.md"}],"status":{"done_when":[{"tag":"v0.5.1"}]}}]}]}"#).unwrap();
         let mtime = std::fs::metadata(d.join("chronicle.json")).unwrap().modified().unwrap();
         std::fs::create_dir_all(d.join("docs/superpowers/specs")).unwrap();
@@ -4051,6 +4058,7 @@ mod r3_tests {
         std::fs::write(d.join("docs/superpowers/specs/old.md"), "mentioned").unwrap();
         std::fs::write(d.join("docs/superpowers/specs/new-design.md"), "not mentioned").unwrap();
         std::fs::write(d.join("docs/superpowers/plans/new-plan.md"), "not mentioned").unwrap();
+        std::fs::write(d.join("docs/superpowers/plans/.DS_Store"), "finder junk").unwrap();
         std::fs::write(d.join("planning/extra.md"), "in a planDirs folder").unwrap();
         git(&d, &["tag", "v0.5.1"]);
         git(&d, &["tag", "v0.8.1"]);
@@ -4060,11 +4068,17 @@ mod r3_tests {
         let m = p.manifest.clone().unwrap();
         assert_eq!(newer_plans(&ctx, &m, mtime),
                    vec!["docs/superpowers/plans/new-plan.md".to_string(), "docs/superpowers/specs/new-design.md".to_string()],
-                   "newer AND unmentioned; the mentioned one is skipped even though it is newer");
+                   "newer AND unmentioned; the mentioned one is skipped even though it is newer; dotfiles never count");
         let mut m2 = m.clone();
-        m2["planDirs"] = json!(["planning"]);
-        assert!(newer_plans(&ctx, &m2, mtime).contains(&"planning/extra.md".to_string()));
-        assert_eq!(newer_release(&ctx, &m), Some(("v0.8.1".into(), "v0.5.1".into())));
+        // "docs/superpowers/plans" duplicates a default dir on purpose — dedup must hold
+        m2["planDirs"] = json!(["planning", "docs/superpowers/plans"]);
+        let plans2 = newer_plans(&ctx, &m2, mtime);
+        assert!(plans2.contains(&"planning/extra.md".to_string()));
+        assert!(!plans2.iter().any(|p| p.contains(".DS_Store")), "a Finder .DS_Store is never a plan row");
+        assert_eq!(plans2.iter().filter(|p| *p == "docs/superpowers/plans/new-plan.md").count(), 1,
+                   "a dir repeated via planDirs must not duplicate its rows");
+        assert_eq!(newer_release(&ctx, &m), Some(("v0.8.1".into(), "v0.5.1".into())),
+                   "a version number in prose (\"tauri 2.11.5\") is not a real tag and must not be picked as mentioned");
         let st = state_for_project(&p);
         assert_eq!(st["new_plans"].as_array().unwrap().len(), 2);
         assert_eq!(st["newer_release"], json!(["v0.8.1", "v0.5.1"]));
@@ -4076,6 +4090,9 @@ mod r3_tests {
             .replace("old.md", "old.md\"},{\"path\":\"docs/superpowers/specs/new-design.md\"},{\"path\":\"docs/superpowers/plans/new-plan.md");
         std::fs::write(d.join("chronicle.json"), old).unwrap();
         let p = load_project(&d);
+        let m_rewritten = p.manifest.clone().unwrap();
+        assert!(newer_plans(&ctx, &m_rewritten, mtime).is_empty(),
+                 "against the ORIGINAL mtime, now that both files are mentioned, neither is new");
         assert!(state_for_project(&p)["new_plans"].as_array().unwrap().is_empty());
     }
 
