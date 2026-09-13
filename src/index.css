@@ -266,6 +266,16 @@
   --font-mono: 'Geist Mono Variable', ui-monospace, 'SF Mono', monospace;
 }
 
+/* §1.9 Stacking — the one ladder every floating surface climbs. Before this
+   the app had five ad-hoc values (10, 20, 30, 40, 50) and no way to tell which
+   was meant to win. Consumed as `z-(--z-popover)`, `z-(--z-modal)`, … */
+:root {
+  --z-popover: 30;
+  --z-overlay: 40;
+  --z-modal: 50;
+  --z-toast: 60;
+}
+
 /* ============ Base ============ */
 *,
 *::before,

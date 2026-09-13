@@ -19,7 +19,7 @@ import {
  * FileTree draw one MenuNode[] through both — so it wears the house skin from
  * dropdown-menu.tsx and differs only in which Radix vars position it. */
 const CONTEXT_SURFACE =
-  "z-50 max-h-(--radix-context-menu-content-available-height) origin-(--radix-context-menu-content-transform-origin) " +
+  "z-(--z-popover) max-h-(--radix-context-menu-content-available-height) origin-(--radix-context-menu-content-transform-origin) " +
   MENU_SURFACE_BASE
 
 function ContextMenu({

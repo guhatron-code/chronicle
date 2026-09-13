@@ -10,7 +10,7 @@ import { MENU_SURFACE_BASE } from "@/components/ui/dropdown-menu"
  * keep their own buttons — but it is the same floating surface, so it shares
  * the skin and differs only in which Radix vars place it. */
 const POPOVER_SURFACE =
-  "z-50 max-h-(--radix-popover-content-available-height) origin-(--radix-popover-content-transform-origin) " +
+  "z-(--z-popover) max-h-(--radix-popover-content-available-height) origin-(--radix-popover-content-transform-origin) " +
   MENU_SURFACE_BASE
 
 function Popover({

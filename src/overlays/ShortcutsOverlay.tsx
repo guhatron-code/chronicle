@@ -63,7 +63,7 @@ export function ShortcutsOverlay({
       <DialogContent
         data-chrome
         showCloseButton={false}
-        className="max-w-[560px] gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 [box-shadow:var(--shadow-overlay)] sm:max-w-[560px]"
+        className="max-w-[560px] gap-0 overflow-hidden p-0 sm:max-w-[560px]"
       >
         <div className="flex items-center justify-between border-b border-divider px-4 py-3.5">
           <DialogTitle className="text-[15px] font-semibold text-text-primary">

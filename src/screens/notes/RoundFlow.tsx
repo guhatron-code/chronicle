@@ -12,6 +12,7 @@ import { useSessionStatus } from "@/lib/session-status";
 import { initProgress, logLinesFrom } from "@/lib/roadmap-data";
 import { openRoundFor, refreshNotes, setRoundGenerating } from "@/lib/notes-store";
 import { toastAction, toastError } from "@/overlays/toasts";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 type State =
   | { kind: "idle" }
@@ -80,17 +81,24 @@ export const RoundFlow = forwardRef<RoundFlowHandle, {
 
   if (state.kind !== "generating") return null;
 
+  /* A real Dialog now — portal, focus trap, scrim and animation like every
+     other one — but it must not close while the plan is being written, so
+     Escape and an outside click are refused and Cancel stays the only exit. */
+  const stayOpen = (e: Event) => e.preventDefault();
+
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Starting a round"
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/45 p-6"
-    >
-      <div className="flex w-[440px] flex-col gap-3 rounded-lg border border-border-hairline bg-surface-card p-5">
+    <Dialog open onOpenChange={() => {}}>
+      <DialogContent
+        data-chrome
+        showCloseButton={false}
+        aria-describedby={undefined}
+        onEscapeKeyDown={stayOpen}
+        onInteractOutside={stayOpen}
+        className="flex max-w-[440px] flex-col gap-3 p-5 sm:max-w-[440px]"
+      >
         <div className="flex items-center gap-2.5">
           <Spinner size={14} />
-          <span className="text-sm font-medium text-text-primary">Writing the fix plan…</span>
+          <DialogTitle className="text-sm font-medium text-text-primary">Writing the fix plan…</DialogTitle>
           <span className="flex-1" />
           <MonoMeta className="text-text-dim">
             {(() => {
@@ -125,7 +133,7 @@ export const RoundFlow = forwardRef<RoundFlowHandle, {
             Cancel
           </BtnSecondary>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 });

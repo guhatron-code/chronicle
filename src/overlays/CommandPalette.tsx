@@ -84,7 +84,7 @@ export function CommandPalette({
       <DialogContent
         data-chrome
         showCloseButton={false}
-        className="max-w-[560px] gap-0 overflow-hidden rounded-xl border-border-strong bg-surface-overlay p-0 [box-shadow:var(--shadow-overlay)] sm:max-w-[560px]"
+        className="max-w-[560px] gap-0 overflow-hidden p-0 sm:max-w-[560px]"
       >
         <DialogTitle className="sr-only">Project switcher</DialogTitle>
         <Command

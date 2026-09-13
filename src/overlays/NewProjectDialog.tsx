@@ -34,7 +34,7 @@ export function NewProjectDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         showCloseButton={false}
-        className="flex max-w-[420px] flex-col gap-3 rounded-xl border-border-strong bg-surface-overlay p-5 [box-shadow:var(--shadow-overlay)] sm:max-w-[420px]"
+        className="flex max-w-[420px] flex-col gap-3 p-5 sm:max-w-[420px]"
       >
         <div className="flex items-center gap-3">
           <span className="flex size-9 items-center justify-center rounded-lg border border-border-strong bg-surface-card-raised text-text-secondary">

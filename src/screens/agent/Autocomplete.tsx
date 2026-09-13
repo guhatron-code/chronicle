@@ -50,7 +50,7 @@ export function Autocomplete({
     return (
       <div
         data-composer-menu
-        className="absolute bottom-full left-0 z-30 mb-1.5 w-[340px] max-w-[calc(100%-8px)] rounded-[10px] border border-border-strong bg-surface-overlay px-3 py-2.5 [box-shadow:var(--shadow-overlay)]"
+        className="absolute bottom-full left-0 z-(--z-popover) mb-1.5 w-[340px] max-w-[calc(100%-8px)] rounded-[10px] border border-border-strong bg-surface-overlay px-3 py-2.5 [box-shadow:var(--shadow-overlay)]"
       >
         <span className="text-[12px] text-text-subtle">{emptyLabel}</span>
       </div>
@@ -65,7 +65,7 @@ export function Autocomplete({
       // overflow-x-hidden is explicit: setting only overflow-y promotes
       // overflow-x from visible to auto, which is where the sideways
       // scrollbar came from
-      className="absolute bottom-full left-0 z-30 mb-1.5 flex max-h-[360px] w-[380px] max-w-[calc(100%-8px)] flex-col overflow-y-auto overflow-x-hidden rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
+      className="absolute bottom-full left-0 z-(--z-popover) mb-1.5 flex max-h-[360px] w-[380px] max-w-[calc(100%-8px)] flex-col overflow-y-auto overflow-x-hidden rounded-[10px] border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
     >
       {items.map((it, i) => {
         const heading = it.group !== lastGroup ? it.group : undefined;
