@@ -4,7 +4,7 @@
  * signal. Refresh + help at the bottom; NO settings gear (⌘, lives in the app menu).
  */
 import type { ReactNode } from "react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Hint } from "@/components/ui/tooltip";
 import {
   NotesGlyph,
   RefreshGlyph,
@@ -34,33 +34,23 @@ function RailButton({
   children: ReactNode;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          aria-label={label}
-          onClick={onClick}
-          className={cn(
-            "flex size-[30px] items-center justify-center rounded-md border",
-            selected
-              ? "border-selected-bg bg-selected-bg text-selected-fg"
-              : cn(
-                  "border-border-strong bg-transparent hover:bg-fill-hover hover:text-text-secondary",
-                  dim ? "text-text-dim" : "text-text-subtle",
-                ),
-          )}
-        >
-          {children}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent
-        side="right"
-        sideOffset={8}
-        className="flex items-center gap-2 rounded-md border border-border-strong bg-surface-overlay px-2.5 py-1.5 text-xs text-text-primary [box-shadow:var(--shadow-overlay)]"
+    <Hint label={tooltip} mono={mono} side="right" sideOffset={8}>
+      <button
+        aria-label={label}
+        onClick={onClick}
+        className={cn(
+          "flex size-[30px] items-center justify-center rounded-md border",
+          selected
+            ? "border-selected-bg bg-selected-bg text-selected-fg"
+            : cn(
+                "border-border-strong bg-transparent hover:bg-fill-hover hover:text-text-secondary",
+                dim ? "text-text-dim" : "text-text-subtle",
+              ),
+        )}
       >
-        {tooltip}
-        {mono && <span className="font-mono text-[10px] text-text-dim">{mono}</span>}
-      </TooltipContent>
-    </Tooltip>
+        {children}
+      </button>
+    </Hint>
   );
 }
 
@@ -80,7 +70,6 @@ export function Rail({
   onSetup?: () => void;
 }) {
   return (
-    <TooltipProvider delayDuration={400}>
     <div data-chrome className="flex w-[52px] shrink-0 flex-col items-center gap-1.5 border-r border-divider py-2.5">
       <RailButton label="Roadmap" tooltip="Roadmap" mono="⌘J to cycle"
         selected={pane === "road"} onClick={() => onPane("road")}>
@@ -132,6 +121,5 @@ export function Rail({
         )}
       </RailButton>
     </div>
-    </TooltipProvider>
   );
 }

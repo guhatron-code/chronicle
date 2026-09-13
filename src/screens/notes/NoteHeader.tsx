@@ -15,6 +15,7 @@ import { copyText, notesReveal, type NoteEntry, type NoteStatus } from "@/lib/ip
 import { toastError, toastSuccess } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { cn } from "@/lib/utils";
+import { Hint } from "@/components/ui/tooltip";
 
 /** What the header says on the right. `now` is passed in so the function stays pure. */
 export function saveLabel(open: OpenNote, now: number): string {
@@ -108,14 +109,15 @@ export function NoteHeader({
               className="w-[70%] rounded-[4px] border border-border-strong bg-surface-input px-1 py-px font-sans text-[12.5px] text-text-primary outline-none"
             />
           ) : (
-            <button
-              type="button"
-              onClick={() => setEditing(title)}
-              className="max-w-full truncate align-bottom font-sans text-[12.5px] font-medium text-text-primary hover:underline"
-              title="Rename"
-            >
-              {title}
-            </button>
+            <Hint label="Rename">
+              <button
+                type="button"
+                onClick={() => setEditing(title)}
+                className="max-w-full truncate align-bottom font-sans text-[12.5px] font-medium text-text-primary hover:underline"
+              >
+                {title}
+              </button>
+            </Hint>
           )}
         </div>
 

@@ -21,6 +21,7 @@ import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn, sentence } from "@/lib/utils";
+import { Hint } from "@/components/ui/tooltip";
 import { isHtmlPath } from "@/lib/web-url";
 import { AccBody } from "@/screens/roadmap/bits";
 
@@ -78,8 +79,8 @@ const GIT_TITLE: Record<GitLetter, string> = {
 /** The A/M/D letter badge — letters with distinct treatments, never colour alone. */
 export function GitBadge({ letter }: { letter: GitLetter }) {
   return (
+    <Hint label={GIT_TITLE[letter]}>
     <span
-      title={GIT_TITLE[letter]}
       className={cn(
         "flex size-[15px] items-center justify-center rounded-[4px] border font-mono text-[10px]",
         letter === "A" && "border-border-strong bg-fill-hover text-text-primary",
@@ -89,6 +90,7 @@ export function GitBadge({ letter }: { letter: GitLetter }) {
     >
       {letter}
     </span>
+    </Hint>
   );
 }
 
@@ -319,7 +321,9 @@ function Row({
             trailing={
               <span className="flex shrink-0 items-center gap-1">
                 {node.hasChanges && (
-                  <span title="Contains changes" className="size-[5px] rounded-full bg-text-subtle" />
+                  <Hint label="Contains changes">
+                    <span className="size-[5px] rounded-full bg-text-subtle" />
+                  </Hint>
                 )}
                 <RowDots shown={selected} />
               </span>
@@ -346,19 +350,21 @@ export function FileTree(p: FileTreeProps) {
   return (
     <div data-chrome className={cn("flex h-full min-h-0 flex-col", p.className)}>
       <TreeHeader label={`Explorer · ${n} ${n === 1 ? "root" : "roots"}`}>
-        <TreeIconButton aria-label="New file" title="New file" onClick={p.onNewFile}>
-          <PlusGlyph size={13} />
-        </TreeIconButton>
-        <TreeIconButton aria-label="New folder" title="New folder" onClick={p.onNewFolder}>
-          <FolderPlusGlyph size={13} />
-        </TreeIconButton>
-        <TreeIconButton
-          aria-label="Project history"
-          title="Project history — saves, publish, bring down"
-          onClick={p.onOpenHistory}
-        >
-          <HistoryClockGlyph size={13} />
-        </TreeIconButton>
+        <Hint label="New file">
+          <TreeIconButton aria-label="New file" onClick={p.onNewFile}>
+            <PlusGlyph size={13} />
+          </TreeIconButton>
+        </Hint>
+        <Hint label="New folder">
+          <TreeIconButton aria-label="New folder" onClick={p.onNewFolder}>
+            <FolderPlusGlyph size={13} />
+          </TreeIconButton>
+        </Hint>
+        <Hint label="Project history — saves, publish, bring down">
+          <TreeIconButton aria-label="Project history" onClick={p.onOpenHistory}>
+            <HistoryClockGlyph size={13} />
+          </TreeIconButton>
+        </Hint>
       </TreeHeader>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 text-[12.5px] text-text-secondary">
         {p.roots.map((node, i) => (

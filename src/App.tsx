@@ -34,6 +34,7 @@ import {
   type PickerRecent,
 } from "@/lib/ipc";
 import { keydownInit, reclaimsFocus } from "@/lib/menu-keys";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
 import { RoadmapPane, dropCheckError } from "@/screens/roadmap/RoadmapPane";
 import { RepoPane, confirmDirty, evictRepo, newFileInRepo, openHistoryView, saveActiveFile } from "@/screens/repo/RepoPane";
@@ -142,7 +143,18 @@ function loadPaneLayout(dir: string): PaneLayout {
   }
 }
 
+/* One tooltip provider for the whole app — every Tooltip anywhere under it
+   shares the same 400ms delay and the same skip-delay grace period, which is
+   what makes a row of icon buttons feel like a row rather than 20 timers. */
 export default function App() {
+  return (
+    <TooltipProvider delayDuration={400}>
+      <AppShell />
+    </TooltipProvider>
+  );
+}
+
+function AppShell() {
   const [rows, setRows] = useState<PickerRecent[]>([]);
   const [agent, setAgent] = useState<"claude" | "codex">("claude");
   const [projects, setProjects] = useState<Map<string, ProjectEntry>>(new Map());

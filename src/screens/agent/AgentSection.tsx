@@ -24,6 +24,7 @@ import { toastError } from "@/overlays/toasts";
 import { Chronigirl, HistoryClockGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Hint } from "@/components/ui/tooltip";
 
 function fmtAgo(ms: number): string {
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -191,15 +192,16 @@ export function AgentSection({
         </span>
         <span className="flex-1" />
         <Popover open={histOpen} onOpenChange={setHistOpen}>
-          <PopoverTrigger asChild>
-            <button
-              aria-label="Previous sessions"
-              title="Previous sessions"
-              className="flex size-6 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
-            >
-              <HistoryClockGlyph size={12} />
-            </button>
-          </PopoverTrigger>
+          <Hint label="Previous sessions">
+            <PopoverTrigger asChild>
+              <button
+                aria-label="Previous sessions"
+                className="flex size-6 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+              >
+                <HistoryClockGlyph size={12} />
+              </button>
+            </PopoverTrigger>
+          </Hint>
           {histOpen && <HistoryPopoverBody dir={dir} onClose={() => setHistOpen(false)} />}
         </Popover>
         {live && (
@@ -210,16 +212,17 @@ export function AgentSection({
             End session
           </button>
         )}
-        <button
-          aria-label="Collapse the agent section"
-          title="Collapse — a slim strip stays"
-          onClick={onToggleCollapsed}
-          className="flex size-6 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
-        >
-          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="m3 7.5 3-3 3 3" />
-          </svg>
-        </button>
+        <Hint label="Collapse — a slim strip stays">
+          <button
+            aria-label="Collapse the agent section"
+            onClick={onToggleCollapsed}
+            className="flex size-6 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+          >
+            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="m3 7.5 3-3 3 3" />
+            </svg>
+          </button>
+        </Hint>
       </div>
       {children}
     </div>

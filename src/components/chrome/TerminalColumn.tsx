@@ -39,6 +39,7 @@ import { ptyWrite } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { ClaudeStar, CodexTile, PlusGlyph, XGlyph } from "./icons";
 import { Eyebrow, Kbd, Spinner } from "./atoms";
+import { Hint } from "@/components/ui/tooltip";
 
 export type TerminalAgent = "claude" | "codex";
 
@@ -313,45 +314,49 @@ export function TerminalColumn({
             </div>
           ),
         )}
-        <button
-          aria-label="New terminal"
-          title="New terminal — ⌘T"
-          onClick={onNewTerminal}
-          className="flex size-[26px] shrink-0 items-center justify-center rounded-[7px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
-        >
-          <PlusGlyph size={11} />
-        </button>
+        <Hint label="New terminal" mono="⌘T">
+          <button
+            aria-label="New terminal"
+            onClick={onNewTerminal}
+            className="flex size-[26px] shrink-0 items-center justify-center rounded-[7px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+          >
+            <PlusGlyph size={11} />
+          </button>
+        </Hint>
         <span className="flex-1" />
         <Eyebrow>Start</Eyebrow>
-        <button
-          aria-label="Start Claude Code"
-          title="Start Claude Code"
-          disabled={spawning != null}
-          onClick={() => onStartAgent("claude")}
-          className="flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-fill-hover disabled:opacity-55 disabled:hover:bg-transparent"
-        >
-          {spawning === "claude" ? <Spinner size={13} /> : <ClaudeStar size={16} />}
-        </button>
-        <button
-          aria-label="Start Codex"
-          title="Start Codex"
-          disabled={spawning != null}
-          onClick={() => onStartAgent("codex")}
-          className="flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-fill-hover disabled:opacity-55 disabled:hover:bg-transparent"
-        >
-          {spawning === "codex" ? <Spinner size={13} /> : <CodexTile />}
-        </button>
-        {onToggleCollapsed && (
+        <Hint label="Start Claude Code">
           <button
-            aria-label="Collapse the terminal section"
-            title="Collapse — a slim strip stays"
-            onClick={onToggleCollapsed}
-            className="flex size-6 shrink-0 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+            aria-label="Start Claude Code"
+            disabled={spawning != null}
+            onClick={() => onStartAgent("claude")}
+            className="flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-fill-hover disabled:opacity-55 disabled:hover:bg-transparent"
           >
-            <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="m3 4.5 3 3 3-3" />
-            </svg>
+            {spawning === "claude" ? <Spinner size={13} /> : <ClaudeStar size={16} />}
           </button>
+        </Hint>
+        <Hint label="Start Codex">
+          <button
+            aria-label="Start Codex"
+            disabled={spawning != null}
+            onClick={() => onStartAgent("codex")}
+            className="flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-fill-hover disabled:opacity-55 disabled:hover:bg-transparent"
+          >
+            {spawning === "codex" ? <Spinner size={13} /> : <CodexTile />}
+          </button>
+        </Hint>
+        {onToggleCollapsed && (
+          <Hint label="Collapse — a slim strip stays">
+            <button
+              aria-label="Collapse the terminal section"
+              onClick={onToggleCollapsed}
+              className="flex size-6 shrink-0 items-center justify-center rounded-[6px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+            >
+              <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="m3 4.5 3 3 3-3" />
+              </svg>
+            </button>
+          </Hint>
         )}
       </div>
 

@@ -22,6 +22,7 @@ import { BrandGlyph, ErrorGlyph, HelpGlyph, PlusGlyph, XGlyph } from "./icons";
 import { PaneCluster, type PaneUnit, type PaneVisibility } from "./PaneCluster";
 import { cn } from "@/lib/utils";
 import type { MarkIndex } from "./atoms";
+import { Hint } from "@/components/ui/tooltip";
 
 const MARK_BG = ["", "bg-mark-1", "bg-mark-2", "bg-mark-3", "bg-mark-4", "bg-mark-5", "bg-mark-6"];
 
@@ -140,14 +141,15 @@ export function TitleBar({
       className="flex h-11 shrink-0 items-center gap-3 border-b border-divider px-3.5"
     >
       <TrafficLights />
-      <button
-        aria-label="Home — all projects"
-        title="Home — all projects"
-        onClick={onHome}
-        className="flex size-7 shrink-0 items-center justify-center rounded-[7px] text-text-subtle hover:bg-fill-hover hover:text-text-secondary"
-      >
-        <BrandGlyph size={17} />
-      </button>
+      <Hint label="Home — all projects">
+        <button
+          aria-label="Home — all projects"
+          onClick={onHome}
+          className="flex size-7 shrink-0 items-center justify-center rounded-[7px] text-text-subtle hover:bg-fill-hover hover:text-text-secondary"
+        >
+          <BrandGlyph size={17} />
+        </button>
+      </Hint>
 
       {/* the strip shrinks before anything else on the bar does — min-w-0 lets
           it, and shrink-0 on every tab makes the overflow scroll, not squeeze */}
@@ -221,14 +223,15 @@ export function TitleBar({
           </div>
           <EdgeFades edges={edges} className="bottom-0" />
         </div>
-        <button
-          aria-label="Open another project"
-          title="Open another project — ⌘K"
-          onClick={onAdd}
-          className="flex size-7 shrink-0 items-center justify-center rounded-[7px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
-        >
-          <PlusGlyph size={11} />
-        </button>
+        <Hint label="Open another project" mono="⌘K">
+          <button
+            aria-label="Open another project"
+            onClick={onAdd}
+            className="flex size-7 shrink-0 items-center justify-center rounded-[7px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
+          >
+            <PlusGlyph size={11} />
+          </button>
+        </Hint>
       </div>
 
       {/* the drag gutter: it gives up its width to the tabs, but never all of
@@ -299,15 +302,16 @@ export function TitleBar({
       {onHelp && (
         <>
           <span className="mx-3 h-3.5 w-px shrink-0 bg-divider" aria-hidden />
-          <button
-            data-no-zoom
-            onClick={onHelp}
-            title="Guides, how-tos, and shortcuts — ⌘/"
-            className="inline-flex shrink-0 items-center gap-1.5 rounded-[7px] px-2 py-1 text-[11.5px] font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"
-          >
-            <HelpGlyph size={13} />
-            Need help?
-          </button>
+          <Hint label="Guides, how-tos, and shortcuts" mono="⌘/">
+            <button
+              data-no-zoom
+              onClick={onHelp}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-[7px] px-2 py-1 text-[11.5px] font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary"
+            >
+              <HelpGlyph size={13} />
+              Need help?
+            </button>
+          </Hint>
         </>
       )}
     </div>

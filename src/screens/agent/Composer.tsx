@@ -31,6 +31,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Hint } from "@/components/ui/tooltip";
 import { agentAttach, agentAttachPath, IMG_MIME } from "@/lib/ipc";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Autocomplete, findTrigger, handleKey, type PickerItem } from "./Autocomplete";
@@ -63,18 +64,19 @@ function ConfigSelect({ dir, optionId, title }: { dir: string; optionId: string;
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          data-config-select={optionId}
-          title={title}
-          className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
-        >
-          {current?.name ?? opt.name}
-          <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="m3 4.5 3 3 3-3" />
-          </svg>
-        </button>
-      </DropdownMenuTrigger>
+      <Hint label={title}>
+        <DropdownMenuTrigger asChild>
+          <button
+            data-config-select={optionId}
+            className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
+          >
+            {current?.name ?? opt.name}
+            <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="m3 4.5 3 3 3-3" />
+            </svg>
+          </button>
+        </DropdownMenuTrigger>
+      </Hint>
       <DropdownMenuContent
         data-config-menu={optionId}
         align="start"
@@ -114,20 +116,21 @@ function ModeSelect({
   const cur = options.find((o) => o.value === current);
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          data-config-select="mode"
-          data-mode-control
-          title={cur?.description ?? "How much the agent asks before acting"}
-          disabled={disabled}
-          className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
-        >
-          {cur?.name ?? "Plan"}
-          <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="m3 4.5 3 3 3-3" />
-          </svg>
-        </button>
-      </DropdownMenuTrigger>
+      <Hint label={cur?.description ?? "How much the agent asks before acting"}>
+        <DropdownMenuTrigger asChild>
+          <button
+            data-config-select="mode"
+            data-mode-control
+            disabled={disabled}
+            className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
+          >
+            {cur?.name ?? "Plan"}
+            <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="m3 4.5 3 3 3-3" />
+            </svg>
+          </button>
+        </DropdownMenuTrigger>
+      </Hint>
       <DropdownMenuContent data-config-menu="mode" align="start" side="top" className="w-[300px]">
         <DropdownMenuRadioGroup value={current} onValueChange={onPick}>
           {options.map((o) => (
@@ -478,32 +481,32 @@ export function Composer({
       {attachments.length > 0 && (
         <div data-chrome className="flex flex-wrap items-center gap-1.5">
           {attachments.map((a) => (
-            <span
-              key={a.id}
-              data-attach-chip
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData("application/x-chronicle-path", a.absPath);
-                e.dataTransfer.setData("text/plain", a.absPath);
-                e.dataTransfer.effectAllowed = "copy";
-              }}
-              className="inline-flex h-6 max-w-[180px] cursor-grab items-center gap-1.5 rounded-full bg-fill-subtle px-2.5 text-[11px] text-text-subtle active:cursor-grabbing"
-              title={`${a.absPath} — drag onto a terminal (hold Shift) to insert the path`}
-            >
-              {a.isImage ? (
-                <ImageGlyph size={12} dot={false} className="shrink-0 text-text-dim" />
-              ) : (
-                <PaperclipGlyph size={11} className="shrink-0 text-text-dim" />
-              )}
-              <span className="truncate">{a.name}</span>
-              <button
-                aria-label={`Remove ${a.name}`}
-                onClick={() => removeAttachment(a.id)}
-                className="flex text-text-dim hover:text-text-secondary"
+            <Hint key={a.id} label={`${a.absPath} — drag onto a terminal (hold Shift) to insert the path`}>
+              <span
+                data-attach-chip
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData("application/x-chronicle-path", a.absPath);
+                  e.dataTransfer.setData("text/plain", a.absPath);
+                  e.dataTransfer.effectAllowed = "copy";
+                }}
+                className="inline-flex h-6 max-w-[180px] cursor-grab items-center gap-1.5 rounded-full bg-fill-subtle px-2.5 text-[11px] text-text-subtle active:cursor-grabbing"
               >
-                <XGlyph size={8} />
-              </button>
-            </span>
+                {a.isImage ? (
+                  <ImageGlyph size={12} dot={false} className="shrink-0 text-text-dim" />
+                ) : (
+                  <PaperclipGlyph size={11} className="shrink-0 text-text-dim" />
+                )}
+                <span className="truncate">{a.name}</span>
+                <button
+                  aria-label={`Remove ${a.name}`}
+                  onClick={() => removeAttachment(a.id)}
+                  className="flex text-text-dim hover:text-text-secondary"
+                >
+                  <XGlyph size={8} />
+                </button>
+              </span>
+            </Hint>
           ))}
         </div>
       )}
@@ -566,14 +569,16 @@ export function Composer({
       </div>
       <div data-chrome className="flex items-center gap-[9px]">
         {!disabled && (
-          <button
-            data-agent-attach
-            title="Attach a file"
-            onClick={() => fileInput.current?.click()}
-            className="inline-flex h-[26px] items-center rounded-md border border-border-hairline px-2 text-text-muted hover:bg-fill-hover hover:text-text-primary"
-          >
-            <PaperclipGlyph size={13} />
-          </button>
+          <Hint label="Attach a file">
+            <button
+              data-agent-attach
+              aria-label="Attach a file"
+              onClick={() => fileInput.current?.click()}
+              className="inline-flex h-[26px] items-center rounded-md border border-border-hairline px-2 text-text-muted hover:bg-fill-hover hover:text-text-primary"
+            >
+              <PaperclipGlyph size={13} />
+            </button>
+          </Hint>
         )}
         {asksFirst && worksFreely && (
           <ModeSelect

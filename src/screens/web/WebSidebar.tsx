@@ -112,6 +112,9 @@ function RowAction({ label, onClick, className, children, onKeyDown, ...rest }: 
   label: string; onClick?: () => void;
 } & Omit<ComponentProps<"span">, "onClick" | "ref">) {
   return (
+    /* NOT a <Hint>: this span is what a menu trigger renders through, and a
+       Hint root would swallow the props that trigger injects. The native
+       `title` stays until the trigger chain is untangled. */
     <span
       {...rest}
       role="button"
