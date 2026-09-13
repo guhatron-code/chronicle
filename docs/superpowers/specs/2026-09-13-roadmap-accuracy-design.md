@@ -167,3 +167,62 @@ date" produces a manifest diff that adds the energy, web, notes and repo-editing
 - Automatic manifest edits without a person reviewing.
 - Rewriting existing manifests' rules to markers (the ledger covers them).
 - Per-item (`items`) evidence; that remains the separate SE feature.
+
+## Implementation notes (2026-09-13)
+
+- Round ids are `FX-<n>` (fix-round phases), not the `R<n>` shape implied earlier in
+  this doc; the marker instruction and the fix-round prompt both use `Chronicle-Phase:
+  FX-{n} done`.
+- A ledger entry's `at` is an epoch-millisecond timestamp (`epoch_ms()`), not an ISO
+  string.
+- "Bring it up to date" does not open a fresh agent pane. It reuses the same
+  background init session as first-run setup, seeded with a "REFRESH MODE. Since this
+  roadmap was written the repo moved on. Update only what changed, never drop a phase
+  the plan still contains, and recompute every generatedFrom hash. What changed:
+  {note}" instruction instead of the normal first-run prompt.
+- `StaleAlert` does not exist as a separate banner component; its job is done by the
+  needs-you rows (new plans/specs, a newer release, behind-upstream) rendered directly
+  in the roadmap list.
+- The marker command shown in phase detail and written into every generated prompt is
+  the two-message form: `git commit --allow-empty -m "Close <id>" -m "Chronicle-Phase:
+  <id> done"` (or the trailer appended as the commit's own last paragraph when the
+  commit already carries a body) — never a single `-m` string with an embedded
+  newline.
+- The "behind commits" needs-you row has no "Not now" suppression, unlike the new-plans
+  and newer-release rows (which key suppression off manifest mtime + a finding-set
+  hash in `localStorage`); behind-upstream always keeps showing until the branch is no
+  longer behind.
+- A `pool` phase is only ever lifted to `done` by an explicit marker commit or a
+  ledger entry (including a manual "Mark done"); no rule alone can resolve a pool
+  phase, since pool phases by definition have no ordering rule to evaluate.
+- The release detector only reports a `newer_release` finding for a tag that both (a)
+  is mentioned by the manifest/detector logic as newer than the manifest's known
+  release, and (b) actually exists as a git tag in this repo — it never fabricates or
+  guesses a version.
+- The ledger is written (`latch`) only on a scan of the currently opened project, or
+  on an explicit `chronicle --derive <dir>` call (which always runs with
+  `write=true`); a background picker-preview derive (`derive_for_dir(.., false)`)
+  never writes it.
+- `latch` (the scan-driven ledger write) and `ledger_mark` (the manual "Mark
+  done"/"Mark not done" action) both go through `ledger::record`, which takes the same
+  lock, so a concurrent scan and a manual toggle cannot race and corrupt the ledger.
+
+### Live check on this repo (2026-09-13)
+
+Ran `chronicle --derive` against this repo before and after a marker commit:
+
+- Before the marker: SE derived `done` with proof `commit_subject 1d75d57`; M-1
+  derived `now` (its rule never matched in this repo's history); M-2 and AA derived
+  `later`. `new_plans` listed six docs newer than the manifest — two plans
+  (`2026-09-10-repo-editing.md`, `2026-09-13-roadmap-accuracy.md`) and four specs
+  (`2026-09-08-energy-efficiency-design.md`, `2026-09-09-notes-design.md`,
+  `2026-09-10-repo-editing-and-history-design.md`,
+  `2026-09-13-roadmap-accuracy-design.md`). `newer_release` was `["v0.8.1",
+  "v0.5.1"]`.
+- After `git commit --allow-empty -m "Close M-1" -m "Chronicle-Phase: M-1 done"`: M-1
+  derived `done` with proof `marker <short-hash>` and latched into
+  `.chronicle/roadmap-ledger.json`; M-2 advanced to `now`. On this second derive SE's
+  proof read as `ledger commit_subject 1d75d57` (ledger precedence over re-running the
+  subject-search rule), not the bare `commit_subject 1d75d57` from the first run —
+  both are the same underlying evidence, just reported from the ledger on the second
+  pass.

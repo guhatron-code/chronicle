@@ -132,8 +132,16 @@ current phase's first paste row.
 
 ## CLI
 
-`chronicle --derive <project-dir>` prints `{ "name", "statuses": [{id, state, label}] }` —
-use it to verify a manifest without opening the app.
+`chronicle --derive <project-dir>` prints
+`{ "name", "statuses": [{id, state, label, proof?}], "new_plans", "newer_release",
+"ledger_set_aside", "warnings" }` — use it to verify a manifest without opening the app.
+`proof` is present only on a `done` phase and reads as one of `"marker <hash>"`,
+`"ledger <by> <proof>"`, `"tag <name>"`, `"commit_subject <hash>"`, or
+`"file_matches <path>"`. `new_plans` lists plan/spec docs newer than the manifest;
+`newer_release` is `[latest_tag, manifest_tag]` when a newer release exists, else
+`null`. Passing this flag also writes `.chronicle/roadmap-ledger.json` (the derive
+CLI always runs with `write=true`) — running it against a project you're not
+actively working updates that project's ledger.
 
 ## Waiting phases
 
