@@ -40,8 +40,10 @@ alias, progress-file + commit-subject status, a gate label).
 Principles that make the difference between accurate and decorative:
 
 - **Status rules must point at ground truth**, in order of preference: git tags → per-phase
-  report/progress files → commit subjects (regex, `(?i)` for case). Give each phase multiple
-  `done_when` alternatives when the project records closure in more than one way.
+  report/progress files → commit subjects (regex, `(?i)` for case). For phases not yet
+  started, the Chronicle-Phase marker replaces all of these (see SCHEMA.md, "Prefer the
+  marker"). Give each phase multiple `done_when` alternatives when the project records
+  closure in more than one way.
 - **Anchor `file_matches` patterns tightly.** A loose pattern will match the plan *talking
   about* the marker (e.g. prose saying "gains `Status: RUN` when spent" matching a
   `Status: RUN` rule). Require the literal punctuation of the real marker
@@ -87,6 +89,10 @@ If a `chronicle.json` already exists (stale hashes, or the user says the roadmap
 diff the plan documents against the manifest, update only what changed (phases added/renamed,
 new status markers, new paste files), recompute all `generatedFrom` hashes, and re-verify
 (step 3). Never drop existing phases the plan still contains.
+
+When the invocation carries a "REFRESH MODE … What changed:" note, that list is the diff to
+work from: read each named file or tag, add or update the phases it describes, and leave
+everything else untouched.
 
 ## Copy rules
 

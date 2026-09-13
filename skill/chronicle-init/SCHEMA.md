@@ -15,6 +15,7 @@ every few seconds while the project is open.
     ]
   },
   "workBranch": "main",               // optional; being on any other branch raises a built-in action
+  "planDirs": ["planning"],           // optional; folders Chronicle watches for plan files it should be told about (docs/superpowers/specs and /plans are always watched)
   "generatedFrom": [                  // staleness check — recompute sha256 at every write
     { "path": "canon/PLAN.md", "sha256": "<hex>" }
   ],
@@ -57,6 +58,11 @@ All file access is jailed to the declared roots.
 
 ## Status derivation
 
+- A phase is **done** when any commit on any branch carries the trailer
+  `Chronicle-Phase: <id> done` (a *marker*); this needs no rule and outranks every rule,
+  including `pool`. Chronicle also keeps a ledger (`.chronicle/roadmap-ledger.json`) of
+  every phase it has ever seen done, so a rule that stops matching never un-finishes a
+  phase. Order of truth: marker → ledger → `done_when`.
 - A phase is **done** when ANY `done_when` condition holds.
 - The **first** phase (document order) that is not done, not `pool`, not `window` is **now**.
 - Everything after is **later**; `window` phases show as their own dashed state.
@@ -83,6 +89,13 @@ Exactly one key per object, plus optional `"not": true` to invert:
 | `commit_subject` | `"(?i)phase[- ]3 sign-off"` | any commit subject on ANY branch, however old (the whole history the graph shows) |
 | `file_glob` | `{ "dir": "@canon", "contains": "handoff" }` | some filename directly in `dir` contains the substring (case-insensitive). `contains` is REQUIRED — without it the rule can't be checked |
 | `worktree_branch` | `"medan"` | a LINKED worktree (not the main checkout) is on that branch |
+
+**Prefer the marker for work that hasn't happened yet.** For a phase whose prompt you write
+or update, end the prompt with: "When the work is complete and verified, make the final
+commit with the trailer `Chronicle-Phase: <id> done` as its own last paragraph." Then the
+phase needs no `done_when` at all. Keep `done_when` rules for phases that already closed
+before Chronicle existed. Never edit a prompt file you didn't write; tell the user the
+marker command for that phase instead.
 
 **Pattern discipline:** regexes are matched against the whole file. Anchor tightly — require
 the marker's literal punctuation, or use `(?m)^` — so prose *describing* the marker can't

@@ -1721,7 +1721,13 @@ async fn agent_attach_path(roots: State<'_, OpenRoots>, dir: String, path: Strin
     attach_from_path(&p.dir, &PathBuf::from(&path))
 }
 
-const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written notes (bugs, issues, ideas — with optional screenshots and links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every note below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its note path. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the notes' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly. The prompt MUST also instruct the executor: after each item is completed AND verified, set `status: done` in that note's front matter (the file at `path`, under .chronicle/notes/); change nothing else in the file — this is how the pane and the roadmap track the round live.\n\nDo not change any other file except the two above (and the note status updates the executor makes later). The notes are in `{TASKS}` — read that file (a JSON array of {path, title, body}) before writing anything.\n";
+/// The one line every prompt Chronicle writes ends with. The two-message commit form
+/// matters: git only reads a trailer that sits in its own paragraph after the subject.
+fn marker_instruction(id: &str) -> String {
+    format!("When every item above is complete and verified, make the final commit with this trailer as its own last paragraph: `Chronicle-Phase: {id} done`. If the work is already committed, add an empty commit carrying it: git commit --allow-empty -m \"Close {id}\" -m \"Chronicle-Phase: {id} done\". Chronicle reads that trailer as the proof the phase is done.")
+}
+
+const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written notes (bugs, issues, ideas — with optional screenshots and links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every note below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its note path. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the notes' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly. The prompt MUST also instruct the executor: after each item is completed AND verified, set `status: done` in that note's front matter (the file at `path`, under .chronicle/notes/); change nothing else in the file — this is how the pane and the roadmap track the round live. The prompt MUST also end with this instruction, verbatim with the round number filled in: when every item is complete and verified, make the final commit with the trailer `Chronicle-Phase: FX-{N} done` as its own last paragraph (or `git commit --allow-empty -m \"Close FX-{N}\" -m \"Chronicle-Phase: FX-{N} done\"` if the work is already committed).\n\nDo not change any other file except the two above (and the note status updates the executor makes later). The notes are in `{TASKS}` — read that file (a JSON array of {path, title, body}) before writing anything.\n";
 
 fn fixes_run_key(dir: &str) -> Result<(String, PathBuf), String> {
     let (key, log) = canon_key(dir)?;
@@ -2143,7 +2149,8 @@ async fn round_execute(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init:
         }
     }
     let prompt = format!(
-        "Read {prompt_rel} and fixes/phase_{n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: every item, verified honestly, and after each item completes set `status: done` in that note's front matter (the file named by the item's path, under .chronicle/notes/), changing nothing else in that file."
+        "Read {prompt_rel} and fixes/phase_{n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: every item, verified honestly, and after each item completes set `status: done` in that note's front matter (the file named by the item's path, under .chronicle/notes/), changing nothing else in that file. {}",
+        marker_instruction(&format!("FX-{n}"))
     );
     let logf = std::fs::File::create(&log).map_err(|e| e.to_string())?;
     let errf = logf.try_clone().map_err(|e| e.to_string())?;
@@ -4102,6 +4109,14 @@ mod r3_tests {
         git(&d, &["tag", "v0.1.0"]);
         let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
         assert_eq!(newer_release(&ctx, &json!({"stages": []})), None, "no tag mentioned means nothing to be behind");
+    }
+
+    #[test]
+    fn every_prompt_chronicle_writes_asks_for_the_marker() {
+        let s = marker_instruction("FX-3");
+        assert!(s.contains("Chronicle-Phase: FX-3 done"));
+        assert!(s.contains("--allow-empty"));
+        assert!(FIXES_PROMPT_HEAD.contains("Chronicle-Phase: FX-{N} done"));
     }
 }
 
