@@ -21,6 +21,7 @@ use regex::Regex;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -573,6 +574,8 @@ struct Ctx {
     /// (short hash, subject) for EVERY commit on every branch, newest first.
     /// Unbounded on purpose: a proving commit must never fall out of a window.
     subjects: Vec<(String, String)>,
+    /// phase id → full hash of the newest commit carrying `Chronicle-Phase: <id> done`
+    markers: HashMap<String, String>,
 }
 
 impl Ctx {
@@ -588,6 +591,8 @@ impl Ctx {
                     None => (String::new(), l.to_string()),
                 })
                 .collect(),
+            markers: parse_markers(&git_in(&p.repo, &["log", "--all",
+                "--format=%H%x1e%(trailers:key=Chronicle-Phase,valueonly,separator=%x1f)"])),
         }
     }
     fn resolve(&self, path: &str) -> PathBuf {
@@ -623,6 +628,60 @@ impl Ctx {
         }
         None
     }
+}
+
+/// `git log --format=%H%x1e%(trailers:key=Chronicle-Phase,valueonly,separator=%x1f)`
+/// gives one line per commit: `<hash>\x1e<value>\x1f<value>…` (the value list is
+/// empty for a commit with no such trailer). Only `<id> done` counts; the first
+/// occurrence (newest commit) wins.
+fn parse_markers(raw: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for line in raw.lines() {
+        let Some((hash, values)) = line.split_once('\u{1e}') else { continue };
+        for v in values.split('\u{1f}') {
+            let v = v.trim();
+            let Some(id) = v.strip_suffix(" done") else { continue };
+            let id = id.trim();
+            if id.is_empty() { continue }
+            out.entry(id.to_string()).or_insert_with(|| hash.trim().to_string());
+        }
+    }
+    out
+}
+
+/// The first condition in `conds` that holds, so a status can say what proved it.
+fn proving_cond(ctx: &Ctx, conds: Option<&Value>) -> Option<Value> {
+    conds.and_then(|v| v.as_array())?
+        .iter().find(|c| eval_cond(ctx, c) == Some(true)).cloned()
+}
+
+/// `(by, proof)` for a condition that holds: the rule key and the thing it matched.
+fn proof_of(ctx: &Ctx, cond: &Value) -> (String, String) {
+    if let Some(t) = cond.get("tag").and_then(|v| v.as_str()) {
+        return ("tag".into(), t.into());
+    }
+    if let Some(pat) = cond.get("commit_subject").and_then(|v| v.as_str()) {
+        let hash = Regex::new(pat).ok()
+            .and_then(|re| ctx.subjects.iter().find(|(_, s)| re.is_match(s)).map(|(h, _)| h.clone()))
+            .unwrap_or_default();
+        return ("commit_subject".into(), hash);
+    }
+    if let Some(p) = cond.get("file_exists").and_then(|v| v.as_str()) {
+        return ("file_exists".into(), p.into());
+    }
+    if let Some(p) = cond.pointer("/file_matches/path").and_then(|v| v.as_str()) {
+        return ("file_matches".into(), p.into());
+    }
+    if let Some(d) = cond.pointer("/file_glob/dir").and_then(|v| v.as_str()) {
+        return ("file_glob".into(), d.into());
+    }
+    if cond.get("file_glob").is_some() {
+        return ("file_glob".into(), ".".into());
+    }
+    if let Some(b) = cond.get("worktree_branch").and_then(|v| v.as_str()) {
+        return ("worktree_branch".into(), b.into());
+    }
+    ("rule".into(), String::new())
 }
 
 /// One condition. Supported keys (exactly one per object, plus optional "not": true):
@@ -829,6 +888,10 @@ struct PhaseState {
     id: String,
     state: String, // done | now | later | window | pool
     label: String,
+    /// What proved a done phase: "marker <hash>", "ledger <by> <proof>", "tag v1",
+    /// "commit_subject 1d75d57", "file_matches PROGRESS.md" … None when not done.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proof: Option<String>,
 }
 
 fn derive_statuses(ctx: &Ctx, manifest: &Value) -> Vec<PhaseState> {
@@ -841,7 +904,16 @@ fn derive_statuses(ctx: &Ctx, manifest: &Value) -> Vec<PhaseState> {
             let pool = phase.get("pool").and_then(|v| v.as_bool()).unwrap_or(false);
             let window = phase.get("window").and_then(|v| v.as_bool()).unwrap_or(false);
             let status = phase.get("status").cloned().unwrap_or(json!({}));
-            let done = any_conds(ctx, status.get("done_when"));
+            // order of truth: a marker commit, then the rules the manifest wrote
+            let proof: Option<String> = if let Some(h) = ctx.markers.get(&id) {
+                Some(format!("marker {}", &h[..h.len().min(7)]))
+            } else {
+                proving_cond(ctx, status.get("done_when")).map(|c| {
+                    let (by, p) = proof_of(ctx, &c);
+                    if p.is_empty() { by } else { format!("{by} {p}") }
+                })
+            };
+            let done = proof.is_some();
             let labels = status.get("current_labels").and_then(|v| v.as_array()).cloned().unwrap_or_default();
             let pick_label = |fallback: &str| -> String {
                 for l in &labels {
@@ -853,30 +925,31 @@ fn derive_statuses(ctx: &Ctx, manifest: &Value) -> Vec<PhaseState> {
             };
             // fix-round overlay phases carry their precomputed truth (from the notes)
             if let Some(frs) = phase.get("fixRoundState") {
-                let rdone = frs.get("done").and_then(|v| v.as_bool()).unwrap_or(false);
+                let rdone = frs.get("done").and_then(|v| v.as_bool()).unwrap_or(false)
+                    || ctx.markers.contains_key(&id);
                 let label = frs.get("label").and_then(|v| v.as_str()).unwrap_or("ready to run").to_string();
                 let ps = if rdone {
-                    PhaseState { id, state: "done".into(), label: "done".into() }
+                    PhaseState { id, state: "done".into(), label: "done".into(), proof: Some("notes".into()) }
                 } else if !current_taken {
                     current_taken = true;
-                    PhaseState { id, state: "now".into(), label }
+                    PhaseState { id, state: "now".into(), label, proof: None }
                 } else {
-                    PhaseState { id, state: "later".into(), label }
+                    PhaseState { id, state: "later".into(), label, proof: None }
                 };
                 out.push(ps);
                 continue;
             }
-            let ps = if pool {
-                PhaseState { id, state: "pool".into(), label: "ideas".into() }
-            } else if done {
-                PhaseState { id, state: "done".into(), label: "done".into() }
+            let ps = if done {
+                PhaseState { id, state: "done".into(), label: "done".into(), proof: proof.clone() }
+            } else if pool {
+                PhaseState { id, state: "pool".into(), label: "ideas".into(), proof: None }
             } else if window {
-                PhaseState { id, state: "window".into(), label: pick_label("ongoing") }
+                PhaseState { id, state: "window".into(), label: pick_label("ongoing"), proof: None }
             } else if !current_taken {
                 current_taken = true;
-                PhaseState { id, state: "now".into(), label: pick_label("up next") }
+                PhaseState { id, state: "now".into(), label: pick_label("up next"), proof: None }
             } else {
-                PhaseState { id, state: "later".into(), label: "later".into() }
+                PhaseState { id, state: "later".into(), label: "later".into(), proof: None }
             };
             out.push(ps);
         }
@@ -3300,7 +3373,7 @@ mod r1_tests {
     }
 
     fn ctx_for(repo: &Path) -> Ctx {
-        Ctx { repo: repo.to_path_buf(), extras: vec![], tags: HashSet::new(), subjects: vec![] }
+        Ctx { repo: repo.to_path_buf(), extras: vec![], tags: HashSet::new(), subjects: vec![], markers: HashMap::new() }
     }
 
     #[test]
@@ -3680,6 +3753,57 @@ mod r3_tests {
         assert_eq!(eval_cond(&ctx, &json!({"commit_subject": "(?i)per-step evidence"})), Some(true));
         assert!(ctx.subjects[0].0.len() >= 7, "each subject carries its short hash");
     }
+
+    #[test]
+    fn markers_are_read_from_trailers() {
+        let raw = "aaaa1111\u{1e}M-1 done\u{1f}SE done\nbbbb2222\u{1e}\ncccc3333\u{1e}M-1 done\ndddd4444\u{1e}Z-9 started\n";
+        let m = parse_markers(raw);
+        assert_eq!(m.get("M-1").map(String::as_str), Some("aaaa1111"), "newest marker wins");
+        assert_eq!(m.get("SE").map(String::as_str), Some("aaaa1111"), "several trailers on one commit");
+        assert!(m.get("Z-9").is_none(), "only `<id> done` counts");
+        assert_eq!(m.len(), 2);
+    }
+
+    #[test]
+    fn a_marker_commit_proves_a_phase_with_no_rule() {
+        let d = repo("marker");
+        git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty",
+                  "-m", "chore: close the slash menu phase", "-m", "Chronicle-Phase: M-1 done"]);
+        let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
+        assert!(ctx.markers.contains_key("M-1"));
+        let m = json!({"stages": [{"phases": [
+            {"id": "M-1", "status": {"done_when": [{"commit_subject": "never matches"}]}},
+            {"id": "M-2", "status": {"done_when": [{"tag": "phase-1"}]}},
+            {"id": "ID", "pool": true}
+        ]}]});
+        let st = derive_statuses(&ctx, &m);
+        assert_eq!(st[0].state, "done");
+        assert!(st[0].proof.as_deref().unwrap_or("").starts_with("marker "), "{:?}", st[0].proof);
+        assert_eq!(st[1].state, "now");
+        assert_eq!(st[1].proof, None);
+        assert_eq!(st[2].state, "pool");
+        // a pool phase with a marker is done too: the marker outranks any rule
+        git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty",
+                  "-m", "chore: the shelf item shipped", "-m", "Chronicle-Phase: ID done"]);
+        let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
+        assert_eq!(derive_statuses(&ctx, &m)[2].state, "done");
+    }
+
+    #[test]
+    fn a_rule_that_fires_names_its_proof() {
+        let d = repo("proof");
+        git(&d, &["tag", "phase-1"]);
+        std::fs::write(d.join("REPORT.md"), "## R-1 · closed\n").unwrap();
+        let ctx = Ctx::build(&Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None });
+        assert_eq!(proof_of(&ctx, &json!({"tag": "phase-1"})), ("tag".to_string(), "phase-1".to_string()));
+        let (by, proof) = proof_of(&ctx, &json!({"commit_subject": "(?i)first save"}));
+        assert_eq!(by, "commit_subject");
+        assert_eq!(proof, ctx.subjects[0].0, "the matching commit's short hash");
+        assert_eq!(proof_of(&ctx, &json!({"file_matches": {"path": "REPORT.md", "pattern": "(?m)^## R-1"}})),
+                   ("file_matches".to_string(), "REPORT.md".to_string()));
+        let m = json!({"stages": [{"phases": [{"id": "A", "status": {"done_when": [{"tag": "nope"}, {"tag": "phase-1"}]}}]}]});
+        assert_eq!(derive_statuses(&ctx, &m)[0].proof.as_deref(), Some("tag phase-1"));
+    }
 }
 
 #[cfg(test)]
@@ -3750,7 +3874,7 @@ mod r4_tests {
         assert_eq!(fix["name"], "Bug fixes");
         assert_eq!(fix["paste"][0]["path"], "fixes/phase_1_fixes_prompt.md");
 
-        let ctx = Ctx { repo: d.clone(), extras: vec![], tags: HashSet::new(), subjects: vec![] };
+        let ctx = Ctx { repo: d.clone(), extras: vec![], tags: HashSet::new(), subjects: vec![], markers: HashMap::new() };
         let sts = derive_statuses(&ctx, &merged);
         let m: std::collections::HashMap<&str, (&str, &str)> = sts.iter()
             .map(|s| (s.id.as_str(), (s.state.as_str(), s.label.as_str()))).collect();
