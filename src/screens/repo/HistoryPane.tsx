@@ -19,7 +19,7 @@ import {
 import { cn, sentence } from "@/lib/utils";
 import { AccBody } from "@/screens/roadmap/bits";
 import { GitBadge, type GitLetter } from "./FileTree";
-import { Hint } from "@/components/ui/tooltip";
+import { Hint, hintWhileDisabled } from "@/components/ui/tooltip";
 
 /* ---- data types ---- */
 
@@ -143,10 +143,19 @@ function GraphLanes({ commits, branches }: { commits: Commit[]; branches: Branch
   );
 }
 
+const DRAFT_HINT = "Claude drafts a message from the changes — you can edit it";
+
 function AuthorTile({ author }: { author: CommitAuthor }) {
   return (
+    /* role + aria-label, not the tooltip: Radix only wires aria-describedby
+       while the tooltip is open, and this span is not focusable, so a reader
+       would otherwise meet an initial or a glyph with no name at all. */
     <Hint label={author.kind === "agent" ? "Agent save" : "You"}>
-      <span className="flex size-4 items-center justify-center rounded-xs bg-surface-card-raised text-[8px] font-semibold text-text-subtle">
+      <span
+        role="img"
+        aria-label={author.kind === "agent" ? "Agent save" : "You"}
+        className="flex size-4 items-center justify-center rounded-xs bg-surface-card-raised text-[8px] font-semibold text-text-subtle"
+      >
         {author.kind === "agent" ? <AgentStarGlyph size={8} /> : author.initials}
       </span>
     </Hint>
@@ -485,9 +494,10 @@ export function HistoryPane(p: HistoryPaneProps) {
                 )}
               />
               {p.onDraftMessage && (
-                <Hint label="Claude drafts a message from the changes — you can edit it">
+                <Hint label={DRAFT_HINT}>
                   <button
                     disabled={p.drafting || nothingToSave}
+                    title={hintWhileDisabled(p.drafting || nothingToSave, DRAFT_HINT)}
                     onClick={p.onDraftMessage}
                     className="flex h-9 shrink-0 items-center gap-1.5 rounded-md border border-border-strong px-[11px] text-[11.5px] font-medium text-text-secondary hover:bg-fill-hover hover:text-text-primary disabled:opacity-45 disabled:hover:bg-transparent"
                   >

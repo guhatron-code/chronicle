@@ -25,6 +25,7 @@ const FLOATING = [
   "components/ui/dropdown-menu.tsx",
   "components/ui/context-menu.tsx",
   "components/ui/popover.tsx",
+  "components/ui/tooltip.tsx",
   "components/ui/dialog.tsx",
   "components/ui/alert-dialog.tsx",
 ];
@@ -81,7 +82,11 @@ describe("the shared menu skin", () => {
   });
 
   it("is what the context menu and the popover are built from", () => {
-    for (const rel of ["components/ui/context-menu.tsx", "components/ui/popover.tsx"]) {
+    for (const rel of [
+      "components/ui/context-menu.tsx",
+      "components/ui/popover.tsx",
+      "components/ui/tooltip.tsx",
+    ]) {
       expect(src(rel)).toContain("MENU_SURFACE_BASE");
     }
   });

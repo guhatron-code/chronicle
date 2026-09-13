@@ -175,7 +175,7 @@ export function CommandPalette({
               </CommandGroup>
             )}
 
-            <CommandSeparator className="mx-1 my-2 bg-divider" />
+            <CommandSeparator className="mx-1 my-2" />
 
             <CommandGroup>
               <CommandItem

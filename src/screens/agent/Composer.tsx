@@ -482,7 +482,12 @@ export function Composer({
         <div data-chrome className="flex flex-wrap items-center gap-1.5">
           {attachments.map((a) => (
             <Hint key={a.id} label={`${a.absPath} — drag onto a terminal (hold Shift) to insert the path`}>
+              {/* role="group" so the label is actually exposed — a bare span is
+                  generic, and ARIA forbids naming that; the chip is not
+                  focusable, so the tooltip cannot carry the description */}
               <span
+                role="group"
+                aria-label={`${a.name} · ${a.absPath} — drag onto a terminal (hold Shift) to insert the path`}
                 data-attach-chip
                 draggable
                 onDragStart={(e) => {

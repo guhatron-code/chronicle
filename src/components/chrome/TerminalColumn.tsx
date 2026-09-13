@@ -39,7 +39,7 @@ import { ptyWrite } from "@/lib/ipc";
 import { cn } from "@/lib/utils";
 import { ClaudeStar, CodexTile, PlusGlyph, XGlyph } from "./icons";
 import { Eyebrow, Kbd, Spinner } from "./atoms";
-import { Hint } from "@/components/ui/tooltip";
+import { Hint, hintWhileDisabled } from "@/components/ui/tooltip";
 
 export type TerminalAgent = "claude" | "codex";
 
@@ -329,6 +329,7 @@ export function TerminalColumn({
           <button
             aria-label="Start Claude Code"
             disabled={spawning != null}
+            title={hintWhileDisabled(spawning != null, "Start Claude Code")}
             onClick={() => onStartAgent("claude")}
             className="flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-fill-hover disabled:opacity-55 disabled:hover:bg-transparent"
           >
@@ -339,6 +340,7 @@ export function TerminalColumn({
           <button
             aria-label="Start Codex"
             disabled={spawning != null}
+            title={hintWhileDisabled(spawning != null, "Start Codex")}
             onClick={() => onStartAgent("codex")}
             className="flex size-[30px] shrink-0 items-center justify-center rounded-md hover:bg-fill-hover disabled:opacity-55 disabled:hover:bg-transparent"
           >

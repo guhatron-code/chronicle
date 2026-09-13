@@ -5,7 +5,7 @@
  * disables ("The last pane stays open"). Keyboard twins: ⌥⌘1/2/3.
  */
 import { cn } from "@/lib/utils";
-import { Hint } from "@/components/ui/tooltip";
+import { Hint, hintWhileDisabled } from "@/components/ui/tooltip";
 
 export type PaneUnit = "content" | "agent" | "terminal";
 export type PaneVisibility = Record<PaneUnit, boolean>;
@@ -42,17 +42,17 @@ export function PaneCluster({
       {(["content", "agent", "terminal"] as PaneUnit[]).map((unit) => {
         const visible = visibility[unit];
         const last = visible && visibleCount === 1; // the floor: never hide the last unit
+        const label = last ? "The last pane stays open" : `${visible ? "Hide" : "Show"} ${NAME[unit]}`;
         return (
-          <Hint
-            key={unit}
-            label={last ? "The last pane stays open" : `${visible ? "Hide" : "Show"} ${NAME[unit]}`}
-            mono={last ? undefined : KBD[unit]}
-          >
+          <Hint key={unit} label={label} mono={last ? undefined : KBD[unit]}>
             <button
-              aria-label={last ? "The last pane stays open" : `${visible ? "Hide" : "Show"} ${NAME[unit]}`}
+              aria-label={label}
               aria-pressed={visible}
               data-pane-toggle={unit}
               disabled={last}
+              // the whole point of this label is to explain the inert state, so
+              // it cannot depend on a tooltip a disabled button can never open
+              title={hintWhileDisabled(last, label)}
               onClick={() => onToggle(unit)}
               className={cn(
                 "flex size-6 items-center justify-center rounded-sm",

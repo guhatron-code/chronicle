@@ -92,4 +92,24 @@ function Hint({
   )
 }
 
-export { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider, Hint }
+/** A disabled control dispatches no pointer events, so Radix can never open a
+ *  tooltip on one — and a hint that only exists while the control is inert (the
+ *  pane cluster's "the last pane stays open") would then explain nothing at the
+ *  one moment it is needed. WebKit still draws a native `title` on a disabled
+ *  element, so that carries the hint for exactly as long as the `Hint` cannot.
+ *  Pair it with the same `Hint`: only one of the two is ever live.
+ *
+ *      <Hint label={L}><button disabled={d} title={hintWhileDisabled(d, L)} …/></Hint>
+ */
+function hintWhileDisabled(disabled: boolean, label: string): string | undefined {
+  return disabled ? label : undefined
+}
+
+export {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+  Hint,
+  hintWhileDisabled,
+}

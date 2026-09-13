@@ -80,7 +80,11 @@ const GIT_TITLE: Record<GitLetter, string> = {
 export function GitBadge({ letter }: { letter: GitLetter }) {
   return (
     <Hint label={GIT_TITLE[letter]}>
+    {/* the letter alone means nothing to a reader, and this span never takes
+       focus, so the name has to live on the element, not in the tooltip */}
     <span
+      role="img"
+      aria-label={GIT_TITLE[letter]}
       className={cn(
         "flex size-[15px] items-center justify-center rounded-xs border font-mono text-[10px]",
         letter === "A" && "border-border-strong bg-fill-hover text-text-primary",
@@ -322,7 +326,7 @@ function Row({
               <span className="flex shrink-0 items-center gap-1">
                 {node.hasChanges && (
                   <Hint label="Contains changes">
-                    <span className="size-[5px] rounded-full bg-text-subtle" />
+                    <span role="img" aria-label="Contains changes" className="size-[5px] rounded-full bg-text-subtle" />
                   </Hint>
                 )}
                 <RowDots shown={selected} />

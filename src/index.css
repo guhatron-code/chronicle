@@ -270,7 +270,11 @@
 
 /* §1.9 Stacking — the one ladder every floating surface climbs. Before this
    the app had five ad-hoc values (10, 20, 30, 40, 50) and no way to tell which
-   was meant to win. Consumed as `z-(--z-popover)`, `z-(--z-modal)`, … */
+   was meant to win. Consumed as `z-(--z-popover)`, `z-(--z-modal)`, …
+
+   The one trap: a menu, popover or tooltip mounted INSIDE a dialog sits on the
+   popover rung and would paint under the modal. Nothing nests that way today;
+   the first one that does needs `className="z-(--z-modal)"` on its content. */
 :root {
   --z-popover: 30;
   --z-overlay: 40;
