@@ -2,8 +2,7 @@
 //! `main()` fronts it twice: `chronicle --mcp <dir>` (stdio MCP) and `chronicle <group>
 //! <verb>` (CLI). Notes and state need no running app.
 //!
-//! wired up by the CLI (cli.rs) and the MCP server (mcp.rs); until then nothing calls it
-#![allow(dead_code)]
+//! wired up by the CLI (cli.rs) and the MCP server (mcp.rs).
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -15,7 +14,10 @@ pub(crate) struct Outcome { pub summary: String, pub data: Value }
 
 pub(crate) struct ToolSpec {
     pub name: &'static str,
+    // Read by the MCP server (schema advertised to the model), not yet by the CLI.
+    #[allow(dead_code)]
     pub description: &'static str,
+    #[allow(dead_code)]
     pub input_schema: Value,
 }
 

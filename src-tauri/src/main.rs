@@ -16,6 +16,7 @@ mod menu;
 mod notes;
 mod ledger;
 mod agent_api;
+mod cli;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -3422,6 +3423,7 @@ fn launch_open_dir(lo: State<LaunchOpen>) -> Option<String> {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if let Some(code) = cli::run(&args[1..]) { std::process::exit(code); }
     let launch_open = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1).cloned());
     if let Some(i) = args.iter().position(|a| a == "--derive") {
         let dir = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
