@@ -188,10 +188,11 @@ date" produces a manifest diff that adds the energy, web, notes and repo-editing
   <id> done"` (or the trailer appended as the commit's own last paragraph when the
   commit already carries a body) — never a single `-m` string with an embedded
   newline.
-- The "behind commits" needs-you row has no "Not now" suppression, unlike the new-plans
-  and newer-release rows (which key suppression off manifest mtime + a finding-set
-  hash in `localStorage`); behind-upstream always keeps showing until the branch is no
-  longer behind.
+- None of the behind rows has a "Not now" suppression: no `localStorage` key, no
+  finding-set hash, nothing dismissible. The new-plans row, the newer-release row and
+  the behind-upstream row all keep showing until the thing they name is no longer
+  true — the roadmap is brought up to date, or the branch catches up. The confirm
+  dialog's cancel ("Not now") only declines that one refresh run; the row stays.
 - A `pool` phase is only ever lifted to `done` by an explicit marker commit or a
   ledger entry (including a manual "Mark done"); no rule alone can resolve a pool
   phase, since pool phases by definition have no ordering rule to evaluate.
@@ -200,9 +201,10 @@ date" produces a manifest diff that adds the energy, web, notes and repo-editing
   release, and (b) actually exists as a git tag in this repo — it never fabricates or
   guesses a version.
 - The ledger is written (`latch`) only on a scan of the currently opened project, or
-  on an explicit `chronicle --derive <dir>` call (which always runs with
-  `write=true`); a background picker-preview derive (`derive_for_dir(.., false)`)
-  never writes it.
+  on an explicit developer-CLI call: `chronicle --derive <dir>` (which always runs
+  with `write=true`) and `chronicle --state <dir>` (which goes through
+  `state_for_project`, and so latches too). A background picker-preview derive
+  (`derive_project(.., false)`) never writes it.
 - `latch` (the scan-driven ledger write) and `ledger_mark` (the manual "Mark
   done"/"Mark not done" action) both go through `ledger::record`, which takes the same
   lock, so a concurrent scan and a manual toggle cannot race and corrupt the ledger.
