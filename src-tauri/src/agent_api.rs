@@ -1,6 +1,9 @@
 //! One implementation of every capability an agent (or a shell) can ask Chronicle for.
 //! `main()` fronts it twice: `chronicle --mcp <dir>` (stdio MCP) and `chronicle <group>
 //! <verb>` (CLI). Notes and state need no running app.
+//!
+//! wired up by the CLI (cli.rs) and the MCP server (mcp.rs); until then nothing calls it
+#![allow(dead_code)]
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -101,12 +104,29 @@ fn read_note_file(dir: &Path, rel: &str) -> Result<(parse::FrontMatter, String),
     Ok(parse::split_front_matter(&text))
 }
 
-/// One list row. Front-matter keys the file lacks are null; nothing is invented.
-pub(crate) fn note_row(vault: &Path, rel: &str) -> Value {
+/// One list row, plus its lowercased body for the `text` filter (`None` when the
+/// note was never opened — too big, mirroring `index::parse_note`'s `unreadable`).
+/// One read per note: `notes_list`'s filter reuses the body this returns instead of
+/// opening the file a second time.
+fn row_and_body(vault: &Path, rel: &str, size: u64) -> (Value, Option<String>) {
+    let title = rel.rsplit_once('/').map(|(_, f)| f).unwrap_or(rel).trim_end_matches(".md");
+    if size > index::MAX_INDEXED {
+        let row = json!({
+            "path": rel,
+            "id": Value::Null,
+            "title": title,
+            "status": Value::Null,
+            "round": Value::Null,
+            "tags": Value::Array(vec![]),
+            "created": Value::Null,
+            "updated": Value::Null,
+            "unreadable": true,
+        });
+        return (row, None);
+    }
     let text = std::fs::read_to_string(vault.join(rel)).unwrap_or_default();
     let (fm, body) = parse::split_front_matter(&text);
-    let title = rel.rsplit_once('/').map(|(_, f)| f).unwrap_or(rel).trim_end_matches(".md");
-    json!({
+    let row = json!({
         "path": rel,
         "id": fm.get("id"),
         "title": title,
@@ -115,8 +135,14 @@ pub(crate) fn note_row(vault: &Path, rel: &str) -> Value {
         "tags": parse::tags_of(&fm, &body),
         "created": fm.get("created"),
         "updated": fm.get("updated"),
-    })
+        "unreadable": false,
+    });
+    (row, Some(body.to_lowercase()))
 }
+
+/// One list row. Front-matter keys the file lacks are null; nothing is invented.
+/// A note larger than `index::MAX_INDEXED` is `unreadable` and never opened.
+pub(crate) fn note_row(vault: &Path, rel: &str, size: u64) -> Value { row_and_body(vault, rel, size).0 }
 
 fn notes_list(dir: &Path, args: &Value) -> Result<Outcome, String> {
     let status = arg_str(args, "status")?;
@@ -128,13 +154,15 @@ fn notes_list(dir: &Path, args: &Value) -> Result<Outcome, String> {
     let mut entries = index::walk(&vault);
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0))); // newest first, then path
     let mut rows = Vec::new();
-    for (rel, _, _) in entries {
-        let row = note_row(&vault, &rel);
+    for (rel, _, size) in entries {
+        let (row, body_lower) = row_and_body(&vault, &rel, size);
         if let Some(s) = status { if row["status"].as_str() != Some(s) { continue } }
         if let Some(r) = round { if row["round"].as_u64() != Some(r) { continue } }
         if let Some(t) = tag { if !row["tags"].as_array().map(|a| a.iter().any(|x| x == t)).unwrap_or(false) { continue } }
         if let Some(q) = &text {
-            let body = std::fs::read_to_string(vault.join(&rel)).unwrap_or_default().to_lowercase();
+            // an unreadable note was never opened, so it can never match a text
+            // search — it is skipped rather than falling back to a path match
+            let Some(body) = &body_lower else { continue };
             if !body.contains(q) && !rel.to_lowercase().contains(q) { continue }
         }
         rows.push(row);
@@ -219,6 +247,26 @@ mod tests {
                    "that path isn't inside the notes vault");
         assert_eq!(call(&d, "chronicle.notes.read", &json!({})).unwrap_err(), "path is required.");
         assert!(call(&d, "chronicle.nope.x", &json!({})).unwrap_err().starts_with("No capability named chronicle.nope.x."));
+    }
+
+    #[test]
+    fn a_note_over_the_index_size_cap_is_unreadable_and_skipped_by_text_search() {
+        let d = vault("huge");
+        put(&d, "Tasks/T-001 Login.md", "---\nstatus: done\n---\n\n# Login\n\nBody one.\n");
+        let huge = format!("---\nstatus: queued\n---\n\n{}", "x".repeat(6_000_001));
+        put(&d, "Tasks/T-999 Huge.md", &huge);
+
+        let all = call(&d, "chronicle.notes.list", &json!({})).unwrap();
+        let rows = all.data["notes"].as_array().unwrap();
+        let row = rows.iter().find(|r| r["path"] == "Tasks/T-999 Huge.md").unwrap();
+        assert_eq!(row["unreadable"], true);
+        assert_eq!(row["status"], Value::Null, "never opened, so status is null, not the file's real value");
+        assert_eq!(row["title"], "T-999 Huge");
+
+        let hits = call(&d, "chronicle.notes.list", &json!({"text": "x"})).unwrap();
+        let hit_paths: Vec<&str> = hits.data["notes"].as_array().unwrap().iter()
+            .map(|r| r["path"].as_str().unwrap()).collect();
+        assert!(!hit_paths.contains(&"Tasks/T-999 Huge.md"), "an unreadable note is never opened for a text search: {hit_paths:?}");
     }
 
     #[test]

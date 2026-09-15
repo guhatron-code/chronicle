@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Emitter, EventTarget};
 
-const MAX_INDEXED: u64 = 4 * 1024 * 1024;
+pub const MAX_INDEXED: u64 = 4 * 1024 * 1024;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct NoteEntry {
