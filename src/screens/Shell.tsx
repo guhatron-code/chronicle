@@ -10,7 +10,7 @@
  * Hiding a unit never kills sessions (they live outside React, like hidden
  * terminal tabs always have).
  */
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { Rail, type Pane } from "@/components/chrome/Rail";
 import { TitleBar, type ProjectTab, type UpdateLineProps } from "@/components/chrome/TitleBar";
@@ -21,6 +21,7 @@ import {
   type TerminalTab,
 } from "@/components/chrome/TerminalColumn";
 import { AgentSection } from "@/screens/agent/AgentSection";
+import { focusActiveTerm, shouldReclaimTerminalFocus } from "@/lib/term-sessions";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
 export function Shell({
@@ -115,6 +116,72 @@ export function Shell({
   const showContent = panes.content;
   const showRight = panes.agent || panes.terminal;
   const bothExpanded = panes.agent && panes.terminal && !agentCollapsed && !terminalCollapsed;
+
+  /* ---- the terminal takes the keyboard ----
+     Nothing used to focus an xterm, so the first keystroke after coming back to
+     the window, or after picking a tab, went nowhere. Four moments hand the
+     keyboard over: the window regaining focus; the column expanding; a session
+     appearing (every spawn — ⌘T, the column's buttons, a roadmap Start, the
+     round log — makes itself active); and a tab pick. The middle two both show
+     up as a dep change below, so the effect covers them; a pick needs its own
+     handler because re-clicking the tab that is already active changes no state
+     at all. Every one of them is gated by shouldReclaimTerminalFocus, so the
+     keyboard is never taken out of a field, an editor or a dialog. */
+  const terminalOpen = panes.terminal && !terminalCollapsed;
+  const dirRef = useRef(activeDir);
+  const collapsedRef = useRef(!terminalOpen);
+  useEffect(() => {
+    dirRef.current = activeDir;
+    collapsedRef.current = !terminalOpen;
+  });
+
+  /* One frame, because the tab that just became active mounts its host in this
+     commit and xterm cannot focus a textarea that is not in the document yet —
+     and the predicate is re-asked at the far end of that frame, not before it:
+     a double-click on a tab fires two clicks and then raises the rename chip,
+     whose autofocused input must keep the keyboard. Returns the handle so an
+     effect can cancel it. */
+  const focusSoon = useCallback((dir: string) => {
+    return requestAnimationFrame(() => {
+      if (!shouldReclaimTerminalFocus(document.activeElement, { collapsed: false })) return;
+      focusActiveTerm(dir);
+    });
+  }, []);
+
+  const selectTerminal = useCallback(
+    (id: number) => {
+      onTerminalSelect?.(id);
+      focusSoon(activeDir);
+    },
+    [activeDir, focusSoon, onTerminalSelect],
+  );
+
+  /* Registered once, reading the live dir/collapsed through refs — re-binding it
+     every render would be a listener churn for nothing. Judged synchronously, on
+     purpose: a click that raised the window focuses its own target immediately
+     after this runs, so clicking into a field still wins. */
+  useEffect(() => {
+    const onWindowFocus = () => {
+      // false while the Web pane's native WKWebView is first responder — the
+      // keyboard is already somewhere real, and App.tsx's menu-key path relies
+      // on that split (it blurs the stale DOM focus itself)
+      if (!document.hasFocus()) return;
+      if (!shouldReclaimTerminalFocus(document.activeElement, { collapsed: collapsedRef.current })) return;
+      focusActiveTerm(dirRef.current);
+    };
+    window.addEventListener("focus", onWindowFocus);
+    return () => window.removeEventListener("focus", onWindowFocus);
+  }, []);
+
+  /* the column expanding (terminalOpen), a spawn or a tab close (the active id
+     moves), a project switch, or the mount itself. focusSoon's predicate
+     decides, so none of them can interrupt typing; on mount with no sessions
+     yet it is a no-op anyway. */
+  useEffect(() => {
+    if (!terminalOpen) return;
+    const raf = focusSoon(activeDir);
+    return () => cancelAnimationFrame(raf);
+  }, [activeDir, activeTerminalId, focusSoon, terminalOpen]);
 
   /* the roadmap content column is max-w-[900px] + 2×28px padding — the pane
    * never grows past what the content can use, and never shrinks below the
@@ -307,7 +374,7 @@ export function Shell({
                     onNewTerminal={onNewTerminal}
                     onStartAgent={onStartAgent}
                     spawning={terminalSpawning}
-                    onSelect={onTerminalSelect}
+                    onSelect={selectTerminal}
                     onClose={onTerminalClose}
                     onRenameCommit={onTerminalRenameCommit}
                     hostFor={terminalHostFor}

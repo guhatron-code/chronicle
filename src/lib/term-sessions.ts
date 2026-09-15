@@ -181,6 +181,84 @@ export function liveCount(dir?: string): number {
   return [...sessions.values()].filter((s) => !s.dead && (!dir || s.dir === dir)).length;
 }
 
+/* ---- the terminal takes the keyboard back ----
+   Nothing used to focus an xterm on its own, so coming back to the window, or
+   picking a tab, left the keyboard on <body> and the first keystroke went
+   nowhere. Focusing automatically is only safe with a hard rule about when NOT
+   to: an automatic focus that lands mid-word in a field is a bug, never a
+   convenience. `shouldReclaimTerminalFocus` is that rule, kept pure and tested
+   in src/lib/term-focus.test.ts. */
+
+/** The slice of an element the predicate reads. A real `Element` satisfies it
+ *  structurally, so callers just pass `document.activeElement`; the test builds
+ *  chains against it without a DOM (this suite runs in vitest's `node`
+ *  environment — see vitest.config.ts). */
+export interface FocusTarget {
+  tagName: string;
+  getAttribute(name: string): string | null;
+  isContentEditable?: boolean;
+  readonly parentElement: FocusTarget | null;
+}
+
+/** `<input>` types that hold no text — chrome, not a field. */
+const CLICKY_INPUT_TYPES = new Set(["button", "submit", "checkbox", "radio"]);
+
+/** Classes that mean "a text surface already owns the keyboard": CodeMirror
+ *  (the repo editor), ProseMirror/tiptap (notes), and xterm's own helper
+ *  textarea — that last one is a terminal already, and which terminal the user
+ *  picked is their business, not ours. */
+const EDITABLE_CLASSES = ["cm-editor", "ProseMirror", "tiptap", "xterm-helper-textarea"];
+
+function hasClass(el: FocusTarget, name: string): boolean {
+  const cls = el.getAttribute("class");
+  return cls != null && cls.split(/\s+/).includes(name);
+}
+
+/** Is the keyboard somewhere it must stay? The chain is walked in full: a
+ *  focused leaf can sit dozens of nodes under a notes editor. */
+function ownsTheKeyboard(active: FocusTarget | null): boolean {
+  if (!active) return false;
+  const tag = active.tagName.toLowerCase();
+  if (tag === "textarea" || tag === "select") return true;
+  if (tag === "input") {
+    const type = (active.getAttribute("type") ?? "text").toLowerCase();
+    if (!CLICKY_INPUT_TYPES.has(type)) return true;
+  }
+  for (let el: FocusTarget | null = active; el; el = el.parentElement) {
+    if (el.isContentEditable) return true;
+    const ce = el.getAttribute("contenteditable");
+    if (ce != null && ce !== "false") return true;
+    // a Radix/Base UI dialog traps focus on purpose — never fight it
+    if (el.getAttribute("role") === "dialog") return true;
+    const node = el;
+    if (EDITABLE_CLASSES.some((c) => hasClass(node, c))) return true;
+  }
+  return false;
+}
+
+/**
+ * May the terminal take the keyboard? No while the column is collapsed (there
+ * is nothing to type into), and no while anything text-shaped — or a modal —
+ * has it. Everything else (nothing focused, the body, a button, a plain div)
+ * is fair game.
+ */
+export function shouldReclaimTerminalFocus(
+  active: Element | FocusTarget | null,
+  opts: { collapsed: boolean },
+): boolean {
+  if (opts.collapsed) return false;
+  return !ownsTheKeyboard(active);
+}
+
+/** Give the keyboard to `dir`'s active terminal — the selected one, or the
+ *  first live one if that is gone or ended. A no-op when there is none. */
+export function focusActiveTerm(dir: string) {
+  const id = activeTermFor(dir);
+  const selected = id == null ? undefined : sessions.get(id);
+  const session = selected && !selected.dead ? selected : termsFor(dir).find((s) => !s.dead);
+  session?.term.focus();
+}
+
 /* ---- F — clickable paths in terminal output ----
    A bounded per-line scan (xterm calls provideLinks per hovered line, never
    per frame); ⌘-click routes the path to the repo viewer via the handler the
@@ -379,8 +457,9 @@ if (typeof MutationObserver !== "undefined") {
   }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 }
 
-/* dev-only handle for the wiring harness */
-if (import.meta.env.DEV) {
+/* dev-only handle for the wiring harness (guarded like the MutationObserver
+   above: this module is imported by node-environment tests) */
+if (import.meta.env.DEV && typeof window !== "undefined") {
   (window as never as Record<string, unknown>).__terms = { getTerm, termsFor, liveCount };
 }
 
