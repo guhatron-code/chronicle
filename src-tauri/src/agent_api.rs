@@ -105,6 +105,30 @@ fn caps() -> Vec<Capability> {
             },
             run: notes_attach,
         },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.state.phases",
+                description: "Every roadmap phase with its state, label, what proved it, and whether the repo still proves it now. Never writes anything.",
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            run: state_phases,
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.state.needs_you",
+                description: "What needs the user right now: git housekeeping and a roadmap that fell behind, as the app phrases them.",
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            run: state_needs_you,
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.state.rounds",
+                description: "Every round with its kind, state, and each note's status.",
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            run: state_rounds,
+        },
     ]
 }
 
@@ -381,6 +405,57 @@ fn notes_attach(dir: &Path, args: &Value) -> Result<Outcome, String> {
     Ok(Outcome { summary: format!("Attached {file} to {rel}."), data: json!({ "path": rel, "attachment": att, "file": file_rel }) })
 }
 
+/* ---------- state ---------- */
+
+fn state_phases(dir: &Path, _args: &Value) -> Result<Outcome, String> {
+    let p = crate::load_project(dir);
+    if p.manifest.is_none() {
+        let why = p.manifest_error.clone().map(|e| format!(" (chronicle.json can't be read: {e})")).unwrap_or_else(|| " (no chronicle.json)".into());
+        return Ok(Outcome { summary: format!("This project has no roadmap yet{why}."), data: json!({ "manifest_present": false, "statuses": [] }) });
+    }
+    let ctx = crate::Ctx::build(&p);
+    let mut data = crate::derive_project(&p, &ctx, false);
+    data["manifest_present"] = json!(true);
+    let statuses = data["statuses"].as_array().cloned().unwrap_or_default();
+    let real: Vec<&Value> = statuses.iter().filter(|s| matches!(s["state"].as_str(), Some("done" | "now" | "later"))).collect();
+    let done = real.iter().filter(|s| s["state"] == "done").count();
+    let mut parts: Vec<String> = statuses.iter().filter(|s| s["state"] != "later" && s["state"] != "pool").map(|s| {
+        let id = s["id"].as_str().unwrap_or("?");
+        match s["state"].as_str() {
+            Some("now") => format!("{id} now ({})", s["label"].as_str().unwrap_or("up next")),
+            Some(st) => format!("{id} {st}"),
+            None => id.to_string(),
+        }
+    }).collect();
+    parts.push(format!("{done} of {} done", real.len()));
+    Ok(Outcome { summary: format!("{}.", parts.join(" · ")), data })
+}
+
+fn state_needs_you(dir: &Path, _args: &Value) -> Result<Outcome, String> {
+    let p = crate::load_project(dir);
+    let rows = crate::needs_you_sentences(&p);
+    let n = rows.len();
+    let summary = match n { 0 => "Nothing needs you.".to_string(), 1 => "1 thing needs you.".to_string(), n => format!("{n} things need you.") };
+    Ok(Outcome { summary, data: json!({ "rows": rows }) })
+}
+
+fn state_rounds(dir: &Path, _args: &Value) -> Result<Outcome, String> {
+    let rounds = crate::notes::rounds::load(dir)?;
+    let mut out = Vec::new();
+    let mut lines = Vec::new();
+    for r in &rounds {
+        let st = crate::notes::rounds::statuses_for(dir, &r.note_paths);
+        let notes: serde_json::Map<String, Value> = r.note_paths.iter()
+            .map(|p| (p.clone(), st.get(p).cloned().flatten().map(Value::String).unwrap_or(Value::Null))).collect();
+        let done = notes.values().filter(|v| v.as_str() == Some("done")).count();
+        lines.push(format!("round {} {} {}, {} of {} notes done", r.n, r.kind.clone().unwrap_or_else(|| "round".into()), r.state, done, r.note_paths.len()));
+        out.push(json!({ "n": r.n, "kind": r.kind, "state": r.state, "notes": notes }));
+    }
+    let n = out.len();
+    let summary = if n == 0 { "No rounds yet.".to_string() } else { format!("{n} round{} · {}.", if n == 1 { "" } else { "s" }, lines.join(" · ")) };
+    Ok(Outcome { summary, data: json!({ "rounds": out }) })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -575,5 +650,52 @@ mod tests {
         std::fs::write(d.join("big.bin"), vec![0u8; 10_000_001]).unwrap();
         assert_eq!(call(&d, "chronicle.notes.attach", &json!({"path": "Tasks/T-001 A.md", "file": "big.bin"})).unwrap_err(),
                    "The file is over 10 MB, which is the attachment limit.");
+    }
+
+    fn git(d: &Path, args: &[&str]) {
+        let o = std::process::Command::new("git").arg("-C").arg(d).args(args).output().unwrap();
+        assert!(o.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&o.stderr));
+    }
+
+    #[test]
+    fn state_answers_from_the_roadmap_and_git_without_latching() {
+        let d = vault("state");
+        git(&d, &["init", "-q", "-b", "main"]);
+        git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "feat: first save"]);
+        git(&d, &["tag", "v0.1.0"]);
+        std::fs::write(d.join("chronicle.json"), r#"{"chronicleVersion":1,"name":"t","workBranch":"main","stages":[{"title":"S","phases":[
+            {"id":"A","name":"Done one","status":{"done_when":[{"tag":"v0.1.0"}]}},
+            {"id":"B","name":"Next one","status":{"done_when":[{"tag":"v0.2.0"}]}}]}]}"#).unwrap();
+        let ph = call(&d, "chronicle.state.phases", &json!({})).unwrap();
+        let st = ph.data["statuses"].as_array().unwrap();
+        assert_eq!((st[0]["id"].as_str(), st[0]["state"].as_str(), st[0]["live"].as_bool()), (Some("A"), Some("done"), Some(true)));
+        assert_eq!((st[1]["id"].as_str(), st[1]["state"].as_str()), (Some("B"), Some("now")));
+        assert_eq!(ph.summary, "A done · B now (up next) · 1 of 2 done.");
+        assert!(!d.join(".chronicle/roadmap-ledger.json").exists(), "reading state never latches");
+
+        let ny = call(&d, "chronicle.state.needs_you", &json!({})).unwrap();
+        let rows = ny.data["rows"].as_array().unwrap();
+        assert!(rows.iter().any(|r| r["id"] == "github"), "no remote: the GitHub row, {rows:?}");
+        assert!(rows.iter().all(|r| r["title"].is_string() && r["sub"].is_string()));
+        assert!(ny.summary.ends_with("thing needs you.") || ny.summary.ends_with("things need you."), "{}", ny.summary);
+
+        put(&d, "Tasks/T-001 A.md", "---\nid: T-001\nstatus: done\nround: 1\n---\n\n# A\n");
+        put(&d, "Tasks/T-002 B.md", "---\nid: T-002\nstatus: in_progress\nround: 1\n---\n\n# B\n");
+        std::fs::write(d.join(".chronicle/rounds.json"), r#"{"version":1,"rounds":[{"n":1,"state":"ready","kind":"bug fixes","note_paths":["Tasks/T-001 A.md","Tasks/T-002 B.md"]}]}"#).unwrap();
+        let rd = call(&d, "chronicle.state.rounds", &json!({})).unwrap();
+        let r = &rd.data["rounds"][0];
+        assert_eq!(r["n"], 1);
+        assert_eq!(r["kind"], "bug fixes");
+        assert_eq!(r["notes"]["Tasks/T-001 A.md"], "done");
+        assert_eq!(r["notes"]["Tasks/T-002 B.md"], "in_progress");
+        assert_eq!(rd.summary, "1 round · round 1 bug fixes ready, 1 of 2 notes done.");
+    }
+
+    #[test]
+    fn state_without_a_roadmap_says_so() {
+        let d = vault("noroadmap");
+        let ph = call(&d, "chronicle.state.phases", &json!({})).unwrap();
+        assert_eq!(ph.data["manifest_present"], false);
+        assert_eq!(ph.summary, "This project has no roadmap yet (no chronicle.json).");
     }
 }

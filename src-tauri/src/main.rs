@@ -1094,7 +1094,7 @@ fn derive_for_dir(dir: &Path, write: bool) -> Value {
 /// built, so a caller that already holds a `Ctx` (the picker builds one per tile)
 /// does not pay for a second one — `Ctx::build` walks the whole `git log --all`.
 /// A project with no manifest reports the load error.
-fn derive_project(p: &Project, ctx: &Ctx, write: bool) -> Value {
+pub(crate) fn derive_project(p: &Project, ctx: &Ctx, write: bool) -> Value {
     match &p.manifest {
         None => json!({"error": p.manifest_error.clone().unwrap_or_else(|| "no manifest".into())}),
         Some(m) => {
@@ -1601,7 +1601,7 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-fn state_for_project(p: &Project) -> Value {
+pub(crate) fn state_for_project(p: &Project) -> Value {
     let ctx = Ctx::build(p);
 
     let branch_probe = git_in_checked(&p.repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -1704,6 +1704,63 @@ fn state_for_project(p: &Project) -> Value {
         "work_branch": p.manifest.as_ref().and_then(|m| m.get("workBranch")).cloned().unwrap_or(Value::Null),
         "checked_at": hhmmss_now(),
     })
+}
+
+/// The built-in "what needs you" rows as the app phrases them, computed from the same
+/// facts `state_for_project` reports. The frontend's `needsYouRows` is the wording
+/// reference; keep the two in step.
+pub(crate) fn needs_you_sentences(p: &Project) -> Vec<Value> {
+    let s = state_for_project(p);
+    let str_of = |k: &str| s.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let num = |k: &str| s.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+    let flag = |k: &str| s.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    let mut rows = Vec::new();
+    let mut row = |id: &str, title: String, sub: &str, command: String| {
+        rows.push(json!({ "id": id, "title": title, "sub": sub, "command": command }));
+    };
+    if flag("is_git") {
+        let branch = str_of("branch");
+        let work = str_of("work_branch");
+        if !work.is_empty() && !branch.is_empty() && branch != work {
+            row("branch", format!("You're on {branch}"), &format!("This project works on its own branch ({work})."), format!("git checkout {work}"));
+        }
+        if !flag("upstream") && !branch.is_empty() {
+            if str_of("remote_url").is_empty() {
+                let slug = p.repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "project".into());
+                row("github", "Put this project on GitHub".into(), "It has no online home yet.", format!("gh repo create {slug} --private --source=. --push"));
+            } else {
+                row("publish-first", "Publish the work online".into(), "Everything here exists only on this Mac right now.", format!("git push -u origin {branch}"));
+            }
+        }
+        if flag("upstream") && num("ahead") > 0 {
+            let n = num("ahead");
+            row("publish", format!("Publish {n} save{}", if n > 1 { "s" } else { "" }), "Saved to history, not online yet.", format!("git push origin {branch}"));
+        }
+        if flag("upstream") && num("behind") > 0 {
+            row("pull", "The online copy is newer".into(), "Bring it down before working.", "git pull --ff-only".into());
+        }
+        let prunable = s.get("worktrees").and_then(|v| v.as_array()).map(|a| a.iter().filter(|w| w["prunable"].as_bool() == Some(true)).count()).unwrap_or(0);
+        if prunable > 0 {
+            row("prune", format!("Clean up {prunable} leftover workspace{}", if prunable > 1 { "s" } else { "" }), "A finished agent session left a working copy behind.", "git worktree prune".into());
+        }
+    }
+    if s.get("manifest_present").and_then(|v| v.as_bool()) == Some(true) {
+        for d in s.get("stale").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+            let d = d.as_str().unwrap_or("").to_string();
+            row(&format!("behind-doc:{d}"), format!("{d} changed since the roadmap was written"), "A refresh reads it again and updates only what changed.", String::new());
+        }
+        for pth in s.get("new_plans").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+            let pth = pth.as_str().unwrap_or("").to_string();
+            let name = pth.rsplit('/').next().unwrap_or(&pth).to_string();
+            row(&format!("behind-plan:{pth}"), format!("{name} is not on the roadmap"), "A plan file newer than the roadmap that it never mentions.", String::new());
+        }
+        if let Some(pair) = s.get("newer_release").and_then(|v| v.as_array()) {
+            if pair.len() == 2 {
+                row("behind-release", format!("{} shipped, the roadmap ends at {}", pair[0].as_str().unwrap_or(""), pair[1].as_str().unwrap_or("")), "Releases after the last phase the roadmap knows about.", String::new());
+            }
+        }
+    }
+    rows
 }
 
 /// Save a composer attachment into `.chronicle/attachments/`, never clobbering:
@@ -4249,6 +4306,34 @@ mod r3_tests {
         assert!(s.contains("Chronicle-Phase: FX-3 done"));
         assert!(s.contains("--allow-empty"));
         assert!(FIXES_PROMPT_HEAD.contains("Chronicle-Phase: FX-{N} done"));
+    }
+
+    /// `needs_you_sentences` must keep step with the frontend's `needsYouRows`
+    /// wording (src/lib/roadmap-data.ts) for the same two cases: no remote at all,
+    /// and a published branch that is ahead.
+    #[test]
+    fn needs_you_sentences_match_the_frontend_wording() {
+        let d = repo("needs-you-none");
+        let p = Project { dir: d.clone(), repo: d.clone(), extras: vec![], manifest: None, manifest_error: None };
+        let rows = needs_you_sentences(&p);
+        let github = rows.iter().find(|r| r["id"] == "github").expect("no remote: the github row");
+        assert_eq!(github["title"], "Put this project on GitHub");
+
+        let origin = tmp("needs-you-origin");
+        git(&origin, &["init", "-q", "--bare", "-b", "main"]);
+        let d2 = repo("needs-you-ahead");
+        git(&d2, &["remote", "add", "origin", origin.to_string_lossy().as_ref()]);
+        git(&d2, &["push", "-qu", "origin", "main"]);
+        std::fs::write(d2.join("a.txt"), "one\n").unwrap();
+        git(&d2, &["-c", "user.email=t@t", "-c", "user.name=t", "add", "a.txt"]);
+        git(&d2, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "feat: a"]);
+        std::fs::write(d2.join("b.txt"), "two\n").unwrap();
+        git(&d2, &["-c", "user.email=t@t", "-c", "user.name=t", "add", "b.txt"]);
+        git(&d2, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "feat: b"]);
+        let p2 = Project { dir: d2.clone(), repo: d2.clone(), extras: vec![], manifest: None, manifest_error: None };
+        let rows2 = needs_you_sentences(&p2);
+        let publish = rows2.iter().find(|r| r["id"] == "publish").expect("ahead 2: the publish row");
+        assert_eq!(publish["title"], "Publish 2 saves");
     }
 }
 
