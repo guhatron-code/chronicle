@@ -259,6 +259,8 @@ export function NotesPane({
         onRunRoundInPane={onRunRoundInPane}
         logOpen={logOpen}
         onToggleLog={toggleLog}
+        vault={index.vault}
+        borrowed={index.borrowed}
         width={sidebarWidth}
       />
 

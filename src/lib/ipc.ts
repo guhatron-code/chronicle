@@ -457,7 +457,14 @@ export interface NoteEntry {
 /** `.chronicle/rounds.json` as the index carries it — enough to draw the round
  *  card and to know which notes the round locks. */
 export interface RoundSummary { n: number; state: string; kind: string | null; note_paths: string[] }
-export interface NotesIndex { notes: NoteEntry[]; generation: number; rounds: RoundSummary[] }
+export interface NotesIndex {
+  notes: NoteEntry[]; generation: number; rounds: RoundSummary[];
+  /** Absolute path of the vault this index reflects — `dir` itself, or the main
+   *  checkout when `dir` is a linked git worktree. */
+  vault: string;
+  /** True when this project is a linked worktree borrowing the main checkout's vault. */
+  borrowed: boolean;
+}
 export interface NoteSearchHit { path: string; title: string; kind: "title" | "tag" | "body"; snippet: string }
 export interface NotesChanged { dir: string; paths: string[]; generation: number }
 export const notesIndex = (dir: string) => invoke<NotesIndex>("notes_index", { dir });

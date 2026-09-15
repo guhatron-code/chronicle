@@ -8,7 +8,7 @@ use super::parse::{self, links_of, round_of, snippet_of, split_front_matter, sta
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Emitter, EventTarget};
 
 const MAX_INDEXED: u64 = 4 * 1024 * 1024;
@@ -38,6 +38,11 @@ pub struct NotesIndex {
     /// notes it locks — without holding that in session memory. A restart in
     /// the middle of a round has to agree with `notes_write`'s `locked`.
     pub rounds: Vec<super::rounds::RoundSummary>,
+    /// Absolute path of the vault this index reflects — `dir` itself, or the
+    /// main checkout when `dir` is a linked git worktree.
+    pub vault: String,
+    /// True when `dir` is a linked worktree borrowing the main checkout's vault.
+    pub borrowed: bool,
 }
 
 pub struct Vault {
@@ -59,7 +64,38 @@ pub struct NotesState {
     refresh_locks: Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>,
 }
 
-pub fn vault_dir(dir: &Path) -> PathBuf { dir.join(".chronicle/notes") }
+/// dir → the checkout whose `.chronicle/notes` it uses. Resolved once per process
+/// per dir: worktree-ness does not change while the app runs, and `vault_dir` is
+/// called on every poll from dozens of places.
+fn roots() -> &'static Mutex<HashMap<PathBuf, PathBuf>> {
+    static ROOTS: OnceLock<Mutex<HashMap<PathBuf, PathBuf>>> = OnceLock::new();
+    ROOTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The folder whose `.chronicle/notes` this project reads and writes. A linked git
+/// worktree (its `--git-dir` differs from `--git-common-dir`) borrows the main
+/// checkout's vault, so a round run from a worktree edits the notes the app shows.
+pub fn vault_root(dir: &Path) -> PathBuf {
+    if let Some(r) = roots().lock().ok().and_then(|m| m.get(dir).cloned()) { return r; }
+    let resolved = resolve_root(dir);
+    if let Ok(mut m) = roots().lock() { m.insert(dir.to_path_buf(), resolved.clone()); }
+    resolved
+}
+
+fn resolve_root(dir: &Path) -> PathBuf {
+    let git_dir = crate::git_in(dir, &["rev-parse", "--path-format=absolute", "--git-dir"]);
+    let common = crate::git_in(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    if git_dir.is_empty() || common.is_empty() || git_dir == common { return dir.to_path_buf(); }
+    // the main checkout is the parent of its .git directory
+    match Path::new(common.trim()).parent() {
+        Some(p) => p.canonicalize().unwrap_or_else(|_| p.to_path_buf()),
+        None => dir.to_path_buf(),
+    }
+}
+
+pub fn vault_is_borrowed(dir: &Path) -> bool { vault_root(dir) != dir }
+
+pub fn vault_dir(dir: &Path) -> PathBuf { vault_root(dir).join(".chronicle/notes") }
 
 pub fn walk(vault: &Path) -> Vec<(String, u64, u64)> {
     let mut out = Vec::new();
@@ -190,9 +226,11 @@ pub fn snapshot(state: &NotesState, dir: &Path) -> NotesIndex {
     // and a project nobody is watching must still answer with the truth
     let rounds = super::rounds::summaries(dir);
     let guard = match state.vaults.lock() { Ok(g) => g, Err(e) => e.into_inner() };
+    let vault = vault_dir(dir).to_string_lossy().into_owned();
+    let borrowed = vault_is_borrowed(dir);
     match guard.get(dir) {
-        Some(v) => NotesIndex { notes: v.notes.clone(), generation: v.generation, rounds },
-        None => NotesIndex { notes: vec![], generation: 0, rounds },
+        Some(v) => NotesIndex { notes: v.notes.clone(), generation: v.generation, rounds, vault, borrowed },
+        None => NotesIndex { notes: vec![], generation: 0, rounds, vault, borrowed },
     }
 }
 
@@ -409,5 +447,39 @@ mod tests {
         assert!(e.unreadable);
         assert_eq!(e.title, "Big");
         assert!(e.tags.is_empty() && e.links.is_empty() && e.snippet.is_empty());
+    }
+
+    fn git(d: &std::path::Path, args: &[&str]) {
+        let o = std::process::Command::new("git").arg("-C").arg(d).args(args).output().unwrap();
+        assert!(o.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&o.stderr));
+    }
+
+    #[test]
+    fn a_linked_worktree_uses_the_main_checkouts_vault() {
+        let base = std::env::temp_dir().join(format!("chronicle-vault-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let main = base.join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(&main, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "first"]);
+        std::fs::create_dir_all(main.join(".chronicle/notes")).unwrap();
+        let wt = base.join("wt");
+        git(&main, &["worktree", "add", "-q", "-b", "feature", wt.to_str().unwrap()]);
+        let main = main.canonicalize().unwrap();
+        let wt = wt.canonicalize().unwrap();
+
+        assert_eq!(vault_root(&main), main, "the main checkout is its own root");
+        assert_eq!(vault_root(&wt), main, "a linked worktree borrows the main checkout's vault");
+        assert_eq!(vault_dir(&wt), main.join(".chronicle/notes"));
+        assert!(vault_is_borrowed(&wt));
+        assert!(!vault_is_borrowed(&main));
+        // not a repo at all: the folder is its own root
+        let plain = base.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        let plain = plain.canonicalize().unwrap();
+        assert_eq!(vault_root(&plain), plain);
+        // the answer is cached: a second call spawns no git (cheap enough to call 81 times a poll)
+        let (_, spawns) = crate::git_spawns(|| vault_root(&wt));
+        assert_eq!(spawns, 0, "cached after the first resolution");
     }
 }

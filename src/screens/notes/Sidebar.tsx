@@ -112,6 +112,7 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, no
 export const Sidebar = memo(function Sidebar({
   dir, notes, openPath, onOpenNote, onNewNote, onOpenSearch, onRevealVault,
   queued, round, agent, onStartRound, onRunRoundInPane, logOpen, onToggleLog,
+  vault, borrowed,
   width = 232,
 }: {
   dir: string;
@@ -124,6 +125,10 @@ export const Sidebar = memo(function Sidebar({
   onOpenSearch: () => void;
   onRevealVault: () => void;
   queued: number;
+  /** Absolute path of the vault this index reflects. */
+  vault: string;
+  /** True when this project is a linked worktree borrowing the main checkout's vault. */
+  borrowed: boolean;
   /** the pinned round, in whatever phase it is in — null when there is none */
   round: RoundCardData | null;
   agent: "claude" | "codex";
@@ -183,6 +188,12 @@ export const Sidebar = memo(function Sidebar({
           </DropdownMenuContent>
         </DropdownMenu>
       </TreeHeader>
+
+      {borrowed && (
+        <div className="px-2 pb-1 pt-1.5 text-[11px] text-text-subtle" title={vault}>
+          Notes live in the main checkout · {vault.replace(/\/\.chronicle\/notes$/, "").split("/").pop()}
+        </div>
+      )}
 
       {newFolder !== null && (
         <form

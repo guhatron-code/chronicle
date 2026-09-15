@@ -343,7 +343,7 @@ pub(crate) fn git_spawns<T>(f: impl FnOnce() -> T) -> (T, usize) {
     (out, GIT_SPAWNS.with(|c| c.get()))
 }
 
-fn git_in(repo: &Path, args: &[&str]) -> String {
+pub(crate) fn git_in(repo: &Path, args: &[&str]) -> String {
     git_in_checked(repo, args).unwrap_or_default()
 }
 

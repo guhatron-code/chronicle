@@ -33,7 +33,7 @@ export interface OpenNote {
   incoming: string | null;
 }
 
-const EMPTY: NotesIndex = { notes: [], generation: 0, rounds: [] };
+const EMPTY: NotesIndex = { notes: [], generation: 0, rounds: [], vault: "", borrowed: false };
 const indexes = new Map<string, NotesIndex>();
 const opens = new Map<string, OpenNote>();
 /* Two subscriber sets, because they answer to different rates. `subs` is the
