@@ -228,8 +228,11 @@ function ownsTheKeyboard(active: FocusTarget | null): boolean {
     if (el.isContentEditable) return true;
     const ce = el.getAttribute("contenteditable");
     if (ce != null && ce !== "false") return true;
-    // a Radix/Base UI dialog traps focus on purpose — never fight it
-    if (el.getAttribute("role") === "dialog") return true;
+    // a Radix/Base UI dialog traps focus on purpose — never fight it. Both
+    // roles: the confirm sheet (overlays/ConfirmDialog.tsx) is an AlertDialog,
+    // and it is exactly the thing that must not lose the keyboard.
+    const role = el.getAttribute("role");
+    if (role === "dialog" || role === "alertdialog") return true;
     const node = el;
     if (EDITABLE_CLASSES.some((c) => hasClass(node, c))) return true;
   }

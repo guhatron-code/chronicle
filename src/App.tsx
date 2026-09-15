@@ -541,10 +541,11 @@ function AppShell() {
   useEffect(() => subscribeRunFlags(() => termBump((n) => n + 1)), []);
   const setActiveTerm = useCallback((dir: string, id: number) => {
     setActiveTermFor(dir, id);
-    requestAnimationFrame(() => {
-      fitTerm(id);
-      getTerm(id)?.term.focus();
-    });
+    // sizing only — focus belongs to Shell's guarded path (shouldReclaimTerminalFocus).
+    // This used to focus here too, unconditionally, which beat that guard to the
+    // frame: it blurred the rename chip a double-click raises, and it focused a
+    // terminal in a collapsed column.
+    requestAnimationFrame(() => fitTerm(id));
   }, []);
   const hostRefs = useRef(new Map<number, (el: HTMLDivElement | null) => void>());
   const hostObs = useRef(new Map<number, ResizeObserver>());

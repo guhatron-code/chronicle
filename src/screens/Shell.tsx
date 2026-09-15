@@ -10,7 +10,7 @@
  * Hiding a unit never kills sessions (they live outside React, like hidden
  * terminal tabs always have).
  */
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { Rail, type Pane } from "@/components/chrome/Rail";
 import { TitleBar, type ProjectTab, type UpdateLineProps } from "@/components/chrome/TitleBar";
@@ -130,7 +130,10 @@ export function Shell({
   const terminalOpen = panes.terminal && !terminalCollapsed;
   const dirRef = useRef(activeDir);
   const collapsedRef = useRef(!terminalOpen);
-  useEffect(() => {
+  /* layout, not passive: a window focus event can land between the commit and a
+     passive flush, and the listener below would read the previous project's dir
+     or the previous collapsed state */
+  useLayoutEffect(() => {
     dirRef.current = activeDir;
     collapsedRef.current = !terminalOpen;
   });
@@ -143,7 +146,9 @@ export function Shell({
      effect can cancel it. */
   const focusSoon = useCallback((dir: string) => {
     return requestAnimationFrame(() => {
-      if (!shouldReclaimTerminalFocus(document.activeElement, { collapsed: false })) return;
+      // collapsedRef, not `false`: the column can be collapsed inside the frame
+      // this was scheduled in, and a hidden terminal must not take the keyboard
+      if (!shouldReclaimTerminalFocus(document.activeElement, { collapsed: collapsedRef.current })) return;
       focusActiveTerm(dir);
     });
   }, []);

@@ -106,10 +106,17 @@ describe("shouldReclaimTerminalFocus", () => {
   });
 
   it("leaves a dialog alone — it traps focus on purpose", () => {
-    const dialog = el("div", { attrs: { role: "dialog" }, parent: body });
-    const button = el("button", { parent: dialog });
-    expect(shouldReclaimTerminalFocus(dialog, open)).toBe(false);
-    expect(shouldReclaimTerminalFocus(button, open)).toBe(false);
+    // both roles: the confirm sheet is a Radix AlertDialog, and "Close and stop
+    // the session" losing the keyboard to the very terminal it is about to kill
+    // is the worst version of this bug
+    for (const role of ["dialog", "alertdialog"]) {
+      const dialog = el("div", { attrs: { role }, parent: body });
+      const button = el("button", { parent: dialog });
+      expect(shouldReclaimTerminalFocus(dialog, open)).toBe(false);
+      expect(shouldReclaimTerminalFocus(button, open)).toBe(false);
+    }
+    // a role that is not a dialog is just chrome
+    expect(shouldReclaimTerminalFocus(el("div", { attrs: { role: "tablist" }, parent: body }), open)).toBe(true);
   });
 
   it("leaves a terminal that already has the keyboard alone", () => {
