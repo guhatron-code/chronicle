@@ -15,6 +15,7 @@ mod files;
 mod menu;
 mod notes;
 mod ledger;
+mod agent_api;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -36,10 +37,10 @@ use tauri::{Emitter, Manager, State};
 #[derive(Clone)]
 pub(crate) struct Project {
     pub(crate) dir: PathBuf,            // the folder that was opened (holds chronicle.json)
-    repo: PathBuf,                      // git root (manifest roots.repo, relative to dir)
-    extras: Vec<(String, PathBuf)>,     // alias -> absolute path
-    manifest: Option<Value>,            // None => no/invalid manifest (degraded view)
-    manifest_error: Option<String>,
+    pub(crate) repo: PathBuf,           // git root (manifest roots.repo, relative to dir)
+    pub(crate) extras: Vec<(String, PathBuf)>, // alias -> absolute path
+    pub(crate) manifest: Option<Value>, // None => no/invalid manifest (degraded view)
+    pub(crate) manifest_error: Option<String>,
 }
 
 impl Project {
@@ -293,7 +294,7 @@ fn save_recents(recents: &[Value]) {
     );
 }
 
-fn load_project(dir: &Path) -> Project {
+pub(crate) fn load_project(dir: &Path) -> Project {
     let mpath = dir.join("chronicle.json");
     let (manifest, manifest_error) = match std::fs::read_to_string(&mpath) {
         Err(_) => (None, None), // missing — a valid degraded state
@@ -2039,6 +2040,12 @@ fn watch_project(app: tauri::AppHandle, roots: State<OpenRoots>, watch: State<Wa
     w.watch(&p.dir, notify::RecursiveMode::Recursive).map_err(|e| e.to_string())?;
     if p.repo != p.dir {
         let _ = w.watch(&p.repo, notify::RecursiveMode::Recursive);
+    }
+    if notes::index::vault_root(&p.dir) != p.dir {
+        // the vault is borrowed from another checkout (a linked worktree) — watch
+        // its .chronicle there too, so this pane hears about notes/rounds changes
+        // made from the checkout that actually owns the vault
+        let _ = w.watch(&notes::index::vault_root(&p.dir).join(".chronicle"), notify::RecursiveMode::Recursive);
     }
     map.insert(key, w);
     Ok(())
