@@ -7,28 +7,43 @@
  * xterm wraps a logical line across buffer rows when it overflows `cols`; the
  * continuation row is marked `isWrapped`. A link that lands on the wrap
  * boundary must resolve against the whole logical line, not just the row the
- * mouse happens to be hovering.
+ * mouse happens to be hovering. `logicalLine` reads rows lazily through an
+ * accessor (mirroring term.buffer.active.getLine) rather than a pre-built
+ * array, so the common unwrapped case doesn't have to touch the buffer more
+ * than once or twice, and it pads every non-final row of a wrapped line back
+ * out to `cols` before joining, since a trimmed read of a wrapped row can
+ * come up short of `cols` (a wide CJK/emoji character that didn't fit the
+ * last column leaves xterm-cleared cells there, not real content).
  */
-import { describe, expect, it } from "vitest";
-import { logicalLine, spanToRange } from "./term-links";
+import { describe, expect, it, vi } from "vitest";
+import { logicalLine, spanToRange, type LinkRow } from "./term-links";
 
-function row(text: string, isWrapped = false) {
+function row(text: string, isWrapped = false): LinkRow {
   return { text, isWrapped };
+}
+
+/** Wrap a fixed array as a `logicalLine` accessor, `undefined` past either
+ *  end — exactly how `readLinkRow(term, i)` behaves against a real buffer. */
+function arrayAccessor(rows: LinkRow[]) {
+  return (i: number): LinkRow | undefined => rows[i];
 }
 
 describe("logicalLine", () => {
   it("returns just the one row when it isn't wrapped on either side", () => {
     const rows = [row("$ echo hi"), row("https://example.com/a"), row("$ ")];
-    expect(logicalLine(rows, 1)).toEqual({ text: "https://example.com/a", firstRow: 1 });
+    expect(logicalLine(arrayAccessor(rows), 1, 80)).toEqual({
+      text: "https://example.com/a",
+      firstRow: 1,
+    });
   });
 
   it("joins a URL split across two rows, y pointing at the first row", () => {
-    // cols = 20; the URL is 33 chars, so it wraps once
+    // cols = 20; the URL is 38 chars, so it wraps once
     const rows = [
       row("https://claude.ai/co"), // full width, no trailing space to trim
       row("de/artifact/abc123", true),
     ];
-    expect(logicalLine(rows, 0)).toEqual({
+    expect(logicalLine(arrayAccessor(rows), 0, 20)).toEqual({
       text: "https://claude.ai/code/artifact/abc123",
       firstRow: 0,
     });
@@ -39,7 +54,7 @@ describe("logicalLine", () => {
       row("https://claude.ai/co"),
       row("de/artifact/abc123", true),
     ];
-    expect(logicalLine(rows, 1)).toEqual({
+    expect(logicalLine(arrayAccessor(rows), 1, 20)).toEqual({
       text: "https://claude.ai/code/artifact/abc123",
       firstRow: 0,
     });
@@ -55,7 +70,7 @@ describe("logicalLine", () => {
       row("$ "),
     ];
     // y = 3 (the third row of the wrapped URL, 0-based index into rows)
-    expect(logicalLine(rows, 3)).toEqual({
+    expect(logicalLine(arrayAccessor(rows), 3, 20)).toEqual({
       text: "https://claude.ai/code/artifact/very-long-id-that-keeps-going/more",
       firstRow: 1,
     });
@@ -63,12 +78,79 @@ describe("logicalLine", () => {
 
   it("does not reach past an unwrapped neighbor", () => {
     const rows = [row("$ one"), row("$ two"), row("$ three")];
-    expect(logicalLine(rows, 1)).toEqual({ text: "$ two", firstRow: 1 });
+    expect(logicalLine(arrayAccessor(rows), 1, 80)).toEqual({ text: "$ two", firstRow: 1 });
   });
 
-  it("stays within the array bounds at the very first or last row", () => {
+  it("stays within bounds at the very first or last row", () => {
     const rows = [row("only row")];
-    expect(logicalLine(rows, 0)).toEqual({ text: "only row", firstRow: 0 });
+    expect(logicalLine(arrayAccessor(rows), 0, 80)).toEqual({ text: "only row", firstRow: 0 });
+  });
+
+  it("stops walking at maxSteps even if isWrapped keeps going", () => {
+    // five one-char rows (cols = 1, so no padding kicks in) all wrapped onto
+    // each other; cap the walk to 2 steps in each direction so a
+    // pathological line can't drag the whole buffer in
+    const rows = [row("a", true), row("b", true), row("c", true), row("d", true), row("e", true)];
+    // y = 2 (the middle row); backward can reach row 0, forward can reach row 4
+    expect(logicalLine(arrayAccessor(rows), 2, 1, 2)).toEqual({ text: "abcde", firstRow: 0 });
+    // a tighter cap of 1 step per direction can only reach rows 1..3
+    expect(logicalLine(arrayAccessor(rows), 2, 1, 1)).toEqual({ text: "bcd", firstRow: 1 });
+  });
+
+  it("pads every non-final row to cols before joining, so a wide-char-trimmed row still lines up", () => {
+    // cols = 5; row 0 is really 5 cells wide on screen, but a wide character
+    // that didn't fit the last column left xterm's cleared cell there, and a
+    // trimmed read of that row comes back as only 4 characters — "abcd"
+    // instead of "abcd " (the cleared cell renders as a space).
+    const rows = [row("abcd"), row("efg", true)];
+    expect(logicalLine(arrayAccessor(rows), 0, 5)).toEqual({
+      text: "abcd efg", // "abcd" padded to 5 (a trailing space) + "efg"
+      firstRow: 0,
+    });
+  });
+
+  it("pads a row shortened by an actual wide character the same way", () => {
+    // "wid\u{1F600}" is 4 code points wide in JS string length terms but
+    // occupies 5 terminal cells (the emoji is double-width); simulate the
+    // trimmed 5-char read xterm would produce for a row that's really 6
+    // cells wide, wrapping mid-emoji so the emoji doesn't appear at all and
+    // the last cell is cleared.
+    const rows = [row("wid\u{1F600}"), row("e", true)]; // "wid\u{1F600}".length === 5
+    expect(logicalLine(arrayAccessor(rows), 0, 6)).toEqual({
+      text: "wid\u{1F600} e", // padded to 6 (one trailing space) + "e"
+      firstRow: 0,
+    });
+  });
+
+  it("does not pad the true last row of the line — trailing content is real", () => {
+    const rows = [row("https://claude.ai/co"), row("de", true)];
+    const { text } = logicalLine(arrayAccessor(rows), 0, 20);
+    expect(text).toBe("https://claude.ai/code"); // no trailing space after "de"
+    expect(text.endsWith(" ")).toBe(false);
+  });
+
+  it("reads at most two rows for the common unwrapped case — the hovered row and its neighbor", () => {
+    const rows = [row("$ one"), row("$ two"), row("$ three")];
+    const getRow = vi.fn(arrayAccessor(rows));
+    logicalLine(getRow, 1, 80, 60);
+    // row 1 (isWrapped check), row 2 (the forward peek) — never row 0
+    expect(getRow.mock.calls.map((c) => c[0]).sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(getRow).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads each row touched by a wrapped line only once, thanks to caching", () => {
+    const rows = [
+      row("https://claude.ai/co"),
+      row("de/artifact/abc123", true),
+      row("$ "),
+    ];
+    const getRow = vi.fn(arrayAccessor(rows));
+    logicalLine(getRow, 1, 20, 60); // y points at the continuation row
+    // row 1 (backward check), row 0 (backward continues, then becomes the
+    // forward-loop's first checked row — cached, not re-read), row 2 (the
+    // forward peek that stops the walk)
+    expect(getRow).toHaveBeenCalledTimes(3);
+    expect(new Set(getRow.mock.calls.map((c) => c[0]))).toEqual(new Set([0, 1, 2]));
   });
 });
 
@@ -132,7 +214,7 @@ describe("logicalLine + spanToRange together: punctuation stripping on a joined 
       row("https://claude.ai/co"),
       row("de/artifact/abc123.", true), // trailing period is punctuation, not part of the URL
     ];
-    const { text, firstRow } = logicalLine(rows, 0);
+    const { text, firstRow } = logicalLine(arrayAccessor(rows), 0, cols);
     const URL_RE = /https?:\/\/[^\s'"<>()\[\]]+/g;
     const m = URL_RE.exec(text)!;
     const url = m[0].replace(/[.,;:!?]+$/, "");

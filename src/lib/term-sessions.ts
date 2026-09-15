@@ -303,18 +303,21 @@ const URL_RE = /https?:\/\/[^\s'"<>()\[\]]+/g;
 
 // A logical line that wraps a pathological number of rows (a giant base64
 // blob with no whitespace) must not walk the whole scrollback on every
-// hover — 60 rows is far past any real URL or path at any sane terminal
-// width, so the join gives up and treats the window edge as the boundary.
+// hover — 60 rows in either direction is far past any real URL or path at
+// any sane terminal width, so the walk gives up there.
 const MAX_WRAP_ROWS = 60;
 
-/** One buffer row as `logicalLine` wants it. trimRight (`translateToString`'s
- *  `true`) matches the old single-row read exactly, and is exact for a
- *  wrapped row too: xterm pads a wrapped row to the full column count with
- *  real characters, not trailing blanks, so there is nothing for trimRight
- *  to trim away — it only ever affects the last, possibly short, row. */
-function readLinkRow(term: Terminal, index0: number): LinkRow {
+/** One buffer row as `logicalLine` wants it, or `undefined` past either end
+ *  of the buffer — `logicalLine`'s stop condition. trimRight
+ *  (`translateToString`'s `true`) matches the old single-row read exactly;
+ *  `logicalLine` pads every non-final row of a wrapped line back out to
+ *  `cols` itself, so a wrapped row trimmed short (a wide CJK/emoji
+ *  character that didn't fit the last column, whose leftover cell(s) xterm
+ *  clears rather than fills) still joins correctly. */
+function readLinkRow(term: Terminal, index0: number): LinkRow | undefined {
   const bufLine = term.buffer.active.getLine(index0);
-  return { text: bufLine?.translateToString(true) ?? "", isWrapped: bufLine?.isWrapped ?? false };
+  if (!bufLine) return undefined;
+  return { text: bufLine.translateToString(true), isWrapped: bufLine.isWrapped };
 }
 
 /* ONE provider for both kinds of link. xterm consults link providers in
@@ -327,22 +330,23 @@ function readLinkRow(term: Terminal, index0: number): LinkRow {
    A URL or path longer than the terminal width wraps onto the next buffer
    row(s), which xterm marks `isWrapped`; provideLinks is asked about one
    row at a time, so the row is first grown into its whole logical line
-   (logicalLine) before the regexes run, and each match's offset in that
-   joined string is mapped back to an on-screen range that can span rows
-   (spanToRange). An unwrapped row is its own one-row logical line, so this
-   reduces to the previous single-row math exactly. */
+   (logicalLine, reading only as many neighboring rows as the wrap actually
+   spans — two `getLine` calls for the common unwrapped case) before the
+   regexes run, and each match's offset in that joined string is mapped back
+   to an on-screen range that can span rows (spanToRange). An unwrapped row
+   is its own one-row logical line, so this reduces to the previous
+   single-row math exactly. */
 function registerTermLinks(term: Terminal, dir: string) {
   term.registerLinkProvider({
     provideLinks(y, callback) {
-      const row0 = y - 1; // 0-based buffer index xterm is asking about
-      const total = term.buffer.active.length;
-      const winStart = Math.max(0, row0 - MAX_WRAP_ROWS);
-      const winEnd = Math.min(total - 1, row0 + MAX_WRAP_ROWS);
-      const rows: LinkRow[] = [];
-      for (let i = winStart; i <= winEnd; i += 1) rows.push(readLinkRow(term, i));
-      const { text: line, firstRow: firstRowInWindow } = logicalLine(rows, row0 - winStart);
-      const firstRow = winStart + firstRowInWindow + 1; // back to xterm's 1-based y
       const cols = term.cols;
+      const { text: line, firstRow: firstRow0 } = logicalLine(
+        (index0) => readLinkRow(term, index0),
+        y - 1, // 0-based buffer index xterm is asking about
+        cols,
+        MAX_WRAP_ROWS,
+      );
+      const firstRow = firstRow0 + 1; // back to xterm's 1-based y
 
       const links: Parameters<typeof callback>[0] = [];
       const urlSpans: [number, number][] = []; // [start, endExclusive) in line offsets
