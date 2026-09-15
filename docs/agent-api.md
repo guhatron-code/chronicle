@@ -41,7 +41,7 @@ roadmap rules, never from memory. Neither group needs the app running.
 | `notes.update` | `path`, `body?`, `set?` (front-matter keys to set), `unset?` | the note's new front matter | `chronicle notes update --path "Tasks/T-012 Login.md" --set status=done --unset owner` |
 | `notes.set_status` | `path`, `status` | new status | `chronicle notes set_status --path "Tasks/T-012 Login.md" --status done` |
 | `notes.attach` | `path`, `file` (absolute or project-relative) | the attachment's vault-relative embed and its project-relative path | `chronicle notes attach --path "Tasks/T-012 Login.md" --file screenshot.png` |
-| `state.phases` | none | every phase: id, name, state, label, proof, live; plus `new_plans`, `newer_release`, `stale`, warnings | `chronicle state phases` |
+| `state.phases` | none | every phase: id, name, state, label, proof, live; plus `new_plans`, `newer_release`, `ledger_set_aside`, `manifest_present`, warnings | `chronicle state phases` |
 | `state.needs_you` | none | the built-in rows the app would show, as plain sentences with their commands | `chronicle state needs_you` |
 | `state.rounds` | none | every round: n, kind, state, and per note path, its status | `chronicle state rounds` |
 

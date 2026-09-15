@@ -33,7 +33,7 @@ fn caps() -> Vec<Capability> {
                     "properties": {
                         "status": { "type": "string", "description": "queued, in_progress, done, or any status the vault uses" },
                         "round": { "type": "integer", "description": "only notes in this round" },
-                        "tag": { "type": "string" },
+                        "tag": { "type": ["string", "array"], "items": { "type": "string" }, "description": "one tag, or a list: a note matches if it carries any of them" },
                         "text": { "type": "string", "description": "case-insensitive substring over title and body" },
                         "limit": { "type": "integer", "default": 200 }
                     }
@@ -169,6 +169,18 @@ fn arg_u64(args: &Value, key: &str) -> Result<Option<u64>, String> {
 fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     arg_str(args, key)?.filter(|s| !s.trim().is_empty()).ok_or_else(|| format!("{key} is required."))
 }
+/// A string, or a list of strings: a bare string becomes a one-element list. Anything
+/// else (a number, an object, a list holding a non-string) is refused.
+fn arg_str_or_list(args: &Value, key: &str) -> Result<Option<Vec<String>>, String> {
+    match args.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) => Ok(Some(vec![s.clone()])),
+        Some(Value::Array(a)) => a.iter()
+            .map(|v| v.as_str().map(str::to_string).ok_or_else(|| format!("{key} must be a string or a list of strings.")))
+            .collect::<Result<Vec<_>, _>>().map(Some),
+        Some(_) => Err(format!("{key} must be a string or a list of strings.")),
+    }
+}
 
 /* ---------- notes ---------- */
 
@@ -221,7 +233,7 @@ pub(crate) fn note_row(vault: &Path, rel: &str, size: u64) -> Value { row_and_bo
 fn notes_list(dir: &Path, args: &Value) -> Result<Outcome, String> {
     let status = arg_str(args, "status")?;
     let round = arg_u64(args, "round")?;
-    let tag = arg_str(args, "tag")?;
+    let tag = arg_str_or_list(args, "tag")?;
     let text = arg_str(args, "text")?.map(|t| t.to_lowercase());
     let limit = arg_u64(args, "limit")?.unwrap_or(200) as usize;
     let vault = index::vault_dir(dir);
@@ -233,7 +245,10 @@ fn notes_list(dir: &Path, args: &Value) -> Result<Outcome, String> {
         let (row, body_lower) = row_and_body(&vault, &rel, size);
         if let Some(s) = status { if row["status"].as_str() != Some(s) { continue } }
         if let Some(r) = round { if row["round"].as_u64() != Some(r) { continue } }
-        if let Some(t) = tag { if !row["tags"].as_array().map(|a| a.iter().any(|x| x == t)).unwrap_or(false) { continue } }
+        if let Some(tags) = &tag {
+            let row_tags: Vec<&str> = row["tags"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
+            if !tags.iter().any(|t| row_tags.contains(&t.as_str())) { continue }
+        }
         if let Some(q) = &text {
             // an unreadable note was never opened, so it can never match a text
             // search — it is skipped rather than falling back to a path match
@@ -504,6 +519,12 @@ mod tests {
         assert_eq!(rows[0]["created"], Value::Null, "absent keys are null, not invented");
         assert_eq!(call(&d, "chronicle.notes.list", &json!({"round": 1})).unwrap().data["notes"][0]["id"], "T-001");
         assert_eq!(call(&d, "chronicle.notes.list", &json!({"tag": "ui"})).unwrap().data["notes"].as_array().unwrap().len(), 2);
+        let bug_or_nope = call(&d, "chronicle.notes.list", &json!({"tag": ["bug", "nope"]})).unwrap();
+        let bug_rows = bug_or_nope.data["notes"].as_array().unwrap();
+        assert_eq!(bug_rows.len(), 1, "a note matches if it carries any listed tag");
+        assert_eq!(bug_rows[0]["id"], "T-002");
+        assert_eq!(call(&d, "chronicle.notes.list", &json!({"tag": 7})).unwrap_err(),
+                   "tag must be a string or a list of strings.");
         assert_eq!(call(&d, "chronicle.notes.list", &json!({"text": "kanban"})).unwrap().data["notes"][0]["id"], "T-002");
         assert_eq!(call(&d, "chronicle.notes.list", &json!({"limit": 1})).unwrap().data["notes"].as_array().unwrap().len(), 1);
         let zero = call(&d, "chronicle.notes.list", &json!({"limit": 0})).unwrap();

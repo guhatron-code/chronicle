@@ -69,7 +69,7 @@ already contains); an unknown status is refused with the list of known ones.
 
 | capability | result |
 |---|---|
-| `state.phases` | every phase: id, name, state, label, `proof?`, `live`; plus `new_plans`, `newer_release`, `stale`, warnings — the `--derive` shape, never latching (write = false) |
+| `state.phases` | every phase: id, name, state, label, `proof?`, `live`; plus `new_plans`, `newer_release`, `ledger_set_aside`, `manifest_present`, warnings — the `--derive` shape, never latching (write = false) |
 | `state.needs_you` | the built-in rows the app would show (branch, publish, pull, prune, behind) as plain sentences with their commands |
 | `state.rounds` | every round: n, kind, state, and per note path → status |
 
@@ -210,6 +210,21 @@ CLI plus the vault resolution (§1, §2 notes/state, §6); (2) rounds you can wa
   summary sentence last. Other capabilities print their one-line summary only.
   `--limit 0` is a valid call and returns zero rows (and, for `notes list`, the summary
   "0 notes.").
+- **`notes.list`'s `tag` takes one tag or several.** The schema accepts a string or an
+  array of strings; a bare string becomes a one-element list, and a note matches when its
+  tags intersect the list (`{"tag": ["bug", "nope"]}` matches any note tagged `bug`, `nope`,
+  or both). This is required, not optional: the CLI's `--tag` flag already repeats into a
+  JSON array (`--tag ui --tag bug` → `["ui", "bug"]`, cli.rs's `LIST_FLAGS`), so a
+  schema that only accepted a string made `chronicle notes list --tag ui` fail on every
+  call through the CLI front. A non-string, non-array value (a number, an object) is
+  refused with "tag must be a string or a list of strings."
+- **`state.phases`'s fields.** `derive_project`'s result is `name`, `statuses`, `warnings`,
+  `ledger_set_aside`, `new_plans`, `newer_release`, plus `manifest_present` that
+  `state_phases` adds itself. There is no `stale` field here: `stale` (the
+  `generatedFrom` sha256 mismatch list) is computed only by the app's fuller
+  `state_for_project`, which `state.needs_you` calls; it surfaces there as
+  `behind-doc:<path>` rows, distinct from the `behind-plan:...` rows (`new_plans`) and
+  the `behind-release` row (`newer_release`) that `state.phases` does carry.
 - **MCP protocol.** `initialize` answers `protocolVersion: "2025-06-18"`. A tool error
   (an unknown tool, a refused call) is returned as a normal `tools/call` result with
   `isError: true` and the message as its text content, not a JSON-RPC error; only
