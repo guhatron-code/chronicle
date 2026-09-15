@@ -183,3 +183,41 @@ CLI plus the vault resolution (§1, §2 notes/state, §6); (2) rounds you can wa
 - Clones without a committed vault.
 - Write actions beyond rounds (editing the roadmap, git operations).
 - Any automatic registration of `.mcp.json`.
+
+## Implementation notes (plan 1, 2026-09-16)
+
+- **The id allocator.** There was no allocator before this plan; app-created notes carry
+  no id. `notes.create` now allocates `T-<n>` as one past the highest numeric `T-id`
+  already in the vault, so a migration ending at `T-140` hands its first agent-created
+  note `T-141` regardless of how many app-created, id-less notes sit alongside it.
+- **`notes.attach`.** Returns both `attachment`, the vault-relative embed written into the
+  note body (`../attachments/<name>`), and `file`, the same attachment addressed from the
+  project root (`.chronicle/attachments/<name>`). Both the project-relative source and the
+  attachments folder are jailed to the project directory.
+- **The borrowed vault.** A linked git worktree has no `.chronicle/` of its own;
+  `notes::index::vault_root` resolves it to the main checkout's vault, and every notes
+  capability, the app's own notes commands, and round settlement go through it. The app
+  watches that borrowed vault too, and the notes sidebar shows one line under the vault
+  name: "Notes live in the main checkout · `<name>`".
+- **`state.*` never writes.** `state.phases` calls `derive_project` with `write: false`,
+  so the phase derivation never latches the roadmap ledger. `state.rounds` reads
+  `rounds.json` and computed note statuses directly, never through `inject_rounds`'s
+  `settle` gate, so listing rounds never settles one. Both were verified against a live
+  repository with unchanged file mtimes on `.chronicle/roadmap-ledger.json` and
+  `.chronicle/rounds.json` before and after the call.
+- **The `notes list` table.** Columns are id, status, round, tags (comma-joined, `·` when
+  empty), and path, in that fixed order, one row per note, no header row, with the
+  summary sentence last. Other capabilities print their one-line summary only.
+  `--limit 0` is a valid call and returns zero rows (and, for `notes list`, the summary
+  "0 notes.").
+- **MCP protocol.** `initialize` answers `protocolVersion: "2025-06-18"`. A tool error
+  (an unknown tool, a refused call) is returned as a normal `tools/call` result with
+  `isError: true` and the message as its text content, not a JSON-RPC error; only
+  protocol-level problems (bad JSON, an unknown method) are JSON-RPC errors.
+- **Live check.** Run against this repository (139 notes, all `done`; 7 rounds, all
+  settled) on the Task 6 debug binary: `notes list --status queued` correctly printed "0
+  notes." (a valid outcome, not a bug); `state phases` reported `M-1 done`, `M-2 now (up
+  next)`, `SE done`, `new_plans` naming the September 2026 specs and plans ahead of the
+  roadmap, and `newer_release: ["v0.8.1", "v0.5.1"]`; `state needs_you` and `state rounds`
+  matched the app's own wording; every call exited 0 and left the ledger and rounds files
+  untouched.

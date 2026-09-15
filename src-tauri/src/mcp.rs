@@ -79,8 +79,8 @@ pub(crate) fn serve(dir: PathBuf) -> i32 {
 mod tests {
     use super::*;
 
-    fn session() -> (PathBuf, Session) {
-        let d = std::env::temp_dir().join(format!("chronicle-mcp-{}", std::process::id()));
+    fn session(name: &str) -> (PathBuf, Session) {
+        let d = std::env::temp_dir().join(format!("chronicle-mcp-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join(".chronicle/notes/Tasks")).unwrap();
         std::fs::write(d.join(".chronicle/notes/Tasks/T-001 A.md"), "---\nid: T-001\nstatus: queued\n---\n\n# A\n").unwrap();
@@ -93,7 +93,7 @@ mod tests {
 
     #[test]
     fn the_handshake_then_list_then_call() {
-        let (_, mut s) = session();
+        let (_, mut s) = session("handshake");
         let init = rpc(&mut s, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}"#);
         assert_eq!(init["id"], 1);
         assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn protocol_errors_are_jsonrpc_errors() {
-        let (_, mut s) = session();
+        let (_, mut s) = session("protocol-errors");
         let e = rpc(&mut s, r#"{"jsonrpc":"2.0","id":9,"method":"tools/nope"}"#);
         assert_eq!(e["error"]["code"], -32601);
         let e = rpc(&mut s, "{not json");
