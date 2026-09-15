@@ -1098,7 +1098,7 @@ pub(crate) fn derive_project(p: &Project, ctx: &Ctx, write: bool) -> Value {
     match &p.manifest {
         None => json!({"error": p.manifest_error.clone().unwrap_or_else(|| "no manifest".into())}),
         Some(m) => {
-            let merged = inject_rounds(&p.dir, m);
+            let merged = inject_rounds(&p.dir, m, write);
             let mut l = ledger::load(&p.dir);
             let statuses = derive_statuses(ctx, &merged, &l);
             if write { latch(&p.dir, &mut l, &statuses); }
@@ -1145,7 +1145,8 @@ async fn get_picker() -> Value {
                     // the Ctx this tile already built — never a second git log walk
                     let d = derive_project(&p, &ctx, false);
                     let statuses = d.get("statuses").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-                    let merged = inject_rounds(&p.dir, m);
+                    // a read-only preview tile — never settles a round
+                    let merged = inject_rounds(&p.dir, m, false);
                     let mut flat: Vec<Value> = Vec::new();
                     if let Some(stages) = merged.get("stages").and_then(|v| v.as_array()) {
                         for st in stages {
@@ -1341,7 +1342,7 @@ async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: St
             // SECOND time further down, re-reading rounds.json and every ready
             // round's notes; a project with no roadmap keeps its own settle,
             // since nothing else in the poll would lift its locks.
-            Some(m) => inject_rounds(&p.dir, m),
+            Some(m) => inject_rounds(&p.dir, m, true),
             None => { notes::rounds::settle_done(&p.dir); Value::Null }
         });
         obj.insert("blank".into(), json!(blank && p.manifest.is_none()));
@@ -1633,7 +1634,7 @@ pub(crate) fn state_for_project(p: &Project, write: bool) -> Value {
             Worktree { path, branch: br, prunable }
         }).collect();
 
-    let merged_manifest = p.manifest.as_ref().map(|m| inject_rounds(&p.dir, m));
+    let merged_manifest = p.manifest.as_ref().map(|m| inject_rounds(&p.dir, m, write));
     let mut ledger = ledger::load(&p.dir);
     let (statuses, doc_existence, stale, custom_actions, new_plans, newer_rel) = match &merged_manifest {
         None => (Vec::new(), json!({}), json!([]), json!([]), Vec::<String>::new(), Value::Null),
@@ -1731,8 +1732,12 @@ pub(crate) fn needs_you_sentences(p: &Project) -> Vec<Value> {
         }
         if !flag("upstream") && !branch.is_empty() {
             if str_of("remote_url").is_empty() {
-                let slug = p.repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "project".into());
-                row("github", "Put this project on GitHub".into(), "It has no online home yet.", format!("gh repo create {slug} --private --source=. --push"));
+                let raw = p.repo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "project".into());
+                // frontend: (s.repo.split("/").pop() ?? "project").replace(/[^a-zA-Z0-9._-]/g, "-")
+                let slug: String = raw.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '-' }).collect();
+                row("github", "Put this project on GitHub".into(),
+                    "It has no online home yet. Chronicle creates a private repo under your account and publishes.",
+                    format!("gh repo create {slug} --private --source=. --push"));
             } else {
                 row("publish-first", "Publish the work online".into(), "Everything here exists only on this Mac right now.", format!("git push -u origin {branch}"));
             }
@@ -1746,23 +1751,35 @@ pub(crate) fn needs_you_sentences(p: &Project) -> Vec<Value> {
         }
         let prunable = s.get("worktrees").and_then(|v| v.as_array()).map(|a| a.iter().filter(|w| w["prunable"].as_bool() == Some(true)).count()).unwrap_or(0);
         if prunable > 0 {
-            row("prune", format!("Clean up {prunable} leftover workspace{}", if prunable > 1 { "s" } else { "" }), "A finished agent session left a working copy behind.", "git worktree prune".into());
+            row("prune", format!("Clean up {prunable} leftover workspace{}", if prunable > 1 { "s" } else { "" }),
+                "A finished agent session left a working copy behind. Your project isn't touched.", "git worktree prune".into());
         }
     }
     if s.get("manifest_present").and_then(|v| v.as_bool()) == Some(true) {
         for d in s.get("stale").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
             let d = d.as_str().unwrap_or("").to_string();
-            row(&format!("behind-doc:{d}"), format!("{d} changed since the roadmap was written"), "A refresh reads it again and updates only what changed.", String::new());
+            row(&format!("behind-doc:{d}"), format!("{d} changed since the roadmap was written"),
+                "A refresh reads it again and updates only what changed. You review the diff before anything lands.", String::new());
         }
-        for pth in s.get("new_plans").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+        let new_plans: Vec<Value> = s.get("new_plans").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        for pth in new_plans.iter().take(5) {
             let pth = pth.as_str().unwrap_or("").to_string();
             let name = pth.rsplit('/').next().unwrap_or(&pth).to_string();
             row(&format!("behind-plan:{pth}"), format!("{name} is not on the roadmap"), "A plan file newer than the roadmap that it never mentions.", String::new());
+        }
+        if new_plans.len() > 5 {
+            row("behind-plan-more!", format!("and {} more plan files are not on the roadmap", new_plans.len() - 5),
+                "The refresh reads all of them.", String::new());
         }
         if let Some(pair) = s.get("newer_release").and_then(|v| v.as_array()) {
             if pair.len() == 2 {
                 row("behind-release", format!("{} shipped, the roadmap ends at {}", pair[0].as_str().unwrap_or(""), pair[1].as_str().unwrap_or("")), "Releases after the last phase the roadmap knows about.", String::new());
             }
+        }
+        if flag("ledger_set_aside") {
+            row("ledger-bad", "The done ledger was unreadable and set aside".into(),
+                "It is next to the original as roadmap-ledger.json.bad. Phases re-prove themselves from the rules; anything only the ledger knew will need Mark done again.",
+                String::new());
         }
     }
     rows
@@ -2000,8 +2017,13 @@ fn settle_round(dir: &Path) {
 /// inserted right after the stage holding the LAST DONE phase. The manifest on disk is
 /// never touched. Each phase carries fixRound metadata + precomputed done/label (read
 /// from the notes' front matter on disk) that derive_statuses honors.
-fn inject_rounds(dir: &Path, manifest: &Value) -> Value {
-    notes::rounds::settle_done(dir);
+///
+/// `settle` gates the one write this function can make: `notes::rounds::settle_done`
+/// saving `.chronicle/rounds.json` when a ready round's notes are all done. Pass
+/// `false` from any read-only path (a picker preview, an agent's state capability) —
+/// everything else here (the merge itself) only ever reads.
+fn inject_rounds(dir: &Path, manifest: &Value, settle: bool) -> Value {
+    if settle { notes::rounds::settle_done(dir); }
     let rounds = notes::rounds::load(dir).unwrap_or_default(); // unreadable => no overlay
     let settled: Vec<&notes::rounds::Round> = rounds.iter()
         .filter(|r| r.state == "ready" || r.state == "done").collect();
@@ -3418,7 +3440,7 @@ fn main() {
         if blank && p.manifest.is_some() { let _ = std::fs::remove_file(&marker); }
         if let Some(obj) = st.as_object_mut() {
             obj.insert("manifest".into(), p.manifest.as_ref()
-                .map(|m| inject_rounds(&p.dir, m)).unwrap_or(Value::Null));
+                .map(|m| inject_rounds(&p.dir, m, true)).unwrap_or(Value::Null));
             obj.insert("blank".into(), json!(blank && p.manifest.is_none()));
             if p.manifest.is_none() {
                 obj.insert("misplaced".into(), json!(misplaced_manifest(&p.dir)));
@@ -4324,6 +4346,7 @@ mod r3_tests {
         let rows = needs_you_sentences(&p);
         let github = rows.iter().find(|r| r["id"] == "github").expect("no remote: the github row");
         assert_eq!(github["title"], "Put this project on GitHub");
+        assert_eq!(github["sub"], "It has no online home yet. Chronicle creates a private repo under your account and publishes.");
 
         let origin = tmp("needs-you-origin");
         git(&origin, &["init", "-q", "--bare", "-b", "main"]);
@@ -4340,6 +4363,29 @@ mod r3_tests {
         let rows2 = needs_you_sentences(&p2);
         let publish = rows2.iter().find(|r| r["id"] == "publish").expect("ahead 2: the publish row");
         assert_eq!(publish["title"], "Publish 2 saves");
+
+        // the github slug sanitizer matches the frontend's exactly: every char
+        // outside [A-Za-z0-9._-] becomes '-'
+        let parent = tmp("slug-parent");
+        let appdir = parent.join("My App");
+        std::fs::create_dir_all(&appdir).unwrap();
+        git(&appdir, &["init", "-q", "-b", "main"]);
+        git(&appdir, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "feat: first save"]);
+        let p3 = Project { dir: appdir.clone(), repo: appdir.clone(), extras: vec![], manifest: None, manifest_error: None };
+        let rows3 = needs_you_sentences(&p3);
+        let github3 = rows3.iter().find(|r| r["id"] == "github").expect("slug case: the github row");
+        assert_eq!(github3["command"], "gh repo create My-App --private --source=. --push");
+
+        // a prunable worktree: sub verbatim
+        let d4 = repo("needs-you-prune");
+        let wt = std::env::temp_dir().join(format!("chronicle-r3-needs-you-prune-wt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&wt);
+        git(&d4, &["worktree", "add", "-q", "-b", "leftover", wt.to_string_lossy().as_ref()]);
+        let _ = std::fs::remove_dir_all(&wt); // gone from disk; git still has the admin entry: prunable
+        let p4 = Project { dir: d4.clone(), repo: d4.clone(), extras: vec![], manifest: None, manifest_error: None };
+        let rows4 = needs_you_sentences(&p4);
+        let prune = rows4.iter().find(|r| r["id"] == "prune").expect("prunable worktree: the prune row");
+        assert_eq!(prune["sub"], "A finished agent session left a working copy behind. Your project isn't touched.");
     }
 }
 
@@ -4402,7 +4448,7 @@ mod r4_tests {
         vault_round(&d, &["queued", "in_progress"], "ready");
         std::fs::create_dir_all(d.join("fixes")).unwrap();
 
-        let merged = inject_rounds(&d, &manifest);
+        let merged = inject_rounds(&d, &manifest, true);
         let stages = merged["stages"].as_array().unwrap();
         assert_eq!(stages.len(), 2, "a synthetic stage is appended");
         assert_eq!(stages[1]["note"], "from Notes");
@@ -4419,7 +4465,7 @@ mod r4_tests {
         assert_eq!(m["FX-1"], ("now", "being fixed"));
 
         vault_round(&d, &["done", "done"], "ready");
-        let merged = inject_rounds(&d, &manifest);
+        let merged = inject_rounds(&d, &manifest, true);
         let fx = derive_statuses(&ctx, &merged, &ledger::load(&d)).into_iter().find(|s| s.id == "FX-1").unwrap();
         assert_eq!(fx.state, "done");
         assert_eq!(notes::rounds::load(&d).unwrap()[0].state, "done", "settle_done ran and lifted the lock");
@@ -4434,13 +4480,13 @@ mod r4_tests {
         // round still reads done: its state IS the answer, no note is opened.
         std::fs::remove_dir_all(d.join(".chronicle/notes/Tasks")).unwrap();
 
-        let merged = inject_rounds(&d, &manifest);
+        let merged = inject_rounds(&d, &manifest, true);
         let fix = &merged["stages"][1]["phases"][0];
         assert_eq!(fix["fixRoundState"]["done"], json!(true));
         assert_eq!(fix["fixRoundState"]["label"], "done");
         // a ready round still gets the real answer from disk
         vault_round(&d, &["in_progress", "done"], "ready");
-        let merged = inject_rounds(&d, &manifest);
+        let merged = inject_rounds(&d, &manifest, true);
         let fix = &merged["stages"][1]["phases"][0];
         assert_eq!(fix["fixRoundState"]["done"], json!(false));
         assert_eq!(fix["fixRoundState"]["label"], "being fixed");
@@ -4461,7 +4507,7 @@ mod r4_tests {
             prompt_path: format!("fixes/phase_{n}_fixes_prompt.md"),
         };
         notes::rounds::save(&d, &[mk(1, "Tasks/N0.md"), mk(2, "Tasks/N1.md")]).unwrap();
-        let merged = inject_rounds(&d, &json!({"name": "x", "stages": [{"title": "S", "phases": []}]}));
+        let merged = inject_rounds(&d, &json!({"name": "x", "stages": [{"title": "S", "phases": []}]}), true);
         let phases = merged["stages"][1]["phases"].as_array().unwrap();
         assert_eq!(phases.len(), 2);
         assert_eq!(phases[0]["name"], "Bug fixes");
@@ -4473,7 +4519,7 @@ mod r4_tests {
     fn no_rounds_means_no_overlay() {
         let d = tmp("noop");
         let manifest = json!({"name": "x", "stages": [{"title": "S", "phases": []}]});
-        let merged = inject_rounds(&d, &manifest);
+        let merged = inject_rounds(&d, &manifest, true);
         assert_eq!(merged, manifest, "no rounds store → the manifest passes through untouched");
     }
 }

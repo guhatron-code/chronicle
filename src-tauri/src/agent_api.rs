@@ -678,18 +678,35 @@ mod tests {
         assert!(rows.iter().all(|r| r["title"].is_string() && r["sub"].is_string()));
         assert!(ny.summary.ends_with("thing needs you.") || ny.summary.ends_with("things need you."), "{}", ny.summary);
 
+        // T-002 done too: every note in round 1 is now done, so the round WOULD
+        // settle ("ready" -> "done" in rounds.json) if any state capability's
+        // read triggered inject_rounds' settle_done — none may.
         put(&d, "Tasks/T-001 A.md", "---\nid: T-001\nstatus: done\nround: 1\n---\n\n# A\n");
-        put(&d, "Tasks/T-002 B.md", "---\nid: T-002\nstatus: in_progress\nround: 1\n---\n\n# B\n");
+        put(&d, "Tasks/T-002 B.md", "---\nid: T-002\nstatus: done\nround: 1\n---\n\n# B\n");
         std::fs::write(d.join(".chronicle/rounds.json"), r#"{"version":1,"rounds":[{"n":1,"state":"ready","kind":"bug fixes","note_paths":["Tasks/T-001 A.md","Tasks/T-002 B.md"]}]}"#).unwrap();
         let rd = call(&d, "chronicle.state.rounds", &json!({})).unwrap();
         let r = &rd.data["rounds"][0];
         assert_eq!(r["n"], 1);
         assert_eq!(r["kind"], "bug fixes");
         assert_eq!(r["notes"]["Tasks/T-001 A.md"], "done");
-        assert_eq!(r["notes"]["Tasks/T-002 B.md"], "in_progress");
-        assert_eq!(rd.summary, "1 round · round 1 bug fixes ready, 1 of 2 notes done.");
+        assert_eq!(r["notes"]["Tasks/T-002 B.md"], "done");
+        assert_eq!(rd.summary, "1 round · round 1 bug fixes ready, 2 of 2 notes done.");
 
-        // phases, needs_you and rounds are all read-only: none of them ever latches
+        // phases and needs_you both merge the round overlay (via derive_project /
+        // state_for_project's inject_rounds) — call them now that the round is
+        // settleable, and confirm the overlay still reports the notes' live truth
+        // without ever persisting it.
+        let ph2 = call(&d, "chronicle.state.phases", &json!({})).unwrap();
+        let st2 = ph2.data["statuses"].as_array().unwrap();
+        assert!(st2.iter().any(|s| s["id"] == "FX-1" && s["state"] == "done"),
+                "the round's own notes still prove FX-1 done, without settling the file: {st2:?}");
+        call(&d, "chronicle.state.needs_you", &json!({})).unwrap();
+
+        // all three state capabilities are read-only: none of them ever latches
+        // the ledger, and none of them ever settles a round on disk either
+        let rounds_after = std::fs::read_to_string(d.join(".chronicle/rounds.json")).unwrap();
+        assert!(rounds_after.contains(r#""state":"ready""#),
+                "reading state never settles a round either: {rounds_after}");
         assert!(!d.join(".chronicle/roadmap-ledger.json").exists(), "reading state never latches");
     }
 
