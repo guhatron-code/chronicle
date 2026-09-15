@@ -47,6 +47,10 @@ export interface PhaseStatus {
   label: string;
   /** What proved a done phase ("marker f8a0e01", "ledger user", "tag v0.3.0"…). */
   proof?: string;
+  /** True when the repo itself still proves it right now — a marker, a firing
+   *  rule, or a round whose notes are all done. The ledger holds a phase done
+   *  after its rule stops matching, so `proof` alone cannot say this. */
+  live?: boolean;
 }
 
 /** A manifest phase as the MERGED manifest carries it (incl. fix-round overlays). */

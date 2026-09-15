@@ -17,6 +17,7 @@ import {
   PlayGlyph,
   XGlyph,
 } from "@/components/chrome/icons";
+import { Hint } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { MiniMd } from "@/lib/mini-md";
 import { AccBody, PasteChip } from "./bits";
@@ -93,7 +94,7 @@ function StepRow({ step }: { step: DetailStep }) {
     >
       <span
         className={cn(
-          "inline-block size-3 shrink-0 rounded-[3px] border-[1.3px]",
+          "inline-block size-3 shrink-0 rounded-xs border-[1.3px]",
           step.state === "active" ? "border-state-neutral" : "border-border-strong",
         )}
       />
@@ -195,23 +196,21 @@ function SaveRow({ save, last }: { save: DetailSave; last: boolean }) {
       </div>
       <div className={cn("flex flex-col gap-[3px]", !last && "pb-3.5")}>
         <div className="flex items-center gap-[7px]">
-          <span className="rounded-[5px] bg-fill-subtle px-[5px] font-mono text-[10.5px] text-text-subtle">
+          <span className="rounded-xs bg-fill-subtle px-[5px] font-mono text-[10.5px] text-text-subtle">
             {save.hash}
           </span>
           {save.author.kind === "agent" ? (
-            <span
-              title="agent save"
-              className="flex size-4 items-center justify-center rounded-[5px] bg-surface-card-raised text-text-subtle"
-            >
-              <AgentStarGlyph size={9} />
-            </span>
+            <Hint label="Agent save">
+              <span className="flex size-4 items-center justify-center rounded-xs bg-surface-card-raised text-text-subtle">
+                <AgentStarGlyph size={9} />
+              </span>
+            </Hint>
           ) : (
-            <span
-              title="you"
-              className="flex size-4 items-center justify-center rounded-[5px] bg-surface-card-raised text-[8px] font-semibold text-text-subtle"
-            >
-              {save.author.initials}
-            </span>
+            <Hint label="Your save">
+              <span className="flex size-4 items-center justify-center rounded-xs bg-surface-card-raised text-[8px] font-semibold text-text-subtle">
+                {save.author.initials}
+              </span>
+            </Hint>
           )}
           <span className="font-mono text-[11px] text-text-dim tabular-nums">{save.ago}</span>
         </div>
@@ -336,14 +335,16 @@ export function PhaseDetail(p: PhaseDetailProps) {
                 <p className="text-[12.5px] text-text-secondary">
                   When the work is saved, the agent adds this line to the commit message. Or close it yourself:
                 </p>
-                <button
-                  type="button"
-                  onClick={() => p.onCopyCommand?.(p.markerCommand ?? "")}
-                  className="w-fit rounded-md bg-fill-subtle px-2.5 py-1.5 text-left font-mono text-[11.5px] text-text-primary hover:bg-fill-hover"
-                  title="Copy"
-                >
-                  {p.markerCommand}
-                </button>
+                <Hint label="Copy the marker command">
+                  <button
+                    type="button"
+                    onClick={() => p.onCopyCommand?.(p.markerCommand ?? "")}
+                    aria-label="Copy the marker command"
+                    className="w-fit rounded-md bg-fill-subtle px-2.5 py-1.5 text-left font-mono text-[11.5px] text-text-primary hover:bg-fill-hover"
+                  >
+                    {p.markerCommand}
+                  </button>
+                </Hint>
               </>
             )}
             <div className="flex flex-wrap items-center gap-2 pt-1">

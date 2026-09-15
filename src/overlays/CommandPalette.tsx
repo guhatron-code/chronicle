@@ -1,6 +1,6 @@
 /*
  * F5 — the ⌘K command palette / project switcher. shadcn Command in a dialog overlay.
- * Groups: "Open — switch instantly" (⌘1–9) · "Recent — open" · actions. State dot is
+ * Groups: "Open · switch instantly" (⌘1–9) · "Recent · open" · actions. State dot is
  * always paired with a word. Footer: ↵ open · esc close.
  */
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -110,7 +110,7 @@ export function CommandPalette({
             </CommandEmpty>
 
             {openProjects.length > 0 && (
-              <CommandGroup heading="Open — switch instantly">
+              <CommandGroup heading="Open · switch instantly">
                 {openProjects.map((p, i) => (
                   <CommandItem
                     key={p.path}
@@ -124,7 +124,7 @@ export function CommandPalette({
             )}
 
             {recents.length > 0 && (
-              <CommandGroup heading="Recent — open">
+              <CommandGroup heading="Recent · open">
                 {recents.map((p) => (
                   <CommandItem
                     key={p.path}
@@ -138,7 +138,7 @@ export function CommandPalette({
             )}
 
             {(githubRepos?.length || githubError) && (
-              <CommandGroup heading="GitHub — clone and open">
+              <CommandGroup heading="GitHub · clone and open">
                 {githubError ? (
                   <CommandItem
                     value="github setup"

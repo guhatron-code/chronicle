@@ -348,7 +348,7 @@ export function TerminalColumn({
           </button>
         </Hint>
         {onToggleCollapsed && (
-          <Hint label="Collapse — a slim strip stays">
+          <Hint label="Collapse · a slim strip stays">
             <button
               aria-label="Collapse the terminal section"
               onClick={onToggleCollapsed}

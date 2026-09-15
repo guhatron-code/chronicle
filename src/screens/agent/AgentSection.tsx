@@ -212,7 +212,7 @@ export function AgentSection({
             End session
           </button>
         )}
-        <Hint label="Collapse — a slim strip stays">
+        <Hint label="Collapse · a slim strip stays">
           <button
             aria-label="Collapse the agent section"
             onClick={onToggleCollapsed}

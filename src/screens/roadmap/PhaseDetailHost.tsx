@@ -155,6 +155,17 @@ export function PhaseDetailHost({
   const busyRound = openRoundFor(dir)?.n ?? null;
   if (busyRound != null) preflight.push({ label: `round ${busyRound} is active here`, ok: false });
 
+  /* "Mark not done" only removes the ledger entry. When the repo still proves the
+   * phase (`live`), the entry would come straight back on the next scan — so the
+   * action is blocked and says what to remove instead. `proof` cannot answer this
+   * on its own: once latched it reads "ledger …" whether or not the rule still
+   * fires, which is what used to leave the button live for ever after. */
+  const markNotDoneBlocked = !status?.live
+    ? null
+    : status.proof === "notes" || (fixRound != null && !status.proof?.startsWith("marker "))
+      ? "Still proved by the notes: every note in the round is done."
+      : "Still proved by the repo: remove the tag, marker or file first.";
+
   return (
     <PhaseDetail
       phaseId={id}
@@ -199,11 +210,7 @@ export function PhaseDetailHost({
       onCopyCommand={onCopyCommand}
       onMarkDone={onMarkDone}
       onMarkNotDone={onMarkNotDone}
-      markNotDoneBlocked={
-        status?.proof && !status.proof.startsWith("ledger ")
-          ? "Still proved by the repo: remove the tag, marker or file first."
-          : null
-      }
+      markNotDoneBlocked={markNotDoneBlocked}
     />
   );
 }

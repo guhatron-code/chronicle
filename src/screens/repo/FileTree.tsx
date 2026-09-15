@@ -364,7 +364,7 @@ export function FileTree(p: FileTreeProps) {
             <FolderPlusGlyph size={13} />
           </TreeIconButton>
         </Hint>
-        <Hint label="Project history — saves, publish, bring down">
+        <Hint label="Project history · saves, publish, bring down">
           <TreeIconButton aria-label="Project history" onClick={p.onOpenHistory}>
             <HistoryClockGlyph size={13} />
           </TreeIconButton>

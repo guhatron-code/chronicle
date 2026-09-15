@@ -6,12 +6,12 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRightGlyph, ChevronDownGlyph, ChevronUpGlyph } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 
-/** Passive 15px-line badge chip — fill-subtle, radius 5, NO border (de-boxing law).
+/** Passive 15px-line badge chip — fill-subtle, radius xs, NO border (de-boxing law).
  *  (F15 "changed just now" · F18 "new"/"edited" · F19 "next up" · F21 FX badge.) */
 export const TinyBadge = ({ className, children }: { className?: string; children: ReactNode }) => (
   <span
     className={cn(
-      "rounded-[5px] bg-fill-subtle px-[5px] text-[10.5px] leading-[15px] text-text-subtle",
+      "rounded-xs bg-fill-subtle px-[5px] text-[10.5px] leading-[15px] text-text-subtle",
       className,
     )}
   >
@@ -21,7 +21,7 @@ export const TinyBadge = ({ className, children }: { className?: string; childre
 
 /** Dashed provenance badge (F19 "from the roadmap · review before running"). */
 export const DashedBadge = ({ children }: { children: ReactNode }) => (
-  <span className="shrink-0 whitespace-nowrap rounded-[5px] border border-dashed border-border-strong px-1.5 text-[10.5px] leading-4 text-text-subtle">
+  <span className="shrink-0 whitespace-nowrap rounded-xs border border-dashed border-border-strong px-1.5 text-[10.5px] leading-4 text-text-subtle">
     {children}
   </span>
 );

@@ -425,20 +425,27 @@ export function RoadmapPane({
               .catch((e) => toastError("Couldn't start a terminal", String(e).slice(0, 90)));
           }}
           onCopyCommand={(cmd) => { void copyText(cmd); toastSuccess("Copied"); }}
-          onMarkDone={() =>
+          onMarkDone={() => {
+            // "?" is not a phase id: it would write a ledger entry no phase can ever own
+            if (!phase.id) { toastError("This phase has no id"); return; }
+            const id = phase.id;
             onConfirm({
-              title: `Mark ${phase.id} done?`,
+              title: `Mark ${id} done?`,
               body: "Chronicle records it in the done ledger. Nothing in your project changes. You can undo this from the same place.",
               cancelLabel: "Not yet", confirmLabel: "Mark done",
-              onConfirm: () => { ledgerMark(dir, phase.id ?? "?", true).catch((e) => toastError("Couldn't mark it", String(e).slice(0, 90))); },
-            })}
-          onMarkNotDone={() =>
+              onConfirm: () => { ledgerMark(dir, id, true).catch((e) => toastError("Couldn't mark it", String(e).slice(0, 90))); },
+            });
+          }}
+          onMarkNotDone={() => {
+            if (!phase.id) { toastError("This phase has no id"); return; }
+            const id = phase.id;
             onConfirm({
-              title: `Mark ${phase.id} not done?`,
+              title: `Mark ${id} not done?`,
               body: "The ledger entry is removed. If a tag, marker or file still proves it, it comes straight back on the next scan.",
               cancelLabel: "Keep it", confirmLabel: "Mark not done",
-              onConfirm: () => { ledgerMark(dir, phase.id ?? "?", false).catch((e) => toastError("Couldn't change it", String(e).slice(0, 90))); },
-            })}
+              onConfirm: () => { ledgerMark(dir, id, false).catch((e) => toastError("Couldn't change it", String(e).slice(0, 90))); },
+            });
+          }}
         />
       );
     }
@@ -552,7 +559,9 @@ export function RoadmapPane({
       onRefreshRoadmap: (note: string) =>
         onConfirm({
           title: "Bring the roadmap up to date?",
-          body: `${agent === "codex" ? "A Codex" : "A Claude"} session reads what changed and updates only those phases. Your files aren't changed; review the roadmap diff in Repo before you save anything else.`,
+          // the note is quoted verbatim: it is the one thing the session is told,
+          // and it is built from file names in the repo, so the user reads it first
+          body: `${agent === "codex" ? "A Codex" : "A Claude"} session reads what changed and updates only those phases. It will be told: "${note}" Your files aren't changed; review the roadmap diff in Repo before you save anything else.`,
           cancelLabel: "Not now",
           confirmLabel: "Update",
           onConfirm: () => startInit(false, note),

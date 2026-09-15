@@ -278,6 +278,8 @@ const BY_WORDS: Record<string, (p: string) => string> = {
   file_matches: (p) => p,
   file_glob: (p) => `a file in ${p}`,
   worktree_branch: (p) => `the workspace on ${p}`,
+  // a negated rule: what proves the phase is that the thing is NOT there
+  absence: (p) => `the absence of ${p}`,
 };
 
 export function proofSentence(proof: string | undefined): string | null {

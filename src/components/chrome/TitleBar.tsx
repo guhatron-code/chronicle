@@ -141,9 +141,9 @@ export function TitleBar({
       className="flex h-11 shrink-0 items-center gap-3 border-b border-divider px-3.5"
     >
       <TrafficLights />
-      <Hint label="Home — all projects">
+      <Hint label="Home · all projects">
         <button
-          aria-label="Home — all projects"
+          aria-label="Home · all projects"
           onClick={onHome}
           className="flex size-7 shrink-0 items-center justify-center rounded-[7px] text-text-subtle hover:bg-fill-hover hover:text-text-secondary"
         >

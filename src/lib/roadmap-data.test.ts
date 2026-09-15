@@ -258,6 +258,9 @@ describe("what proved a phase", () => {
     expect(proofSentence("file_matches c-zed/PROGRESS.md")).toBe("Proved by c-zed/PROGRESS.md.");
     expect(proofSentence("notes")).toBe("Every note in the round is done.");
     expect(proofSentence(undefined)).toBeNull();
+    // a negated rule is proved by what is NOT there, and must never read as if it were
+    expect(proofSentence("absence tag v9")).toBe("Proved by the absence of tag v9.");
+    expect(proofSentence("ledger absence tag v9")).toBe("Recorded done on an earlier scan, from the absence of tag v9.");
   });
   it("the marker command is the two-message form git parses", () => {
     expect(markerCommand("M-1")).toBe('git commit --allow-empty -m "Close M-1" -m "Chronicle-Phase: M-1 done"');
