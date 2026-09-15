@@ -67,7 +67,12 @@ pub(crate) fn serve(dir: PathBuf) -> i32 {
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
     for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
+        // a read error is not end of input: say why the server stopped instead of
+        // looking like a clean shutdown to the client
+        let Ok(line) = line else {
+            eprintln!("chronicle --mcp: stdin is not UTF-8; stopping.");
+            break
+        };
         if let Some(r) = handle_line(&mut s, &line) {
             if writeln!(out, "{r}").is_err() || out.flush().is_err() { break }
         }

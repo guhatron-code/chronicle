@@ -169,6 +169,24 @@ fn arg_u64(args: &Value, key: &str) -> Result<Option<u64>, String> {
 fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, String> {
     arg_str(args, key)?.filter(|s| !s.trim().is_empty()).ok_or_else(|| format!("{key} is required."))
 }
+/// Front matter is a flat `key: value` block written verbatim (`join_front_matter`), so
+/// a key holding a colon writes a second key on one line, and a value holding a line
+/// break writes a whole new line — `{"owner": "me\nround: 3"}` would stamp a real round,
+/// and a value holding `---` would close the block and spill into the body. Both are
+/// refused before anything is set, never escaped: front matter is one line per key.
+fn check_fm_key(key: &str) -> Result<(), String> {
+    if key.contains(['\n', '\r', ':']) {
+        return Err("front-matter keys are one word, no colon or line break.".into());
+    }
+    Ok(())
+}
+fn check_fm_value(value: &str) -> Result<(), String> {
+    if value.contains(['\n', '\r']) {
+        return Err("front-matter values and tags are one line.".into());
+    }
+    Ok(())
+}
+
 /// A string, or a list of strings: a bare string becomes a one-element list. Anything
 /// else (a number, an object, a list holding a non-string) is refused.
 fn arg_str_or_list(args: &Value, key: &str) -> Result<Option<Vec<String>>, String> {
@@ -335,6 +353,7 @@ fn notes_create(dir: &Path, args: &Value) -> Result<Outcome, String> {
             .collect::<Result<Vec<_>, _>>()?,
         Some(_) => return Err("tags must be a list of strings.".into()),
     };
+    for t in &tags { check_fm_value(t)?; }
     let body = arg_str(args, "body")?.unwrap_or("").trim_end();
     let rel = new_note_path(dir, folder, title)?;
     let id = next_id(dir);
@@ -354,7 +373,9 @@ fn notes_update(dir: &Path, args: &Value) -> Result<Outcome, String> {
         let obj = set.as_object().ok_or("set must be an object of strings.")?;
         for (k, v) in obj {
             if k == "id" || k == "round" { return Err("id and round are Chronicle's to assign.".into()); }
+            check_fm_key(k)?;
             let v = v.as_str().ok_or_else(|| format!("set.{k} must be a string."))?;
+            check_fm_value(v)?;
             if k == "status" { check_status(dir, v)?; }
             fm.set(k, v);
         }
@@ -675,6 +696,36 @@ mod tests {
                    "The file is over 10 MB, which is the attachment limit.");
     }
 
+    #[test]
+    fn front_matter_stays_one_line_per_key_so_a_value_cannot_forge_one() {
+        let d = vault("inject");
+        let note = "---\nid: T-001\nstatus: queued\n---\n\n# A\n\nbody\n";
+        put(&d, "Tasks/T-001 A.md", note);
+        let full = d.join(".chronicle/notes/Tasks/T-001 A.md");
+        let update = |set: Value| call(&d, "chronicle.notes.update", &json!({"path": "Tasks/T-001 A.md", "set": set}));
+
+        // a value carrying a line break would stamp a real `round: 3` line
+        assert_eq!(update(json!({"owner": "me\nround: 3"})).unwrap_err(),
+                   "front-matter values and tags are one line.");
+        assert_eq!(std::fs::read_to_string(&full).unwrap(), note, "a refused note is left exactly as it was");
+        // and one carrying a `---` line would close the block early
+        assert_eq!(update(json!({"owner": "me\n---\nnot front matter"})).unwrap_err(),
+                   "front-matter values and tags are one line.");
+        assert_eq!(update(json!({"owner": "me\rround: 3"})).unwrap_err(),
+                   "front-matter values and tags are one line.");
+        // a key with a colon writes a second key on the same line
+        assert_eq!(update(json!({"a:b": "x"})).unwrap_err(),
+                   "front-matter keys are one word, no colon or line break.");
+        assert_eq!(update(json!({"a\nb": "x"})).unwrap_err(),
+                   "front-matter keys are one word, no colon or line break.");
+        assert_eq!(std::fs::read_to_string(&full).unwrap(), note);
+
+        // create's tags go through set_list, the same hole
+        assert_eq!(call(&d, "chronicle.notes.create", &json!({"title": "B", "tags": ["bug\nid: T-9"]})).unwrap_err(),
+                   "front-matter values and tags are one line.");
+        assert!(!d.join(".chronicle/notes/Tasks/B.md").exists(), "a refused create writes no file");
+    }
+
     fn git(d: &Path, args: &[&str]) {
         let o = std::process::Command::new("git").arg("-C").arg(d).args(args).output().unwrap();
         assert!(o.status.success(), "git {:?}: {}", args, String::from_utf8_lossy(&o.stderr));
@@ -731,6 +782,25 @@ mod tests {
         assert!(rounds_after.contains(r#""state":"ready""#),
                 "reading state never settles a round either: {rounds_after}");
         assert!(!d.join(".chronicle/roadmap-ledger.json").exists(), "reading state never latches");
+    }
+
+    /// A corrupt ledger is set aside by the app's own write paths, never by a read:
+    /// an agent asking what is done must not move a project file out from under it.
+    #[test]
+    fn reading_state_never_sets_a_corrupt_ledger_aside() {
+        let d = vault("ledger-read");
+        git(&d, &["init", "-q", "-b", "main"]);
+        git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "feat: first save"]);
+        std::fs::write(d.join("chronicle.json"), r#"{"chronicleVersion":1,"name":"t","workBranch":"main","stages":[{"title":"S","phases":[
+            {"id":"A","name":"One","status":{"done_when":[{"tag":"v9.9.9"}]}}]}]}"#).unwrap();
+        let led = d.join(crate::ledger::FILE);
+        std::fs::write(&led, "{ not json").unwrap();
+
+        let ph = call(&d, "chronicle.state.phases", &json!({})).unwrap();
+        assert_eq!(ph.data["ledger_set_aside"], true, "the caller still hears the ledger could not be read");
+        call(&d, "chronicle.state.needs_you", &json!({})).unwrap();
+        assert_eq!(std::fs::read_to_string(&led).unwrap(), "{ not json", "a read leaves the file where it is");
+        assert!(!d.join(".chronicle/roadmap-ledger.json.bad").exists(), "and moves nothing aside");
     }
 
     #[test]

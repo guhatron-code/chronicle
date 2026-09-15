@@ -59,6 +59,9 @@ pub(crate) fn parse(args: &[String]) -> Result<Invocation, Usage> {
             }
             i += 2;
         } else {
+            // one bare argument is the project directory; a second is a typo, and
+            // silently keeping the last one would run the call somewhere else
+            if dir.is_some() { return Err(Usage("Only one project directory can be given.".into())) }
             dir = Some(PathBuf::from(a));
             i += 1;
         }
@@ -128,6 +131,8 @@ mod tests {
         assert_eq!(parse(&a("notes")).unwrap_err().0, "Usage: chronicle notes <list|read|create|update|set_status|attach> [--flag value] [--json] [dir].");
         assert!(parse(&a("notes frobnicate")).unwrap_err().0.starts_with("No capability named chronicle.notes.frobnicate."));
         assert_eq!(parse(&a("notes list --status")).unwrap_err().0, "--status needs a value.");
+        // one bare argument is the project directory; a second one is a typo, not a silent overwrite
+        assert_eq!(parse(&a("notes list /tmp/a /tmp/b")).unwrap_err().0, "Only one project directory can be given.");
         assert!(parse(&a("")).is_err());
         // not a CLI call at all: the app launches
         assert_eq!(run(&a("--open /tmp/x")), None);

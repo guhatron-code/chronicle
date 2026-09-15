@@ -34,20 +34,29 @@ fn path(dir: &Path) -> PathBuf { dir.join(FILE) }
 /// A missing file is an empty ledger. A file that cannot be parsed, or that a
 /// newer Chronicle wrote (`version` above ours), is renamed to
 /// `roadmap-ledger.json.bad` (never overwritten in place) and reported via
-/// `set_aside`: a shape this build does not know is never half-read.
+/// `set_aside`: a shape this build does not know is never half-read. A caller that
+/// must not write anything uses `load_readonly` instead.
 pub fn load(dir: &Path) -> Ledger {
-    let p = path(dir);
-    let text = match std::fs::read_to_string(&p) {
+    let l = load_readonly(dir);
+    if l.set_aside {
+        let p = path(dir);
+        let _ = std::fs::rename(&p, p.with_extension("json.bad"));
+    }
+    l
+}
+
+/// The same read with nothing written: a file this build cannot use is reported via
+/// `set_aside` and left exactly where it is. Every read-only caller (an agent's state
+/// capability, a status export) goes through this, so asking what is done never moves
+/// a project file.
+pub fn load_readonly(dir: &Path) -> Ledger {
+    let text = match std::fs::read_to_string(path(dir)) {
         Ok(t) => t,
         Err(_) => return Ledger { version: 1, ..Default::default() },
     };
-    let set_aside = || {
-        let _ = std::fs::rename(&p, p.with_extension("json.bad"));
-        Ledger { version: 1, set_aside: true, ..Default::default() }
-    };
     match serde_json::from_str::<Ledger>(&text) {
         Ok(l) if l.version <= VERSION => l,
-        _ => set_aside(),
+        _ => Ledger { version: 1, set_aside: true, ..Default::default() },
     }
 }
 
@@ -161,6 +170,23 @@ mod tests {
         assert_eq!(std::fs::read_to_string(d.join(FILE).with_extension("json.bad")).unwrap(), body);
         assert!(!d.join(FILE).exists());
         assert!(!load(&d).set_aside, "the next load is clean");
+    }
+
+    #[test]
+    fn a_read_only_load_reports_a_corrupt_file_without_moving_it() {
+        let d = tmp("readonly");
+        std::fs::create_dir_all(d.join(".chronicle")).unwrap();
+        std::fs::write(d.join(FILE), "{ not json").unwrap();
+        let l = load_readonly(&d);
+        assert!(l.done.is_empty(), "a shape this build does not know is never half-read");
+        assert!(l.set_aside, "the caller still hears the file could not be read");
+        assert_eq!(std::fs::read_to_string(d.join(FILE)).unwrap(), "{ not json", "a read never moves a project file");
+        assert!(!d.join(FILE).with_extension("json.bad").exists());
+
+        let ok = tmp("readonly-ok");
+        mark(&ok, "A", "tag", "v1").unwrap();
+        assert_eq!(load_readonly(&ok).done["A"].proof, "v1", "a healthy file reads the same either way");
+        assert!(!load_readonly(&ok).set_aside);
     }
 
     #[test]

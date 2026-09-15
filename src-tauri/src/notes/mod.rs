@@ -208,7 +208,10 @@ pub fn attach(p: &Project, slug: &str, ext: &str, bytes: &[u8]) -> Result<String
     let ext: String = ext.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_lowercase();
     if slug.is_empty() || ext.is_empty() { return Err("bad attachment name".into()); }
     if bytes.len() > 10_000_000 { return Err("attachment is over 10 MB".into()); }
-    let adir = p.dir.join(".chronicle/attachments");
+    // beside the vault, not beside the project: with a borrowed vault (a linked
+    // worktree) the note lives in the main checkout, and `../attachments` from it has
+    // to land there too, exactly as `write_note` writes the note itself
+    let adir = index::vault_root(&p.dir).join(".chronicle/attachments");
     std::fs::create_dir_all(&adir).map_err(|e| e.to_string())?;
     let mut n = 1usize;
     while adir.join(format!("{slug}-{n}.{ext}")).exists() { n += 1; }

@@ -86,8 +86,13 @@ fn resolve_root(dir: &Path) -> PathBuf {
     let git_dir = crate::git_in(dir, &["rev-parse", "--path-format=absolute", "--git-dir"]);
     let common = crate::git_in(dir, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
     if git_dir.is_empty() || common.is_empty() || git_dir == common { return dir.to_path_buf(); }
+    let common = Path::new(common.trim());
+    // only a real `<checkout>/.git` has a checkout around it to borrow. A bare repo
+    // (`repo.git` with sibling worktrees) has none: its parent is the folder that HOLDS
+    // the worktrees, so borrowing it would put the vault outside every project.
+    if common.file_name() != Some(std::ffi::OsStr::new(".git")) { return dir.to_path_buf(); }
     // the main checkout is the parent of its .git directory
-    match Path::new(common.trim()).parent() {
+    match common.parent() {
         Some(p) => p.canonicalize().unwrap_or_else(|_| p.to_path_buf()),
         None => dir.to_path_buf(),
     }
@@ -481,5 +486,30 @@ mod tests {
         // the answer is cached: a second call spawns no git (cheap enough to call 81 times a poll)
         let (_, spawns) = crate::git_spawns(|| vault_root(&wt));
         assert_eq!(spawns, 0, "cached after the first resolution");
+    }
+
+    /// A bare repo with sibling worktrees (`repo.git` beside them) has no main
+    /// checkout to borrow: the common dir's parent is the folder that HOLDS the
+    /// worktrees, so borrowing it would put the vault outside every project — and
+    /// leave that parent's `.chronicle` findable from anywhere beneath it.
+    #[test]
+    fn a_worktree_of_a_bare_repo_is_its_own_root() {
+        let base = std::env::temp_dir().join(format!("chronicle-vault-bare-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let src = base.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        git(&src, &["init", "-q", "-b", "main"]);
+        git(&src, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "first"]);
+        let bare = base.join("repo.git");
+        let o = std::process::Command::new("git")
+            .args(["clone", "-q", "--bare", src.to_str().unwrap(), bare.to_str().unwrap()]).output().unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        let wt = base.join("wt");
+        git(&bare, &["worktree", "add", "-q", wt.to_str().unwrap(), "main"]);
+        let wt = wt.canonicalize().unwrap();
+
+        assert_eq!(vault_root(&wt), wt, "no `.git` directory means no checkout to borrow");
+        assert!(!vault_is_borrowed(&wt));
+        assert_eq!(vault_dir(&wt), wt.join(".chronicle/notes"));
     }
 }

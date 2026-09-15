@@ -1101,7 +1101,8 @@ pub(crate) fn derive_project(p: &Project, ctx: &Ctx, write: bool) -> Value {
         None => json!({"error": p.manifest_error.clone().unwrap_or_else(|| "no manifest".into())}),
         Some(m) => {
             let merged = inject_rounds(&p.dir, m, write);
-            let mut l = ledger::load(&p.dir);
+            // a read moves nothing: only the writing caller may set a corrupt ledger aside
+            let mut l = if write { ledger::load(&p.dir) } else { ledger::load_readonly(&p.dir) };
             let statuses = derive_statuses(ctx, &merged, &l);
             if write { latch(&p.dir, &mut l, &statuses); }
             let mtime = std::fs::metadata(p.dir.join("chronicle.json")).and_then(|m| m.modified())
@@ -1637,7 +1638,8 @@ pub(crate) fn state_for_project(p: &Project, write: bool) -> Value {
         }).collect();
 
     let merged_manifest = p.manifest.as_ref().map(|m| inject_rounds(&p.dir, m, write));
-    let mut ledger = ledger::load(&p.dir);
+    // as in derive_project: a read-only call never sets a corrupt ledger aside either
+    let mut ledger = if write { ledger::load(&p.dir) } else { ledger::load_readonly(&p.dir) };
     let (statuses, doc_existence, stale, custom_actions, new_plans, newer_rel) = match &merged_manifest {
         None => (Vec::new(), json!({}), json!([]), json!([]), Vec::<String>::new(), Value::Null),
         Some(m) => {
