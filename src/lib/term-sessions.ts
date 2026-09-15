@@ -22,6 +22,7 @@ import {
   ptyWrite,
 } from "./ipc";
 import { getActivity, subscribeActivity } from "./scheduler";
+import { logicalLine, spanToRange, type LinkRow } from "./term-links";
 
 export interface TermSession {
   id: number; // pty id
@@ -300,15 +301,49 @@ function hideLinkTip() {
 
 const URL_RE = /https?:\/\/[^\s'"<>()\[\]]+/g;
 
+// A logical line that wraps a pathological number of rows (a giant base64
+// blob with no whitespace) must not walk the whole scrollback on every
+// hover — 60 rows is far past any real URL or path at any sane terminal
+// width, so the join gives up and treats the window edge as the boundary.
+const MAX_WRAP_ROWS = 60;
+
+/** One buffer row as `logicalLine` wants it. trimRight (`translateToString`'s
+ *  `true`) matches the old single-row read exactly, and is exact for a
+ *  wrapped row too: xterm pads a wrapped row to the full column count with
+ *  real characters, not trailing blanks, so there is nothing for trimRight
+ *  to trim away — it only ever affects the last, possibly short, row. */
+function readLinkRow(term: Terminal, index0: number): LinkRow {
+  const bufLine = term.buffer.active.getLine(index0);
+  return { text: bufLine?.translateToString(true) ?? "", isWrapped: bufLine?.isWrapped ?? false };
+}
+
 /* ONE provider for both kinds of link. xterm consults link providers in
    registration order and stops at the first that returns any links, so two
    providers meant a line carrying both a path and a URL lost the URL entirely.
-   A single pass over the line collects both, URLs first, and a path match that
-   overlaps a URL (the path inside `https://host/a/b.js`) is dropped. */
+   A single pass over the (possibly multi-row) logical line collects both,
+   URLs first, and a path match that overlaps a URL (the path inside
+   `https://host/a/b.js`) is dropped.
+
+   A URL or path longer than the terminal width wraps onto the next buffer
+   row(s), which xterm marks `isWrapped`; provideLinks is asked about one
+   row at a time, so the row is first grown into its whole logical line
+   (logicalLine) before the regexes run, and each match's offset in that
+   joined string is mapped back to an on-screen range that can span rows
+   (spanToRange). An unwrapped row is its own one-row logical line, so this
+   reduces to the previous single-row math exactly. */
 function registerTermLinks(term: Terminal, dir: string) {
   term.registerLinkProvider({
     provideLinks(y, callback) {
-      const line = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+      const row0 = y - 1; // 0-based buffer index xterm is asking about
+      const total = term.buffer.active.length;
+      const winStart = Math.max(0, row0 - MAX_WRAP_ROWS);
+      const winEnd = Math.min(total - 1, row0 + MAX_WRAP_ROWS);
+      const rows: LinkRow[] = [];
+      for (let i = winStart; i <= winEnd; i += 1) rows.push(readLinkRow(term, i));
+      const { text: line, firstRow: firstRowInWindow } = logicalLine(rows, row0 - winStart);
+      const firstRow = winStart + firstRowInWindow + 1; // back to xterm's 1-based y
+      const cols = term.cols;
+
       const links: Parameters<typeof callback>[0] = [];
       const urlSpans: [number, number][] = []; // [start, endExclusive) in line offsets
 
@@ -319,7 +354,7 @@ function registerTermLinks(term: Terminal, dir: string) {
         const url = m[0].replace(/[.,;:!?]+$/, ""); // trailing punctuation isn't part of the link
         urlSpans.push([m.index, m.index + m[0].length]);
         links.push({
-          range: { start: { x: m.index + 1, y }, end: { x: m.index + url.length, y } },
+          range: spanToRange(m.index, m.index + url.length, cols, firstRow),
           text: url,
           decorations: { underline: true, pointerCursor: true },
           activate: (event) => { if (!event.metaKey) return; urlOpenHandler?.(dir, url); },
@@ -337,7 +372,7 @@ function registerTermLinks(term: Terminal, dir: string) {
         const end = start + shown.length;
         if (urlSpans.some(([a, b]) => start < b && end > a)) continue; // it's part of a URL
         links.push({
-          range: { start: { x: start + 1, y }, end: { x: end, y } },
+          range: spanToRange(start, end, cols, firstRow),
           text: shown,
           decorations: { underline: true, pointerCursor: true },
           activate: (event) => {
