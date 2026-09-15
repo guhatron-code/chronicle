@@ -47,7 +47,9 @@ export function isClaudeArtifactUrl(url: string): boolean {
   let u: URL;
   try { u = new URL(url); } catch { return false; }
   if (u.protocol !== "https:" || !ARTIFACT_HOSTS.has(u.hostname)) return false;
-  return u.pathname.includes("/artifacts/");
+  // claude.ai links to one artifact as /artifact/<id> (singular) and lists them under
+  // /artifacts/; both are artifact pages, so both open in the Web pane
+  return u.pathname.split("/").some((seg) => seg === "artifact" || seg === "artifacts");
 }
 
 export function isHtmlPath(path: string): boolean {

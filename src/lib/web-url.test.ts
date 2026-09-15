@@ -59,6 +59,8 @@ describe("isClaudeArtifactUrl", () => {
     expect(isClaudeArtifactUrl("https://claude.ai/artifacts/abc123")).toBe(true);
     expect(isClaudeArtifactUrl("https://www.claude.ai/public/artifacts/abc")).toBe(true);
     expect(isClaudeArtifactUrl("https://claude.site/artifacts/abc")).toBe(true);
+    expect(isClaudeArtifactUrl("https://claude.ai/artifact/VLZCEPpeKmXzkwQaZowWr2")).toBe(true);
+    expect(isClaudeArtifactUrl("https://claude.ai/artifactory/x")).toBe(false);
   });
   it("rejects other claude pages and other hosts", () => {
     expect(isClaudeArtifactUrl("https://claude.ai/chat/xyz")).toBe(false);
