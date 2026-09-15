@@ -1306,7 +1306,7 @@ async fn open_project(roots: State<'_, OpenRoots>, path: String) -> Result<Value
 #[tauri::command]
 async fn get_state(app: tauri::AppHandle, roots: State<'_, OpenRoots>, notes: State<'_, notes::index::NotesState>, dir: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
-    let mut s = state_for_project(&p);
+    let mut s = state_for_project(&p, true);
     let marker = p.dir.join(".chronicle-blank");
     let blank = marker.exists();
     if blank && p.manifest.is_some() { let _ = std::fs::remove_file(&marker); } // roadmap arrived
@@ -1601,7 +1601,12 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-pub(crate) fn state_for_project(p: &Project) -> Value {
+/// `write` gates the ledger `latch(...)` call below and nothing else — every other
+/// field here (git probes, staleness, custom actions) is always computed fresh. Pass
+/// `true` only from a scan/poll path that owns advancing the roadmap (the app's
+/// heartbeat, the `--state` CLI); a read-only consumer (a status export, an agent's
+/// state capability) passes `false` so reading state can never latch a phase done.
+pub(crate) fn state_for_project(p: &Project, write: bool) -> Value {
     let ctx = Ctx::build(p);
 
     let branch_probe = git_in_checked(&p.repo, &["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -1634,7 +1639,7 @@ pub(crate) fn state_for_project(p: &Project) -> Value {
         None => (Vec::new(), json!({}), json!([]), json!([]), Vec::<String>::new(), Value::Null),
         Some(m) => {
             let statuses = derive_statuses(&ctx, m, &ledger);
-            latch(&p.dir, &mut ledger, &statuses);
+            if write { latch(&p.dir, &mut ledger, &statuses); }
             // existence for every path the manifest references (paste + docs)
             let mut docs = serde_json::Map::new();
             let mut walk = |path: &str| {
@@ -1710,7 +1715,7 @@ pub(crate) fn state_for_project(p: &Project) -> Value {
 /// facts `state_for_project` reports. The frontend's `needsYouRows` is the wording
 /// reference; keep the two in step.
 pub(crate) fn needs_you_sentences(p: &Project) -> Vec<Value> {
-    let s = state_for_project(p);
+    let s = state_for_project(p, false);
     let str_of = |k: &str| s.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
     let num = |k: &str| s.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
     let flag = |k: &str| s.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
@@ -2511,7 +2516,8 @@ async fn global_search(roots: State<'_, OpenRoots>, dir: String, q: String) -> R
 #[tauri::command]
 async fn status_report(roots: State<'_, OpenRoots>, dir: String) -> Result<String, String> {
     let p = project_for(&roots, &dir)?;
-    let s = state_for_project(&p);
+    // a read-only export (the roadmap as a sendable page) — never advances the ledger
+    let s = state_for_project(&p, false);
     let name = p.manifest.as_ref().and_then(|m| m.get("name")).and_then(|v| v.as_str())
         .unwrap_or_else(|| p.dir.file_name().map(|x| x.to_str().unwrap_or("project")).unwrap_or("project"));
     let mut md = format!("# {name} — status\n\n");
@@ -3406,7 +3412,7 @@ fn main() {
         let dir = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
             .canonicalize().unwrap_or_else(|_| PathBuf::from("."));
         let p = load_project(&dir);
-        let mut st = state_for_project(&p);
+        let mut st = state_for_project(&p, true);
         let marker = p.dir.join(".chronicle-blank");
         let blank = marker.exists();
         if blank && p.manifest.is_some() { let _ = std::fs::remove_file(&marker); }
@@ -4192,7 +4198,7 @@ mod r3_tests {
                    "a dir repeated via planDirs must not duplicate its rows");
         assert_eq!(newer_release(&ctx, &m), Some(("v0.8.1".into(), "v0.5.1".into())),
                    "a version number in prose (\"tauri 2.11.5\") is not a real tag and must not be picked as mentioned");
-        let st = state_for_project(&p);
+        let st = state_for_project(&p, true);
         assert_eq!(st["new_plans"].as_array().unwrap().len(), 2);
         assert_eq!(st["newer_release"], json!(["v0.8.1", "v0.5.1"]));
         // nothing behind: no rows
@@ -4206,7 +4212,7 @@ mod r3_tests {
         let m_rewritten = p.manifest.clone().unwrap();
         assert!(newer_plans(&ctx, &m_rewritten, mtime).is_empty(),
                  "against the ORIGINAL mtime, now that both files are mentioned, neither is new");
-        assert!(state_for_project(&p)["new_plans"].as_array().unwrap().is_empty());
+        assert!(state_for_project(&p, true)["new_plans"].as_array().unwrap().is_empty());
     }
 
     #[test]

@@ -671,7 +671,6 @@ mod tests {
         assert_eq!((st[0]["id"].as_str(), st[0]["state"].as_str(), st[0]["live"].as_bool()), (Some("A"), Some("done"), Some(true)));
         assert_eq!((st[1]["id"].as_str(), st[1]["state"].as_str()), (Some("B"), Some("now")));
         assert_eq!(ph.summary, "A done · B now (up next) · 1 of 2 done.");
-        assert!(!d.join(".chronicle/roadmap-ledger.json").exists(), "reading state never latches");
 
         let ny = call(&d, "chronicle.state.needs_you", &json!({})).unwrap();
         let rows = ny.data["rows"].as_array().unwrap();
@@ -689,6 +688,9 @@ mod tests {
         assert_eq!(r["notes"]["Tasks/T-001 A.md"], "done");
         assert_eq!(r["notes"]["Tasks/T-002 B.md"], "in_progress");
         assert_eq!(rd.summary, "1 round · round 1 bug fixes ready, 1 of 2 notes done.");
+
+        // phases, needs_you and rounds are all read-only: none of them ever latches
+        assert!(!d.join(".chronicle/roadmap-ledger.json").exists(), "reading state never latches");
     }
 
     #[test]
