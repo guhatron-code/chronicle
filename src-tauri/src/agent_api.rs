@@ -14,10 +14,7 @@ pub(crate) struct Outcome { pub summary: String, pub data: Value }
 
 pub(crate) struct ToolSpec {
     pub name: &'static str,
-    // Read by the MCP server (schema advertised to the model), not yet by the CLI.
-    #[allow(dead_code)]
     pub description: &'static str,
-    #[allow(dead_code)]
     pub input_schema: Value,
 }
 
@@ -232,6 +229,7 @@ fn notes_list(dir: &Path, args: &Value) -> Result<Outcome, String> {
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0))); // newest first, then path
     let mut rows = Vec::new();
     for (rel, _, size) in entries {
+        if rows.len() >= limit { break }
         let (row, body_lower) = row_and_body(&vault, &rel, size);
         if let Some(s) = status { if row["status"].as_str() != Some(s) { continue } }
         if let Some(r) = round { if row["round"].as_u64() != Some(r) { continue } }
@@ -243,7 +241,6 @@ fn notes_list(dir: &Path, args: &Value) -> Result<Outcome, String> {
             if !body.contains(q) && !rel.to_lowercase().contains(q) { continue }
         }
         rows.push(row);
-        if rows.len() >= limit { break }
     }
     let n = rows.len();
     Ok(Outcome { summary: format!("{n} note{}.", if n == 1 { "" } else { "s" }), data: json!({ "notes": rows }) })
@@ -509,6 +506,9 @@ mod tests {
         assert_eq!(call(&d, "chronicle.notes.list", &json!({"tag": "ui"})).unwrap().data["notes"].as_array().unwrap().len(), 2);
         assert_eq!(call(&d, "chronicle.notes.list", &json!({"text": "kanban"})).unwrap().data["notes"][0]["id"], "T-002");
         assert_eq!(call(&d, "chronicle.notes.list", &json!({"limit": 1})).unwrap().data["notes"].as_array().unwrap().len(), 1);
+        let zero = call(&d, "chronicle.notes.list", &json!({"limit": 0})).unwrap();
+        assert_eq!(zero.data["notes"], json!([]));
+        assert_eq!(zero.summary, "0 notes.");
         assert_eq!(call(&d, "chronicle.notes.list", &json!({"status": 7})).unwrap_err(),
                    "status must be a string.");
 

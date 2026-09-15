@@ -17,6 +17,7 @@ mod notes;
 mod ledger;
 mod agent_api;
 mod cli;
+mod mcp;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -3425,6 +3426,13 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(code) = cli::run(&args[1..]) { std::process::exit(code); }
     let launch_open = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1).cloned());
+    if let Some(i) = args.iter().position(|a| a == "--mcp") {
+        let start = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+        match agent_api::resolve_project_dir(&start) {
+            Some(dir) => std::process::exit(mcp::serve(dir)),
+            None => { eprintln!("No Chronicle project at {}.", start.display()); std::process::exit(1) }
+        }
+    }
     if let Some(i) = args.iter().position(|a| a == "--derive") {
         let dir = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
         let out = derive_for_dir(&dir, true);
