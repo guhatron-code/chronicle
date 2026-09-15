@@ -25,24 +25,29 @@ pub struct Ledger {
     #[serde(skip)]
     pub set_aside: bool,
 }
-fn one() -> u32 { 1 }
+/// The shape this build writes and can read.
+pub const VERSION: u32 = 1;
+fn one() -> u32 { VERSION }
 
 fn path(dir: &Path) -> PathBuf { dir.join(FILE) }
 
-/// A missing file is an empty ledger. A file that cannot be parsed is renamed to
-/// `roadmap-ledger.json.bad` (never overwritten in place) and reported via `set_aside`.
+/// A missing file is an empty ledger. A file that cannot be parsed, or that a
+/// newer Chronicle wrote (`version` above ours), is renamed to
+/// `roadmap-ledger.json.bad` (never overwritten in place) and reported via
+/// `set_aside`: a shape this build does not know is never half-read.
 pub fn load(dir: &Path) -> Ledger {
     let p = path(dir);
     let text = match std::fs::read_to_string(&p) {
         Ok(t) => t,
         Err(_) => return Ledger { version: 1, ..Default::default() },
     };
+    let set_aside = || {
+        let _ = std::fs::rename(&p, p.with_extension("json.bad"));
+        Ledger { version: 1, set_aside: true, ..Default::default() }
+    };
     match serde_json::from_str::<Ledger>(&text) {
-        Ok(l) => l,
-        Err(_) => {
-            let _ = std::fs::rename(&p, p.with_extension("json.bad"));
-            Ledger { version: 1, set_aside: true, ..Default::default() }
-        }
+        Ok(l) if l.version <= VERSION => l,
+        _ => set_aside(),
     }
 }
 
@@ -134,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn mark_keeps_the_first_entry_unless_overwritten_on_purpose() {
+    fn mark_overwrites_an_existing_entry() {
         let d = tmp("keep");
         mark(&d, "A", "tag", "v1").unwrap();
         let first = load(&d).done["A"].at;
@@ -142,6 +147,20 @@ mod tests {
         let l = load(&d);
         assert_eq!(l.done["A"].by, "user");
         assert!(l.done["A"].at >= first);
+    }
+
+    #[test]
+    fn a_file_from_a_newer_chronicle_is_set_aside_not_read() {
+        let d = tmp("version");
+        std::fs::create_dir_all(d.join(".chronicle")).unwrap();
+        let body = r#"{"version":2,"done":{"A":{"by":"user","proof":"","at":1}}}"#;
+        std::fs::write(d.join(FILE), body).unwrap();
+        let l = load(&d);
+        assert!(l.done.is_empty(), "a shape this build does not know is never half-read");
+        assert!(l.set_aside);
+        assert_eq!(std::fs::read_to_string(d.join(FILE).with_extension("json.bad")).unwrap(), body);
+        assert!(!d.join(FILE).exists());
+        assert!(!load(&d).set_aside, "the next load is clean");
     }
 
     #[test]
