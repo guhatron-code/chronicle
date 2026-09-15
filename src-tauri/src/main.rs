@@ -569,7 +569,7 @@ pub(crate) fn dirty_set(repo: &Path) -> Vec<DirtyEntry> {
     out
 }
 
-struct Ctx {
+pub(crate) struct Ctx {
     repo: PathBuf,
     extras: Vec<(String, PathBuf)>,
     tags: HashSet<String>,
@@ -581,7 +581,7 @@ struct Ctx {
 }
 
 impl Ctx {
-    fn build(p: &Project) -> Ctx {
+    pub(crate) fn build(p: &Project) -> Ctx {
         Ctx {
             repo: p.repo.clone(),
             extras: p.extras.clone(),
@@ -614,7 +614,7 @@ impl Ctx {
     /// Manifest content is data, never trusted: absolute paths and `..` traversal are
     /// rejected outright; the resolved path (symlinks followed) must stay inside a
     /// declared root. Returns None for anything that escapes or doesn't exist.
-    fn resolve_jailed(&self, path: &str) -> Option<PathBuf> {
+    pub(crate) fn resolve_jailed(&self, path: &str) -> Option<PathBuf> {
         if Path::new(path).is_absolute() { return None; }
         if Path::new(path).components().any(|c| matches!(c, std::path::Component::ParentDir)) {
             return None;

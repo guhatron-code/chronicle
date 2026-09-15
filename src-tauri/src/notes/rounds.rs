@@ -114,6 +114,19 @@ pub fn is_locked(dir: &Path, rel: &str) -> bool {
     rounds.iter().any(|r| r.n == n && live(r))
 }
 
+/// Which live round holds this note, if any (the number `is_locked` hides).
+/// Mirrors `is_locked`'s two ways in exactly: the record's own `note_paths`
+/// list first, then the note's own `round:` stamp, both only for a live round.
+pub fn locking_round(dir: &Path, rel: &str) -> Option<u64> {
+    let rounds = load_or_none(dir);
+    if let Some(r) = rounds.iter().find(|r| live(r) && r.note_paths.iter().any(|p| p == rel)) {
+        return Some(r.n);
+    }
+    let fm = front_of(dir, rel)?;
+    let n = parse::round_of(&fm)?;
+    rounds.iter().find(|r| r.n == n && live(r)).map(|r| r.n)
+}
+
 pub fn statuses_for(dir: &Path, paths: &[String]) -> HashMap<String, Option<String>> {
     paths.iter()
         .map(|p| (p.clone(), front_of(dir, p).and_then(|fm| parse::status_of(&fm))))
