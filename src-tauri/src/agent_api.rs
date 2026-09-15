@@ -99,7 +99,7 @@ fn caps() -> Vec<Capability> {
         Capability {
             spec: ToolSpec {
                 name: "chronicle.notes.attach",
-                description: "Copy a file from the project into the vault's attachments and embed it at the end of the note.",
+                description: "Copy a file from the project into the vault's attachments and embed it at the end of the note. Returns `attachment`, the vault-relative embed written into the note, and `file`, its path from the project root.",
                 input_schema: json!({ "type": "object", "required": ["path", "file"],
                     "properties": { "path": { "type": "string" }, "file": { "type": "string", "description": "project-relative or absolute path inside the project" } } }),
             },
@@ -292,7 +292,9 @@ fn notes_create(dir: &Path, args: &Value) -> Result<Outcome, String> {
     check_status(dir, status)?;
     let tags: Vec<String> = match args.get("tags") {
         None | Some(Value::Null) => vec![],
-        Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+        Some(Value::Array(a)) => a.iter()
+            .map(|v| v.as_str().map(str::to_string).ok_or_else(|| "tags must be a list of strings.".to_string()))
+            .collect::<Result<Vec<_>, _>>()?,
         Some(_) => return Err("tags must be a list of strings.".into()),
     };
     let body = arg_str(args, "body")?.unwrap_or("").trim_end();
@@ -313,6 +315,7 @@ fn notes_update(dir: &Path, args: &Value) -> Result<Outcome, String> {
     if let Some(set) = args.get("set") {
         let obj = set.as_object().ok_or("set must be an object of strings.")?;
         for (k, v) in obj {
+            if k == "id" || k == "round" { return Err("id and round are Chronicle's to assign.".into()); }
             let v = v.as_str().ok_or_else(|| format!("set.{k} must be a string."))?;
             if k == "status" { check_status(dir, v)?; }
             fm.set(k, v);
@@ -341,28 +344,41 @@ fn notes_set_status(dir: &Path, args: &Value) -> Result<Outcome, String> {
     Ok(Outcome { summary: format!("{rel} is now {status}."), data: json!({ "path": rel, "status": status }) })
 }
 
+/// `notes::attach`'s two terse refusals, turned into sentences an agent can act on.
+/// Matched on the exact strings that helper returns (`notes/mod.rs` ~205-220); anything
+/// else (an io error, formatted with `{e}`) is passed through unchanged.
+fn attach_error_sentence(e: String) -> String {
+    match e.as_str() {
+        "bad attachment name" => "The file needs an extension, like .png or .pdf.".to_string(),
+        "attachment is over 10 MB" => "The file is over 10 MB, which is the attachment limit.".to_string(),
+        _ => e,
+    }
+}
+
 fn notes_attach(dir: &Path, args: &Value) -> Result<Outcome, String> {
     let rel = required_str(args, "path")?;
     let file = required_str(args, "file")?;
     let p = crate::load_project(dir);
-    let ctx = crate::Ctx::build(&p);
-    let src = if Path::new(file).is_absolute() {
-        let canon = Path::new(file).canonicalize().map_err(|_| format!("There is no file at {file}."))?;
-        let root = p.dir.canonicalize().map_err(|e| e.to_string())?;
-        if !canon.starts_with(&root) { return Err("file must be inside the project.".into()) }
-        canon
-    } else {
-        ctx.resolve_jailed(file).ok_or_else(|| if file.contains("..") || file.starts_with('/') {
-            "file must be inside the project.".to_string() } else { format!("There is no file at {file}.") })?
-    };
+    // both branches jail to the project dir (p.dir) alone — not Ctx::resolve_jailed,
+    // which also opens manifest `extras` (@alias/... roots) that can sit outside it
+    let candidate = if Path::new(file).is_absolute() { PathBuf::from(file) } else { p.dir.join(file) };
+    let canon = candidate.canonicalize().map_err(|_| format!("There is no file at {file}."))?;
+    let root = p.dir.canonicalize().map_err(|e| e.to_string())?;
+    if !canon.starts_with(&root) { return Err("file must be inside the project.".into()) }
+    let src = canon;
     let bytes = std::fs::read(&src).map_err(|_| format!("There is no file at {file}."))?;
     let stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
     let ext = src.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
-    let att = crate::notes::attach(&p, &stem, &ext, &bytes)?;
+    let att = crate::notes::attach(&p, &stem, &ext, &bytes).map_err(attach_error_sentence)?;
+    // `att` is the vault-relative embed ("../attachments/<name>") the note body needs
+    // (the editor's ATTACHMENT_REF regex requires exactly that form); `file_rel` is the
+    // same attachment addressed from the project root, for a caller that wants to open it.
+    let name = att.strip_prefix("../attachments/").unwrap_or(&att);
+    let file_rel = format!(".chronicle/attachments/{name}");
     let (fm, body) = read_note_file(dir, rel)?;
     let body = format!("{}\n\n![{stem}]({att})\n", body.trim_end());
     write_locked_aware(dir, rel, &parse::join_front_matter(&fm, &body))?;
-    Ok(Outcome { summary: format!("Attached {file} to {rel}."), data: json!({ "path": rel, "attachment": att }) })
+    Ok(Outcome { summary: format!("Attached {file} to {rel}."), data: json!({ "path": rel, "attachment": att, "file": file_rel }) })
 }
 
 #[cfg(test)]
@@ -489,6 +505,9 @@ mod tests {
         assert_eq!(call(&d, "chronicle.notes.create", &json!({})).unwrap_err(), "title is required.");
         assert_eq!(call(&d, "chronicle.notes.create", &json!({"title": "X", "folder": "../out"})).unwrap_err(),
                    "that path isn't inside the notes vault");
+        // a non-string tag is refused rather than silently dropped
+        assert_eq!(call(&d, "chronicle.notes.create", &json!({"title": "Y", "tags": ["bug", 7]})).unwrap_err(),
+                   "tags must be a list of strings.");
     }
 
     #[test]
@@ -506,6 +525,11 @@ mod tests {
         assert_eq!(r.summary, "Updated Tasks/T-001 A.md · in_progress.");
         let e = call(&d, "chronicle.notes.update", &json!({"path": "Tasks/T-001 A.md", "set": {"status": "nope"}})).unwrap_err();
         assert!(e.starts_with("nope isn't a status this vault uses."));
+        // id and round are Chronicle's to assign: a stray set of either is refused, not written
+        assert_eq!(call(&d, "chronicle.notes.update", &json!({"path": "Tasks/T-001 A.md", "set": {"id": "T-999"}})).unwrap_err(),
+                   "id and round are Chronicle's to assign.");
+        assert_eq!(call(&d, "chronicle.notes.update", &json!({"path": "Tasks/T-001 A.md", "set": {"round": "3"}})).unwrap_err(),
+                   "id and round are Chronicle's to assign.");
         let s = call(&d, "chronicle.notes.set_status", &json!({"path": "Tasks/T-001 A.md", "status": "done"})).unwrap();
         assert_eq!(s.data["status"], "done");
         assert_eq!(s.summary, "Tasks/T-001 A.md is now done.");
@@ -524,18 +548,32 @@ mod tests {
         std::fs::write(d.join("shot.png"), b"\x89PNGfake").unwrap();
         let r = call(&d, "chronicle.notes.attach", &json!({"path": "Tasks/T-001 A.md", "file": "shot.png"})).unwrap();
         let att = r.data["attachment"].as_str().unwrap().to_string();
-        // notes::attach returns a vault-root-relative embed ref ("../attachments/<file>"),
-        // the same convention migrate.rs and the frontend's ATTACHMENT_REF regex use —
-        // not a project-relative ".chronicle/attachments/…" path (adjusted from the brief,
-        // see task-3-report.md).
+        let file = r.data["file"].as_str().unwrap().to_string();
+        // `attachment` is the vault-root-relative embed ref ("../attachments/<name>"), the
+        // same convention migrate.rs and the frontend's ATTACHMENT_REF regex require in a
+        // note's body; `file` is the same attachment addressed from the project root, for
+        // a caller that wants to open or check it directly (adjusted from the brief, see
+        // task-3-report.md).
         assert!(att.starts_with("../attachments/") && att.ends_with(".png"), "{att}");
-        let file_name = att.strip_prefix("../attachments/").unwrap();
-        assert!(d.join(".chronicle/attachments").join(file_name).exists());
+        assert!(file.starts_with(".chronicle/attachments/") && file.ends_with(".png"), "{file}");
+        assert!(d.join(&file).exists());
         let text = std::fs::read_to_string(d.join(".chronicle/notes/Tasks/T-001 A.md")).unwrap();
         assert!(text.trim_end().ends_with(&format!("![shot]({att})")), "the note ends with the embed: {text}");
         assert_eq!(call(&d, "chronicle.notes.attach", &json!({"path": "Tasks/T-001 A.md", "file": "/etc/passwd"})).unwrap_err(),
                    "file must be inside the project.");
         assert_eq!(call(&d, "chronicle.notes.attach", &json!({"path": "Tasks/T-001 A.md", "file": "missing.png"})).unwrap_err(),
                    "There is no file at missing.png.");
+        // a relative path that climbs out of the project is refused the same way an
+        // absolute one outside it is — both branches jail to the project dir alone
+        std::fs::write(d.parent().unwrap().join("outside.png"), b"\x89PNGfake").unwrap();
+        assert_eq!(call(&d, "chronicle.notes.attach", &json!({"path": "Tasks/T-001 A.md", "file": "../outside.png"})).unwrap_err(),
+                   "file must be inside the project.");
+        // notes::attach's terse refusals come back as sentences
+        std::fs::write(d.join("noext"), b"data").unwrap();
+        assert_eq!(call(&d, "chronicle.notes.attach", &json!({"path": "Tasks/T-001 A.md", "file": "noext"})).unwrap_err(),
+                   "The file needs an extension, like .png or .pdf.");
+        std::fs::write(d.join("big.bin"), vec![0u8; 10_000_001]).unwrap();
+        assert_eq!(call(&d, "chronicle.notes.attach", &json!({"path": "Tasks/T-001 A.md", "file": "big.bin"})).unwrap_err(),
+                   "The file is over 10 MB, which is the attachment limit.");
     }
 }
