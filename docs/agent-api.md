@@ -45,6 +45,13 @@ roadmap rules, never from memory. Neither group needs the app running.
 | `state.needs_you` | none | the built-in rows the app would show, as plain sentences with their commands | `chronicle state needs_you` |
 | `state.rounds` | none | every round: n, kind, state, and per note path, its status | `chronicle state rounds` |
 
+On `notes.attach`: in a linked worktree the attachment is stored beside the borrowed
+vault, in the main checkout; the app shows it when that checkout is open.
+
+Front matter is one line per key: `notes.update`'s `set` refuses a key holding a colon or
+a line break, and a value (or a `notes.create` tag) holding a line break, rather than
+writing a line the note never meant to carry.
+
 ## Flag grammar
 
 - `--tag` repeats: `--tag ui --tag bug` becomes `["ui", "bug"]`.

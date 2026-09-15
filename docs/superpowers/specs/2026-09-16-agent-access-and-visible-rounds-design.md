@@ -236,3 +236,29 @@ CLI plus the vault resolution (§1, §2 notes/state, §6); (2) rounds you can wa
   roadmap, and `newer_release: ["v0.8.1", "v0.5.1"]`; `state needs_you` and `state rounds`
   matched the app's own wording; every call exited 0 and left the ledger and rounds files
   untouched.
+- **Front matter is one line per key.** `join_front_matter` writes `key: value` verbatim,
+  so an agent-supplied value holding a line break would write a whole new front-matter
+  line (`{"owner": "me\nround: 3"}` stamping a real round), and one holding `---` would
+  close the block and spill into the body. `notes.update`'s `set` and `notes.create`'s
+  `tags` refuse rather than escape: a key holding `\n`, `\r` or `:` with "front-matter
+  keys are one word, no colon or line break." and a value or tag holding `\n` or `\r`
+  with "front-matter values and tags are one line." The check runs before anything is
+  set, so a refused call leaves the note byte for byte as it was.
+- **A read never sets the ledger aside.** `ledger::load` renames a corrupt or
+  newer-version `roadmap-ledger.json` to `.bad`; `ledger::load_readonly` reports the same
+  `set_aside` flag and leaves the file where it is. `derive_project` and
+  `state_for_project` call the read-only one whenever `write` is false, so
+  `state.phases` and `state.needs_you` still tell the caller the ledger could not be
+  read without moving a project file out from under the app.
+- **Attachments follow the borrowed vault.** `notes::attach` writes to
+  `vault_root(&p.dir)/.chronicle/attachments`, not `p.dir`, so the `../attachments/<name>`
+  ref it puts in the note resolves from wherever `write_note` put that note. In a linked
+  worktree the attachment therefore lands in the main checkout; the app shows it when
+  that checkout is open, and a project opened AS the worktree reading it back is deferred.
+  `notes.attach`'s `file` field stays the project-relative `.chronicle/attachments/<name>`.
+- **Only a `.git` directory has a checkout to borrow.** `resolve_root` treats the parent
+  of the git common dir as the main checkout only when that common dir is named exactly
+  `.git`. A bare repo with sibling worktrees (`repo.git` beside them) has no main
+  checkout: its parent is the folder that holds the worktrees, and borrowing it would put
+  the vault outside every project and leave that parent's `.chronicle` findable from
+  anywhere beneath it. Such a worktree is its own vault root.
