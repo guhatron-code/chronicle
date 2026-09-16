@@ -176,7 +176,7 @@ describe("the history section while the facts are still on their way", () => {
   // every handler is a no-op here; the mapping is what is under test
   const handlers = new Proxy({}, { get: () => () => {} }) as RoadmapCtx["handlers"];
   const ctx = (over: Partial<RoadmapCtx> = {}): RoadmapCtx => ({
-    agent: "claude", partOf: null, initRun: null, fixesRun: null, execRun: null,
+    agent: "claude", partOf: null, initRun: null,
     digest: null, consent: null, copiedPath: null, expandedId: null,
     justSwitched: false, historyFacts: null, historyChecking: false,
     historyError: null, uncommittedOpen: false, warningDismissed: false,
@@ -195,6 +195,13 @@ describe("the history section while the facts are still on their way", () => {
     expect(p?.kind).toBe("panel");
     if (p?.kind !== "panel") throw new Error("expected the panel");
     expect(p.lastSave?.subject).toBe("fix(notes): keep the caret in place");
+  });
+
+  /* The building card used to also mirror a round's fixes/exec session — those
+     sessions are gone (Task 1); the roadmap session is the only one left. */
+  it("stays absent with no roadmap session running, even with a manifest on screen", () => {
+    const s = repo({ manifest_present: true });
+    expect(mapRoadmap(s, ctx()).building).toBeUndefined();
   });
 });
 

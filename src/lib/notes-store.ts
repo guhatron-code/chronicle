@@ -21,7 +21,7 @@ import {
 } from "./ipc";
 import {
   joinFrontMatter, newNotePath, roundPhaseOf, roundsJustFinished, setStatusInFront, splitFrontMatter,
-  type RoundPhase, type RoundRoute, type SaveState,
+  type RoundPhase, type RoundRecord, type RoundRoute, type SaveState,
 } from "./notes-model";
 import { clearRunningRound, dismissedRoundFor, evictRoundLog, runningRoundFor } from "./round-log";
 import { announce } from "./journal";
@@ -67,6 +67,9 @@ export async function refreshNotes(dir: string): Promise<void> {
     const before = indexFor(dir).rounds;
     indexes.set(dir, next);
     for (const n of roundsJustFinished(before, next.rounds)) finishedRound(dir, n);
+    if (roundsJustReady(before, next.rounds).length > 0) {
+      announce(dir, "round-plan", "A round's fix plan is ready", "Chronicle");
+    }
     notifyIndex();
   } catch { /* not an open project — the pane shows its empty state */ }
 }
@@ -81,6 +84,15 @@ function finishedRound(dir: string, n: number): void {
   if (runningRoundFor(dir)?.n === n) clearRunningRound(dir);
   announce(dir, "round-done", `Round ${n} finished`, "Chronicle");
   toastSuccess("The round finished", "Check Notes · finished items are ticked");
+}
+
+/** A round's plan just finished writing — the record moving from `generating`
+ *  to `ready`. Same before/after comparison as roundsJustFinished, kept here
+ *  rather than on the roadmap: the pane it used to mirror this session on is
+ *  gone, but the record still knows the moment it happened. */
+function roundsJustReady(before: RoundRecord[], after: RoundRecord[]): number[] {
+  const was = new Map(before.map((r) => [r.n, r.state]));
+  return after.filter((r) => r.state === "ready" && was.get(r.n) === "generating").map((r) => r.n);
 }
 
 /** The heartbeat's `notes_generation`: refetch only when it actually moved. */

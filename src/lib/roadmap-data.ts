@@ -116,12 +116,6 @@ export interface RoadmapCtx {
   agent: "claude" | "codex";
   partOf: { name: string; path: string } | null;
   initRun: InitRun | null;
-  /** A round's fixes session writing the plan — same card, different title. */
-  fixesRun: InitRun | null;
-  /** A headless round EXECUTION session (F1) — same card again. */
-  execRun: InitRun | null;
-  /** Which round the exec session is running — names the card. */
-  execRoundN?: number | null;
   /** "While you were away" — journal entries since the user last looked (F2). */
   digest?: { ts: number; text: string }[] | null;
   /** the persisted per-project consent — null means never asked */
@@ -144,13 +138,9 @@ export interface RoadmapCtx {
     onRunMyself: () => void;
     onBasicView: () => void;
     onCancelInit: () => void;
-    onCancelFixes: () => void;
-    onCancelExec: () => void;
     onDismissDigest: () => void;
     onCopyStatus: () => void;
-    onViewExecLog: () => void;
     onViewFullLog: () => void;
-    onViewFixesLog: () => void;
     onScan: () => void;
     onRebuild: () => void;
     onDismissWarning: () => void;
@@ -476,8 +466,8 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     props.digest = { entries: ctx.digest, onDismiss: H.onDismissDigest };
   }
 
-  /* -- the building card: any running session (first build, rebuild, OR the
-        the fix-plan writer) shows F13 in the top slot -- */
+  /* -- the building card: a running init session (first build or rebuild)
+        shows F13 in the top slot -- */
   if (ctx.initRun?.running) {
     const r = ctx.initRun;
     // with a roadmap already on screen this is a REBUILD — one name everywhere
@@ -485,37 +475,10 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
     props.building = r.elapsedS > 300
       ? { kind: "still-running", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit, onViewFullLog: H.onViewFullLog }
       : { kind: "running", title, elapsed: fmtElapsed(r.elapsedS), progress: r.progress, logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelInit };
-  } else if (ctx.fixesRun?.running) {
-    const r = ctx.fixesRun;
-    props.building = r.elapsedS > 300
-      ? { kind: "still-running", note: "Big rounds can take a while. The session is alive and still writing.", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelFixes, onViewFullLog: H.onViewFixesLog }
-      : {
-          kind: "running",
-          title: "Writing the fix plan…",
-          elapsed: fmtElapsed(r.elapsedS),
-          progress: r.progress,
-          logLines: r.logLines,
-          activeLine: r.activeLine,
-          onCancel: H.onCancelFixes,
-        };
-  } else if (ctx.execRun?.running) {
-    const r = ctx.execRun;
-    const title = ctx.execRoundN != null ? `Running round ${ctx.execRoundN}…` : "Running the round…";
-    props.building = r.elapsedS > 300
-      ? { kind: "still-running", note: "Rounds can take a while. Notes tick done as they're verified.", elapsed: fmtElapsed(r.elapsedS), logLines: r.logLines, activeLine: r.activeLine, onCancel: H.onCancelExec, onViewFullLog: H.onViewExecLog }
-      : {
-          kind: "running",
-          title,
-          elapsed: fmtElapsed(r.elapsedS),
-          progress: r.progress,
-          logLines: r.logLines,
-          activeLine: r.activeLine,
-          onCancel: H.onCancelExec,
-        };
   }
 
   /* -- warning banner (yields to the building card while a rebuild runs) -- */
-  if (s.manifest_present && s.manifest_warnings.length > 0 && !ctx.warningDismissed && !ctx.initRun?.running && !ctx.fixesRun?.running && !ctx.execRun?.running) {
+  if (s.manifest_present && s.manifest_warnings.length > 0 && !ctx.warningDismissed && !ctx.initRun?.running) {
     props.warning = { count: s.manifest_warnings.length, onRebuild: H.onRebuild, onDismiss: H.onDismissWarning };
   }
 
@@ -692,7 +655,7 @@ export function mapRoadmap(s: StateData, ctx: RoadmapCtx): RoadmapProps {
   }
 
   /* -- the standing rebuild action (bottom of the column) -- */
-  if (s.manifest_present && !ctx.initRun?.running && !ctx.fixesRun?.running) {
+  if (s.manifest_present && !ctx.initRun?.running) {
     props.onRebuildRoadmap = H.onRebuild;
   props.onCopyStatus = H.onCopyStatus;
   }

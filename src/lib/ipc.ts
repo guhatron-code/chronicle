@@ -614,24 +614,3 @@ export function windowControls() {
     setTitle: (title: string) => w.setTitle(title),
   };
 }
-
-/* ---------- TEMPORARY stubs — plan 2 Task 2 ----------
- * The headless `fixes`/`exec` background sessions are gone (plan 2 Task 1):
- * rounds either run in the agent pane or in a terminal, both driven by
- * round_plan_begin/round_plan_settle/round_plan_cancel/round_run_message_cmd
- * above. RoadmapPane.tsx is the last caller of the old wrappers below (Notes
- * stopped calling them when Task 4 rewrote the round card and deleted the log
- * panel); Task 5 rewires it, and deletes every stub left here with it.
- */
-/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
-export const fixesStatus = (_dir: string) => Promise.reject(new Error("removed")) as Promise<InitStatusData>;
-/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
-export const fixesCancel = (_dir: string) => Promise.reject(new Error("removed"));
-/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
-export const fixesLogPath = (_dir: string) => Promise.reject(new Error("removed")) as Promise<string>;
-/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
-export const roundExecStatus = (_dir: string) => Promise.reject(new Error("removed")) as Promise<InitStatusData>;
-/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
-export const roundExecCancel = (_dir: string) => Promise.reject(new Error("removed"));
-/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
-export const execLogPath = (_dir: string) => Promise.reject(new Error("removed")) as Promise<string>;
