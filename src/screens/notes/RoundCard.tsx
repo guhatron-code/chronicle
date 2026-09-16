@@ -5,9 +5,14 @@
  * A round whose plan is written sits at `ready` in the record and looks
  * identical to one that is executing; the only affordance for starting it was
  * a toast action that is easy to miss, so a written plan could sit untouched
- * while the card said "working" and the log panel showed an executor that had
- * never run. `plan-ready` is now its own phase with its own three buttons —
- * the same three the board's done card used to offer.
+ * while the card said "working". `plan-ready` is now its own phase with its
+ * own three buttons: the two routes a round can actually run in, and the
+ * prompt for anywhere else.
+ *
+ * A running round is somewhere you can go and look — the agent pane or a
+ * terminal tab — so the executing card's first button is the way there, and
+ * the second is the honest escape for a run that ended without the app
+ * hearing about it.
  *
  * Presentational plus its own commands: everything it needs about the round
  * arrives as props (so the memo holds while the user types), and the actions
@@ -16,9 +21,7 @@
 import { memo, useState } from "react";
 import { TreeRow } from "@/components/chrome/Tree";
 import { DocGlyph } from "@/components/chrome/icons";
-import {
-  copyText, readFileText, roundExecCancel, roundPlanCancel, type NoteEntry,
-} from "@/lib/ipc";
+import { copyText, readFileText, roundPlanCancel, type NoteEntry } from "@/lib/ipc";
 import { agentSessionFor, cancelAgentTurn } from "@/lib/agent-session";
 import { clearRunningRound, dismissRound } from "@/lib/round-log";
 import { refreshNotes, setRoundGenerating } from "@/lib/notes-store";
@@ -37,6 +40,8 @@ export interface RoundCardData {
   notes: NoteEntry[];
   done: number;
   route: RoundRoute | null;
+  /** the tab running it, when the route is a terminal — "Open the terminal" */
+  termId?: number;
 }
 
 /** A note's row label. Before anything runs, "working" would be a lie; after
@@ -51,22 +56,24 @@ function rowStatus(note: NoteEntry, phase: RoundPhase): { label: string; tone: s
 const BTN = "shrink-0 rounded-xs border border-border-hairline px-[7px] py-[3px] text-[10.5px] text-text-dim hover:bg-fill-hover hover:text-text-primary disabled:opacity-50";
 
 export const RoundCard = memo(function RoundCard({
-  dir, round, openPath, onOpenNote, logOpen, onToggleLog, onRunInPane,
+  dir, round, openPath, onOpenNote, onRunInPane, onRunInTerminal, onRevealPane, onRevealTerminal,
 }: {
   dir: string;
   round: RoundCardData;
   openPath: string | null;
   onOpenNote: (path: string) => void;
-  logOpen: boolean;
-  onToggleLog: () => void;
   /** hands the round to the ACP session in the agent pane */
   onRunInPane?: (n: number, total: number) => void;
+  /** spawns a terminal tab and types the round's run message into it */
+  onRunInTerminal?: (n: number, total: number) => void;
+  /** show the agent pane — where a round on the pane route is running */
+  onRevealPane?: () => void;
+  /** show the terminal column and put this round's tab on top */
+  onRevealTerminal?: (termId: number) => void;
 }) {
-  const { phase, n, kind, notes, done, route } = round;
+  const { phase, n, kind, notes, done, route, termId } = round;
   const [busy, setBusy] = useState(false);
   const total = notes.length;
-
-  const runInPane = () => onRunInPane?.(n, total);
 
   const copyPrompt = () => {
     readFileText(dir, `fixes/phase_${n}_fixes_prompt.md`)
@@ -75,10 +82,11 @@ export const RoundCard = memo(function RoundCard({
       .catch((e) => toastError("Couldn't copy the prompt", String(e).slice(0, 90)));
   };
 
-  /* The ACP route has no session to cancel — the thread is the round. All the
-     card can do is stop claiming it is running, which is what the user needs
-     when the turn died without the pane hearing about it. */
-  const forgetAgentRun = () => clearRunningRound(dir);
+  /* Neither route has a session to cancel: the pane's thread IS the round, and
+     a terminal tab is the user's to stop (or close) themselves. All the card
+     can do is stop claiming it is running, which is what the user needs when
+     the run ended without the app hearing about it. */
+  const forgetRun = () => clearRunningRound(dir);
 
   /* A plan being written is a turn in the agent pane, so the TURN goes first:
      cancelling it ends the plan cleanly and its own turn-end path does the
@@ -98,28 +106,10 @@ export const RoundCard = memo(function RoundCard({
       .finally(() => setBusy(false));
   };
 
-  const cancelTerminalRun = () => {
-    setBusy(true);
-    roundExecCancel(dir)
-      .then(() => refreshNotes(dir))
-      .then(() => toastSuccess("Stopped the round"))
-      .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)))
-      .finally(() => setBusy(false));
-  };
-
   return (
     <div className="mx-2 mb-2 mt-1 rounded-lg border border-border-strong bg-surface-card px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-text-primary">
-          Round {n} · {kind}
-        </span>
-        <button
-          type="button"
-          onClick={onToggleLog}
-          className="shrink-0 rounded-xs border border-border-hairline px-[7px] py-[2px] text-[10.5px] text-text-dim hover:bg-fill-hover hover:text-text-primary"
-        >
-          {logOpen ? "Hide log" : "View log"}
-        </button>
+      <div className="truncate text-[12.5px] font-semibold text-text-primary">
+        Round {n} · {kind}
       </div>
 
       <div className="mt-0.5 text-[11px] text-text-muted">
@@ -154,7 +144,10 @@ export const RoundCard = memo(function RoundCard({
       {phase === "plan-ready" && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {onRunInPane && (
-            <button type="button" disabled={busy} onClick={runInPane} className={BTN}>Run in the agent pane</button>
+            <button type="button" disabled={busy} onClick={() => onRunInPane(n, total)} className={BTN}>Run in the pane</button>
+          )}
+          {onRunInTerminal && (
+            <button type="button" disabled={busy} onClick={() => onRunInTerminal(n, total)} className={BTN}>Run in a terminal</button>
           )}
           <button type="button" onClick={copyPrompt} className={BTN}>Copy the prompt</button>
         </div>
@@ -166,15 +159,15 @@ export const RoundCard = memo(function RoundCard({
         </div>
       )}
 
-      {phase === "executing" && route === "terminal" && (
-        <div className="mt-2.5 flex gap-1.5">
-          <button type="button" disabled={busy} onClick={cancelTerminalRun} className={BTN}>Cancel</button>
-        </div>
-      )}
-
-      {phase === "executing" && route === "pane" && (
-        <div className="mt-2.5 flex gap-1.5">
-          <button type="button" onClick={forgetAgentRun} className={BTN}>Not running anymore</button>
+      {phase === "executing" && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {route === "terminal" && termId != null && onRevealTerminal && (
+            <button type="button" onClick={() => onRevealTerminal(termId)} className={BTN}>Open the terminal</button>
+          )}
+          {route === "pane" && onRevealPane && (
+            <button type="button" onClick={onRevealPane} className={BTN}>Open the pane</button>
+          )}
+          <button type="button" onClick={forgetRun} className={BTN}>Not running anymore</button>
         </div>
       )}
 

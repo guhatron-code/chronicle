@@ -16,13 +16,12 @@ import { NoteEditor } from "./editor/NoteEditor";
 import { Sidebar } from "./Sidebar";
 import { NoteHeader } from "./NoteHeader";
 import { Backlinks } from "./Backlinks";
-import { RoundLog } from "./RoundLog";
 import { BtnPrimary } from "@/components/chrome/atoms";
 import { SplitHandle } from "@/components/chrome/SplitHandle";
 import { notesRevealVault, type NoteEntry } from "@/lib/ipc";
 import {
   createNote, editBody, flushSave, indexFor, noteEntry, openFor, openNote,
-  queuedCountFor, roundKindFor, roundNotesFor, roundPhase, roundRoute, setNotesOnScreen,
+  queuedCountFor, roundKindFor, roundNotesFor, roundPhase, roundRoute, roundTermId, setNotesOnScreen,
   subscribeNotes, takePendingOpenNote,
 } from "@/lib/notes-store";
 import { subscribeRoundSession } from "@/lib/round-log";
@@ -31,11 +30,6 @@ import { toastError } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
 const OPEN_KEY = (dir: string) => `chronicle.notes.open.${dir}`;
-/* beside the tree's collapsed state, and remembered the same way */
-const LOG_KEY = (dir: string) => `chronicle.notes.log.${dir}`;
-function loadLogOpen(dir: string): boolean {
-  try { return localStorage.getItem(LOG_KEY(dir)) === "1"; } catch { return false; }
-}
 
 /* the sidebar width — global, not per-vault, exactly like the explorer's own
    `chronicle.treew` (one tree width across every project, not one per repo) */
@@ -65,7 +59,7 @@ function markMissingLinks(container: HTMLElement, notes: NoteEntry[], path: stri
 
 export function NotesPane({
   dir, onScreen, onConfirm, onOpenSearch, onOpenFile, onOpenUrl,
-  onPlanRound, onRunRoundInPane, onRevealTerminal,
+  onPlanRound, onRunRoundInPane, onRunRoundInTerminal, onRevealPane, onRevealTerminal,
 }: {
   dir: string;
   onScreen: boolean;
@@ -77,13 +71,16 @@ export function NotesPane({
   /** "Start a round" — App writes the plan as a turn in the agent pane */
   onPlanRound: () => void;
   onRunRoundInPane?: (n: number, total: number) => void;
-  /** "Open full log" tails the real file in a terminal tab — show the column */
-  onRevealTerminal?: () => void;
+  onRunRoundInTerminal?: (n: number, total: number) => void;
+  /** "Open the pane" — a round running on the pane route is watched there */
+  onRevealPane?: () => void;
+  /** "Open the terminal" — show the column and put the round's tab on top */
+  onRevealTerminal?: (termId: number) => void;
 }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeNotes(() => bump((n) => n + 1)), []);
-  // a session starting or stopping is a phase change, so the card and the log
-  // header both move — it fires on that, never on a log line
+  // a round starting or stopping is a phase change, so the card's route, its
+  // buttons and the subline all move with it
   useEffect(() => subscribeRoundSession(() => bump((n) => n + 1)), []);
   useEffect(() => { setNotesOnScreen(onScreen ? dir : null); return () => setNotesOnScreen(null); }, [dir, onScreen]);
 
@@ -125,12 +122,13 @@ export function NotesPane({
      Sidebar's `roundOpen` prop stays referentially stable while the user types,
      and only actually changes when the index itself does. */
   /* The one answer to "what is this round doing?" — the record cannot tell a
-     written plan from a running one, so the running-round mark decides. The
-     card and the log panel both read this, so they can never disagree again. */
+     written plan from a running one, so the running-round mark decides, and
+     the same mark names the route (and the tab) the card offers to open. */
   const ph = roundPhase(dir);
   const phase = ph?.phase ?? null;
   const roundN = ph?.n ?? null;
   const route = roundN == null ? null : roundRoute(dir, roundN);
+  const termId = roundN == null ? undefined : roundTermId(dir, roundN);
   const roundNotes = useMemo(
     () => (roundN == null ? [] : roundNotesFor(dir, roundN)),
     [dir, index, roundN],
@@ -138,12 +136,10 @@ export function NotesPane({
   const round = useMemo<RoundCardData | null>(
     () => (phase == null || roundN == null ? null : {
       phase, n: roundN, kind: roundKindFor(dir, roundN), notes: roundNotes,
-      done: roundNotes.filter((x) => x.status === "done").length, route,
+      done: roundNotes.filter((x) => x.status === "done").length, route, termId,
     }),
-    [dir, phase, roundN, roundNotes, route],
+    [dir, phase, roundN, roundNotes, route, termId],
   );
-  const [logOpen, setLogOpen] = useState(() => loadLogOpen(dir));
-  useEffect(() => setLogOpen(loadLogOpen(dir)), [dir]);
 
   /* the sidebar splitter — same drag math as the Repo pane's tree splitter
      (RepoPane's onTreeSplitterDown), same bounds, its own global width key */
@@ -169,19 +165,6 @@ export function NotesPane({
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
   }, [sidebarWidth]);
-  const toggleLog = useCallback(() => {
-    setLogOpen((o) => {
-      try { localStorage.setItem(LOG_KEY(dir), o ? "0" : "1"); } catch { /* private mode */ }
-      return !o;
-    });
-  }, [dir]);
-  const closeLog = useCallback(() => {
-    setLogOpen(false);
-    try { localStorage.setItem(LOG_KEY(dir), "0"); } catch { /* private mode */ }
-  }, [dir]);
-  // the log tail IS worth dropping off screen — unlike the phase, a stale one
-  // costs nothing and the panel is not being looked at
-  const showLog = logOpen && round !== null && onScreen;
 
   const openNoteHere = useCallback((path: string) => { void openNote(dir, path); }, [dir]);
   const newNoteIn = useCallback((folder: string) => {
@@ -195,11 +178,15 @@ export function NotesPane({
     notesRevealVault(dir).catch((e) => toastError("Couldn't reveal it", String(e).slice(0, 90)));
   }, [dir]);
 
-  /* App re-renders on every keystroke, so an inline prop would give RoundLog a
-     new callback identity each time and defeat its memo — the ref keeps it stable */
+  /* App re-renders on every keystroke, so an inline prop would give the sidebar
+     a new callback identity each time and defeat its memo — the ref keeps it
+     stable */
   const revealRef = useRef(onRevealTerminal);
   revealRef.current = onRevealTerminal;
-  const revealTerminal = useCallback(() => revealRef.current?.(), []);
+  const revealTerminal = useCallback((id: number) => revealRef.current?.(id), []);
+  const paneRef = useRef(onRevealPane);
+  paneRef.current = onRevealPane;
+  const revealPane = useCallback(() => paneRef.current?.(), []);
 
   /* same reason: "Start a round" arrives as an inline arrow from App, and the
      sidebar's memo is what keeps typing cheap */
@@ -248,8 +235,9 @@ export function NotesPane({
         round={round}
         onStartRound={planRound}
         onRunRoundInPane={onRunRoundInPane}
-        logOpen={logOpen}
-        onToggleLog={toggleLog}
+        onRunRoundInTerminal={onRunRoundInTerminal}
+        onRevealPane={revealPane}
+        onRevealTerminal={revealTerminal}
         vault={index.vault}
         borrowed={index.borrowed}
         width={sidebarWidth}
@@ -300,21 +288,8 @@ export function NotesPane({
                 />
               </div>
             </div>
-            {!showLog && (
-              <Backlinks notes={index.notes} path={open.path} onOpenNote={openNoteHere} onCreateNote={createMissing} />
-            )}
+            <Backlinks notes={index.notes} path={open.path} onOpenNote={openNoteHere} onCreateNote={createMissing} />
           </>
-        )}
-        {showLog && round && (
-          <RoundLog
-            dir={dir}
-            phase={round.phase}
-            n={round.n}
-            done={round.done}
-            total={round.notes.length}
-            onClose={closeLog}
-            onRevealTerminal={revealTerminal}
-          />
         )}
       </div>
     </div>

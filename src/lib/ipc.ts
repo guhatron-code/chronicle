@@ -619,9 +619,9 @@ export function windowControls() {
  * The headless `fixes`/`exec` background sessions are gone (plan 2 Task 1):
  * rounds either run in the agent pane or in a terminal, both driven by
  * round_plan_begin/round_plan_settle/round_plan_cancel/round_run_message_cmd
- * above. RoundCard.tsx, RoundLog.tsx and RoadmapPane.tsx still
- * call the old wrappers below; each is rewritten (or deleted) by the task
- * named on it, which is also the task that deletes the matching stub here.
+ * above. RoadmapPane.tsx is the last caller of the old wrappers below (Notes
+ * stopped calling them when Task 4 rewrote the round card and deleted the log
+ * panel); Task 5 rewires it, and deletes every stub left here with it.
  */
 /** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
 export const fixesStatus = (_dir: string) => Promise.reject(new Error("removed")) as Promise<InitStatusData>;
@@ -629,19 +629,9 @@ export const fixesStatus = (_dir: string) => Promise.reject(new Error("removed")
 export const fixesCancel = (_dir: string) => Promise.reject(new Error("removed"));
 /** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
 export const fixesLogPath = (_dir: string) => Promise.reject(new Error("removed")) as Promise<string>;
-/** REMOVED in plan 2 Task 1; stub until Task 4/5 rewire RoundLog/RoadmapPane. */
+/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
 export const roundExecStatus = (_dir: string) => Promise.reject(new Error("removed")) as Promise<InitStatusData>;
-/** REMOVED in plan 2 Task 1; stub until Task 4/5 rewire RoundCard/RoadmapPane. */
+/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
 export const roundExecCancel = (_dir: string) => Promise.reject(new Error("removed"));
-/** REMOVED in plan 2 Task 1; stub until Task 4/5 rewire RoundLog/RoadmapPane. */
+/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
 export const execLogPath = (_dir: string) => Promise.reject(new Error("removed")) as Promise<string>;
-/** REMOVED in plan 2 Task 1 (SessionKind lost "fixes"/"exec"); stub until
- *  Task 4 deletes RoundLog.tsx, its only consumer. */
-export type RoundLogKind = "fixes" | "exec";
-/** REMOVED in plan 2 Task 2 (round-log.ts dropped the log/watch store); stub
- *  until Task 4 deletes RoundLog.tsx, the only consumer below. */
-export interface RoundLogTail { tail: string; running: boolean; seen: boolean }
-const EMPTY_ROUND_LOG: RoundLogTail = { tail: "", running: false, seen: false };
-export const subscribeRoundLog = (_cb: () => void): (() => void) => () => {};
-export const armRoundLog = (_dir: string, _kind: RoundLogKind | null): void => {};
-export const roundLogFor = (_dir: string, _kind: RoundLogKind): RoundLogTail => EMPTY_ROUND_LOG;

@@ -359,6 +359,13 @@ export function roundRoute(dir: string, n: number): RoundRoute | null {
   return r?.n === n ? r.route : null;
 }
 
+/** The terminal tab running round `n`, when a terminal is the route — the
+ *  card's "Open the terminal" needs the tab, not just the route. */
+export function roundTermId(dir: string, n: number): number | undefined {
+  const r = runningRoundFor(dir);
+  return r?.n === n ? r.termId : undefined;
+}
+
 /** "bug fixes" / "feature additions" — what the plan's first line declared. */
 export function roundKindFor(dir: string, n: number): string {
   return indexFor(dir).rounds.find((r) => r.n === n)?.kind ?? "fixes";

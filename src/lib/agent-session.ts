@@ -840,9 +840,11 @@ async function settleRoundPlan(
   }
 }
 
-/** A round's turn has ended. Finished or not is the NOTES' answer, so read
- *  them back first — a note ticked in the last second is still a tick. */
-function settleRoundRun(dir: string, n: number): void {
+/** A round's run has ended, whichever route ran it. Finished or not is the
+ *  NOTES' answer, so read them back first — a note ticked in the last second
+ *  is still a tick. Shared with the terminal route (round-run.ts), so the two
+ *  routes can never announce a round differently. */
+export function settleRoundRun(dir: string, n: number): void {
   void refreshNotes(dir).then(() => {
     const notes = roundNotesFor(dir, n);
     if (notes.length > 0 && notes.every((x) => x.status === "done")) {

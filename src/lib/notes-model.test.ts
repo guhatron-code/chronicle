@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { NoteEntry } from "./ipc";
 import {
   backlinksFor, buildTree, endNewestRoundPlan, joinFrontMatter, nestTree, newNotePath,
-  outlinksFor, pillFor, roundLogHeader, roundPhaseOf, roundPlanOutcome, roundSubline, sanitizeTitle,
+  outlinksFor, pillFor, roundPhaseOf, roundPlanOutcome, roundSubline, sanitizeTitle,
   setStatusInFront, slugFor,
-  splitFrontMatter, statusInFront, stickToBottom, tagCounts, tailLines, LOG_MAX_LINES, STICK_SLOP,
+  splitFrontMatter, statusInFront, tagCounts, terminalRoundCommand,
 } from "./notes-model";
 
 const note = (path: string, p: Partial<NoteEntry> = {}): NoteEntry => ({
@@ -150,38 +150,7 @@ describe("paths", () => {
   });
 });
 
-describe("the round log panel", () => {
-  it("keeps the last lines and drops blank ones", () => {
-    expect(tailLines("")).toEqual([]);
-    expect(tailLines("\n\n   \n")).toEqual([]);
-    expect(tailLines("one\n\ntwo  \nthree")).toEqual(["one", "two", "three"]);
-    // the session re-sends the whole tail on every event, so the cap is what
-    // keeps a long round from putting thousands of rows in the DOM
-    const many = Array.from({ length: LOG_MAX_LINES + 50 }, (_, i) => `line ${i}`).join("\n");
-    const kept = tailLines(many);
-    expect(kept).toHaveLength(LOG_MAX_LINES);
-    expect(kept[0]).toBe("line 50");
-    expect(kept[kept.length - 1]).toBe(`line ${LOG_MAX_LINES + 49}`);
-    expect(tailLines("a\nb\nc", 2)).toEqual(["b", "c"]);
-  });
-
-  it("sticks to the tail unless the reader has scrolled up", () => {
-    //            scrollTop, scrollHeight, clientHeight
-    expect(stickToBottom(760, 1000, 240)).toBe(true);          // pinned to the bottom
-    expect(stickToBottom(760 - STICK_SLOP, 1000, 240)).toBe(true);  // rounding is not scrolling
-    expect(stickToBottom(400, 1000, 240)).toBe(false);         // reading something further up
-    expect(stickToBottom(0, 200, 240)).toBe(true);             // shorter than the box
-  });
-
-  it("names the phase in the header line", () => {
-    expect(roundLogHeader("generating", 4, 0, 0)).toBe("Round 4 · writing the plan");
-    expect(roundLogHeader("plan-ready", 8, 0, 2)).toBe("Round 8 · plan ready · not started");
-    expect(roundLogHeader("executing", 4, 2, 6)).toBe("Round 4 · executing · 2 of 6 done");
-    expect(roundLogHeader("executing", 1, 0, 1)).toBe("Round 1 · executing · 0 of 1 done");
-    expect(roundLogHeader("finished", 8, 2, 2)).toBe("Round 8 · done · 2 of 2");
-    expect(roundLogHeader("failed", 8, 0, 2)).toBe("Round 8 · didn't finish · 0 of 2 done");
-  });
-
+describe("the round card", () => {
   it("says the same thing on the card, with the route", () => {
     expect(roundSubline("generating", null, 0, 2)).toBe("2 notes · writing the plan…");
     expect(roundSubline("plan-ready", null, 0, 2)).toBe("2 notes · plan ready · not started");
@@ -189,6 +158,16 @@ describe("the round log panel", () => {
     expect(roundSubline("executing", "terminal", 0, 1)).toBe("1 note · executing · 0 of 1 done · in a terminal");
     expect(roundSubline("finished", null, 2, 2)).toBe("2 notes · done · 2 of 2");
     expect(roundSubline("failed", null, 0, 2)).toBe("2 notes · didn't finish · 0 of 2 done");
+  });
+
+  it("the terminal route quotes the run message for the shell", () => {
+    const msg = "Read fixes/phase_3_fixes_prompt.md and run `git commit -m \"Close FX-3\"` when it's done";
+    const cmd = terminalRoundCommand("claude", msg);
+    expect(cmd.startsWith("claude '")).toBe(true);
+    expect(cmd.endsWith("'\n")).toBe(true);
+    expect(cmd).toContain("when it'\\''s done");
+    expect(cmd).toContain('`git commit -m "Close FX-3"`');
+    expect(terminalRoundCommand("codex", "x").startsWith("codex '")).toBe(true);
   });
 });
 

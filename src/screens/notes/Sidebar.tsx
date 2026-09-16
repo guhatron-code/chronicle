@@ -111,8 +111,8 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, no
  */
 export const Sidebar = memo(function Sidebar({
   dir, notes, openPath, onOpenNote, onNewNote, onOpenSearch, onRevealVault,
-  queued, round, onStartRound, onRunRoundInPane, logOpen, onToggleLog,
-  vault, borrowed,
+  queued, round, onStartRound, onRunRoundInPane, onRunRoundInTerminal,
+  onRevealPane, onRevealTerminal, vault, borrowed,
   width = 232,
 }: {
   dir: string;
@@ -134,8 +134,10 @@ export const Sidebar = memo(function Sidebar({
   /** "Start a round" — the plan is written as a turn in the agent pane */
   onStartRound: () => void;
   onRunRoundInPane?: (n: number, total: number) => void;
-  logOpen: boolean;
-  onToggleLog: () => void;
+  onRunRoundInTerminal?: (n: number, total: number) => void;
+  /** the card's "Open the pane" / "Open the terminal" — go and watch the run */
+  onRevealPane?: () => void;
+  onRevealTerminal?: (termId: number) => void;
   /** column width in px (L3: 232px) — the splitter next door in NotesPane drives it */
   width?: number;
 }) {
@@ -235,9 +237,10 @@ export const Sidebar = memo(function Sidebar({
           round={round}
           openPath={openPath}
           onOpenNote={onOpenNote}
-          logOpen={logOpen}
-          onToggleLog={onToggleLog}
           onRunInPane={onRunRoundInPane}
+          onRunInTerminal={onRunRoundInTerminal}
+          onRevealPane={onRevealPane}
+          onRevealTerminal={onRevealTerminal}
         />
       )}
 

@@ -89,6 +89,7 @@ import type { HelpTarget } from "@/lib/help-content";
 import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/lib/setup-store";
 import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent } from "@/lib/agent-session";
+import { startRoundInTerminal } from "@/lib/round-run";
 import { agentSessionStop, readFileText } from "@/lib/ipc";
 import { openAgentReview } from "@/screens/repo/RepoPane";
 import { copyText, githubClone, githubRepos, initStatus, launchOpenDir, openUrl, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
@@ -1196,7 +1197,11 @@ function AppShell() {
             onOpenSearch={() => { setSearchScope("notes"); setSearchOpen(true); }}
             onOpenFile={(path) => { openFileInRepo(active.dir, path); goPane("repo"); }}
             onOpenUrl={(url) => { void openInWeb(active.dir, { url }); goPane("web"); }}
-            onRevealTerminal={() => patchLayout({ terminal: true, terminalCollapsed: false })}
+            onRevealTerminal={(termId) => {
+              patchLayout({ terminal: true, terminalCollapsed: false });
+              setActiveTerm(active.dir, termId);
+            }}
+            onRevealPane={() => patchLayout({ agent: true, agentCollapsed: false })}
             onPlanRound={() => {
               patchLayout({ agent: true, agentCollapsed: false });
               void startRoundPlanInPane(active.dir).catch((e) =>
@@ -1206,6 +1211,12 @@ function AppShell() {
             onRunRoundInPane={(n, total) => {
               patchLayout({ agent: true, agentCollapsed: false });
               void startRoundInPane(active.dir, n, total).catch((e) =>
+                toastError("Couldn't start the round", String(e).slice(0, 110)),
+              );
+            }}
+            onRunRoundInTerminal={(n, total) => {
+              patchLayout({ terminal: true, terminalCollapsed: false });
+              void startRoundInTerminal(active.dir, n, total, agent).catch((e) =>
                 toastError("Couldn't start the round", String(e).slice(0, 110)),
               );
             }}
