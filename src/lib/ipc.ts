@@ -575,6 +575,25 @@ export const agentEditUndo = (dir: string, path: string | null) =>
 export const agentRestoreCheckpoint = (dir: string, id: string) =>
   invoke("agent_restore_checkpoint", { dir, id });
 
+/* ---------- an agent asking the app to do something ---------- */
+/*
+ * The bridge: an agent running in a project asks over a socket, Rust emits this
+ * event and waits for the reply below (it times out on its own, so every branch
+ * of the frontend handler must answer). src/lib/agent-bridge.ts is the handler;
+ * register the listener ONCE at app scope and return the UnlistenFn.
+ */
+export interface AgentAction {
+  id: number;
+  dir: string;
+  action: string;
+  args: Record<string, unknown>;
+}
+export const onAgentAction = (cb: (a: AgentAction) => void): Promise<UnlistenFn> =>
+  listen<AgentAction>("agent-action", (e) => cb(e.payload));
+/** The answer the waiting agent gets: a sentence, plus whatever it asked to read. */
+export const agentActionReply = (id: number, ok: boolean, summary: string, data?: unknown) =>
+  invoke<void>("agent_action_reply", { id, ok, summary, data: data ?? null });
+
 /* ---------- the native menu (src-tauri/src/menu.rs) ---------- */
 /*
  * The app menu carries every ⌘ shortcut as a key equivalent so a chord still reaches

@@ -53,6 +53,7 @@ import {
   setTermPathHandler,
   setTermUrlHandler,
   spawnTerm,
+  termTail,
   fgAgentFor,
   hadAgentFor,
   agentRunningFor,
@@ -75,6 +76,7 @@ import {
   openNoteInPane,
   refreshNotes,
   queuedCountFor,
+  roundNotesFor,
   setNotesOnScreen,
   subscribeNotesIndex,
 } from "@/lib/notes-store";
@@ -90,6 +92,7 @@ import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/li
 import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent } from "@/lib/agent-session";
 import { startRoundInTerminal } from "@/lib/round-run";
+import { mountAgentBridge } from "@/lib/agent-bridge";
 import { agentSessionStop, readFileText } from "@/lib/ipc";
 import { openAgentReview } from "@/screens/repo/RepoPane";
 import { copyText, githubClone, githubRepos, initStatus, launchOpenDir, openUrl, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
@@ -856,6 +859,35 @@ function AppShell() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [openDialog, activate, closeProject, newTerminal, togglePaneUnit, revealContent, pane, quitNow]);
+
+  /* ---- an agent asking for one of the app's own actions ----
+     The bridge hands the request to the SAME functions the buttons call, so a
+     round an agent starts is a round, not a second way of running one. The
+     agent to launch in a terminal is read through a ref: the dispatcher is
+     mounted once, and the picker's current choice must reach it without
+     re-mounting the listener under it. */
+  const agentRef = useRef(agent);
+  agentRef.current = agent;
+  useEffect(
+    () =>
+      mountAgentBridge({
+        planRound: startRoundPlanInPane,
+        startRound: (dir, n, total, where) =>
+          where === "terminal"
+            ? startRoundInTerminal(dir, n, total, agentRef.current)
+            : startRoundInPane(dir, n, total),
+        openProject: doOpenProject,
+        revealPane: () => patchLayout({ agent: true, agentCollapsed: false }),
+        revealTerminal: () => patchLayout({ terminal: true, terminalCollapsed: false }),
+        roundTotal: (dir, n) => roundNotesFor(dir, n).length,
+        // the registry answers for a tab by id; an agent that names none gets
+        // the tab that project is looking at, and nothing when it has none
+        termTail: (id, lines) => (id == null ? null : termTail(id, lines)),
+        activeTerm: activeTermFor,
+        isProjectOpen: (dir) => projectsRef.current.has(dir),
+      }),
+    [doOpenProject, patchLayout],
+  );
 
   /* ---- the same map, arriving from the native menu (src-tauri/src/menu.rs) ----
      The Web pane's page is a native WKWebView: while it is first responder our

@@ -178,6 +178,38 @@ export function getTerm(id: number): TermSession | undefined {
   return sessions.get(id);
 }
 
+/**
+ * The tail of a tab's output, as text — what an agent gets when it asks to
+ * read a terminal back (src/lib/agent-bridge.ts).
+ *
+ * The walk goes backwards from the end of the active buffer, because that is
+ * where the interesting part is, and the blank rows below the last line of
+ * output are skipped: a screen that scrolled once is mostly empty, and "the
+ * last 200 lines" must mean 200 lines of something. Blank rows BETWEEN lines
+ * are kept — they are the shape of the output. The cap counts non-empty rows.
+ *
+ * Null means there is no such tab. A tab whose pty ended is still a tab: its
+ * scrollback is exactly what someone asks to read after a run finishes.
+ */
+export function termTail(id: number, lines: number): string | null {
+  const s = sessions.get(id);
+  if (!s) return null;
+  const buf = s.term.buffer.active;
+  const out: string[] = [];
+  let kept = 0;
+  for (let i = buf.length - 1; i >= 0 && kept < lines; i -= 1) {
+    const row = buf.getLine(i)?.translateToString(true) ?? "";
+    if (row.trim() === "") {
+      if (out.length === 0) continue; // trailing blank screen, not output
+      out.push(row);
+      continue;
+    }
+    out.push(row);
+    kept += 1;
+  }
+  return out.reverse().join("\n");
+}
+
 export function liveCount(dir?: string): number {
   return [...sessions.values()].filter((s) => !s.dead && (!dir || s.dir === dir)).length;
 }
