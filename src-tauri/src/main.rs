@@ -1420,7 +1420,7 @@ async fn init_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: St
     let pid = child.id();
     runs.insert(key.clone(), (child, log, epoch_ms()));
     drop(runs);
-    watch_run(app, key, "init", dir.clone(), dirp.clone(), pid);
+    watch_run(app, key, "init", dir.clone(), pid);
     Ok(())
 }
 
@@ -1490,7 +1490,7 @@ fn probe_step(exit: Option<i32>, log: &Path, last_len: &mut u64, ui_visible: boo
 /// reused by a cancel-then-restart before this waiter's next tick, the pid
 /// mismatch is treated as "this run vanished" so the waiter never adopts a
 /// different child.
-fn watch_run(app: tauri::AppHandle, key: String, kind: &'static str, dir: String, dir_path: PathBuf, pid: u32) {
+fn watch_run(app: tauri::AppHandle, key: String, kind: &'static str, dir: String, pid: u32) {
     std::thread::spawn(move || {
         let mut last_len = 0u64;
         loop {
@@ -1525,7 +1525,6 @@ fn watch_run(app: tauri::AppHandle, key: String, kind: &'static str, dir: String
                     }));
                 }
                 ProbeOutcome::Exited(_) => {
-                    if kind == "fixes" { settle_round(&dir_path); } // what fixes_status did on completion
                     let _ = app.emit("session-status", json!({
                         "dir": dir, "kind": kind, "running": false, "started": true,
                         "started_at": started, "code": code, "log_tail": read_tail(&log, 30000),
@@ -1855,146 +1854,86 @@ fn marker_instruction(id: &str) -> String {
 
 const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written notes (bugs, issues, ideas — with optional screenshots and links) into an executable fix plan for this project. Write EXACTLY two files, creating the fixes/ folder if needed:\n\n1. fixes/phase_{N}_fixes_plan.md — every note below, parsed, deduplicated, and expanded into precise, unambiguous, actionable items a coding agent can execute without questions. Reference concrete files/components where inferable from the repo. Keep each item traceable to its note path. THE FIRST LINE of this file must be exactly `Round kind: bug fixes` or `Round kind: feature additions` — decide from the notes' content (mostly defects => bug fixes; mostly new capability => feature additions).\n\n2. fixes/phase_{N}_fixes_prompt.md — the execution instructions to paste into Claude Code or Codex: read the plan, execute every item, verify each fix like a shipping change (run/build/screenshot where applicable), and report per-item outcomes honestly. The prompt MUST also instruct the executor: after each item is completed AND verified, set `status: done` in that note's front matter (the file at `path`, under .chronicle/notes/); change nothing else in the file — this is how the pane and the roadmap track the round live. The prompt MUST also end with this instruction, verbatim with the round number filled in: when every item is complete and verified, make the final commit with the trailer `Chronicle-Phase: FX-{N} done` as its own last paragraph (or `git commit --allow-empty -m \"Close FX-{N}\" -m \"Chronicle-Phase: FX-{N} done\"` if the work is already committed).\n\nDo not change any other file except the two above (and the note status updates the executor makes later). The notes are in `{TASKS}` — read that file (a JSON array of {path, title, body}) before writing anything.\n";
 
-fn fixes_run_key(dir: &str) -> Result<(String, PathBuf), String> {
-    let (key, log) = canon_key(dir)?;
-    let mut h = Sha256::new();
-    h.update(format!("fixes::{key}").as_bytes());
-    let hex = format!("{:x}", h.finalize());
-    Ok((format!("fixes::{key}"), std::env::temp_dir().join(format!("chronicle-fixes-{}.log", &hex[..16]))))
-}
-
-/// "Ready to execute": freeze the queued, un-rounded tasks into round N and start the
-/// background session that writes fixes/phase_N_fixes_plan.md + _prompt.md.
-/// Where the fixes session writes its log — the >5min card's "View full log".
-#[tauri::command]
-fn fixes_log_path(roots: State<OpenRoots>, dir: String) -> Result<String, String> {
-    let _ = project_for(&roots, &dir)?;
-    let (_, log) = fixes_run_key(&dir)?;
-    Ok(log.to_string_lossy().to_string())
-}
-
-#[tauri::command]
-async fn fixes_generate(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, agent: Option<String>) -> Result<u64, String> {
-    let p = project_for(&roots, &dir)?;
-    // the guard comes BEFORE any store mutation: a second click during a live
-    // round must not write a phantom round (audit wave-4 B1). The lock is held
-    // through the store write + spawn so nothing interleaves.
-    let (key, log) = fixes_run_key(&dir)?;
-    let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
-    if let Some((child, _, _)) = runs.get_mut(&key) {
-        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
-            return Err("a fix round is already generating".into());
-        }
+/// "Plan a round": freeze every queued note into round N and hand back the planning
+/// prompt. No process is spawned here; the frontend sends the prompt as a turn in
+/// the agent pane so the user watches the plan being written.
+pub(crate) fn round_plan_begin_in(dir: &Path) -> Result<Value, String> {
+    let mut rounds = notes::rounds::load(dir)?;
+    if rounds.iter().any(|r| r.state == "generating") {
+        return Err("a round is already being planned".into());
     }
-    let picked = notes::rounds::queued_notes(&p.dir);
+    let picked = notes::rounds::queued_notes(dir);
     if picked.is_empty() { return Err("no queued notes to execute".into()); }
-    // a rounds.json we cannot read stops the round here — saving over it would
-    // restart the numbering at 1 and drop every round the user already ran
-    let mut rounds = notes::rounds::load(&p.dir)?;
     let round_n = rounds.iter().map(|r| r.n).max().unwrap_or(0) + 1;
-    // the record goes down BEFORE the notes are frozen: if a set_status then
-    // fails, cancel and settle both know which notes to release
     rounds.push(notes::rounds::Round {
         n: round_n, state: "generating".into(), kind: None,
         task_ids: vec![], note_paths: picked.clone(), created_at: epoch_ms(),
         plan_path: format!("fixes/phase_{round_n}_fixes_plan.md"),
         prompt_path: format!("fixes/phase_{round_n}_fixes_prompt.md"),
     });
-    notes::rounds::save(&p.dir, &rounds)?;
-    // the round takes them: status in_progress, round N, written into the files
+    notes::rounds::save(dir, &rounds)?;
     for rel in &picked {
-        notes::rounds::set_status(&p.dir, rel, Some("in_progress"), Some(round_n))?;
+        notes::rounds::set_status(dir, rel, Some("in_progress"), Some(round_n))?;
     }
-
-    // spawn the generation session (same machinery + lifecycle as /chronicle-init).
-    // the notes go via a file — a big round would blow ARG_MAX as an argv string (H7)
-    let vault = notes::index::vault_dir(&p.dir);
+    let vault = notes::index::vault_dir(dir);
     let payload: Vec<Value> = picked.iter().map(|rel| {
         let text = std::fs::read_to_string(vault.join(rel)).unwrap_or_default();
         let (_, body) = notes::parse::split_front_matter(&text);
-        json!({
-            "path": rel,
-            "title": rel.rsplit('/').next().unwrap_or(rel).trim_end_matches(".md"),
-            "body": body,
-        })
+        json!({ "path": rel, "title": rel.rsplit('/').next().unwrap_or(rel).trim_end_matches(".md"), "body": body })
     }).collect();
     let tasks_rel = format!(".chronicle/round_{round_n}_notes.json");
-    std::fs::write(p.dir.join(&tasks_rel), serde_json::to_string_pretty(&payload).unwrap_or_default())
+    std::fs::write(dir.join(&tasks_rel), serde_json::to_string_pretty(&payload).unwrap_or_default())
         .map_err(|e| e.to_string())?;
-    let prompt = FIXES_PROMPT_HEAD
-        .replace("{N}", &round_n.to_string())
-        .replace("{TASKS}", &tasks_rel);
-    let logf = std::fs::File::create(&log).map_err(|e| e.to_string())?;
-    let errf = logf.try_clone().map_err(|e| e.to_string())?;
-    let (claude_bin, codex_bin) = agent_paths();
-    let use_codex = agent.as_deref() == Some("codex")
-        || (agent.is_none() && claude_bin.is_none() && codex_bin.is_some());
-    let child = if use_codex {
-        let bin = codex_bin.ok_or("Codex isn't installed (couldn't find `codex`)")?;
-        std::process::Command::new(bin)
-            .args(["exec", "--json", "--skip-git-repo-check",
-                   "--dangerously-bypass-approvals-and-sandbox", &prompt])
-            .current_dir(&p.dir)
-            .stdin(std::process::Stdio::null())
-            .stdout(logf).stderr(errf)
-            .process_group(0)
-            .spawn().map_err(|e| format!("couldn't start a Codex session: {e}"))?
-    } else {
-        let bin = claude_bin.ok_or("couldn't find `claude` — if it's installed, make sure `command -v claude` works in a terminal, then reopen Chronicle")?;
-        std::process::Command::new(bin)
-            .args(["-p", &prompt, "--model", "opus", "--permission-mode", "bypassPermissions",
-                   "--verbose", "--output-format", "stream-json"])
-            .current_dir(&p.dir)
-            .stdin(std::process::Stdio::null())
-            .stdout(logf).stderr(errf)
-            .process_group(0)
-            .spawn().map_err(|e| format!("couldn't start a Claude session: {e}"))?
-    };
-    let pid = child.id();
-    runs.insert(key.clone(), (child, log, epoch_ms()));
-    drop(runs);
-    watch_run(app, key, "fixes", dir.clone(), p.dir.clone(), pid);
-    Ok(round_n)
+    let prompt = FIXES_PROMPT_HEAD.replace("{N}", &round_n.to_string()).replace("{TASKS}", &tasks_rel);
+    Ok(json!({ "n": round_n, "total": picked.len(), "prompt": prompt }))
 }
 
-#[tauri::command]
-async fn fixes_status(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String) -> Result<Value, String> {
-    let p = project_for(&roots, &dir)?;
-    let (key, _) = fixes_run_key(&dir)?;
-    let probed = {
-        let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
-        match runs.get_mut(&key) {
-            None => None,
-            Some((child, log, started)) => Some((child.try_wait().map_err(|e| e.to_string())?, log.clone(), *started)),
-        }
+/// The turn ended: settle the generating record from what landed on disk.
+pub(crate) fn round_plan_settle_in(dir: &Path) -> Result<Value, String> {
+    let before = notes::rounds::load(dir)?;
+    let Some(n) = before.iter().rev().find(|r| r.state == "generating").map(|r| r.n) else {
+        return Ok(json!({ "n": Value::Null, "state": "none" }));
     };
-    let Some((code, log, started)) = probed else { return Ok(json!({"running": false, "started": false})) };
-    // on completion, settle the newest generating round from what actually landed on disk
-    if code.is_some() { settle_round(&p.dir); }
-    Ok(json!({
-        "running": code.is_none(), "started": true,
-        "started_at": started,
-        "code": code.and_then(|c| c.code()),
-        "log_tail": read_tail(&log, 30000),
-    }))
+    settle_round(dir);
+    let after = notes::rounds::load(dir)?;
+    let state = after.iter().find(|r| r.n == n).map(|r| r.state.clone()).unwrap_or_else(|| "none".into());
+    Ok(json!({ "n": n, "state": state }))
 }
 
-#[tauri::command]
-async fn fixes_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String) -> Result<(), String> {
-    let p = project_for(&roots, &dir)?;
-    let (key, _) = fixes_run_key(&dir)?;
-    let entry = init.runs.lock().map_err(|e| e.to_string())?.remove(&key);
-    if let Some((mut child, _, _)) = entry { term_then_kill(&mut child); }
-    // a cancelled generating round unfreezes its notes
-    let mut rounds = notes::rounds::load(&p.dir)?;
-    // the newest GENERATING round, exactly as settle_round picks it — never
-    // assume it is last() (audit B1)
+/// The user stopped the planning turn: drop the generating record, requeue its notes.
+pub(crate) fn round_plan_cancel_in(dir: &Path) -> Result<(), String> {
+    let mut rounds = notes::rounds::load(dir)?;
     if let Some(i) = rounds.iter().rposition(|r| r.state == "generating") {
         let paths = rounds.remove(i).note_paths;
-        for rel in &paths { let _ = notes::rounds::set_status(&p.dir, rel, Some("queued"), None); }
-        let _ = notes::rounds::save(&p.dir, &rounds);
+        for rel in &paths { let _ = notes::rounds::set_status(dir, rel, Some("queued"), None); }
+        notes::rounds::save(dir, &rounds)?;
     }
     Ok(())
+}
+
+/// The one sentence that runs a settled round, wherever it runs.
+pub(crate) fn round_run_message(n: u64) -> String {
+    format!(
+        "Read fixes/phase_{n}_fixes_prompt.md and fixes/phase_{n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: every item, verified honestly, and after each item completes set `status: done` in that note's front matter (the file named by the item's path, under .chronicle/notes/), changing nothing else in that file. {}",
+        marker_instruction(&format!("FX-{n}"))
+    )
+}
+
+#[tauri::command]
+async fn round_plan_begin(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?; round_plan_begin_in(&p.dir)
+}
+#[tauri::command]
+async fn round_plan_settle(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?; round_plan_settle_in(&p.dir)
+}
+#[tauri::command]
+async fn round_plan_cancel(roots: State<'_, OpenRoots>, dir: String) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?; round_plan_cancel_in(&p.dir)
+}
+#[tauri::command]
+fn round_run_message_cmd(roots: State<OpenRoots>, dir: String, n: u64) -> Result<String, String> {
+    let _ = project_for(&roots, &dir)?; Ok(round_run_message(n))
 }
 
 /// After a generation session exits: read what it actually wrote and record the truth —
@@ -2252,111 +2191,6 @@ async fn github_create(roots: State<'_, OpenRoots>, dir: String) -> Result<Strin
         return Err(err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("gh failed").to_string());
     }
     Ok(name)
-}
-
-/* ================= headless round execution (F1) ================= */
-
-fn exec_run_key(dir: &str) -> Result<(String, PathBuf), String> {
-    let (key, _) = canon_key(dir)?;
-    let mut h = Sha256::new();
-    h.update(format!("exec::{key}").as_bytes());
-    let hex = format!("{:x}", h.finalize());
-    Ok((format!("exec::{key}"), std::env::temp_dir().join(format!("chronicle-exec-{}.log", &hex[..16]))))
-}
-
-/// Run a settled round's prompt headlessly — the same machinery, consent, and
-/// lifecycle as the generation session. The executor sets `status: done` in each
-/// note's front matter itself (the prompt file carries that contract), so the
-/// pane and the roadmap tick live off the ordinary poll.
-#[tauri::command]
-async fn round_execute(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String, n: u64, agent: Option<String>) -> Result<(), String> {
-    let p = project_for(&roots, &dir)?;
-    let prompt_rel = format!("fixes/phase_{n}_fixes_prompt.md");
-    if !p.dir.join(&prompt_rel).exists() {
-        return Err("that round's prompt file isn't there anymore".into());
-    }
-    // read the store before spawning: the agent is about to edit note front
-    // matter and settle_done has to be able to read the round back afterwards
-    notes::rounds::load(&p.dir)?;
-    let (key, log) = exec_run_key(&dir)?;
-    let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
-    if let Some((child, _, _)) = runs.get_mut(&key) {
-        if child.try_wait().map_err(|e| e.to_string())?.is_none() {
-            return Err("a round is already running".into());
-        }
-    }
-    let prompt = format!(
-        "Read {prompt_rel} and fixes/phase_{n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: every item, verified honestly, and after each item completes set `status: done` in that note's front matter (the file named by the item's path, under .chronicle/notes/), changing nothing else in that file. {}",
-        marker_instruction(&format!("FX-{n}"))
-    );
-    let logf = std::fs::File::create(&log).map_err(|e| e.to_string())?;
-    let errf = logf.try_clone().map_err(|e| e.to_string())?;
-    let (claude_bin, codex_bin) = agent_paths();
-    let use_codex = agent.as_deref() == Some("codex")
-        || (agent.is_none() && claude_bin.is_none() && codex_bin.is_some());
-    let child = if use_codex {
-        let bin = codex_bin.ok_or("Codex isn't installed (couldn't find `codex`)")?;
-        std::process::Command::new(bin)
-            .args(["exec", "--json", "--skip-git-repo-check",
-                   "--dangerously-bypass-approvals-and-sandbox", &prompt])
-            .current_dir(&p.dir)
-            .stdin(std::process::Stdio::null())
-            .stdout(logf).stderr(errf)
-            .process_group(0)
-            .spawn().map_err(|e| format!("couldn't start a Codex session: {e}"))?
-    } else {
-        let bin = claude_bin.ok_or("couldn't find `claude` — if it's installed, make sure `command -v claude` works in a terminal, then reopen Chronicle")?;
-        std::process::Command::new(bin)
-            .args(["-p", &prompt, "--model", "opus", "--permission-mode", "bypassPermissions",
-                   "--verbose", "--output-format", "stream-json"])
-            .current_dir(&p.dir)
-            .stdin(std::process::Stdio::null())
-            .stdout(logf).stderr(errf)
-            .process_group(0)
-            .spawn().map_err(|e| format!("couldn't start a Claude session: {e}"))?
-    };
-    let pid = child.id();
-    runs.insert(key.clone(), (child, log, epoch_ms()));
-    drop(runs);
-    watch_run(app, key, "exec", dir.clone(), p.dir.clone(), pid);
-    Ok(())
-}
-
-#[tauri::command]
-async fn round_exec_status(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String) -> Result<Value, String> {
-    let _ = project_for(&roots, &dir)?;
-    let (key, _) = exec_run_key(&dir)?;
-    let probed = {
-        let mut runs = init.runs.lock().map_err(|e| e.to_string())?;
-        match runs.get_mut(&key) {
-            None => None,
-            Some((child, log, started)) => Some((child.try_wait().map_err(|e| e.to_string())?, log.clone(), *started)),
-        }
-    };
-    let Some((code, log, started)) = probed else { return Ok(json!({"running": false, "started": false})) };
-    Ok(json!({
-        "running": code.is_none(), "started": true,
-        "started_at": started,
-        "code": code.and_then(|c| c.code()),
-        "log_tail": read_tail(&log, 30000),
-    }))
-}
-
-/// Where the headless round session writes its log — for a "View full log" tab.
-#[tauri::command]
-fn exec_log_path(roots: State<OpenRoots>, dir: String) -> Result<String, String> {
-    let _ = project_for(&roots, &dir)?;
-    let (_, log) = exec_run_key(&dir)?;
-    Ok(log.to_string_lossy().to_string())
-}
-
-#[tauri::command]
-async fn round_exec_cancel(roots: State<'_, OpenRoots>, init: State<'_, InitState>, dir: String) -> Result<(), String> {
-    let _ = project_for(&roots, &dir)?;
-    let (key, _) = exec_run_key(&dir)?;
-    let entry = init.runs.lock().map_err(|e| e.to_string())?.remove(&key);
-    if let Some((mut child, _, _)) = entry { term_then_kill(&mut child); }
-    Ok(())
 }
 
 /* ================= round retrospective (F5 — deterministic, from git) ================= */
@@ -3572,7 +3406,7 @@ fn main() {
             notes::notes_index, notes::notes_read, notes::notes_write, notes::notes_move,
             notes::notes_delete, notes::notes_search, notes::notes_attach, notes::notes_detach,
             notes::notes_reveal, notes::notes_reveal_vault,
-            fixes_log_path, fixes_generate, fixes_status, fixes_cancel,
+            round_plan_begin, round_plan_settle, round_plan_cancel, round_run_message_cmd,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
             history::history_facts, history::git_fetch,
@@ -3581,7 +3415,7 @@ fn main() {
             files::rename_path, files::trash_path, files::reveal_path,
             pty_spawn, init_log_path,
             pty_write, pty_resize, pty_kill, pty_info,
-            round_execute, round_exec_status, round_exec_cancel, round_retro, exec_log_path,
+            round_retro,
             agent_session_start, agent_session_state, agent_prompt, agent_cancel,
             agent_set_mode, agent_set_config_option, agent_respond_permission, agent_session_stop,
             agent_edits, agent_edit_diff, agent_edit_keep, agent_edit_undo, agent_restore_checkpoint,
@@ -4448,6 +4282,57 @@ mod r4_tests {
         let r = notes::rounds::load(&d).unwrap();
         assert_eq!(r[0].state, "ready");
         assert_eq!(r[0].kind.as_deref(), Some("feature additions"));
+    }
+
+    #[test]
+    fn planning_a_round_freezes_the_queued_notes_and_returns_the_prompt() {
+        let d = tmp("plan-begin");
+        std::fs::create_dir_all(d.join(".chronicle/notes/Tasks")).unwrap();
+        std::fs::write(d.join(".chronicle/notes/Tasks/A.md"), "---\nstatus: queued\n---\n\n# A\n\nfix a\n").unwrap();
+        std::fs::write(d.join(".chronicle/notes/Tasks/B.md"), "---\nstatus: queued\n---\n\n# B\n").unwrap();
+        std::fs::write(d.join(".chronicle/notes/Tasks/C.md"), "---\nstatus: done\n---\n\n# C\n").unwrap();
+        let out = round_plan_begin_in(&d).unwrap();
+        assert_eq!(out["n"], 1);
+        assert_eq!(out["total"], 2);
+        let prompt = out["prompt"].as_str().unwrap();
+        assert!(prompt.contains("fixes/phase_1_fixes_plan.md") && prompt.contains(".chronicle/round_1_notes.json"), "{prompt}");
+        assert!(!prompt.contains("{N}") && !prompt.contains("{TASKS}"));
+        assert!(prompt.contains("Chronicle-Phase: FX-{N} done") == false && prompt.contains("Chronicle-Phase: FX-1 done"), "the marker names the round");
+        let rounds = notes::rounds::load(&d).unwrap();
+        assert_eq!((rounds[0].n, rounds[0].state.as_str()), (1, "generating"));
+        let text = std::fs::read_to_string(d.join(".chronicle/notes/Tasks/A.md")).unwrap();
+        assert!(text.contains("status: in_progress") && text.contains("round: 1"), "{text}");
+        assert!(d.join(".chronicle/round_1_notes.json").exists());
+        assert_eq!(round_plan_begin_in(&d).unwrap_err(), "a round is already being planned");
+    }
+
+    #[test]
+    fn settling_reads_the_plan_files_and_cancel_requeues() {
+        let d = tmp("plan-settle");
+        std::fs::create_dir_all(d.join(".chronicle/notes/Tasks")).unwrap();
+        std::fs::write(d.join(".chronicle/notes/Tasks/A.md"), "---\nstatus: queued\n---\n\n# A\n").unwrap();
+        round_plan_begin_in(&d).unwrap();
+        // nothing written yet → failed, notes requeued
+        let s = round_plan_settle_in(&d).unwrap();
+        assert_eq!((s["n"].clone(), s["state"].as_str()), (json!(1), Some("failed")));
+        assert!(std::fs::read_to_string(d.join(".chronicle/notes/Tasks/A.md")).unwrap().contains("status: queued"));
+        // second round: plan + prompt written → ready, kind from the first line
+        round_plan_begin_in(&d).unwrap();
+        std::fs::create_dir_all(d.join("fixes")).unwrap();
+        std::fs::write(d.join("fixes/phase_2_fixes_plan.md"), "Round kind: feature additions\n\n1. A\n").unwrap();
+        std::fs::write(d.join("fixes/phase_2_fixes_prompt.md"), "Execute the plan.\n").unwrap();
+        let s = round_plan_settle_in(&d).unwrap();
+        assert_eq!((s["n"].clone(), s["state"].as_str()), (json!(2), Some("ready")));
+        assert_eq!(notes::rounds::load(&d).unwrap()[1].kind.as_deref(), Some("feature additions"));
+        // settle with nothing generating → none
+        assert_eq!(round_plan_settle_in(&d).unwrap()["state"], "none");
+        // cancel: a third generating round is removed and its note requeued
+        std::fs::write(d.join(".chronicle/notes/Tasks/D.md"), "---\nstatus: queued\n---\n\n# D\n").unwrap();
+        round_plan_begin_in(&d).unwrap();
+        round_plan_cancel_in(&d).unwrap();
+        assert_eq!(notes::rounds::load(&d).unwrap().len(), 2, "the generating record is gone");
+        assert!(std::fs::read_to_string(d.join(".chronicle/notes/Tasks/D.md")).unwrap().contains("status: queued"));
+        assert!(round_run_message(2).contains("fixes/phase_2_fixes_prompt.md") && round_run_message(2).contains("Chronicle-Phase: FX-2 done"));
     }
 
     #[test]
