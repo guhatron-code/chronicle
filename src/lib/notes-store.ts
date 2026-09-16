@@ -22,6 +22,7 @@ import {
 import {
   joinFrontMatter, newNotePath, roundPhaseOf, roundsJustFinished, setStatusInFront, splitFrontMatter,
   type RoundPhase, type RoundRecord, type RoundRoute, type SaveState,
+  deriveTitle,
 } from "./notes-model";
 import { clearRunningRound, dismissedRoundFor, evictRoundLog, runningRoundFor } from "./round-log";
 import { announce } from "./journal";
@@ -202,7 +203,7 @@ export function keepMine(dir: string): void {
 }
 
 export async function openNote(dir: string, path: string): Promise<void> {
-  await flushSave(dir);
+  await settleNote(dir); // the note being left saves, and takes its name if it is still ours
   remember(dir, opens.get(dir)?.path);
   try {
     const text = await notesRead(dir, path);
@@ -299,6 +300,53 @@ export async function flushSave(dir: string): Promise<void> {
   await save(dir);
 }
 
+/* ---------- round 9: a note names itself while the name is still ours ---------- */
+
+const fileTitleOf = (path: string) => (path.split("/").pop() ?? path).replace(/\.md$/, "");
+/** "Weekly plan 2" and "Weekly plan" are the same name: the suffix is the
+ *  collision rule's, not the user's */
+const stripSuffix = (title: string) => title.replace(/ \d+$/, "");
+
+/**
+ * Is this note's file name still ours to change? Yes while it is `Untitled`
+ * (or `Untitled N`), or while it equals what we would have derived from the
+ * body last saved — the content the current name came from, since a rename
+ * only ever happens at a save. Any other name was typed by hand, and a hand
+ * rename ends the tracking for good. No flag is stored anywhere.
+ */
+export function autoTitled(open: OpenNote): boolean {
+  const name = stripSuffix(fileTitleOf(open.path));
+  return name === "Untitled" || name === deriveTitle(open.savedBody);
+}
+
+/**
+ * Save, then rename if the name is still ours and the body says something
+ * new. Called where a rename is cheap enough to be right — the caret leaving
+ * the first block, blur, a note or pane switch, ⌘S — never from the 600 ms
+ * debounce: a rename moves a file and rewrites every [[link]] to it.
+ * The rename is `renameNote` → `notes_move`, the same path a hand rename
+ * takes, so links follow. A refusal (a live round's lock, a race) is quiet.
+ */
+export async function settleNote(dir: string): Promise<void> {
+  const before = opens.get(dir);
+  if (!before) return;
+  const ours = autoTitled(before); // judged against the body BEFORE this save moves savedBody
+  await flushSave(dir);
+  const open = opens.get(dir);
+  if (!open || open.path !== before.path || !ours || open.conflict) return;
+  const title = deriveTitle(open.body);
+  if (title === stripSuffix(fileTitleOf(open.path))) return;
+  const folder = open.path.includes("/") ? open.path.slice(0, open.path.lastIndexOf("/")) : "";
+  const taken = new Set(indexFor(dir).notes.map((n) => n.path).filter((p) => p !== open.path));
+  const to = newNotePath(folder, title, taken);
+  if (to === open.path) return;
+  try {
+    await renameNote(dir, open.path, to);
+  } catch {
+    /* best effort: the note keeps its name; a hand rename still says why */
+  }
+}
+
 export async function setStatus(dir: string, status: NoteStatus | null): Promise<void> {
   const open = opens.get(dir);
   if (!open) return;
@@ -312,7 +360,9 @@ export async function createNote(dir: string, folder: string, title: string): Pr
   const taken = new Set(indexFor(dir).notes.map((n) => n.path));
   const path = newNotePath(folder, title, taken);
   const name = (path.split("/").pop() ?? path).replace(/\.md$/, "");
-  await notesWrite(dir, path, `# ${name}\n\n`);
+  // an Untitled note starts EMPTY: a seeded "# Untitled" heading would pin the
+  // derived title to Untitled forever. A real title keeps its heading.
+  await notesWrite(dir, path, stripSuffix(name) === "Untitled" ? "" : `# ${name}\n\n`);
   await refreshNotes(dir);
   await openNote(dir, path);
   return path;
@@ -326,6 +376,9 @@ export async function renameNote(dir: string, from: string, to: string): Promise
   await refreshNotes(dir);
   const open = opens.get(dir);
   if (open?.path === from) { open.path = to; notify(); }
+  // the back stack keys on paths: a note that moved is still the same note
+  const h = history.get(dir);
+  if (h) history.set(dir, h.map((p) => (p === from ? to : p)));
 }
 
 export async function deleteNote(dir: string, path: string): Promise<void> {

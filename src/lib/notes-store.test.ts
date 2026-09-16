@@ -3,6 +3,8 @@ import { setActivity } from "./scheduler";
 
 const writes: { path: string; text: string }[] = [];
 let writeError: string | null = null;
+const moves: { from: string; to: string }[] = [];
+let moveError: string | null = null;
 let fileText = "---\nstatus: queued\n---\n\nbody\n";
 // let one test hold a write in flight until it explicitly releases it
 let holdWrite = false;
@@ -40,7 +42,11 @@ vi.mock("./ipc", () => ({
     if (writeError) throw writeError;
     writes.push({ path, text });
   }),
-  notesMove: vi.fn(async () => [] as string[]),
+  notesMove: vi.fn(async (_d: string, from: string, to: string) => {
+    if (moveError) throw moveError;
+    moves.push({ from, to });
+    return [] as string[];
+  }),
   notesDelete: vi.fn(async () => ".chronicle/trash/1-A.md"),
   notesSearch: vi.fn(async () => []),
   notesAttach: vi.fn(async () => "../attachments/a-1.png"),
@@ -66,6 +72,8 @@ describe("the notes store", () => {
     setActivity({ visible: true, focused: true, onBattery: false });
     writes.length = 0;
     writeError = null;
+    moves.length = 0;
+    moveError = null;
     fileText = "---\nstatus: queued\n---\n\nbody\n";
     holdWrite = false;
     releaseWrite = null;
@@ -376,5 +384,89 @@ describe("the notes store", () => {
     await store.refreshNotes("/p");
     expect(hits).toBe(1);                   // the index moving still reaches them
     off();
+  });
+
+
+  describe("a note names itself while the name is still ours (round 9)", () => {
+    const untitled = { path: "Tasks/Untitled.md", title: "Untitled", folder: "Tasks", status: null, round: null };
+    const openUntitled = async (body = "") => {
+      indexNotes = [A_NOTE, untitled];
+      fileText = `---\nstatus: queued\n---\n\n${body}`;
+      await store.refreshNotes("/p");
+      await store.openNote("/p", "Tasks/Untitled.md");
+    };
+
+    it("an Untitled note is renamed from its first line on settle, through the link-rewriting move", async () => {
+      await openUntitled();
+      store.editBody("/p", "# Weekly plan\n\nthings");
+      await store.settleNote("/p");
+      expect(writes.at(-1)?.path).toBe("Tasks/Untitled.md"); // saved first, in place
+      expect(moves).toEqual([{ from: "Tasks/Untitled.md", to: "Tasks/Weekly plan.md" }]);
+      expect(store.openFor("/p")?.path).toBe("Tasks/Weekly plan.md");
+    });
+
+    it("a note the user named by hand is left alone", async () => {
+      indexNotes = [A_NOTE, { path: "Tasks/Keep me.md", title: "Keep me", folder: "Tasks", status: null, round: null }];
+      fileText = "---\nstatus: queued\n---\n\n# Something else\n";
+      await store.refreshNotes("/p");
+      await store.openNote("/p", "Tasks/Keep me.md");
+      expect(store.autoTitled(store.openFor("/p")!)).toBe(false);
+      store.editBody("/p", "# Something else again\n");
+      await store.settleNote("/p");
+      expect(moves).toEqual([]);
+    });
+
+    it("keeps tracking a heading it derived itself, and stops the moment the name diverges", async () => {
+      indexNotes = [A_NOTE, { path: "Tasks/Weekly plan.md", title: "Weekly plan", folder: "Tasks", status: null, round: null }];
+      fileText = "---\nstatus: queued\n---\n\n# Weekly plan\n";
+      await store.refreshNotes("/p");
+      await store.openNote("/p", "Tasks/Weekly plan.md");
+      expect(store.autoTitled(store.openFor("/p")!)).toBe(true);
+      store.editBody("/p", "# Weekly plan for May\n");
+      await store.settleNote("/p");
+      expect(moves).toEqual([{ from: "Tasks/Weekly plan.md", to: "Tasks/Weekly plan for May.md" }]);
+    });
+
+    it("a collision takes the next free name, and an unchanged body renames nothing again", async () => {
+      indexNotes = [A_NOTE, untitled, { path: "Tasks/Weekly plan.md", title: "Weekly plan", folder: "Tasks", status: null, round: null }];
+      fileText = "---\nstatus: queued\n---\n\n";
+      await store.refreshNotes("/p");
+      await store.openNote("/p", "Tasks/Untitled.md");
+      store.editBody("/p", "# Weekly plan\n");
+      await store.settleNote("/p");
+      expect(moves).toEqual([{ from: "Tasks/Untitled.md", to: "Tasks/Weekly plan 2.md" }]);
+      // now the index says the note lives at "Weekly plan 2": the suffix is ours, so nothing moves
+      indexNotes = [A_NOTE, { path: "Tasks/Weekly plan 2.md", title: "Weekly plan 2", folder: "Tasks", status: null, round: null }, { path: "Tasks/Weekly plan.md", title: "Weekly plan", folder: "Tasks", status: null, round: null }];
+      indexGeneration = 2;
+      await store.refreshNotes("/p");
+      await store.settleNote("/p");
+      expect(moves).toHaveLength(1);
+    });
+
+    it("a refusal leaves the note where it is, without a toast", async () => {
+      await openUntitled();
+      store.editBody("/p", "# Locked one\n");
+      moveError = "locked: a round is running";
+      await store.settleNote("/p");
+      expect(store.openFor("/p")?.path).toBe("Tasks/Untitled.md");
+      const { toastError } = await import("@/overlays/toasts");
+      expect(vi.mocked(toastError)).not.toHaveBeenCalled();
+    });
+
+    it("the 600 ms debounce alone never renames", async () => {
+      await openUntitled();
+      store.editBody("/p", "# Weekly plan\n");
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(writes).toHaveLength(1);
+      expect(moves).toEqual([]);
+    });
+
+    it("a new Untitled note starts empty, so its first line becomes its name; a titled one keeps its heading", async () => {
+      await store.refreshNotes("/p");
+      await store.createNote("/p", "Tasks", "Untitled");
+      expect(writes.at(-1)).toEqual({ path: "Tasks/Untitled.md", text: "" });
+      await store.createNote("/p", "Tasks", "Real title");
+      expect(writes.at(-1)).toEqual({ path: "Tasks/Real title.md", text: "# Real title\n\n" });
+    });
   });
 });

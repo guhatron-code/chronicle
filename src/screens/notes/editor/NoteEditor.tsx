@@ -20,10 +20,13 @@ import { NOTE_EXTENSIONS, finishMarkdown } from "./nodes";
 import { slashSuggest, tagSuggest, wikiLinkSuggest } from "./suggesters";
 
 export function NoteEditor({
-  dir, path, body, readOnly, notes, onChange, onBlur, onOpenNote, onCreateNote, onOpenFile, onOpenUrl,
+  dir, path, body, readOnly, notes, onChange, onBlur, onLeaveFirstBlock, onOpenNote, onCreateNote, onOpenFile, onOpenUrl,
 }: {
   dir: string; path: string; body: string; readOnly: boolean; notes: NoteEntry[];
   onChange: (body: string) => void; onBlur: () => void;
+  /** the caret just left the document's first block (round 9: the moment a
+   *  note may take its name from its first line) */
+  onLeaveFirstBlock?: () => void;
   onOpenNote: (p: string) => void;
   onCreateNote: (title: string, folder: string) => Promise<string>;
   onOpenFile: (p: string) => void; onOpenUrl: (url: string) => void;
@@ -33,8 +36,8 @@ export function NoteEditor({
    * editor created for note A keeps calling note A's onChange forever. */
   const notesRef = useRef(notes); notesRef.current = notes;
   const pathRef = useRef(path); pathRef.current = path;
-  const cb = useRef({ onChange, onBlur, onOpenNote, onCreateNote, onOpenFile, onOpenUrl });
-  cb.current = { onChange, onBlur, onOpenNote, onCreateNote, onOpenFile, onOpenUrl };
+  const cb = useRef({ onChange, onBlur, onLeaveFirstBlock, onOpenNote, onCreateNote, onOpenFile, onOpenUrl });
+  cb.current = { onChange, onBlur, onLeaveFirstBlock, onOpenNote, onCreateNote, onOpenFile, onOpenUrl };
 
   const [srcToRef] = useState(() => new Map<string, string>());
   const folder = useMemo(() => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""), [path]);
@@ -141,6 +144,24 @@ export function NoteEditor({
     lastImages.current = imagesReady;
     editor.commands.setContent(wanted, { contentType: "markdown" });
   }, [editor, body, cached, imagesReady, srcToRef]);
+
+  /* the caret leaving the first block: inside means the selection head sits
+     within the document's first top-level node; fire once per exit */
+  useEffect(() => {
+    if (!editor) return;
+    const inside = () => {
+      const first = editor.state.doc.firstChild;
+      return !!first && editor.state.selection.from < first.nodeSize;
+    };
+    let was = inside();
+    const onSel = () => {
+      const now = inside();
+      if (was && !now) cb.current.onLeaveFirstBlock?.();
+      was = now;
+    };
+    editor.on("selectionUpdate", onSel);
+    return () => { editor.off("selectionUpdate", onSel); };
+  }, [editor]);
 
   /* ⌘] needs to know what the caret is on */
   useEffect(() => {

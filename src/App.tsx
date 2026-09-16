@@ -69,7 +69,7 @@ import { isHtmlPath, isClaudeArtifactUrl } from "@/lib/web-url";
 import {
   createNote,
   evictNotes,
-  flushSave,
+  settleNote,
   followLinkUnderCaret,
   noteGeneration,
   noteHistoryBack,
@@ -837,7 +837,7 @@ function AppShell() {
         if (e.defaultPrevented) return;
         e.preventDefault();
         if (pane === "repo") saveActiveFile(activeRef.current);
-        else void flushSave(activeRef.current);
+        else void settleNote(activeRef.current);
       }
       else if (mod && e.key === "p" && activeRef.current) {
         e.preventDefault();

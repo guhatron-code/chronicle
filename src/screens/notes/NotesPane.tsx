@@ -20,7 +20,7 @@ import { BtnPrimary } from "@/components/chrome/atoms";
 import { SplitHandle } from "@/components/chrome/SplitHandle";
 import { notesRevealVault, type NoteEntry } from "@/lib/ipc";
 import {
-  createNote, editBody, flushSave, indexFor, noteEntry, openFor, openNote,
+  createNote, editBody, indexFor, noteEntry, openFor, openNote, settleNote,
   queuedCountFor, roundKindFor, roundNotesFor, roundPhase, roundRoute, roundTermId, setNotesOnScreen,
   subscribeNotes, takePendingOpenNote,
 } from "@/lib/notes-store";
@@ -102,9 +102,10 @@ export function NotesPane({
     if (saved) void openNote(dir, saved);
   }, [dir]);
 
-  /* flush on unmount (pane switch); blur/beforeunload/visibility are handled
-     once at notes-store's module scope */
-  useEffect(() => () => { void flushSave(dir); }, [dir]);
+  /* settle on unmount (pane switch): save, and take the name if it is still
+     ours; blur/beforeunload/visibility flush-all stays a plain save at
+     notes-store's module scope — no renames while the app is going away */
+  useEffect(() => () => { void settleNote(dir); }, [dir]);
 
   const index = indexFor(dir);
   const open = openFor(dir);
@@ -280,7 +281,8 @@ export function NotesPane({
                   readOnly={entry?.unreadable ?? false}
                   notes={index.notes}
                   onChange={(body) => editBody(dir, body)}
-                  onBlur={() => void flushSave(dir)}
+                  onBlur={() => void settleNote(dir)}
+                  onLeaveFirstBlock={() => void settleNote(dir)}
                   onOpenNote={openNoteHere}
                   onCreateNote={(title: string, folder: string) => createNote(dir, folder, title.split("/").pop() ?? title)}
                   onOpenFile={onOpenFile}
