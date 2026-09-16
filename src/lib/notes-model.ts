@@ -200,6 +200,38 @@ export function roundPlanOutcome(
   return settled === "ready" ? "ready" : "failed";
 }
 
+/**
+ * The thread's cards as this rule needs to see them — `agent-session.ts` owns
+ * the real union; nothing here may depend on it (it depends on this file).
+ */
+/* `outcome` is `unknown` because other cards in that union carry an `outcome`
+   of their own shape (a permission's answer); this rule only ever writes to a
+   card whose kind is "round-plan". */
+export interface PlanCardish { kind: string; ended?: boolean; outcome?: unknown }
+
+/**
+ * End the newest un-ended `round-plan` card, and say whether there was one.
+ *
+ * A card left open is not cosmetic: the turn-end reducer settles the newest
+ * un-ended one, so a plan that never got a turn would capture the NEXT turn's
+ * end — settling a record it has nothing to do with and stealing the branch a
+ * running round needs.
+ */
+export function endNewestRoundPlan(
+  entries: PlanCardish[],
+  outcome: "ready" | "failed" | "cancelled",
+): boolean {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e.kind === "round-plan" && !e.ended) {
+      e.ended = true;
+      e.outcome = outcome;
+      return true;
+    }
+  }
+  return false;
+}
+
 /** The panel never grows without bound: a long round's tail is thousands of
  *  lines nobody scrolls back through, and the DOM pays for every one. The
  *  session carries the WHOLE last 30 kB of the log on each event rather than a

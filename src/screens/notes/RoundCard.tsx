@@ -80,14 +80,18 @@ export const RoundCard = memo(function RoundCard({
      when the turn died without the pane hearing about it. */
   const forgetAgentRun = () => clearRunningRound(dir);
 
-  /* A plan being written is a turn in the agent pane — but the record can be
-     stranded (the app restarted mid-plan, the session died without the turn
-     ever ending), so Stop cancels the RECORD first and the turn only if one is
-     actually live. That way there is always a way out of "writing the plan…". */
+  /* A plan being written is a turn in the agent pane, so the TURN goes first:
+     cancelling it ends the plan cleanly and its own turn-end path does the
+     record cancel, which leaves ours below a no-op. The record cancel still
+     runs unconditionally because the record can be stranded with no turn at
+     all (the app restarted mid-plan, the session died without ever ending its
+     turn) — that is the case where Stop is the only way out of "writing the
+     plan…", and it has to work. Cancelling twice is safe: the backend's cancel
+     does nothing when no round is generating. */
   const stopPlan = () => {
     setBusy(true);
-    roundPlanCancel(dir)
-      .then(() => (agentSessionFor(dir).turnActive ? cancelAgentTurn(dir) : undefined))
+    (agentSessionFor(dir).turnActive ? cancelAgentTurn(dir) : Promise.resolve())
+      .then(() => roundPlanCancel(dir))
       .then(() => { setRoundGenerating(dir, false); return refreshNotes(dir); })
       .then(() => toastSuccess("Stopped the plan", "Your notes are back in the queue"))
       .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)))

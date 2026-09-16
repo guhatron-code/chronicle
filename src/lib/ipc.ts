@@ -619,7 +619,7 @@ export function windowControls() {
  * The headless `fixes`/`exec` background sessions are gone (plan 2 Task 1):
  * rounds either run in the agent pane or in a terminal, both driven by
  * round_plan_begin/round_plan_settle/round_plan_cancel/round_run_message_cmd
- * above. RoundCard.tsx, RoundFlow.tsx, RoundLog.tsx and RoadmapPane.tsx still
+ * above. RoundCard.tsx, RoundLog.tsx and RoadmapPane.tsx still
  * call the old wrappers below; each is rewritten (or deleted) by the task
  * named on it, which is also the task that deletes the matching stub here.
  */

@@ -28,7 +28,7 @@ import {
 } from "./ipc";
 import { clearRunningRound, markRunningRound } from "./round-log";
 import { refreshNotes, roundGenerating, roundNotesFor, setRoundGenerating } from "./notes-store";
-import { roundPlanOutcome } from "./notes-model";
+import { endNewestRoundPlan, roundPlanOutcome } from "./notes-model";
 import { announce } from "./journal";
 import { toastAction, toastError, toastSuccess } from "@/overlays/toasts";
 
@@ -814,17 +814,22 @@ async function settleRoundPlan(
   stopReason: string | null,
 ): Promise<void> {
   let state: "ready" | "failed" | "none" = "none";
+  let checked = true;
   try {
     if (stopReason === "cancelled") await roundPlanCancel(dir);
     else state = (await roundPlanSettle(dir)).state;
   } catch {
-    /* the record keeps whatever it had; the outcome below stays honest */
+    // the record was never read back, so it is still marked generating — say
+    // exactly that rather than claim the notes are back in the queue
+    checked = stopReason === "cancelled";
   }
   entry.outcome = roundPlanOutcome(stopReason, state);
   setRoundGenerating(dir, false);
   notify();
   await refreshNotes(dir);
-  if (entry.outcome === "ready") {
+  if (!checked) {
+    toastError("Couldn't check the plan", "The round is still marked as planning; use Stop on the round card to clear it");
+  } else if (entry.outcome === "ready") {
     toastAction(`Round ${entry.n} is ready`, "Run it in the pane", () => {
       void startRoundInPane(dir, entry.n, entry.total).catch((e) =>
         toastError("Couldn't start the round", String(e).slice(0, 110)),
@@ -842,7 +847,7 @@ function settleRoundRun(dir: string, n: number): void {
     const notes = roundNotesFor(dir, n);
     if (notes.length > 0 && notes.every((x) => x.status === "done")) {
       announce(dir, "round-done", `Round ${n} finished`, "Chronicle");
-      toastSuccess("The round finished", "Check Notes — finished items are ticked");
+      toastSuccess("The round finished", "Check Notes · finished items are ticked");
     } else {
       announce(dir, "round-ended", `Round ${n} ended early`, "Chronicle");
     }
@@ -861,11 +866,19 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
   void refreshNotes(dir);
   s.viewing = null;
 
-  // the plan never got its turn — hand the notes straight back to the queue
+  /* The card and the record are abandoned together. Leaving the card open is
+     the dangerous half: the turn-end reducer settles the newest un-ended
+     `round-plan`, so a plan that never got a turn would capture the NEXT
+     turn's end — settling an unrelated record and stealing the branch a
+     running round needs to clear its mark and announce itself. */
   let over = false;
+  const endCard = () => {
+    if (endNewestRoundPlan(agentSessionFor(dir).entries, "cancelled")) notify();
+  };
   const giveUp = () => {
     if (over) return;
     over = true;
+    endCard();
     void roundPlanCancel(dir).catch(() => {});
     setRoundGenerating(dir, false);
     void refreshNotes(dir);
@@ -889,8 +902,9 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
     if (cur.phase === "ready" && !cur.turnActive) {
       un();
       // the card's Stop can land while the session is still starting — a plan
-      // nobody is waiting for any more must not be sent the moment it is
-      if (!roundGenerating(dir)) return;
+      // nobody is waiting for any more must not be sent the moment it is, and
+      // its card must not sit open waiting for a turn that will never come
+      if (!roundGenerating(dir)) { over = true; endCard(); return; }
       void sendAgentMessage(dir, prompt).catch(() => giveUp());
     }
     if (cur.phase === "error" || cur.phase === "needs-login") { un(); giveUp(); }
@@ -904,6 +918,9 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
       throw e;
     }
   }
+  // the subscriber may already have given up while the session was starting —
+  // landing a card for an abandoned plan would strand it open
+  if (over) return;
   const cur = agentSessionFor(dir);
   cur.entries.push({ kind: "round-plan", n, total });
   notify();

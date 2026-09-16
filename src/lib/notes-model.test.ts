@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NoteEntry } from "./ipc";
 import {
-  backlinksFor, buildTree, joinFrontMatter, nestTree, newNotePath,
+  backlinksFor, buildTree, endNewestRoundPlan, joinFrontMatter, nestTree, newNotePath,
   outlinksFor, pillFor, roundLogHeader, roundPhaseOf, roundPlanOutcome, roundSubline, sanitizeTitle,
   setStatusInFront, slugFor,
   splitFrontMatter, statusInFront, stickToBottom, tagCounts, tailLines, LOG_MAX_LINES, STICK_SLOP,
@@ -242,5 +242,19 @@ describe("how a planning turn settles", () => {
     expect(roundPlanOutcome(null, "ready")).toBe("ready");
     expect(roundPlanOutcome("end_turn", "failed")).toBe("failed");
     expect(roundPlanOutcome("error", "none")).toBe("failed");
+  });
+
+  it("ends the newest un-ended plan card and leaves settled ones alone", () => {
+    const entries = [
+      { kind: "round-plan", ended: true, outcome: "ready" as const },
+      { kind: "assistant" },
+      { kind: "round-plan" },
+    ];
+    expect(endNewestRoundPlan(entries, "cancelled")).toBe(true);
+    expect(entries[2]).toEqual({ kind: "round-plan", ended: true, outcome: "cancelled" });
+    expect(entries[0]).toEqual({ kind: "round-plan", ended: true, outcome: "ready" });
+    // nothing left open — a second pass must not touch the settled cards
+    expect(endNewestRoundPlan(entries, "cancelled")).toBe(false);
+    expect(endNewestRoundPlan([{ kind: "round" }], "cancelled")).toBe(false);
   });
 });
