@@ -31,6 +31,7 @@ import { clearRunningRound, markRunningRound, runningRoundFor } from "./round-lo
 import { indexFor, refreshNotes, roundGenerating, roundNotesFor, setRoundGenerating } from "./notes-store";
 import { endNewestRoundCard, roundPlanOutcome } from "./notes-model";
 import { announce } from "./journal";
+import { recordRateLimit } from "./limits-store";
 import { toastAction, toastError } from "@/overlays/toasts";
 
 export type AgentPhase =
@@ -147,6 +148,8 @@ export interface AgentSessionState {
   loadSession: boolean; // adapter capability — Z-4 resume gating
   turnActive: boolean;
   usage: { used: number; size: number } | null;
+  /** USD this session, from the end-of-turn usage_update (round 9) */
+  cost: number | null;
   entries: AgentEntry[];
   errorMessage: string | null;
   /** the Works-freely confirm is per SESSION — reset on every new session */
@@ -178,6 +181,7 @@ const blank = (): AgentSessionState => ({
   loadSession: false,
   turnActive: false,
   usage: null,
+  cost: null,
   entries: [],
   errorMessage: null,
   worksFreelyConfirmed: false,
@@ -657,6 +661,12 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       const used = Number(update.used);
       const size = Number(update.size);
       if (Number.isFinite(used) && Number.isFinite(size) && size > 0) s.usage = { used, size };
+      const cost = (update.cost ?? null) as Raw | null;
+      if (cost && typeof cost.amount === "number") s.cost = cost.amount;
+      // the account's limits ride along on the rate-limit flavour of this
+      // update; only a LIVE reading may paint the title bar (limits-store.ts)
+      const meta = (update._meta ?? {}) as Raw;
+      if (live && meta["_claude/rateLimit"]) recordRateLimit(meta["_claude/rateLimit"]);
     } else if (kind === "plan") {
       const raw = Array.isArray(update.entries) ? (update.entries as Raw[]) : [];
       const items = raw.map((e) => {

@@ -77,7 +77,8 @@ describe("a recorded fan-out session replays through the reducer", () => {
     expect((thoughts[0] as { text: string }).text.length).toBeGreaterThan(20);
   });
 
-  it("ends with the last context reading", () => {
+  it("ends with the last context reading and the session's cost", () => {
     expect(s.usage).toEqual({ used: 245376, size: 1000000 });
+    expect(s.cost).toBeCloseTo(19.74, 2);
   });
 });

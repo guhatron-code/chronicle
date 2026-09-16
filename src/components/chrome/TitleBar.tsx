@@ -20,6 +20,8 @@ import { useOverflowEdges } from "@/lib/overflow-edges";
 import { EdgeFades } from "./EdgeFades";
 import { BrandGlyph, ErrorGlyph, HelpGlyph, PlusGlyph, XGlyph } from "./icons";
 import { PaneCluster, type PaneUnit, type PaneVisibility } from "./PaneCluster";
+import { LimitsChip } from "./LimitsChip";
+import type { LimitsReading } from "@/lib/limits-store";
 import { cn } from "@/lib/utils";
 import type { MarkIndex } from "./atoms";
 import { Hint } from "@/components/ui/tooltip";
@@ -97,6 +99,9 @@ export function TitleBar({
   onAdd,
   onHome,
   onHelp,
+  limits,
+  sessionCost,
+  onRefreshLimits,
 }: {
   tabs: ProjectTab[];
   activeDir: string;
@@ -113,6 +118,11 @@ export function TitleBar({
   onHome?: () => void;
   /** Opens the Help screen — the primary entry, replacing the rail's. */
   onHelp?: () => void;
+  /** Round 9 — the account's limits, once a live session has reported them. */
+  limits?: LimitsReading | null;
+  sessionCost?: number | null;
+  /** null when there is no live idle session to send /usage to */
+  onRefreshLimits?: (() => void) | null;
 }) {
   // the active tab must always be visible — no slot to swap it into any more
   // (T-013), so scroll the strip to it whenever the active project changes
@@ -287,6 +297,7 @@ export function TitleBar({
           )}
         </span>
       )}
+      {limits && <LimitsChip limits={limits} sessionCost={sessionCost ?? null} onRefresh={onRefreshLimits ?? null} />}
       {degraded ? (
         <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11.5px] text-text-subtle">
           <ErrorGlyph size={11} strokeWidth={1.4} />

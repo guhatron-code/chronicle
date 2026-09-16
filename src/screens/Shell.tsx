@@ -10,7 +10,7 @@
  * Hiding a unit never kills sessions (they live outside React, like hidden
  * terminal tabs always have).
  */
-import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Rail, type Pane } from "@/components/chrome/Rail";
 import { TitleBar, type ProjectTab, type UpdateLineProps } from "@/components/chrome/TitleBar";
@@ -22,6 +22,9 @@ import {
 } from "@/components/chrome/TerminalColumn";
 import { AgentSection } from "@/screens/agent/AgentSection";
 import { focusActiveTerm, shouldReclaimTerminalFocus } from "@/lib/term-sessions";
+import { agentSessionFor, sendAgentMessage, subscribeAgent } from "@/lib/agent-session";
+import { limitsReading, subscribeLimits } from "@/lib/limits-store";
+import { toastError } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
 export function Shell({
@@ -110,6 +113,15 @@ export function Shell({
   terminalHostFor?: (id: number) => (el: HTMLDivElement | null) => void;
   children: ReactNode;
 }) {
+  // Round 9 — the limits chip: one global reading, this project's session cost
+  const [, bump] = useState(0);
+  useEffect(() => subscribeLimits(() => bump((n) => n + 1)), []);
+  useEffect(() => subscribeAgent(() => bump((n) => n + 1)), []);
+  const limits = limitsReading();
+  const agent = agentSessionFor(activeDir);
+  const refreshLimits = useCallback(() => {
+    void sendAgentMessage(activeDir, "/usage").catch((e) => toastError("Couldn't ask for usage", String(e).slice(0, 90)));
+  }, [activeDir]);
   const rowRef = useRef<HTMLDivElement>(null);
   const colRef = useRef<HTMLDivElement>(null);
 
@@ -255,6 +267,9 @@ export function Shell({
         tabs={tabs}
         activeDir={activeDir}
         checkedAt={checkedAt}
+        limits={limits}
+        sessionCost={agent.cost}
+        onRefreshLimits={agent.phase === "ready" && !agent.turnActive ? refreshLimits : null}
         update={update}
         degraded={degraded}
         panes={panes}
