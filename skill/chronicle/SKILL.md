@@ -51,7 +51,7 @@ chronicle state phases|needs_you|rounds [dir]
 chronicle round plan [dir]
 chronicle round start --n N [--where pane|terminal] [dir]
 chronicle project open <path>
-chronicle terminal read [--lines N] [dir]
+chronicle terminal read [--id <tab>] [--lines N] [dir]
 ```
 
 Add `--json` to any of them for the same JSON a tool call returns instead of the table/plain

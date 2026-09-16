@@ -390,18 +390,24 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     } else if (state === "needs-login") {
       s.phase = "needs-login";
       s.turnActive = false;
+      // nothing queued is going anywhere until someone signs in and the session
+      // is restarted, and a restart drops the queue: the card ends now rather
+      // than reading "waiting for the pane" for the rest of the session
+      if (live) dropQueuedPrompts(s, dir);
     } else if (state === "error") {
       s.phase = "error";
       s.errorMessage = str(params.message) || "The agent bridge stopped.";
       s.turnActive = false;
       settleStreaming(s);
       if (live) clearRunningRound(dir); // a dead bridge is not running anyone's round
+      if (live) dropQueuedPrompts(s, dir); // and it will not send what was waiting, either
     } else if (state === "ended") {
       // needs-login/error keep their more specific face over the shutdown event
       if (s.phase !== "needs-login" && s.phase !== "error") s.phase = "ended";
       s.turnActive = false;
       settleStreaming(s);
       if (live) clearRunningRound(dir);
+      if (live) dropQueuedPrompts(s, dir);
     }
     notify();
     return;
@@ -1116,6 +1122,20 @@ function dropQueueWaiters(dir: string): void {
     queueWaiters.delete(w);
     w.dropped();
   }
+}
+
+/** The pane stopped but the queue is still standing (error / ended / needs-login).
+ *  Every card waiting on it ends — nothing queued can be sent by a session that has
+ *  stopped — and the prompt it was waiting on leaves the queue with it: a waiter
+ *  dropped on its own would turn that prompt into an ordinary message, which the
+ *  next flush would then send with no card left to show for it. The user's own
+ *  typed messages stay put. */
+function dropQueuedPrompts(s: AgentSessionState, dir: string): void {
+  const texts = new Set([...queueWaiters].filter((w) => w.dir === dir).map((w) => w.text));
+  for (let i = s.queue.length - 1; i >= 0; i -= 1) {
+    if (texts.has(s.queue[i])) s.queue.splice(i, 1);
+  }
+  dropQueueWaiters(dir);
 }
 
 /**

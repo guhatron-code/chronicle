@@ -35,6 +35,11 @@ export interface BridgeDeps {
   /** Settles WITH the open: a folder that can't be opened must not be reported
    *  as opened, so this resolves once the project is up and rejects if it isn't. */
   openProject(dir: string): Promise<void>;
+  /** Bring an already-open project to the front. The reveals below act on
+   *  whichever project the window is showing, so a round started in a project
+   *  the user isn't looking at has to foreground that project FIRST — otherwise
+   *  the wrong project's panes open and the wrong project's layout is saved. */
+  activate(dir: string): void;
   revealPane(): void;
   revealTerminal(): void;
   roundTotal(dir: string, n: number): number;
@@ -134,7 +139,8 @@ export async function handleAgentAction(a: AgentAction, deps: BridgeDeps): Promi
   switch (a.action) {
     case "round.plan":
       try {
-        deps.revealPane(); // the pane comes up first: the work is visible while it runs
+        deps.activate(a.dir); // the project being worked in comes to the front first
+        deps.revealPane(); // then the pane: the work is visible while it runs
         await deps.planRound(a.dir);
         return { ok: true, summary: "An agent started planning a round in the pane." };
       } catch (e) {
@@ -147,6 +153,7 @@ export async function handleAgentAction(a: AgentAction, deps: BridgeDeps): Promi
       const where = routeArg(args.where);
       try {
         const total = deps.roundTotal(a.dir, n);
+        deps.activate(a.dir); // reveal follows the front project, so switch to it first
         if (where === "terminal") deps.revealTerminal();
         else deps.revealPane();
         await deps.startRound(a.dir, n, total, where);
@@ -191,7 +198,11 @@ export async function handleAgentAction(a: AgentAction, deps: BridgeDeps): Promi
         return refusal(`read ${what}`, e);
       }
       if (text == null) return refusal(`read ${what}`, "no terminal is open there");
-      const got = text === "" ? 0 : text.split("\n").length;
+      // count what was actually handed over: the rows of the returned text, with a
+      // trailing newline not counted as a row of its own. `termTail` caps on the same
+      // unit, so "50 lines" is never the answer to a read that returned 73.
+      const body = text.endsWith("\n") ? text.slice(0, -1) : text;
+      const got = body === "" ? 0 : body.split("\n").length;
       return {
         ok: true,
         summary: `${got} lines from ${named == null ? "the terminal" : `terminal ${named}`}.`,

@@ -108,6 +108,27 @@ describe("a round prompt waiting in the composer queue", () => {
     expect(agent.agentSessionFor(DIR).queue).toEqual([]);
   });
 
+  it("closes the card when the bridge dies under it", async () => {
+    agent.enqueueAgentMessage(DIR, "first");
+    await agent.startRoundInPane(DIR, 8, 1);
+    turnEnds(); // "first" goes out, the round queues behind it
+    expect(agent.agentSessionFor(DIR).queue).toEqual(["RUN 8"]);
+    await settle();
+
+    // the pane stops: nothing queued will ever be sent, so a card reading
+    // "waiting for the pane" would wait for the rest of the session
+    onUpdate!({ dir: DIR, message: { method: "_chronicle/session_state", params: { state: "error", message: "gone" } } });
+    await settle();
+    expect(roundCard()).toMatchObject({ kind: "round", n: 8, ended: true });
+    expect(runningRoundFor(DIR)).toBeNull();
+    // the prompt leaves the queue with its card: a waiter dropped on its own
+    // would leave "RUN 8" behind as an ordinary message for the next flush
+    expect(agent.agentSessionFor(DIR).queue).toEqual([]);
+
+    turnEnds();
+    expect(prompts).toEqual(["first"]); // and nothing went out after the failure
+  });
+
   it("closes the card when a session restart throws the queue away", async () => {
     agent.enqueueAgentMessage(DIR, "first");
     await agent.startRoundInPane(DIR, 5, 1);

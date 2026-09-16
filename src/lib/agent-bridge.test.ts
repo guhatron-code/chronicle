@@ -1,16 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
 
 /* mountAgentBridge is the one impure export here — it calls onAgentAction and
- * agentActionReply from ./ipc directly (the wire itself, not a decision), so
- * the ordering test below fakes just those two instead of the whole deps
- * surface handleAgentAction already covers. */
+ * agentActionReply from ./ipc directly (the wire itself, not a decision), and
+ * says what happened through ./journal and the toasts, so those three are faked
+ * rather than the whole deps surface handleAgentAction already covers. */
+type FakeAction = { id: number; dir: string; action: string; args: Record<string, unknown> };
 let resolveListener: ((unlisten: () => void) => void) | null = null;
+let fire: ((a: FakeAction) => void) | null = null;
 vi.mock("./ipc", () => ({
-  onAgentAction: vi.fn(() => new Promise<() => void>((resolve) => { resolveListener = resolve; })),
+  onAgentAction: vi.fn((cb: (a: FakeAction) => void) => {
+    fire = cb;
+    return new Promise<() => void>((resolve) => { resolveListener = resolve; });
+  }),
   agentActionReply: vi.fn(async () => {}),
 }));
+vi.mock("./journal", () => ({ announce: vi.fn() }));
+vi.mock("@/overlays/toasts", () => ({ toastSuccess: vi.fn(), toastError: vi.fn() }));
 
 import { describeAction, handleAgentAction, mountAgentBridge } from "./agent-bridge";
+import { announce } from "./journal";
+import { toastError, toastSuccess } from "@/overlays/toasts";
 
 describe("what an agent asked for, in words", () => {
   it("names each action", () => {
@@ -26,7 +35,7 @@ describe("what an agent asked for, in words", () => {
 describe("handling an action", () => {
   const deps = () => ({
     planRound: vi.fn(async () => {}), startRound: vi.fn(async () => {}), openProject: vi.fn(),
-    revealPane: vi.fn(), revealTerminal: vi.fn(), roundTotal: vi.fn(() => 2),
+    activate: vi.fn(), revealPane: vi.fn(), revealTerminal: vi.fn(), roundTotal: vi.fn(() => 2),
     termTail: vi.fn(() => "line a\nline b"),
   });
   it("plans a round in the pane and says so", async () => {
@@ -42,6 +51,34 @@ describe("handling an action", () => {
     expect(d.startRound).toHaveBeenCalledWith("/p", 3, 2, "terminal");
     expect(d.revealTerminal).toHaveBeenCalled();
     expect(r.summary).toBe("An agent started round 3 in a terminal.");
+  });
+  it("brings the action's project to the front before it opens a pane", async () => {
+    // the reveals act on whichever project the window is showing: an agent working
+    // in B while the user looks at A must not flip A's panes open instead
+    const order: string[] = [];
+    const d = deps();
+    d.activate.mockImplementation((dir: string) => { order.push(`activate ${dir}`); });
+    d.revealPane.mockImplementation(() => { order.push("revealPane"); });
+    d.revealTerminal.mockImplementation(() => { order.push("revealTerminal"); });
+
+    await handleAgentAction({ id: 1, dir: "/B", action: "round.start", args: { n: 3 } }, d);
+    await handleAgentAction({ id: 2, dir: "/B", action: "round.start", args: { n: 3, where: "terminal" } }, d);
+    await handleAgentAction({ id: 3, dir: "/B", action: "round.plan", args: {} }, d);
+    expect(order).toEqual([
+      "activate /B", "revealPane",
+      "activate /B", "revealTerminal",
+      "activate /B", "revealPane",
+    ]);
+  });
+  it("counts the lines it actually handed over, blank rows and all", async () => {
+    // "50 lines" must never be the answer to a read that returned 73: the count is
+    // the returned text's rows, with a trailing newline not counted as one of them
+    const d = { ...deps(), termTail: vi.fn(() => "a\n\nb\n") };
+    const r = await handleAgentAction({ id: 1, dir: "/p", action: "terminal.read", args: { id: 7, lines: 50 } }, d);
+    expect(r).toEqual({ ok: true, summary: "3 lines from terminal 7.", data: { text: "a\n\nb\n", lines: 3 } });
+    const empty = { ...deps(), termTail: vi.fn(() => "") };
+    const e = await handleAgentAction({ id: 1, dir: "/p", action: "terminal.read", args: { id: 7 } }, empty);
+    expect(e.summary).toBe("0 lines from terminal 7.");
   });
   it("reads a terminal tail", async () => {
     const d = deps();
@@ -97,7 +134,7 @@ describe("handling an action", () => {
 describe("mounting the bridge", () => {
   const minimalDeps = () => ({
     planRound: vi.fn(async () => {}), startRound: vi.fn(async () => {}), openProject: vi.fn(),
-    revealPane: vi.fn(), revealTerminal: vi.fn(), roundTotal: vi.fn(() => 0),
+    activate: vi.fn(), revealPane: vi.fn(), revealTerminal: vi.fn(), roundTotal: vi.fn(() => 0),
     termTail: vi.fn(() => null),
   });
 
@@ -126,5 +163,42 @@ describe("mounting the bridge", () => {
     resolveListener!(() => {});
     await Promise.resolve();
     await Promise.resolve(); // nothing throws once the listener resolves either
+  });
+
+  /* Nothing an agent does is silent. A success is both said now (the toast) and
+   * recorded for later (the journal); a refusal is said, and only said — the app
+   * declining to do something is not part of the project's history. */
+  describe("saying what an agent did", () => {
+    const settle = async () => { for (let i = 0; i < 8; i += 1) await Promise.resolve(); };
+    const mountAndFire = async (a: FakeAction) => {
+      resolveListener = null;
+      fire = null;
+      vi.mocked(toastSuccess).mockClear();
+      vi.mocked(toastError).mockClear();
+      vi.mocked(announce).mockClear();
+      mountAgentBridge(minimalDeps());
+      resolveListener!(() => {});
+      await settle();
+      fire!(a);
+      await settle();
+    };
+
+    it("toasts AND writes a journal line when an action worked", async () => {
+      await mountAndFire({ id: 9, dir: "/p", action: "round.plan", args: {} });
+      const said = "An agent started planning a round in the pane.";
+      expect(toastSuccess).toHaveBeenCalledWith(said);
+      expect(announce).toHaveBeenCalledWith("/p", "agent-action", said, "Chronicle");
+      expect(toastError).not.toHaveBeenCalled();
+    });
+
+    it("toasts a refusal without writing one", async () => {
+      await mountAndFire({ id: 10, dir: "/p", action: "nope", args: {} });
+      expect(toastError).toHaveBeenCalledWith(
+        "An agent asked for something Chronicle couldn't do",
+        `Couldn't run "nope": Chronicle doesn't know that action`,
+      );
+      expect(announce).not.toHaveBeenCalled();
+      expect(toastSuccess).not.toHaveBeenCalled();
+    });
   });
 });

@@ -186,7 +186,10 @@ export function getTerm(id: number): TermSession | undefined {
  * where the interesting part is, and the blank rows below the last line of
  * output are skipped: a screen that scrolled once is mostly empty, and "the
  * last 200 lines" must mean 200 lines of something. Blank rows BETWEEN lines
- * are kept — they are the shape of the output. The cap counts non-empty rows.
+ * are kept — they are the shape of the output — and they count against the cap
+ * like any other row: what comes back is at most `lines` rows, so the caller
+ * that reports "N lines from the terminal" is reporting the number it asked for
+ * and the number it got, which used to be two different numbers.
  *
  * Null means there is no such tab. A tab whose pty ended is still a tab: its
  * scrollback is exactly what someone asks to read after a run finishes.
@@ -196,16 +199,10 @@ export function termTail(id: number, lines: number): string | null {
   if (!s) return null;
   const buf = s.term.buffer.active;
   const out: string[] = [];
-  let kept = 0;
-  for (let i = buf.length - 1; i >= 0 && kept < lines; i -= 1) {
+  for (let i = buf.length - 1; i >= 0 && out.length < lines; i -= 1) {
     const row = buf.getLine(i)?.translateToString(true) ?? "";
-    if (row.trim() === "") {
-      if (out.length === 0) continue; // trailing blank screen, not output
-      out.push(row);
-      continue;
-    }
+    if (row.trim() === "" && out.length === 0) continue; // trailing blank screen, not output
     out.push(row);
-    kept += 1;
   }
   return out.reverse().join("\n");
 }

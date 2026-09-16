@@ -355,7 +355,7 @@ fn agents_access_enable_in(dir: &Path, home: &Path, exe: &Path) -> Result<Value,
     {
         let obj = mcp_json.as_object_mut().expect("read_mcp_json_strict always returns an object");
         let servers = obj.entry("mcpServers".to_string()).or_insert_with(|| json!({}));
-        let servers_obj = servers.as_object_mut().ok_or("`.mcp.json`'s mcpServers must be an object")?;
+        let servers_obj = servers.as_object_mut().ok_or("The mcpServers entry in .mcp.json must be an object, so nothing was changed.")?;
         servers_obj.insert("chronicle".into(), json!({
             "command": exe.to_string_lossy(),
             "args": ["--mcp", "."],
@@ -3650,6 +3650,11 @@ fn main() {
                             if !open {
                                 return bridge::Reply { ok: false, summary: "That project isn't open in Chronicle. Open it and try again.".into(), data: None };
                             }
+                            // what was checked is what gets emitted, as in the branch
+                            // above: a caller that sent a symlink or a trailing slash
+                            // would otherwise key an agent session under a path the app
+                            // has no pane for, and the round would run where nobody looks
+                            req.dir = canon.to_string_lossy().into_owned();
                         }
                         let id = st.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let (tx, rx) = std::sync::mpsc::channel();

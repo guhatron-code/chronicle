@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentsRowFor } from "./setup-store";
+import { agentsRowFor, agentsRowForError } from "./setup-store";
 import type { AgentsAccessStatus } from "./ipc";
 
 const status = (mcp: boolean): AgentsAccessStatus => ({ mcp, skill: "installed", command: "/x/chronicle" });
@@ -21,6 +21,18 @@ describe("agentsRowFor", () => {
       detail: "Writes .mcp.json in this project and installs the chronicle skill.",
       action: "install",
     });
+  });
+
+  it("says what went wrong, and still offers the button, when the check itself failed", () => {
+    // a spinner with no explanation and no retry is the one thing this row must
+    // never become: a backend error reads as "needs you", with the reason
+    expect(agentsRowForError(new Error("no HOME"))).toEqual({
+      id: "agents",
+      state: "needs_you",
+      detail: "Error: no HOME",
+      action: "install",
+    });
+    expect(agentsRowForError("that project isn't open").detail).toBe("that project isn't open");
   });
 
   it("says the skill is hand-managed when ready but the human owns that copy", () => {

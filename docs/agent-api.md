@@ -1,8 +1,9 @@
 # Agent API
 
 Chronicle's notes and roadmap state are reachable from outside the app: one Rust
-implementation (`src-tauri/src/agent_api.rs`), fronted by an MCP server and a CLI. Both
-answer from disk; no running app is needed for anything on this page.
+implementation (`src-tauri/src/agent_api.rs`), fronted by an MCP server and a CLI. The
+notes and state capabilities answer from disk. The four actions under Actions need the app
+running.
 
 ## The two fronts
 
@@ -88,8 +89,13 @@ trace. Chronicle must already be open on the project the call targets, except
 | `terminal.read` | `chronicle terminal read [--id N] [--lines N] [dir]` | `id?` (default: the terminal the user is looking at), `lines?` (default 200) | reads the last lines of a terminal tab's scrollback; text only, nothing is ever written to a PTY | nothing changes in the app; the caller gets the text back, plus a toast and a journal line |
 
 `round.start`'s `where` must be `pane` or `terminal`; anything else is refused with "where
-must be pane or terminal." A `terminal.read` naming a tab that belongs to another project is
-refused with "Terminal N isn't in this project." rather than read.
+must be pane or terminal." Its `n` must be a round the project actually has, the way
+`state.rounds` reports it: a number nobody planned is refused with "There is no round N in
+this project." before the app is dialled, because the app's own buttons can only offer
+rounds that exist. A `terminal.read` naming a tab that belongs to another project is
+refused with "Terminal N isn't in this project." rather than read. A round started in a
+project that is open but not on screen brings that project to the front first, so the work
+is where the user can see it.
 
 ### The bridge
 

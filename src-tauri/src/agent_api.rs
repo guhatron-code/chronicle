@@ -558,6 +558,14 @@ fn round_start(dir: &Path, a: &Value) -> Result<Outcome, String> {
     let n = arg_u64(a, "n")?.ok_or("n is required.")?;
     let wh = arg_str(a, "where")?.unwrap_or("pane");
     if wh != "pane" && wh != "terminal" { return Err("where must be pane or terminal.".into()) }
+    // The app's own buttons can only offer rounds that exist. An agent hands us a bare
+    // number, so the same guard has to run here: a round that isn't in the record would
+    // otherwise put a card in the thread, send a prompt naming a plan file nobody wrote,
+    // and disable the user's Run buttons until that phantom turn ended. Read the record
+    // the way chronicle.state.rounds does, and refuse before the socket is dialled.
+    if !crate::notes::rounds::load(dir)?.iter().any(|r| r.n == n) {
+        return Err(format!("There is no round {n} in this project."));
+    }
     action(dir, "round.start", json!({ "n": n, "where": wh }), "start a round")
 }
 
@@ -904,6 +912,9 @@ mod tests {
     #[test]
     fn actions_go_through_the_bridge_and_report_its_sentence() {
         let d = vault("actions");
+        // three real rounds: round.start is only allowed to name one of these
+        std::fs::write(d.join(".chronicle/rounds.json"),
+            r#"{"version":1,"rounds":[{"n":1,"state":"ready"},{"n":2,"state":"ready"},{"n":3,"state":"ready"}]}"#).unwrap();
         std::fs::write(d.join("app.token"), "t").unwrap();
         let sock = d.join("app.sock");
         let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
@@ -925,6 +936,13 @@ mod tests {
         assert_eq!(call(&d, "chronicle.round.start", &json!({})).unwrap_err(), "n is required.");
         assert_eq!(call(&d, "chronicle.round.start", &json!({"n": 3, "where": "cloud"})).unwrap_err(),
                    "where must be pane or terminal.");
+        // a round nobody planned is refused here, before the socket: the fake bridge
+        // above answers every request with ok, so an error at all proves it never ran
+        assert_eq!(call(&d, "chronicle.round.start", &json!({"n": 42})).unwrap_err(),
+                   "There is no round 42 in this project.");
+        // and one that does exist still reaches the app
+        let r = call(&d, "chronicle.round.start", &json!({"n": 2})).unwrap();
+        assert_eq!(r.data["echo"]["n"], 2);
         // the default reaches the app as a real value, not as an absent key
         let r = call(&d, "chronicle.round.start", &json!({"n": 1})).unwrap();
         assert_eq!(r.data["echo"]["where"], "pane");

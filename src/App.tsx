@@ -372,6 +372,11 @@ function AppShell() {
   }, [refreshPicker, pollOne]);
 
   const activate = useCallback((dir: string) => {
+    // the ref leads the state by one render on purpose: patchLayout and the other
+    // activeRef readers run before React re-renders when a caller switches project
+    // and then acts on it in the same tick (the agent bridge does exactly that), and
+    // they must act on the project being switched TO, not the one being left
+    activeRef.current = dir;
     setActiveDir(dir);
     setProjects((prev) => {
       const next = new Map(prev);
@@ -889,6 +894,11 @@ function AppShell() {
           ? startRoundInTerminal(dir, n, total, agentRef.current)
           : startRoundInPane(dir, n, total),
       openProject: doOpenProject,
+      // the two reveals below act on whatever project the window is showing, so
+      // the bridge switches to the action's project first: a round started in a
+      // project the user isn't looking at used to open the OTHER project's panes
+      // and save them into its layout, while the round ran out of sight
+      activate: (dir) => { if (projectsRef.current.has(dir)) activate(dir); },
       revealPane: () => patchLayout({ agent: true, agentCollapsed: false }),
       revealTerminal: () => patchLayout({ terminal: true, terminalCollapsed: false }),
       roundTotal: (dir, n) => roundNotesFor(dir, n).length,
@@ -904,7 +914,7 @@ function AppShell() {
       bridgeReady: agentBridgeReady,
     });
     return unmount;
-  }, [doOpenProject, patchLayout]);
+  }, [doOpenProject, patchLayout, activate]);
 
   /* ---- the same map, arriving from the native menu (src-tauri/src/menu.rs) ----
      The Web pane's page is a native WKWebView: while it is first responder our

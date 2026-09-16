@@ -29,7 +29,7 @@ export const CHECK_META: { id: string; name: string; blurb: string; kind: "claud
   { id: "terminal_path", name: "Make the AI work in the terminal", blurb: "So typing the AI's name in the terminal works.", kind: "path" },
   { id: "github", name: "Your projects' online home", blurb: "Where your projects live online, so you can publish and share them.", kind: "github" },
   { id: "superpowers", name: "Extra skills for the AI", blurb: "Extra abilities that make the AI better at bigger jobs.", kind: "skills" },
-  { id: "agents", name: "Let agents reach Chronicle", blurb: "Claude Code in this project can read and write its notes, see the roadmap, and start rounds you watch.", kind: "agents" },
+  { id: "agents", name: "Let agents reach Chronicle", blurb: "Claude Code in this project can read and write its notes, see the roadmap, read this project's terminal output, and start rounds you watch.", kind: "agents" },
 ];
 
 /** The machine-wide prerequisites the first-launch gate and the "all set" celebration
@@ -225,6 +225,13 @@ export function agentsRowFor(status: AgentsAccessStatus | null, dir: string | nu
   };
 }
 
+/** The row when asking the backend failed. A "checking" row here would spin for
+ *  the rest of the session with nothing to click and nothing to read; this one
+ *  says what went wrong and keeps the Turn on button, which retries the lot. */
+export function agentsRowForError(err: unknown): SetupCheck {
+  return { id: "agents", state: "needs_you", detail: String(err), action: "install" };
+}
+
 /** Pull the agents row fresh for whichever project is open (or blocked, if none is). */
 export async function refreshAgentsRow(dir: string | null): Promise<void> {
   if (!dir) {
@@ -235,8 +242,8 @@ export async function refreshAgentsRow(dir: string | null): Promise<void> {
   try {
     const status = await agentsAccessStatus(dir);
     state.checks.set("agents", agentsRowFor(status, dir));
-  } catch {
-    state.checks.set("agents", agentsRowFor(null, dir));
+  } catch (err) {
+    state.checks.set("agents", agentsRowForError(err));
   }
   notify();
 }
