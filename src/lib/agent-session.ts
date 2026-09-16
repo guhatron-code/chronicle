@@ -28,8 +28,8 @@ import {
   type AgentEditFile,
 } from "./ipc";
 import { clearRunningRound, markRunningRound, runningRoundFor } from "./round-log";
-import { indexFor, refreshNotes, roundGenerating, setRoundGenerating } from "./notes-store";
-import { endNewestRoundPlan, roundPlanOutcome } from "./notes-model";
+import { indexFor, refreshNotes, roundGenerating, roundNotesFor, setRoundGenerating } from "./notes-store";
+import { endNewestRoundCard, roundPlanOutcome } from "./notes-model";
 import { announce } from "./journal";
 import { toastAction, toastError } from "@/overlays/toasts";
 
@@ -101,6 +101,11 @@ export type AgentEntry =
       kind: "round";
       n: number;
       total: number;
+      /** the card is in the thread but its message has not been sent yet: the
+       *  pane is mid-turn, or the session is still starting. A queued card is
+       *  invisible to the turn-end reducer — the turn it would otherwise
+       *  capture is somebody else's */
+      queued?: boolean;
       /** set when the turn carrying the round ended — done/failed derive from
        *  the NOTES' statuses plus this stop reason, never the agent's claim */
       ended?: boolean;
@@ -110,6 +115,9 @@ export type AgentEntry =
       kind: "round-plan";
       n: number;
       total: number;
+      /** waiting for the pane, exactly as on a `round` card: the prompt has not
+       *  been sent yet, so no turn ending belongs to this card */
+      queued?: boolean;
       /** set when the planning turn ended — the outcome comes from the record
        *  `round_plan_settle` read back, never from what the agent said */
       ended?: boolean;
@@ -430,11 +438,16 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     // A turn carries a plan or a run, never both. The plan's record is settled
     // HERE and nowhere else: `round_plan_settle` mid-turn would mark the round
     // failed and put every note back in the queue under the agent's feet.
+    //
+    // A QUEUED card is skipped in both loops below. Its card is in the thread
+    // but its message is not sent yet — it is waiting for this very turn to
+    // end — so the turn that is ending belongs to whatever the user was doing,
+    // never to it.
     let settledPlan = false;
     if (live) {
       for (let i = s.entries.length - 1; i >= 0; i--) {
         const e = s.entries[i];
-        if (e.kind === "round-plan" && !e.ended) {
+        if (e.kind === "round-plan" && !e.ended && !e.queued) {
           e.ended = true;
           settledPlan = true;
           void settleRoundPlan(dir, e, stopReason);
@@ -446,7 +459,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     if (live && !settledPlan) {
       for (let i = s.entries.length - 1; i >= 0; i--) {
         const e = s.entries[i];
-        if (e.kind === "round" && !e.ended) {
+        if (e.kind === "round" && !e.ended && !e.queued) {
           e.ended = true;
           e.stopReason = stopReason;
           // the Notes card has no session to watch for this route — the thread IS
@@ -848,10 +861,16 @@ async function settleRoundPlan(
  * A run stopping is NOT a round finishing — that is the record's news, and
  * `refreshNotes` announces it the moment the last note is ticked, on both
  * routes (notes-store.ts). So all that is left here is the other ending: the
- * run is over and the record still says `ready`, i.e. the round stopped with
- * work left in it. The notes are read back first because a note ticked in the
- * last second is still a tick — and that same read is what fires the finished
- * announcement, which is why this one only speaks when it did not.
+ * run is over and work is genuinely left in the round. The notes are read back
+ * first because a note ticked in the last second is still a tick.
+ *
+ * The NOTES decide that, not the record: `refreshNotes` does not settle a
+ * record (Rust's settle_done runs in the app's poll), so a round whose last
+ * note has just been ticked still reads `ready` here for a moment. Reading the
+ * record alone announced "ended early" for a round that had in fact just
+ * finished, with "finished" arriving right behind it. So: if every note in the
+ * round is done, say nothing and let the record path announce the finish on
+ * the next poll.
  *
  * Shared with the terminal route (round-run.ts), so the two routes can never
  * end a round differently.
@@ -860,9 +879,10 @@ export function settleRoundRun(dir: string, n: number): void {
   // nothing is running this round any more, whatever the notes say
   if (runningRoundFor(dir)?.n === n) clearRunningRound(dir);
   void refreshNotes(dir).then(() => {
-    if (indexFor(dir).rounds.some((r) => r.n === n && r.state === "ready")) {
-      announce(dir, "round-ended", `Round ${n} ended early`, "Chronicle");
-    }
+    // a record that already says done/failed has spoken (or is about to)
+    if (!indexFor(dir).rounds.some((r) => r.n === n && r.state === "ready")) return;
+    if (!roundNotesFor(dir, n).some((x) => x.status !== "done")) return;
+    announce(dir, "round-ended", `Round ${n} ended early`, "Chronicle");
   });
 }
 
@@ -885,7 +905,7 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
      running round needs to clear its mark and announce itself. */
   let over = false;
   const endCard = () => {
-    if (endNewestRoundPlan(agentSessionFor(dir).entries, "cancelled")) notify();
+    if (endNewestRoundCard(agentSessionFor(dir).entries, "round-plan", "cancelled")) notify();
   };
   const giveUp = () => {
     if (over) return;
@@ -907,8 +927,19 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
     }
     return;
   }
-  // start (or restart) the session, then land the card and send once ready —
-  // startAgentSession resets the thread, so the card goes in AFTER it
+  // Everything else waits for the session, and only a session that is NOT
+  // there gets started. A pane that is `ready` with a live turn is the case
+  // that made this rule: restarting it blanked the thread and, the backend
+  // being single-flight, never emitted `session_state` at all — the pane sat
+  // on "installing" forever. Queuing behind the turn is the intended
+  // behaviour, so the card lands straight away, marked `queued` (it says
+  // "waiting for the pane", and no turn ending is its own) and the subscriber
+  // sends the moment the turn drops.
+  const needsStart = s.phase !== "ready" && s.phase !== "installing" && s.phase !== "starting";
+  const land = () => {
+    agentSessionFor(dir).entries.push({ kind: "round-plan", n, total, queued: true });
+    notify();
+  };
   const un = subscribeAgent(() => {
     const cur = agentSessionFor(dir);
     if (cur.phase === "ready" && !cur.turnActive) {
@@ -916,26 +947,40 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
       // the card's Stop can land while the session is still starting — a plan
       // nobody is waiting for any more must not be sent the moment it is, and
       // its card must not sit open waiting for a turn that will never come
-      if (!roundGenerating(dir)) { over = true; endCard(); return; }
+      if (over || !roundGenerating(dir)) { over = true; endCard(); return; }
+      unqueueCard(dir, "round-plan");
       void sendAgentMessage(dir, prompt).catch(() => giveUp());
     }
     if (cur.phase === "error" || cur.phase === "needs-login") { un(); giveUp(); }
   });
-  if (s.phase !== "installing" && s.phase !== "starting") {
-    try {
-      await startAgentSession(dir);
-    } catch (e) {
-      un();
-      giveUp();
-      throw e;
-    }
+  if (!needsStart) { land(); return; }
+  // startAgentSession resets the thread, so the card goes in AFTER it
+  try {
+    await startAgentSession(dir);
+  } catch (e) {
+    un();
+    giveUp();
+    throw e;
   }
   // the subscriber may already have given up while the session was starting —
   // landing a card for an abandoned plan would strand it open
   if (over) return;
-  const cur = agentSessionFor(dir);
-  cur.entries.push({ kind: "round-plan", n, total });
-  notify();
+  land();
+}
+
+/** The card's message is going out now, so it is no longer waiting for the
+ *  pane: the turn about to start IS its own, and the turn-end reducer must be
+ *  able to see it again. */
+function unqueueCard(dir: string, kind: "round" | "round-plan"): void {
+  const entries = agentSessionFor(dir).entries;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i];
+    if (e.kind === kind && !e.ended && e.queued) {
+      e.queued = false;
+      notify();
+      return;
+    }
+  }
 }
 
 /** Run a round in the pane: the round card enters the thread, the round
@@ -944,42 +989,82 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
  *  and nobody else's — never the agent's prose, and never the turn ending. */
 export async function startRoundInPane(dir: string, n: number, total: number): Promise<void> {
   const s = agentSessionFor(dir);
+  s.viewing = null;
+  // This route has no log and no session of its own — the mark IS the record
+  // that the round is running here, and every exit below clears it. It goes up
+  // BEFORE the first await: the mark is what turns both Run buttons off, and
+  // marking after the await left them live for the whole round trip, so two
+  // clicks ran the round twice (round-run.ts marks the terminal route early
+  // for exactly the same reason).
+  markRunningRound(dir, { n, route: "pane" });
+
+  /* Giving up has to undo both halves. A card left open is the dangerous one:
+     the turn-end reducer settles the newest un-ended `round`, so a run that
+     never got sent would capture the NEXT turn's end and announce that some
+     other round "ended early". The mark is only ours to clear while it still
+     names this round on this route — a round started since must survive. */
+  let over = false;
+  const giveUp = () => {
+    if (over) return;
+    over = true;
+    if (endNewestRoundCard(agentSessionFor(dir).entries, "round")) notify();
+    const m = runningRoundFor(dir);
+    if (m?.n === n && m.route === "pane") clearRunningRound(dir);
+  };
+
   // Rust builds the run message for BOTH routes (round_run_message_cmd), so a
   // round asks for the same work — including the Chronicle-Phase marker commit
   // — whether it runs here or in a terminal. Rebuilding it here is how the
   // pane route quietly lost the marker instruction.
-  const message = await roundRunMessage(dir, n);
-  s.viewing = null;
-  // this route has no log and no session of its own — the mark IS the record
-  // that the round is running here, and every exit below clears it
-  markRunningRound(dir, { n, route: "pane" });
+  let message: string;
+  try {
+    message = await roundRunMessage(dir, n);
+  } catch (e) {
+    giveUp();
+    throw e;
+  }
+
   if (s.phase === "ready" && !s.turnActive) {
     s.entries.push({ kind: "round", n, total });
     notify();
     try {
       await sendAgentMessage(dir, message);
     } catch (e) {
-      clearRunningRound(dir);
+      giveUp();
       throw e;
     }
     return;
   }
-  // start (or restart) the session, then land the card and send once ready —
-  // startAgentSession resets the thread, so the card goes in AFTER it
+  // as in startRoundPlanInPane: only a session that is not there is started —
+  // a `ready` pane mid-turn queues behind the turn instead of being restarted
+  const needsStart = s.phase !== "ready" && s.phase !== "installing" && s.phase !== "starting";
+  const land = () => {
+    agentSessionFor(dir).entries.push({ kind: "round", n, total, queued: true });
+    notify();
+  };
   const un = subscribeAgent(() => {
     const cur = agentSessionFor(dir);
     if (cur.phase === "ready" && !cur.turnActive) {
       un();
-      void sendAgentMessage(dir, message).catch(() => clearRunningRound(dir));
+      if (over) return;
+      unqueueCard(dir, "round");
+      void sendAgentMessage(dir, message).catch(() => giveUp());
     }
-    if (cur.phase === "error" || cur.phase === "needs-login") { un(); clearRunningRound(dir); }
+    if (cur.phase === "error" || cur.phase === "needs-login") { un(); giveUp(); }
   });
-  if (s.phase !== "installing" && s.phase !== "starting") {
+  if (!needsStart) { land(); return; }
+  // startAgentSession resets the thread, so the card goes in AFTER it
+  try {
     await startAgentSession(dir);
+  } catch (e) {
+    un();
+    giveUp();
+    throw e;
   }
-  const cur = agentSessionFor(dir);
-  cur.entries.push({ kind: "round", n, total });
-  notify();
+  // the subscriber may have given up while the session was starting — landing
+  // a card for a run that will never be sent would strand it open
+  if (over) return;
+  land();
 }
 
 export function agentLive(dir: string): boolean {

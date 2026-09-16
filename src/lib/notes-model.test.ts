@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NoteEntry } from "./ipc";
 import {
-  backlinksFor, buildTree, endNewestRoundPlan, joinFrontMatter, nestTree, newNotePath,
+  backlinksFor, buildTree, endNewestRoundCard, joinFrontMatter, nestTree, newNotePath,
   outlinksFor, pillFor, roundPhaseOf, roundPlanOutcome, roundSubline, sanitizeTitle,
   setStatusInFront, slugFor,
   roundsJustFinished, splitFrontMatter, statusInFront, tagCounts, terminalRoundCommand,
@@ -245,11 +245,21 @@ describe("how a planning turn settles", () => {
       { kind: "assistant" },
       { kind: "round-plan" },
     ];
-    expect(endNewestRoundPlan(entries, "cancelled")).toBe(true);
+    expect(endNewestRoundCard(entries, "round-plan", "cancelled")).toBe(true);
     expect(entries[2]).toEqual({ kind: "round-plan", ended: true, outcome: "cancelled" });
     expect(entries[0]).toEqual({ kind: "round-plan", ended: true, outcome: "ready" });
     // nothing left open — a second pass must not touch the settled cards
-    expect(endNewestRoundPlan(entries, "cancelled")).toBe(false);
-    expect(endNewestRoundPlan([{ kind: "round" }], "cancelled")).toBe(false);
+    expect(endNewestRoundCard(entries, "round-plan", "cancelled")).toBe(false);
+    expect(endNewestRoundCard([{ kind: "round" }], "round-plan", "cancelled")).toBe(false);
+  });
+
+  it("ends a run card the same way, and never the other kind's", () => {
+    // a run that never got sent must not be left open to capture the next
+    // turn's end — and ending it must not reach past it to the plan card
+    const entries = [{ kind: "round-plan" }, { kind: "round" }];
+    expect(endNewestRoundCard(entries, "round")).toBe(true);
+    expect(entries[1]).toEqual({ kind: "round", ended: true }); // no outcome on a run card
+    expect(entries[0]).toEqual({ kind: "round-plan" });
+    expect(endNewestRoundCard(entries, "round")).toBe(false);
   });
 });

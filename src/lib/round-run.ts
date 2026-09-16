@@ -10,10 +10,17 @@
  * routes alike. What the tab dying says is narrower and still worth saying:
  * nothing is running this round any more. That meets the pane's turn-end path
  * in `settleRoundRun`, so the two routes end a round the same way.
+ *
+ * Only ONE of the tab's two endings speaks. A pty exit is the run ending, so
+ * it settles: the record is read back and `settleRoundRun` announces if the
+ * round did not finish. Closing the tab — or closing the project, which tears
+ * every tab down on its way out — only takes the mark down, silently: a tab
+ * the user shut is not news, and a closed project must not be read back or
+ * announced into.
  */
 import { roundRunMessage } from "./ipc";
 import { terminalRoundCommand } from "./notes-model";
-import { clearRunningRound, markRunningRound, runningRoundFor } from "./round-log";
+import { clearRunningRound, markRunningRound, runningRoundFor, type RunningRound } from "./round-log";
 import { getTerm, spawnTerm, subscribeTerms } from "./term-sessions";
 import { settleRoundRun } from "./agent-session";
 
@@ -58,6 +65,19 @@ export async function startRoundInTerminal(
 }
 
 /**
+ * Is the project's running-round mark still this tab's to take down?
+ *
+ * By the time a tab dies the user may have started a newer round or re-routed
+ * this one, and only a mark that still names this round and this tab is ours.
+ * A mark with no tab in it yet is the interim mark of a start still in flight,
+ * which is ours too — it is this round, and the id lands in it a moment later.
+ */
+export function ownsMark(mark: RunningRound | null, n: number, termId: number): boolean {
+  if (!mark) return false;
+  return mark.n === n && mark.route === "terminal" && (mark.termId == null || mark.termId === termId);
+}
+
+/**
  * Wait for the round's tab to end, then stop claiming the round is running.
  *
  * Two different endings arrive here. The pty exiting (`dead`) is the run
@@ -69,20 +89,12 @@ export async function startRoundInTerminal(
  *
  * Either way the check runs at most once, because the subscription is dropped
  * the first time it reports an ending.
- *
- * The mark is the guard against touching someone else's run: by the time this
- * tab dies the user may have started a newer round or re-routed this one, and
- * only a mark that still names this tab is ours. A mark with no tab in it yet
- * is the interim mark of a start still in flight, which is ours too — it is
- * this round, and the id lands in it a moment later.
  */
 function watchRoundTab(dir: string, n: number, termId: number): void {
   const ended = () => {
     const t = getTerm(termId);
     if (t && !t.dead) return false;
-    const mark = runningRoundFor(dir);
-    const ours = mark?.n === n && mark.route === "terminal" && (mark.termId == null || mark.termId === termId);
-    if (ours) {
+    if (ownsMark(runningRoundFor(dir), n, termId)) {
       if (t) settleRoundRun(dir, n); // clears the mark itself, then reads the record back
       else clearRunningRound(dir);
     }

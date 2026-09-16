@@ -282,7 +282,9 @@ function RoundCard({
         ) : (
           <span className="inline-flex items-center gap-[5px] text-xs text-state-neutral">
             <span className="size-[5px] shrink-0 rounded-full bg-state-neutral" style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }} />
-            running
+            {/* the round queues behind whatever turn the pane is already
+                taking, rather than interrupting it — the same spinner says so */}
+            {entry.queued ? "waiting for the pane" : "running"}
           </span>
         )}
         <span className="flex-1" />
@@ -394,8 +396,12 @@ function Entry({
       <div data-round-plan className="mx-3.5 my-1 flex items-center gap-2 rounded-lg border border-border-hairline bg-surface-card-raised px-3.5 py-2.5">
         <span className="text-[13px] font-semibold text-text-primary">Round {entry.n} · planning {entry.total} {entry.total === 1 ? "note" : "notes"}</span>
         <span className="flex-1" />
-        {!entry.ended ? (
-          <span className="inline-flex items-center gap-[5px] text-xs text-state-neutral"><span className="size-[5px] rounded-full bg-state-neutral" style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }} />writing the plan</span>
+        {/* the outcome arrives a beat after the turn ends — `round_plan_settle`
+            has to read the two files back off disk first. Until it lands the
+            card is still working, not failed: red here called every plan
+            "not written" for a moment, including the ones that were. */}
+        {!entry.ended || !entry.outcome ? (
+          <span className="inline-flex items-center gap-[5px] text-xs text-state-neutral"><span className="size-[5px] rounded-full bg-state-neutral" style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }} />{entry.queued ? "waiting for the pane" : entry.ended ? "checking the plan" : "writing the plan"}</span>
         ) : entry.outcome === "ready" ? (
           <span className="text-xs text-state-success">plan ready</span>
         ) : entry.outcome === "cancelled" ? (

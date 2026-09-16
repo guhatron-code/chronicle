@@ -53,8 +53,12 @@ vi.mock("./ipc", () => ({
   IMG_MIME: { png: "image/png", jpg: "image/jpeg" },
 }));
 vi.mock("@/overlays/toasts", () => ({ toastError: vi.fn(), toastSuccess: vi.fn() }));
+vi.mock("./journal", () => ({ announce: vi.fn() }));
 
 const store = await import("./notes-store");
+const { announce } = await import("./journal");
+const announced = (kind: string) =>
+  vi.mocked(announce).mock.calls.filter((c) => c[1] === kind);
 
 describe("the notes store", () => {
   beforeEach(() => {
@@ -74,6 +78,7 @@ describe("the notes store", () => {
     listeners = 0;
     store.evictNotes("/p");
     store.setRoundGenerating("/p", false);
+    vi.mocked(announce).mockClear();
   });
   afterEach(() => { vi.useRealTimers(); });
 
@@ -181,6 +186,48 @@ describe("the notes store", () => {
     expect(store.openRoundFor("/p")).toBeNull();
     expect(store.roundStateFor("/p", 4)).toBeNull();
     expect(store.roundGenerating("/p")).toBe(false);
+  });
+
+  it("a round going ready→done announces round-done once and only once across two refreshes", async () => {
+    // the record is what counts the ticked notes, and it moves exactly once —
+    // every later read of the same `done` record is history, not news
+    indexNotes = [{ path: "Tasks/A.md", title: "A", folder: "Tasks", status: "done", round: 4 }];
+    indexRounds = [{ n: 4, state: "ready", kind: "bug fixes", note_paths: ["Tasks/A.md"] }];
+    await store.refreshNotes("/p");
+    expect(announced("round-done")).toHaveLength(0);
+
+    indexRounds = [{ n: 4, state: "done", kind: "bug fixes", note_paths: ["Tasks/A.md"] }];
+    indexGeneration = 2;
+    await store.refreshNotes("/p");
+    expect(announced("round-done")).toHaveLength(1);
+    expect(announced("round-done")[0][2]).toBe("Round 4 finished");
+
+    indexGeneration = 3;
+    await store.refreshNotes("/p");
+    expect(announced("round-done")).toHaveLength(1);
+  });
+
+  it("a round already done at first load announces nothing", async () => {
+    // opening a project on work that finished long ago is not news
+    indexNotes = [{ path: "Tasks/A.md", title: "A", folder: "Tasks", status: "done", round: 4 }];
+    indexRounds = [{ n: 4, state: "done", kind: "bug fixes", note_paths: ["Tasks/A.md"] }];
+    await store.refreshNotes("/p");
+    indexGeneration = 2;
+    await store.refreshNotes("/p");
+    expect(announce).not.toHaveBeenCalled();
+  });
+
+  it("ignores a read that came back older than the one already held", async () => {
+    indexRounds = [{ n: 4, state: "ready", kind: "bug fixes", note_paths: [] }];
+    indexGeneration = 5;
+    await store.refreshNotes("/p");
+
+    // a slow read from before the round settled, landing after a newer one
+    indexRounds = [{ n: 4, state: "generating", kind: null, note_paths: [] }];
+    indexGeneration = 4;
+    await store.refreshNotes("/p");
+    expect(store.indexFor("/p").generation).toBe(5);
+    expect(store.roundStateFor("/p", 4)).toBe("ready"); // not walked backwards
   });
 
   it("resolves an attachment against the vault root, not the note's folder", async () => {

@@ -164,12 +164,19 @@ export const Sidebar = memo(function Sidebar({
   const tree = useMemo(() => nestTree(buildTree(filtered, NOTHING_COLLAPSED)), [filtered]);
   const tags = useMemo(() => tagCounts(notes), [notes]);
 
+  /* A round that has ENDED still holds the card until it is dismissed, so
+     "still running" is the wrong answer for two of the five phases — the way
+     out of those is Dismiss, and the tooltip has to say so. */
   const disabledReason = round
     ? round.phase === "generating"
       ? "A round is being planned"
       : round.phase === "plan-ready"
         ? `Round ${round.n} hasn't been run yet`
-        : `Round ${round.n} is still running`
+        : round.phase === "finished"
+          ? `Round ${round.n} is finished · dismiss it to start another`
+          : round.phase === "failed"
+            ? `Round ${round.n} didn't finish · dismiss it to start another`
+            : `Round ${round.n} is still running`
     : queued === 0
       ? "Nothing is queued yet"
       : null;

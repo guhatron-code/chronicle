@@ -142,7 +142,7 @@ export function newNotePath(folder: string, title: string, taken: Set<string>): 
   for (let n = 2; ; n++) if (!taken.has(at(`${base} ${n}`))) return at(`${base} ${n}`);
 }
 
-/* ---------- the round log panel (pure parts) ---------- */
+/* ---------- rounds (pure parts) ---------- */
 
 export type RoundPhase = "generating" | "plan-ready" | "executing" | "finished" | "failed";
 
@@ -222,26 +222,29 @@ export function roundPlanOutcome(
  */
 /* `outcome` is `unknown` because other cards in that union carry an `outcome`
    of their own shape (a permission's answer); this rule only ever writes to a
-   card whose kind is "round-plan". */
+   card whose kind it was handed. */
 export interface PlanCardish { kind: string; ended?: boolean; outcome?: unknown }
 
 /**
- * End the newest un-ended `round-plan` card, and say whether there was one.
+ * End the newest un-ended card of one round kind, and say whether there was
+ * one. Both round cards are given up the same way: `round-plan` when the plan
+ * is abandoned, `round` when the run never got sent.
  *
  * A card left open is not cosmetic: the turn-end reducer settles the newest
- * un-ended one, so a plan that never got a turn would capture the NEXT turn's
- * end — settling a record it has nothing to do with and stealing the branch a
- * running round needs.
+ * un-ended one of its kind, so a card that never got a turn would capture the
+ * NEXT turn's end — settling a record it has nothing to do with and stealing
+ * the branch a running round needs.
  */
-export function endNewestRoundPlan(
+export function endNewestRoundCard(
   entries: PlanCardish[],
-  outcome: "ready" | "failed" | "cancelled",
+  kind: "round" | "round-plan",
+  outcome?: "ready" | "failed" | "cancelled",
 ): boolean {
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
-    if (e.kind === "round-plan" && !e.ended) {
+    if (e.kind === kind && !e.ended) {
       e.ended = true;
-      e.outcome = outcome;
+      if (outcome !== undefined) e.outcome = outcome;
       return true;
     }
   }
@@ -266,7 +269,14 @@ export function roundSubline(
 /** What the terminal route types into the tab: the run message as ONE
  *  single-quoted argument, so the backticks, double quotes and newlines the
  *  prompt is full of reach the agent instead of the shell. The trailing
- *  newline is the submit — `autoType` sends exactly what it is given. */
+ *  newline is the submit — `autoType` sends exactly what it is given.
+ *
+ *  The line MUST stay well under 1 KB: a tty in canonical mode drops
+ *  everything past MAX_CANON (1024 bytes on Darwin) in a line with no newline
+ *  in it, and the newline here only comes at the very end. Rust builds the
+ *  message from a fixed sentence plus the round number — no note text, no user
+ *  content — and today it types about 714 bytes. Anything added to
+ *  `round_run_message` has to be counted against that headroom. */
 export function terminalRoundCommand(bin: "claude" | "codex", message: string): string {
   return `${bin} '${message.replace(/'/g, "'\\''")}'\n`;
 }

@@ -64,7 +64,13 @@ export async function refreshNotes(dir: string): Promise<void> {
     // replacement. Two refreshes in flight at once (a disk event and a settle,
     // say) would otherwise both hold the pre-transition record and announce the
     // same finish twice
-    const before = indexFor(dir).rounds;
+    const held = indexFor(dir);
+    // …and of those two, the OLDER read must not land second. Every index
+    // carries the vault's generation, so a read that came back behind what the
+    // store already holds is stale by definition: letting it overwrite would
+    // walk a settled round back to `ready` and announce its finish twice
+    if (next.generation < held.generation) return;
+    const before = held.rounds;
     indexes.set(dir, next);
     for (const n of roundsJustFinished(before, next.rounds)) finishedRound(dir, n);
     if (roundsJustReady(before, next.rounds).length > 0) {
@@ -366,12 +372,8 @@ export function openRoundFor(dir: string): OpenRound | null {
   return { n, notes: mine, done: mine.filter((x) => x.status === "done").length, total: mine.length };
 }
 
-/** What this note's round means for its editor: the pill says "locked by the
- *  round" for both, and `notes_write` refuses for both. Derived from the record
- *  on disk, so reopening the app mid-round says so instead of letting the user
- *  type into a note whose every save fails with a raw `locked`. */
-/** The round whose plan is being written, if any — the log panel's first phase.
- *  Read from the record, so a restart mid-generation still finds it. */
+/** The round whose plan is being written, if any — the round card's first
+ *  phase. Read from the record, so a restart mid-generation still finds it. */
 export function generatingRoundFor(dir: string): number | null {
   return indexFor(dir).rounds.find((r) => r.state === "generating")?.n ?? null;
 }
@@ -406,12 +408,6 @@ export function roundKindFor(dir: string, n: number): string {
 /** The notes a round froze, in path order, and how many are done. */
 export function roundNotesFor(dir: string, n: number): NoteEntry[] {
   return indexFor(dir).notes.filter((x) => x.round === n).sort((a, b) => a.path.localeCompare(b.path));
-}
-
-/** True while any round record could still change — what arms the pane's
- *  session watch, and nothing else. No round, no listeners. */
-export function hasLiveRound(dir: string): boolean {
-  return indexFor(dir).rounds.some((r) => r.state === "generating" || r.state === "ready");
 }
 
 export function roundStateFor(dir: string, round: number | null | undefined): "generating" | "ready" | null {
