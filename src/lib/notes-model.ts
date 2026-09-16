@@ -146,6 +146,10 @@ export function newNotePath(folder: string, title: string, taken: Set<string>): 
 
 export type RoundPhase = "generating" | "plan-ready" | "executing" | "finished" | "failed";
 
+/** Where a round's own prompt is running: the ACP thread in the agent pane, or
+ *  a terminal tab the user spawned it into. */
+export type RoundRoute = "pane" | "terminal";
+
 /** Just the fields the phase model needs off `.chronicle/rounds.json`. */
 export interface RoundRecord { n: number; state: string }
 
@@ -154,9 +158,9 @@ export interface RoundRecord { n: number; state: string }
  *
  * The record cannot answer this on its own: it says `ready` from the moment
  * the plan is written until the last note is done, which covers both "written,
- * nothing has run" and "the executor is working". Only a live session tells
- * them apart — the headless `exec` session, or (for the agent-pane route,
- * which has no session and no log) this session's own record of the click.
+ * nothing has run" and "the executor is working". Only the one running-round
+ * mark tells them apart — this session's own record of where the round was
+ * sent (see round-log.ts).
  *
  * A round that has ENDED still answers, until `dismissed` catches up with its
  * number: the run you have just watched is the one you most want to read back,
@@ -165,8 +169,7 @@ export interface RoundRecord { n: number; state: string }
  */
 export function roundPhaseOf(
   rounds: RoundRecord[],
-  execRunning: boolean,
-  agentRound: number | null,
+  running: { n: number } | null,
   dismissed = 0,
 ): { phase: RoundPhase; n: number } | null {
   const newest = (rs: RoundRecord[]) => rs.reduce((m, r) => Math.max(m, r.n), 0);
@@ -175,7 +178,7 @@ export function roundPhaseOf(
   const ready = rounds.filter((r) => r.state === "ready");
   if (ready.length > 0) {
     const n = newest(ready);
-    return { phase: execRunning || agentRound === n ? "executing" : "plan-ready", n };
+    return { phase: running?.n === n ? "executing" : "plan-ready", n };
   }
   const over = rounds.filter((r) => r.state === "done" || r.state === "failed");
   if (over.length === 0) return null;
@@ -209,7 +212,7 @@ export function stickToBottom(scrollTop: number, scrollHeight: number, clientHei
 /** The round card's second line, in each phase. */
 export function roundSubline(
   phase: RoundPhase,
-  route: "headless" | "agent" | null,
+  route: RoundRoute | null,
   done: number,
   total: number,
 ): string {
@@ -218,7 +221,7 @@ export function roundSubline(
   if (phase === "plan-ready") return `${notes} · plan ready · not started`;
   if (phase === "finished") return `${notes} · done · ${done} of ${total}`;
   if (phase === "failed") return `${notes} · didn't finish · ${done} of ${total} done`;
-  return `${notes} · executing · ${done} of ${total} done · ${route === "agent" ? "in the agent pane" : "headless"}`;
+  return `${notes} · executing · ${done} of ${total} done · ${route === "terminal" ? "in a terminal" : "in the agent pane"}`;
 }
 
 /** The one line at the top of the panel. Executing counts what has actually

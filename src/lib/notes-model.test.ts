@@ -184,8 +184,8 @@ describe("the round log panel", () => {
   it("says the same thing on the card, with the route", () => {
     expect(roundSubline("generating", null, 0, 2)).toBe("2 notes · writing the plan…");
     expect(roundSubline("plan-ready", null, 0, 2)).toBe("2 notes · plan ready · not started");
-    expect(roundSubline("executing", "headless", 1, 2)).toBe("2 notes · executing · 1 of 2 done · headless");
-    expect(roundSubline("executing", "agent", 0, 1)).toBe("1 note · executing · 0 of 1 done · in the agent pane");
+    expect(roundSubline("executing", "pane", 1, 2)).toBe("2 notes · executing · 1 of 2 done · in the agent pane");
+    expect(roundSubline("executing", "terminal", 0, 1)).toBe("1 note · executing · 0 of 1 done · in a terminal");
     expect(roundSubline("finished", null, 2, 2)).toBe("2 notes · done · 2 of 2");
     expect(roundSubline("failed", null, 0, 2)).toBe("2 notes · didn't finish · 0 of 2 done");
   });
@@ -196,41 +196,41 @@ describe("which phase a round is in", () => {
   const ready = { n: 8, state: "ready" };
 
   it("has no phase without a record at all", () => {
-    expect(roundPhaseOf([], false, null)).toBeNull();
+    expect(roundPhaseOf([], null)).toBeNull();
   });
 
   it("keeps the last round readable until it is dismissed", () => {
     // the card and its log used to vanish the instant the final note ticked,
     // taking the run you had just watched with them
     const over = [{ n: 1, state: "done" }, { n: 2, state: "failed" }];
-    expect(roundPhaseOf(over, false, null)).toEqual({ phase: "failed", n: 2 });
-    expect(roundPhaseOf(over, false, null, 2)).toBeNull();
-    expect(roundPhaseOf([{ n: 5, state: "done" }], false, null, 4)).toEqual({ phase: "finished", n: 5 });
+    expect(roundPhaseOf(over, null)).toEqual({ phase: "failed", n: 2 });
+    expect(roundPhaseOf(over, null, 2)).toBeNull();
+    expect(roundPhaseOf([{ n: 5, state: "done" }], null, 4)).toEqual({ phase: "finished", n: 5 });
     // a newer round always outranks a dismissed one
-    expect(roundPhaseOf([{ n: 5, state: "done" }, { n: 6, state: "ready" }], false, null, 5))
+    expect(roundPhaseOf([{ n: 5, state: "done" }, { n: 6, state: "ready" }], null, 5))
       .toEqual({ phase: "plan-ready", n: 6 });
   });
 
   it("is generating while the plan is being written", () => {
-    expect(roundPhaseOf([{ n: 1, state: "done" }, gen], false, null)).toEqual({ phase: "generating", n: 3 });
+    expect(roundPhaseOf([{ n: 1, state: "done" }, gen], null)).toEqual({ phase: "generating", n: 3 });
     // a plan being written wins over an older ready round
-    expect(roundPhaseOf([ready, gen], true, null)).toEqual({ phase: "generating", n: 3 });
+    expect(roundPhaseOf([ready, gen], { n: 8 })).toEqual({ phase: "generating", n: 3 });
   });
 
-  it("separates a written plan from a running one by the session, not the record", () => {
+  it("separates a written plan from a running one by the mark, not the record", () => {
     // the bug: `ready` with a 22 KB plan on disk and nothing ever run read as
     // "executing · 0 of 2 done" and pointed at an executor log that never existed
-    expect(roundPhaseOf([ready], false, null)).toEqual({ phase: "plan-ready", n: 8 });
-    expect(roundPhaseOf([ready], true, null)).toEqual({ phase: "executing", n: 8 });
+    expect(roundPhaseOf([ready], null)).toEqual({ phase: "plan-ready", n: 8 });
+    expect(roundPhaseOf([ready], { n: 8 })).toEqual({ phase: "executing", n: 8 });
   });
 
-  it("counts the agent-pane route as executing, for that round only", () => {
-    expect(roundPhaseOf([ready], false, 8)).toEqual({ phase: "executing", n: 8 });
-    expect(roundPhaseOf([ready], false, 7)).toEqual({ phase: "plan-ready", n: 8 });
+  it("counts the running mark as executing, for the round it names", () => {
+    expect(roundPhaseOf([ready], { n: 8 })).toEqual({ phase: "executing", n: 8 });
+    expect(roundPhaseOf([ready], { n: 7 })).toEqual({ phase: "plan-ready", n: 8 });
   });
 
   it("takes the newest round of its kind", () => {
-    expect(roundPhaseOf([{ n: 2, state: "ready" }, { n: 9, state: "ready" }], false, null))
+    expect(roundPhaseOf([{ n: 2, state: "ready" }, { n: 9, state: "ready" }], null))
       .toEqual({ phase: "plan-ready", n: 9 });
   });
 });

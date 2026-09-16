@@ -7,7 +7,7 @@
  */
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { BtnSecondary, MonoMeta, Spinner } from "@/components/chrome/atoms";
-import { fixesCancel, fixesGenerate, fixesStatus } from "@/lib/ipc";
+import { fixesCancel, fixesGenerate, fixesStatus, type SessionKind } from "@/lib/ipc";
 import { useSessionStatus } from "@/lib/session-status";
 import { initProgress, logLinesFrom } from "@/lib/roadmap-data";
 import { openRoundFor, refreshNotes, setRoundGenerating } from "@/lib/notes-store";
@@ -44,7 +44,9 @@ export const RoundFlow = forwardRef<RoundFlowHandle, {
     },
   }), []);
 
-  const st = useSessionStatus(dir, "fixes", state.kind === "generating", fixesStatus);
+  // REMOVED in plan 2 Task 1: "fixes" is no longer a real SessionKind (a stub
+  // for typecheck until Task 3 rewires this component to round_plan_settle).
+  const st = useSessionStatus(dir, "fixes" as SessionKind, state.kind === "generating", fixesStatus);
   useEffect(() => {
     if (state.kind !== "generating" || !st) return;
     const tail = st.log_tail ?? "";

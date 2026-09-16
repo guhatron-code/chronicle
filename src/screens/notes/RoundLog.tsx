@@ -22,8 +22,7 @@
  */
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LOG_MAX_LINES, roundLogHeader, stickToBottom, tailLines, type RoundPhase } from "@/lib/notes-model";
-import { armRoundLog, roundLogFor, subscribeRoundLog } from "@/lib/round-log";
-import { execLogPath, fixesLogPath } from "@/lib/ipc";
+import { armRoundLog, execLogPath, fixesLogPath, roundLogFor, subscribeRoundLog } from "@/lib/ipc";
 import { setActiveTermFor, spawnTerm, termsFor } from "@/lib/term-sessions";
 import { toastError } from "@/overlays/toasts";
 import { XGlyph } from "@/components/chrome/icons";

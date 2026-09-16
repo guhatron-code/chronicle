@@ -22,11 +22,11 @@ import { BtnPrimary } from "@/components/chrome/atoms";
 import { SplitHandle } from "@/components/chrome/SplitHandle";
 import { notesRevealVault, type NoteEntry } from "@/lib/ipc";
 import {
-  createNote, editBody, flushSave, hasLiveRound, indexFor, noteEntry, openFor, openNote,
+  createNote, editBody, flushSave, indexFor, noteEntry, openFor, openNote,
   queuedCountFor, roundKindFor, roundNotesFor, roundPhase, roundRoute, setNotesOnScreen,
   subscribeNotes, takePendingOpenNote,
 } from "@/lib/notes-store";
-import { armRoundWatch, subscribeRoundSession } from "@/lib/round-log";
+import { subscribeRoundSession } from "@/lib/round-log";
 import type { RoundCardData } from "./RoundCard";
 import { toastError } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
@@ -126,18 +126,8 @@ export function NotesPane({
      Sidebar's `roundOpen` prop stays referentially stable while the user types,
      and only actually changes when the index itself does. */
   /* The one answer to "what is this round doing?" — the record cannot tell a
-     written plan from a running one, so the live session decides. The card and
-     the log panel both read this, so they can never disagree again. */
-  const live = hasLiveRound(dir);
-  // NOT gated on onScreen: an overlay hides the pane, and a watch that dropped
-  // what it knew would demote a running round to "plan ready" — offering to
-  // start a second executor. Two push listeners, no polling; the pane unmounts
-  // when another pane takes over, and closing the project evicts everything.
-  useEffect(() => {
-    armRoundWatch(dir, live);
-    return () => armRoundWatch(dir, false);
-  }, [dir, live]);
-
+     written plan from a running one, so the running-round mark decides. The
+     card and the log panel both read this, so they can never disagree again. */
   const ph = roundPhase(dir);
   const phase = ph?.phase ?? null;
   const roundN = ph?.n ?? null;

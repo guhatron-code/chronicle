@@ -19,9 +19,9 @@ import { DocGlyph } from "@/components/chrome/icons";
 import {
   copyText, fixesCancel, readFileText, roundExecCancel, roundExecute, type NoteEntry,
 } from "@/lib/ipc";
-import { clearAgentRound, dismissRound, markAgentRound } from "@/lib/round-log";
+import { clearRunningRound, dismissRound, markRunningRound } from "@/lib/round-log";
 import { refreshNotes, setRoundGenerating } from "@/lib/notes-store";
-import { roundSubline, type RoundPhase } from "@/lib/notes-model";
+import { roundSubline, type RoundPhase, type RoundRoute } from "@/lib/notes-model";
 import { toastError, toastSuccess } from "@/overlays/toasts";
 import { StatusChip } from "./StatusChip";
 import { cn } from "@/lib/utils";
@@ -35,7 +35,7 @@ export interface RoundCardData {
   kind: string;
   notes: NoteEntry[];
   done: number;
-  route: "headless" | "agent" | null;
+  route: RoundRoute | null;
 }
 
 /** A note's row label. Before anything runs, "working" would be a lie; after
@@ -76,7 +76,7 @@ export const RoundCard = memo(function RoundCard({
 
   const runInPane = () => {
     // the ACP route writes no log of its own, so the card has to remember it
-    markAgentRound(dir, n);
+    markRunningRound(dir, { n, route: "pane" });
     onRunInPane?.(n, total);
   };
 
@@ -90,7 +90,7 @@ export const RoundCard = memo(function RoundCard({
   /* The ACP route has no session to cancel — the thread is the round. All the
      card can do is stop claiming it is running, which is what the user needs
      when the turn died without the pane hearing about it. */
-  const forgetAgentRun = () => clearAgentRound(dir);
+  const forgetAgentRun = () => clearRunningRound(dir);
 
   const cancel = () => {
     setBusy(true);
@@ -156,13 +156,13 @@ export const RoundCard = memo(function RoundCard({
         </div>
       )}
 
-      {(phase === "generating" || (phase === "executing" && route === "headless")) && (
+      {(phase === "generating" || (phase === "executing" && route === "terminal")) && (
         <div className="mt-2.5 flex gap-1.5">
           <button type="button" disabled={busy} onClick={cancel} className={BTN}>Cancel</button>
         </div>
       )}
 
-      {phase === "executing" && route === "agent" && (
+      {phase === "executing" && route === "pane" && (
         <div className="mt-2.5 flex gap-1.5">
           <button type="button" onClick={forgetAgentRun} className={BTN}>Not running anymore</button>
         </div>

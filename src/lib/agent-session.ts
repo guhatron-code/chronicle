@@ -23,7 +23,7 @@ import {
   type AcpUpdate,
   type AgentEditFile,
 } from "./ipc";
-import { clearAgentRound } from "./round-log";
+import { clearRunningRound } from "./round-log";
 
 export type AgentPhase =
   | "none" // never started (or explicitly reset)
@@ -358,13 +358,13 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       s.errorMessage = str(params.message) || "The agent bridge stopped.";
       s.turnActive = false;
       settleStreaming(s);
-      clearAgentRound(dir); // a dead bridge is not running anyone's round
+      clearRunningRound(dir); // a dead bridge is not running anyone's round
     } else if (state === "ended") {
       // needs-login/error keep their more specific face over the shutdown event
       if (s.phase !== "needs-login" && s.phase !== "error") s.phase = "ended";
       s.turnActive = false;
       settleStreaming(s);
-      clearAgentRound(dir);
+      clearRunningRound(dir);
     }
     notify();
     return;
@@ -410,7 +410,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
         // the Notes card has no session to watch for this route — the thread IS
         // the round — so the turn ending is the only thing that can tell it the
         // round is no longer running, however it ended
-        clearAgentRound(dir);
+        clearRunningRound(dir);
         break;
       }
     }
@@ -576,7 +576,7 @@ export async function startAgentSession(dir: string): Promise<void> {
   } catch (e) {
     s.phase = "error";
     s.errorMessage = String(e);
-    clearAgentRound(dir); // a session that failed to start is not running anyone's round
+    clearRunningRound(dir); // a session that failed to start is not running anyone's round
     notify();
     throw e;
   }
@@ -775,7 +775,7 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
     try {
       await sendAgentMessage(dir, message);
     } catch (e) {
-      clearAgentRound(dir);
+      clearRunningRound(dir);
       throw e;
     }
     return;
@@ -786,9 +786,9 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
     const cur = agentSessionFor(dir);
     if (cur.phase === "ready" && !cur.turnActive) {
       un();
-      void sendAgentMessage(dir, message).catch(() => clearAgentRound(dir));
+      void sendAgentMessage(dir, message).catch(() => clearRunningRound(dir));
     }
-    if (cur.phase === "error" || cur.phase === "needs-login") { un(); clearAgentRound(dir); }
+    if (cur.phase === "error" || cur.phase === "needs-login") { un(); clearRunningRound(dir); }
   });
   if (s.phase !== "installing" && s.phase !== "starting") {
     await startAgentSession(dir);

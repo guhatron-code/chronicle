@@ -44,7 +44,7 @@ import { setActiveTermFor, spawnTerm, termsFor } from "@/lib/term-sessions";
 import { useSessionStatus } from "@/lib/session-status";
 import { AWAY_THRESHOLD_MS, announce, lastSeen, markSeen } from "@/lib/journal";
 import { openFileInRepo } from "@/screens/repo/RepoPane";
-import { fixesCancel, fixesLogPath, fixesStatus, initLogPath } from "@/lib/ipc";
+import { fixesCancel, fixesLogPath, fixesStatus, initLogPath, type SessionKind } from "@/lib/ipc";
 import { indexFor, refreshNotes, roundGenerating, subscribeNotesIndex } from "@/lib/notes-store";
 import { setInitRunning } from "@/lib/run-flags";
 import { toastError, toastSuccess, toastRemoteOutcome } from "@/overlays/toasts";
@@ -282,7 +282,9 @@ export function RoadmapPane({
     if (live.length === 0) return null;
     return live.reduce((m, x) => Math.max(m, x.round ?? 0), 0);
   })();
-  const execSt = useSessionStatus(dir, "exec", execRoundN != null, roundExecStatus);
+  // REMOVED in plan 2 Task 1: "exec" is no longer a real SessionKind (a stub
+  // for typecheck until Task 5 rewires this pane's session cards).
+  const execSt = useSessionStatus(dir, "exec" as SessionKind, execRoundN != null, roundExecStatus);
   const sawExecLive = useRef(false);
   useEffect(() => {
     if (execRoundN == null) { setExecRun(null); sawExecLive.current = false; return; }
@@ -323,7 +325,9 @@ export function RoadmapPane({
 
   /* a round's plan is being written → mirror its session on the roadmap */
   const generating = roundGenerating(dir);
-  const fixesSt = useSessionStatus(dir, "fixes", generating, fixesStatus);
+  // REMOVED in plan 2 Task 1: "fixes" is no longer a real SessionKind (a stub
+  // for typecheck until Task 5 rewires this pane's session cards).
+  const fixesSt = useSessionStatus(dir, "fixes" as SessionKind, generating, fixesStatus);
   const fixesSettled = useRef(false);
   useEffect(() => {
     if (!generating) { setFixesRun(null); fixesSettled.current = false; return; }

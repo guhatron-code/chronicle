@@ -128,7 +128,7 @@ export interface InitStatusData {
   code?: number | null;
   log_tail?: string;
 }
-export type SessionKind = "init" | "fixes" | "exec";
+export type SessionKind = "init";
 /** session-status event (main.rs watch_run): one per CHANGE of a background session. */
 export interface SessionStatusEvent extends InitStatusData {
   dir: string;
@@ -313,19 +313,21 @@ export const agentAttach = (dir: string, name: string, b64: string) =>
 /** Attach by absolute path — the OS-drag route, where we get a path, not bytes. */
 export const agentAttachPath = (dir: string, path: string) =>
   invoke<string>("agent_attach_path", { dir, path });
-/** "Start a round": freeze the queued notes into a round; returns the round number. */
-export const fixesGenerate = (dir: string, agent: string | null) =>
-  invoke<number>("fixes_generate", { dir, agent });
-export const fixesStatus = (dir: string) => invoke<InitStatusData>("fixes_status", { dir });
+/** "Start a round": freeze the queued notes into a plan; returns the plan's
+ *  round number, its note count, and the prompt text (round_plan_begin). */
+export const roundPlanBegin = (dir: string) =>
+  invoke<{ n: number; total: number; prompt: string }>("round_plan_begin", { dir });
+/** Poll the plan-writing session to completion — `n` is null until it settles;
+ *  `state` says whether it landed `ready` or `failed`. */
+export const roundPlanSettle = (dir: string) =>
+  invoke<{ n: number | null; state: "ready" | "failed" | "none" }>("round_plan_settle", { dir });
+export const roundPlanCancel = (dir: string) => invoke<void>("round_plan_cancel", { dir });
+/** The round's prompt, ready to hand to the agent pane or a terminal — no
+ *  background session runs it; the route that sent it owns the run. */
+export const roundRunMessage = (dir: string, n: number) =>
+  invoke<string>("round_run_message_cmd", { dir, n });
 
-/* ---------- feature batch: rounds run headless · journal · search · export ---------- */
-
-/** Run a settled round's prompt in a background session (F1). */
-export const roundExecute = (dir: string, n: number, agent: string | null) =>
-  invoke<void>("round_execute", { dir, n, agent });
-export const roundExecStatus = (dir: string) => invoke<InitStatusData>("round_exec_status", { dir });
-export const roundExecCancel = (dir: string) => invoke<void>("round_exec_cancel", { dir });
-export const execLogPath = (dir: string) => invoke<string>("exec_log_path", { dir });
+/* ---------- feature batch: rounds you can watch · journal · search · export ---------- */
 
 /** What a finished round actually did — saves + files, straight from git (F5). */
 export interface RoundRetro { saves: { hash: string; subject: string }[]; save_count: number; file_count: number }
@@ -372,10 +374,6 @@ export const githubCreate = (dir: string) => invoke<string>("github_create", { d
 
 /** The roadmap state as sendable markdown (F7). */
 export const statusReport = (dir: string) => invoke<string>("status_report", { dir });
-export const fixesCancel = (dir: string) => invoke<void>("fixes_cancel", { dir });
-/** The fixes session's log file — for the View-full-log terminal tab. */
-export const fixesLogPath = (dir: string) =>
-  invoke<string>("fixes_log_path", { dir });
 
 /* ---------- PTY ---------- */
 export const ptySpawn = (dir: string, cols: number, rows: number) =>
@@ -616,3 +614,40 @@ export function windowControls() {
     setTitle: (title: string) => w.setTitle(title),
   };
 }
+
+/* ---------- TEMPORARY stubs — plan 2 Task 2 ----------
+ * The headless `fixes`/`exec` background sessions are gone (plan 2 Task 1):
+ * rounds either run in the agent pane or in a terminal, both driven by
+ * round_plan_begin/round_plan_settle/round_plan_cancel/round_run_message_cmd
+ * above. RoundCard.tsx, RoundFlow.tsx, RoundLog.tsx and RoadmapPane.tsx still
+ * call the old wrappers below; each is rewritten (or deleted) by the task
+ * named on it, which is also the task that deletes the matching stub here.
+ */
+/** REMOVED in plan 2 Task 1; stub until Task 3 rewires RoundCard/RoundFlow. */
+export const fixesGenerate = (_dir: string, _agent: string | null) =>
+  Promise.reject(new Error("removed"));
+/** REMOVED in plan 2 Task 1; stub until Task 3/4 rewire RoundFlow/RoundLog. */
+export const fixesStatus = (_dir: string) => Promise.reject(new Error("removed")) as Promise<InitStatusData>;
+/** REMOVED in plan 2 Task 1; stub until Task 3/5 rewire RoundCard/RoadmapPane. */
+export const fixesCancel = (_dir: string) => Promise.reject(new Error("removed"));
+/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
+export const fixesLogPath = (_dir: string) => Promise.reject(new Error("removed")) as Promise<string>;
+/** REMOVED in plan 2 Task 1; stub until Task 3 rewires RoundCard. */
+export const roundExecute = (_dir: string, _n: number, _agent: string | null) =>
+  Promise.reject(new Error("removed"));
+/** REMOVED in plan 2 Task 1; stub until Task 4/5 rewire RoundLog/RoadmapPane. */
+export const roundExecStatus = (_dir: string) => Promise.reject(new Error("removed")) as Promise<InitStatusData>;
+/** REMOVED in plan 2 Task 1; stub until Task 3/5 rewire RoundCard/RoadmapPane. */
+export const roundExecCancel = (_dir: string) => Promise.reject(new Error("removed"));
+/** REMOVED in plan 2 Task 1; stub until Task 4/5 rewire RoundLog/RoadmapPane. */
+export const execLogPath = (_dir: string) => Promise.reject(new Error("removed")) as Promise<string>;
+/** REMOVED in plan 2 Task 1 (SessionKind lost "fixes"/"exec"); stub until
+ *  Task 4 deletes RoundLog.tsx, its only consumer. */
+export type RoundLogKind = "fixes" | "exec";
+/** REMOVED in plan 2 Task 2 (round-log.ts dropped the log/watch store); stub
+ *  until Task 4 deletes RoundLog.tsx, the only consumer below. */
+export interface RoundLogTail { tail: string; running: boolean; seen: boolean }
+const EMPTY_ROUND_LOG: RoundLogTail = { tail: "", running: false, seen: false };
+export const subscribeRoundLog = (_cb: () => void): (() => void) => () => {};
+export const armRoundLog = (_dir: string, _kind: RoundLogKind | null): void => {};
+export const roundLogFor = (_dir: string, _kind: RoundLogKind): RoundLogTail => EMPTY_ROUND_LOG;
