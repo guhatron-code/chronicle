@@ -73,6 +73,8 @@ export type PermOutcome = { type: "selected"; optionId: string } | { type: "canc
 export type AgentEntry =
   | { kind: "user"; text: string; checkpoint?: string | null }
   | { kind: "assistant"; text: string; streaming: boolean }
+  /** the agent's own thinking (round 9) — kept, drawn collapsed, never spoken */
+  | { kind: "thought"; text: string; streaming: boolean }
   | {
       kind: "tool";
       toolCallId: string;
@@ -384,7 +386,13 @@ export function groupEntries(entries: AgentEntry[]): ThreadItem[] {
 }
 
 function settleStreaming(s: AgentSessionState) {
-  for (const e of s.entries) if (e.kind === "assistant") e.streaming = false;
+  for (const e of s.entries) if (e.kind === "assistant" || e.kind === "thought") e.streaming = false;
+}
+
+/** the thought at the tail stops streaming — whatever arrived is not a thought chunk */
+function settleThoughtTail(s: AgentSessionState) {
+  const last = s.entries[s.entries.length - 1];
+  if (last?.kind === "thought") last.streaming = false;
 }
 
 function routeUpdate(u: AcpUpdate) {
@@ -597,12 +605,22 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
   if (method === "session/update") {
     const update = (params.update ?? {}) as Raw;
     const kind = str(update.sessionUpdate);
+    // a thought streams only while thought chunks keep coming: anything else ends it
+    if (kind !== "agent_thought_chunk") settleThoughtTail(s);
     if (kind === "agent_message_chunk") {
       const content = (update.content ?? {}) as Raw;
       if (content.type === "text") {
         const last = s.entries[s.entries.length - 1];
         if (last?.kind === "assistant" && last.streaming) last.text += str(content.text);
         else s.entries.push({ kind: "assistant", text: str(content.text), streaming: true });
+      }
+    } else if (kind === "agent_thought_chunk") {
+      const content = (update.content ?? {}) as Raw;
+      if (content.type === "text") {
+        settleStreamTail(s); // a thought mid-paragraph ends the paragraph, as a tool call does
+        const last = s.entries[s.entries.length - 1];
+        if (last?.kind === "thought" && last.streaming) last.text += str(content.text);
+        else s.entries.push({ kind: "thought", text: str(content.text), streaming: true });
       }
     } else if (kind === "tool_call") {
       settleStreamTail(s);
@@ -658,7 +676,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     } else if (kind === "available_commands_update") {
       s.commands = parseCommands(update.availableCommands);
     }
-    // user_message_chunk (we already pushed the sent text) and thoughts stay unrendered
+    // user_message_chunk (we already pushed the sent text) stays unrendered
     notify();
     return;
   }

@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { Composer } from "./Composer";
 import { ToolCard } from "./ToolCard";
 import { SubagentCard } from "./SubagentCard";
+import { ThoughtCard } from "./ThoughtCard";
 import { PermissionCard } from "./PermissionCard";
 
 /** Projects we've auto-started the agent for this app session — so toggling the
@@ -415,6 +416,12 @@ function Entry({
       </div>
     );
   if (entry.kind === "assistant") return <AssistantMessage text={entry.text} streaming={entry.streaming} />;
+  if (entry.kind === "thought")
+    return (
+      <div className="px-3.5 py-0.5">
+        <ThoughtCard text={entry.text} streaming={entry.streaming} />
+      </div>
+    );
   if (entry.kind === "turn-error") return <TurnError message={entry.message} />;
   if (entry.kind === "perm")
     return (

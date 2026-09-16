@@ -70,6 +70,13 @@ describe("a recorded fan-out session replays through the reducer", () => {
     expect(view.filter((v) => v.kind === "tool")).toHaveLength(0);
   });
 
+  it("keeps the agent's thinking: the fixture's three chunks are one thought entry", () => {
+    const thoughts = s.entries.filter((e) => e.kind === "thought");
+    expect(thoughts).toHaveLength(1);
+    expect(thoughts[0]).toMatchObject({ streaming: false });
+    expect((thoughts[0] as { text: string }).text.length).toBeGreaterThan(20);
+  });
+
   it("ends with the last context reading", () => {
     expect(s.usage).toEqual({ used: 245376, size: 1000000 });
   });
