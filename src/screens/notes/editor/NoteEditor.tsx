@@ -120,7 +120,7 @@ export function NoteEditor({
         return true;
       },
     },
-  }, [path, readOnly, suggesters]);
+  }, [readOnly, suggesters]); // not `path`: a note keeps its editor when it takes its own name (the pane remounts on a real switch via `key`)
   /* handlePaste and handleDrop are frozen at creation time (useEditor only
    * re-reads its options when deps change), so they reach the live editor
    * through this ref — set before paint, never during render. */

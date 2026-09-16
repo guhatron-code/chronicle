@@ -405,6 +405,16 @@ describe("the notes store", () => {
       expect(store.openFor("/p")?.path).toBe("Tasks/Weekly plan.md");
     });
 
+    it("a rename keeps the open id, so the editor keyed on it is not remounted mid-sentence", async () => {
+      await openUntitled();
+      const before = store.openFor("/p")!.openId;
+      store.editBody("/p", "# Weekly plan\n");
+      await store.settleNote("/p");
+      expect(store.openFor("/p")!.openId).toBe(before);
+      await store.openNote("/p", "Tasks/A.md");
+      expect(store.openFor("/p")!.openId).not.toBe(before);
+    });
+
     it("a note the user named by hand is left alone", async () => {
       indexNotes = [A_NOTE, { path: "Tasks/Keep me.md", title: "Keep me", folder: "Tasks", status: null, round: null }];
       fileText = "---\nstatus: queued\n---\n\n# Something else\n";

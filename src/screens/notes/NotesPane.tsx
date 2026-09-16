@@ -274,7 +274,7 @@ export function NotesPane({
             <div ref={docRef} className="min-h-0 flex-1 overflow-y-auto">
               <div className={docClasses}>
                 <NoteEditor
-                  key={open.path}
+                  key={open.openId}
                   dir={dir}
                   path={open.path}
                   body={open.body}

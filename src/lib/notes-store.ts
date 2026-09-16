@@ -29,6 +29,9 @@ import { announce } from "./journal";
 import { toastError, toastSuccess } from "@/overlays/toasts";
 
 export interface OpenNote {
+  /** one number per OPEN, not per path: a rename keeps it, so the editor
+   *  keyed on it survives the note taking its own name mid-sentence (round 9) */
+  openId: number;
   path: string; front: string; body: string; savedBody: string;
   state: SaveState; savedAt: number | null; error: string | null; conflict: boolean;
   /** the disk text waiting behind a conflict bar */
@@ -202,15 +205,17 @@ export function keepMine(dir: string): void {
   notify();
 }
 
+let nextOpenId = 1;
 export async function openNote(dir: string, path: string): Promise<void> {
   await settleNote(dir); // the note being left saves, and takes its name if it is still ours
   remember(dir, opens.get(dir)?.path);
+  const openId = nextOpenId++;
   try {
     const text = await notesRead(dir, path);
     const { front, body } = splitFrontMatter(text);
-    opens.set(dir, { path, front, body, savedBody: body, state: "clean", savedAt: null, error: null, conflict: false, incoming: null });
+    opens.set(dir, { openId, path, front, body, savedBody: body, state: "clean", savedAt: null, error: null, conflict: false, incoming: null });
   } catch (e) {
-    opens.set(dir, { path, front: "", body: "", savedBody: "", state: "error", savedAt: null, error: String(e).slice(0, 140), conflict: false, incoming: null });
+    opens.set(dir, { openId, path, front: "", body: "", savedBody: "", state: "error", savedAt: null, error: String(e).slice(0, 140), conflict: false, incoming: null });
   }
   notify();
 }

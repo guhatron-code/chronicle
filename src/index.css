@@ -455,6 +455,13 @@ a:focus-visible,
   outline: none;
   box-shadow: none;
 }
+/* A new note starts EMPTY (round 9: its first line becomes its name), so the
+   editable area must have somewhere to click before there is any text — an
+   empty document is otherwise one invisible line tall. */
+.note-doc .ProseMirror {
+  min-height: 50vh;
+  cursor: text;
+}
 
 /* Task lists (`- [ ] …`). The live editor's task-item node view emits
    <li class="note-task" data-checked><label><input/><span/></label><div><p/></div></li>
