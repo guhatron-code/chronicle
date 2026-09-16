@@ -132,6 +132,10 @@ current phase's first paste row.
 
 ## CLI
 
+The binary is the desktop app. From a session run it only as `chronicle --derive <project-dir>`
+or `chronicle --state <project-dir>`. Check that it exists with `test -x` on its path, never by
+running it bare or with `--help`.
+
 `chronicle --derive <project-dir>` prints
 `{ "name", "statuses": [{id, state, label, proof?}], "new_plans", "newer_release",
 "ledger_set_aside", "warnings" }` — use it to verify a manifest without opening the app.

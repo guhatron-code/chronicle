@@ -74,8 +74,19 @@ An unverified manifest is worse than none. Check all of these:
    `current_labels.when` by hand against the real repo (grep the file, check the tag, read
    the log) and compare with what the plan says the true state is. Every done phase must
    derive done; the current phase must derive now with the right label; nothing later may
-   derive done. If the Chronicle binary is available, run
-   `chronicle --derive <project-dir>` and check the JSON instead of hand-evaluating.
+   derive done. The Chronicle binary can do this for you. It is the desktop app, so run it
+   in exactly one way. Check that it exists without executing it:
+   `test -x /Applications/Chronicle.app/Contents/MacOS/chronicle` (or `command -v chronicle`
+   when a PATH shim exists). Never run it bare, or with `--help`, `--version`, or any other
+   flag to see whether it works. The only forms a session may run are `--derive <project-dir>`
+   and `--state <project-dir>`, with a timeout so a hung derive never blocks the session:
+
+   ```
+   timeout 60 /Applications/Chronicle.app/Contents/MacOS/chronicle --derive "$PWD"
+   ```
+
+   Check the JSON it prints instead of hand-evaluating. If the binary is absent, hand-evaluate
+   the rules as described above.
 3. **Ordering**: phases appear in true execution order — "now" is computed as the first
    non-done phase, so a misplaced phase corrupts the banner.
 4. **JSON is valid** (`python3 -m json.tool chronicle.json`).
