@@ -20,11 +20,12 @@ import {
   type NoteEntry, type NoteStatus, type NotesIndex,
 } from "./ipc";
 import {
-  joinFrontMatter, newNotePath, roundPhaseOf, setStatusInFront, splitFrontMatter,
+  joinFrontMatter, newNotePath, roundPhaseOf, roundsJustFinished, setStatusInFront, splitFrontMatter,
   type RoundPhase, type RoundRoute, type SaveState,
 } from "./notes-model";
-import { dismissedRoundFor, evictRoundLog, runningRoundFor } from "./round-log";
-import { toastError } from "@/overlays/toasts";
+import { clearRunningRound, dismissedRoundFor, evictRoundLog, runningRoundFor } from "./round-log";
+import { announce } from "./journal";
+import { toastError, toastSuccess } from "@/overlays/toasts";
 
 export interface OpenNote {
   path: string; front: string; body: string; savedBody: string;
@@ -58,9 +59,28 @@ export function queuedCountFor(dir: string): number {
 
 export async function refreshNotes(dir: string): Promise<void> {
   try {
-    indexes.set(dir, await notesIndex(dir));
+    const next = await notesIndex(dir);
+    // read AFTER the await: whatever the store held the instant before this
+    // replacement. Two refreshes in flight at once (a disk event and a settle,
+    // say) would otherwise both hold the pre-transition record and announce the
+    // same finish twice
+    const before = indexFor(dir).rounds;
+    indexes.set(dir, next);
+    for (const n of roundsJustFinished(before, next.rounds)) finishedRound(dir, n);
     notifyIndex();
   } catch { /* not an open project — the pane shows its empty state */ }
+}
+
+/* A round's last note has just been ticked. This — the RECORD moving from
+   `ready` to `done` — is the one place a finished round is announced, because
+   it is the only thing both routes can be trusted to reach: the pane's turn can
+   end without the round being over, and a terminal tab outlives the agent that
+   ran in it (the tab is a shell; the agent exiting leaves the prompt sitting
+   there). Whatever route was running it is no longer running anything. */
+function finishedRound(dir: string, n: number): void {
+  if (runningRoundFor(dir)?.n === n) clearRunningRound(dir);
+  announce(dir, "round-done", `Round ${n} finished`, "Chronicle");
+  toastSuccess("The round finished", "Check Notes · finished items are ticked");
 }
 
 /** The heartbeat's `notes_generation`: refetch only when it actually moved. */

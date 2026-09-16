@@ -23,14 +23,15 @@ import {
   roundPlanBegin,
   roundPlanCancel,
   roundPlanSettle,
+  roundRunMessage,
   type AcpUpdate,
   type AgentEditFile,
 } from "./ipc";
-import { clearRunningRound, markRunningRound } from "./round-log";
-import { refreshNotes, roundGenerating, roundNotesFor, setRoundGenerating } from "./notes-store";
+import { clearRunningRound, markRunningRound, runningRoundFor } from "./round-log";
+import { indexFor, refreshNotes, roundGenerating, setRoundGenerating } from "./notes-store";
 import { endNewestRoundPlan, roundPlanOutcome } from "./notes-model";
 import { announce } from "./journal";
-import { toastAction, toastError, toastSuccess } from "@/overlays/toasts";
+import { toastAction, toastError } from "@/overlays/toasts";
 
 export type AgentPhase =
   | "none" // never started (or explicitly reset)
@@ -450,8 +451,8 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
           e.stopReason = stopReason;
           // the Notes card has no session to watch for this route — the thread IS
           // the round — so the turn ending is the only thing that can tell it the
-          // round is no longer running, however it ended
-          clearRunningRound(dir);
+          // round is no longer running, however it ended (settleRoundRun clears
+          // the mark, and speaks only if the round did not actually finish)
           settleRoundRun(dir, e.n);
           break;
         }
@@ -840,17 +841,26 @@ async function settleRoundPlan(
   }
 }
 
-/** A round's run has ended, whichever route ran it. Finished or not is the
- *  NOTES' answer, so read them back first — a note ticked in the last second
- *  is still a tick. Shared with the terminal route (round-run.ts), so the two
- *  routes can never announce a round differently. */
+/**
+ * A round's run has stopped, whichever route was running it: the pane's turn
+ * ended, or the round's terminal tab died.
+ *
+ * A run stopping is NOT a round finishing — that is the record's news, and
+ * `refreshNotes` announces it the moment the last note is ticked, on both
+ * routes (notes-store.ts). So all that is left here is the other ending: the
+ * run is over and the record still says `ready`, i.e. the round stopped with
+ * work left in it. The notes are read back first because a note ticked in the
+ * last second is still a tick — and that same read is what fires the finished
+ * announcement, which is why this one only speaks when it did not.
+ *
+ * Shared with the terminal route (round-run.ts), so the two routes can never
+ * end a round differently.
+ */
 export function settleRoundRun(dir: string, n: number): void {
+  // nothing is running this round any more, whatever the notes say
+  if (runningRoundFor(dir)?.n === n) clearRunningRound(dir);
   void refreshNotes(dir).then(() => {
-    const notes = roundNotesFor(dir, n);
-    if (notes.length > 0 && notes.every((x) => x.status === "done")) {
-      announce(dir, "round-done", `Round ${n} finished`, "Chronicle");
-      toastSuccess("The round finished", "Check Notes · finished items are ticked");
-    } else {
+    if (indexFor(dir).rounds.some((r) => r.n === n && r.state === "ready")) {
       announce(dir, "round-ended", `Round ${n} ended early`, "Chronicle");
     }
   });
@@ -930,13 +940,15 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
 
 /** Run a round in the pane: the round card enters the thread, the round
  *  prompt becomes the session's next message (sent as soon as the session is
- *  ready — starting one if needed). Done/failed derive from the NOTES plus the
- *  stop reason, never from the agent's prose. */
+ *  ready — starting one if needed). Whether it FINISHED is the record's answer
+ *  and nobody else's — never the agent's prose, and never the turn ending. */
 export async function startRoundInPane(dir: string, n: number, total: number): Promise<void> {
   const s = agentSessionFor(dir);
-  const message =
-    `Read fixes/phase_${n}_fixes_prompt.md and fixes/phase_${n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: ` +
-    `every item, verified honestly, and after each item completes set \`status: done\` in that note's front matter (the file named by the item's path, under .chronicle/notes/), changing nothing else in that file.`;
+  // Rust builds the run message for BOTH routes (round_run_message_cmd), so a
+  // round asks for the same work — including the Chronicle-Phase marker commit
+  // — whether it runs here or in a terminal. Rebuilding it here is how the
+  // pane route quietly lost the marker instruction.
+  const message = await roundRunMessage(dir, n);
   s.viewing = null;
   // this route has no log and no session of its own — the mark IS the record
   // that the round is running here, and every exit below clears it

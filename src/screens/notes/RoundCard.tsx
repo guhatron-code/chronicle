@@ -144,10 +144,10 @@ export const RoundCard = memo(function RoundCard({
       {phase === "plan-ready" && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {onRunInPane && (
-            <button type="button" disabled={busy} onClick={() => onRunInPane(n, total)} className={BTN}>Run in the pane</button>
+            <button type="button" onClick={() => onRunInPane(n, total)} className={BTN}>Run in the pane</button>
           )}
           {onRunInTerminal && (
-            <button type="button" disabled={busy} onClick={() => onRunInTerminal(n, total)} className={BTN}>Run in a terminal</button>
+            <button type="button" onClick={() => onRunInTerminal(n, total)} className={BTN}>Run in a terminal</button>
           )}
           <button type="button" onClick={copyPrompt} className={BTN}>Copy the prompt</button>
         </div>

@@ -188,6 +188,22 @@ export function roundPhaseOf(
 }
 
 /**
+ * The rounds that went from running to finished between two reads of the
+ * record, newest-last.
+ *
+ * This is the ONLY honest "the round is done" signal, and it is the same one
+ * for both routes. A turn ending does not mean a round finished, and a
+ * terminal tab is a shell: the agent inside it can exit hours before the tab
+ * does. The record is what counts the ticked notes, so the record is what
+ * announces. A round with no `before` entry at all is a project opening on
+ * work that finished long ago — history, not news.
+ */
+export function roundsJustFinished(before: RoundRecord[], after: RoundRecord[]): number[] {
+  const was = new Map(before.map((r) => [r.n, r.state]));
+  return after.filter((r) => r.state === "done" && was.get(r.n) === "ready").map((r) => r.n);
+}
+
+/**
  * How a planning turn ended, from the only two things that can say so: the
  * turn's stop reason and what `round_plan_settle` found on disk. The agent's
  * prose never gets a vote — a plan is ready when the record says the round is.

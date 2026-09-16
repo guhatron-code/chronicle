@@ -4,7 +4,7 @@ import {
   backlinksFor, buildTree, endNewestRoundPlan, joinFrontMatter, nestTree, newNotePath,
   outlinksFor, pillFor, roundPhaseOf, roundPlanOutcome, roundSubline, sanitizeTitle,
   setStatusInFront, slugFor,
-  splitFrontMatter, statusInFront, tagCounts, terminalRoundCommand,
+  roundsJustFinished, splitFrontMatter, statusInFront, tagCounts, terminalRoundCommand,
 } from "./notes-model";
 
 const note = (path: string, p: Partial<NoteEntry> = {}): NoteEntry => ({
@@ -158,6 +158,22 @@ describe("the round card", () => {
     expect(roundSubline("executing", "terminal", 0, 1)).toBe("1 note · executing · 0 of 1 done · in a terminal");
     expect(roundSubline("finished", null, 2, 2)).toBe("2 notes · done · 2 of 2");
     expect(roundSubline("failed", null, 0, 2)).toBe("2 notes · didn't finish · 0 of 2 done");
+  });
+
+  it("spots the rounds that just finished, from the record alone", () => {
+    // the record is what knows a round is over: neither route can be trusted to
+    // say so (an agent that exits leaves its terminal tab very much alive)
+    expect(roundsJustFinished([{ n: 3, state: "ready" }], [{ n: 3, state: "done" }])).toEqual([3]);
+    // announced once, on the transition — never again on every later refresh
+    expect(roundsJustFinished([{ n: 3, state: "done" }], [{ n: 3, state: "done" }])).toEqual([]);
+    // a project opening on a round that finished long ago is not news
+    expect(roundsJustFinished([], [{ n: 3, state: "done" }])).toEqual([]);
+    // a round that gave up is not a finish
+    expect(roundsJustFinished([{ n: 3, state: "ready" }], [{ n: 3, state: "failed" }])).toEqual([]);
+    expect(roundsJustFinished(
+      [{ n: 3, state: "ready" }, { n: 4, state: "ready" }],
+      [{ n: 3, state: "done" }, { n: 4, state: "done" }],
+    )).toEqual([3, 4]);
   });
 
   it("the terminal route quotes the run message for the shell", () => {
