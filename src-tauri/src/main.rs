@@ -89,12 +89,22 @@ pub(crate) struct OpenRoots(Mutex<HashSet<PathBuf>>);
 pub(crate) struct BridgeState {
     pending: Mutex<HashMap<u64, std::sync::mpsc::Sender<bridge::Reply>>>,
     next: std::sync::atomic::AtomicU64,
+    /// The socket is bound in `.setup`, seconds before the webview finishes loading.
+    /// Until the frontend says it is listening, an action emitted into that window
+    /// would be heard by nobody and time out after 30 s; false means answer at once.
+    ready: std::sync::atomic::AtomicBool,
 }
 
 #[tauri::command]
 fn agent_action_reply(state: State<BridgeState>, id: u64, ok: bool, summary: String, data: Option<Value>) -> Result<(), String> {
     let tx = state.pending.lock().map_err(|e| e.to_string())?.remove(&id).ok_or("no such action is waiting")?;
     tx.send(bridge::Reply { ok, summary, data }).map_err(|_| "the action already timed out".to_string())
+}
+
+/// The frontend, on mount: from here on an `agent-action` has a listener.
+#[tauri::command]
+fn agent_bridge_ready(state: State<BridgeState>) {
+    state.ready.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Canonical key + a collision-free log path for an init run.
@@ -3358,6 +3368,7 @@ fn main() {
         .manage(BridgeState {
             pending: Mutex::new(HashMap::new()),
             next: std::sync::atomic::AtomicU64::new(1),
+            ready: std::sync::atomic::AtomicBool::new(false),
         })
         // Asynchronous on purpose: the synchronous form runs on the main thread,
         // so reading a big artifact off disk would stall the whole UI. Here the
@@ -3415,15 +3426,34 @@ fn main() {
                 Ok(token) => {
                     let h = app.handle().clone();
                     let handler: Arc<dyn Fn(bridge::Request) -> bridge::Reply + Send + Sync> = Arc::new(move |req| {
+                        // a name the app doesn't perform never reaches the frontend: the
+                        // socket is the edge of the app, and the list of actions is closed
+                        if !bridge::known_action(&req.action) {
+                            return bridge::Reply { ok: false, summary: format!("No action named {}.", req.action), data: None };
+                        }
+                        let st = h.state::<BridgeState>();
+                        // bound but not yet listened to: say so now rather than emit into
+                        // a window that isn't there and make the caller wait out the timeout
+                        if !st.ready.load(std::sync::atomic::Ordering::Relaxed) {
+                            return bridge::Reply {
+                                ok: false,
+                                summary: format!("Chronicle isn't open on this project, so it can't {}. Open it and try again.", bridge::verb_for(&req.action)),
+                                data: None,
+                            };
+                        }
                         // only an opened project may be acted on; opening a project is the exception
                         if req.action != "project.open" {
-                            let canon = PathBuf::from(&req.dir).canonicalize().unwrap_or_else(|_| PathBuf::from(&req.dir));
+                            // a dir that doesn't resolve can't be one the user opened, and
+                            // comparing the unresolved string against the allowlist would
+                            // only ever be a miss dressed up as a check
+                            let Ok(canon) = PathBuf::from(&req.dir).canonicalize() else {
+                                return bridge::Reply { ok: false, summary: "That project isn't open in Chronicle. Open it and try again.".into(), data: None };
+                            };
                             let open = h.state::<OpenRoots>().0.lock().map(|s| s.contains(&canon)).unwrap_or(false);
                             if !open {
                                 return bridge::Reply { ok: false, summary: "That project isn't open in Chronicle. Open it and try again.".into(), data: None };
                             }
                         }
-                        let st = h.state::<BridgeState>();
                         let id = st.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let (tx, rx) = std::sync::mpsc::channel();
                         if let Ok(mut p) = st.pending.lock() { p.insert(id, tx); }
@@ -3492,7 +3522,7 @@ fn main() {
             setup_status, setup_install, setup_fix_terminal_path, setup_cancel,
             setup_run_all, setup_open_login,
             journal_append, journal_read, ledger_mark, notify, draft_save_message,
-            agent_action_reply,
+            agent_action_reply, agent_bridge_ready,
             global_search, status_report,
             github_repos, github_clone, github_create,
             watch_project, unwatch_project, launch_open_dir, quit_app,

@@ -128,6 +128,54 @@ fn caps() -> Vec<Capability> {
             },
             run: state_rounds,
         },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.round.plan",
+                description: "Ask the running Chronicle to plan the next round: it picks the queued notes and shows the plan for the user to approve. Chronicle must be open on this project.",
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            run: round_plan,
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.round.start",
+                description: "Ask the running Chronicle to start round n, in the agent pane or in a terminal. Chronicle must be open on this project.",
+                input_schema: json!({
+                    "type": "object", "required": ["n"],
+                    "properties": {
+                        "n": { "type": "integer", "description": "the round number, as chronicle.state.rounds reports it" },
+                        "where": { "type": "string", "enum": ["pane", "terminal"], "default": "pane",
+                                   "description": "pane runs it in the app's agent pane; terminal runs it in a Chronicle terminal" }
+                    }
+                }),
+            },
+            run: round_start,
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.project.open",
+                description: "Open a Chronicle project in the running app and bring it to the front. The folder must already be a Chronicle project (chronicle.json or .chronicle/).",
+                input_schema: json!({
+                    "type": "object", "required": ["dir"],
+                    "properties": { "dir": { "type": "string", "description": "path to the project folder to open" } }
+                }),
+            },
+            run: project_open,
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.terminal.read",
+                description: "Read the last lines of a terminal in the running Chronicle. Without an id, the terminal the user is looking at. Chronicle must be open on this project.",
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "id": { "type": "integer", "description": "which terminal; omit for the one in front" },
+                        "lines": { "type": "integer", "default": 200 }
+                    }
+                }),
+            },
+            run: terminal_read,
+        },
     ]
 }
 
@@ -491,6 +539,48 @@ fn state_rounds(dir: &Path, _args: &Value) -> Result<Outcome, String> {
     Ok(Outcome { summary, data: json!({ "rounds": out }) })
 }
 
+/* ---------- actions: the four capabilities that need the app running ---------- */
+
+/// Everything above answers from disk. These four ask the RUNNING app to do the thing
+/// its own buttons do, over the bridge, and hand back the sentence it answered with —
+/// so an agent and a click leave the same trace. With no app listening, the failure is
+/// one sentence naming what could not be done.
+fn action(dir: &Path, name: &str, args: Value, verb: &str) -> Result<Outcome, String> {
+    let r = crate::bridge::call(dir, name, args, verb)?;
+    Ok(Outcome { summary: r.summary, data: r.data.unwrap_or_else(|| json!({})) })
+}
+
+fn round_plan(dir: &Path, _a: &Value) -> Result<Outcome, String> {
+    action(dir, "round.plan", json!({}), "plan a round")
+}
+
+fn round_start(dir: &Path, a: &Value) -> Result<Outcome, String> {
+    let n = arg_u64(a, "n")?.ok_or("n is required.")?;
+    let wh = arg_str(a, "where")?.unwrap_or("pane");
+    if wh != "pane" && wh != "terminal" { return Err("where must be pane or terminal.".into()) }
+    action(dir, "round.start", json!({ "n": n, "where": wh }), "start a round")
+}
+
+/// The one capability whose `dir` is not the project the call runs in: the target is
+/// the folder to open, and the request carries it so the app opens that one. It must
+/// already be a Chronicle project — opening a folder adds it to the app's allowlist,
+/// and an agent must not be able to widen that to anywhere on the disk.
+fn project_open(_dir: &Path, a: &Value) -> Result<Outcome, String> {
+    let target = required_str(a, "dir")?;
+    let p = Path::new(target);
+    if !p.is_dir() { return Err(format!("There is no folder at {target}.")) }
+    if !(p.join("chronicle.json").is_file() || p.join(".chronicle").is_dir()) {
+        return Err(format!("{target} isn't a Chronicle project."));
+    }
+    action(p, "project.open", json!({ "dir": target }), "open a project")
+}
+
+fn terminal_read(dir: &Path, a: &Value) -> Result<Outcome, String> {
+    let id = arg_u64(a, "id")?;
+    let lines = arg_u64(a, "lines")?.unwrap_or(200);
+    action(dir, "terminal.read", json!({ "id": id, "lines": lines }), "read a terminal")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -801,6 +891,78 @@ mod tests {
         call(&d, "chronicle.state.needs_you", &json!({})).unwrap();
         assert_eq!(std::fs::read_to_string(&led).unwrap(), "{ not json", "a read leaves the file where it is");
         assert!(!d.join(".chronicle/roadmap-ledger.json.bad").exists(), "and moves nothing aside");
+    }
+
+    /// THE ONLY TEST THAT SETS `CHRONICLE_BRIDGE_SOCKET` / `CHRONICLE_BRIDGE_TOKEN`.
+    /// The tests of one crate run as parallel threads in a single process, so those
+    /// env vars are shared state: they are set at the very top of this test and
+    /// removed before the last assertion, and no other test may touch them.
+    #[test]
+    fn actions_go_through_the_bridge_and_report_its_sentence() {
+        let d = vault("actions");
+        std::fs::write(d.join("app.token"), "t").unwrap();
+        let sock = d.join("app.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+        std::thread::spawn(move || {
+            for s in listener.incoming().flatten() {
+                crate::bridge::serve_connection(s, "t", &|r| crate::bridge::Reply {
+                    ok: true,
+                    summary: format!("{} · {}", r.action, r.args),
+                    data: Some(json!({ "echo": r.args, "dir": r.dir })),
+                });
+            }
+        });
+        std::env::set_var("CHRONICLE_BRIDGE_SOCKET", &sock);
+        std::env::set_var("CHRONICLE_BRIDGE_TOKEN", d.join("app.token"));
+
+        let r = call(&d, "chronicle.round.start", &json!({"n": 3, "where": "terminal"})).unwrap();
+        assert_eq!(r.summary, r#"round.start · {"n":3,"where":"terminal"}"#);
+        assert_eq!(r.data["echo"]["n"], 3);
+        assert_eq!(call(&d, "chronicle.round.start", &json!({})).unwrap_err(), "n is required.");
+        assert_eq!(call(&d, "chronicle.round.start", &json!({"n": 3, "where": "cloud"})).unwrap_err(),
+                   "where must be pane or terminal.");
+        // the default reaches the app as a real value, not as an absent key
+        let r = call(&d, "chronicle.round.start", &json!({"n": 1})).unwrap();
+        assert_eq!(r.data["echo"]["where"], "pane");
+
+        let r = call(&d, "chronicle.round.plan", &json!({})).unwrap();
+        assert!(r.summary.starts_with("round.plan"));
+
+        let r = call(&d, "chronicle.terminal.read", &json!({"lines": 50})).unwrap();
+        assert_eq!(r.data["echo"]["lines"], 50);
+        assert_eq!(r.data["echo"]["id"], Value::Null, "no id means the focused terminal");
+        let r = call(&d, "chronicle.terminal.read", &json!({})).unwrap();
+        assert_eq!(r.data["echo"]["lines"], 200);
+
+        // project.open carries the TARGET as the request's dir, so the app opens the
+        // folder the caller named rather than the one the shell is sitting in
+        assert_eq!(call(&d, "chronicle.project.open", &json!({})).unwrap_err(), "dir is required.");
+        let missing = d.join("nope");
+        assert_eq!(call(&d, "chronicle.project.open", &json!({"dir": missing.to_str().unwrap()})).unwrap_err(),
+                   format!("There is no folder at {}.", missing.display()));
+        // an agent may not widen the app's open-project allowlist to any folder at all:
+        // a plain directory is refused before the bridge is ever dialled
+        let plain = d.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert_eq!(call(&d, "chronicle.project.open", &json!({"dir": plain.to_str().unwrap()})).unwrap_err(),
+                   format!("{} isn't a Chronicle project.", plain.display()));
+        let target = d.join("other");
+        std::fs::create_dir_all(target.join(".chronicle")).unwrap();
+        let r = call(&d, "chronicle.project.open", &json!({"dir": target.to_str().unwrap()})).unwrap();
+        assert_eq!(r.data["dir"], target.to_str().unwrap(), "the request's dir is the folder to open");
+
+        // no app listening: one sentence naming what it could not do. Pointed at a
+        // socket that isn't there rather than at the real config dir, so the result
+        // doesn't depend on whether Chronicle happens to be running on this machine.
+        std::env::set_var("CHRONICLE_BRIDGE_SOCKET", d.join("gone.sock"));
+        assert_eq!(call(&d, "chronicle.round.plan", &json!({})).unwrap_err(),
+                   "Chronicle isn't open on this project, so it can't plan a round. Open it and try again.");
+
+        std::env::remove_var("CHRONICLE_BRIDGE_SOCKET");
+        std::env::remove_var("CHRONICLE_BRIDGE_TOKEN");
+        // the override is a test seam, not a second home: unset, the paths are the app's
+        assert_eq!(crate::bridge::socket_path(), crate::config_dir().join("app.sock"));
+        assert_eq!(crate::bridge::token_path(), crate::config_dir().join("app.token"));
     }
 
     #[test]

@@ -12,6 +12,17 @@ impl Session { pub(crate) fn new(dir: PathBuf) -> Self { Self { dir, initialized
 
 const INSTRUCTIONS: &str = "Chronicle keeps this project's notes (tasks, bugs, ideas) and its build roadmap. Use chronicle.notes.* to list, read, create and update notes instead of grepping .chronicle/notes; use chronicle.state.* before saying what is done or what is next, because it answers from git and the roadmap rules, not from memory.";
 
+/// The version a person would recognise: the app's, from tauri.conf.json, not the
+/// crate's 0.1.0. Parsed once from the file compiled in beside this one.
+pub(crate) fn app_version() -> &'static str {
+    static V: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        serde_json::from_str::<Value>(include_str!("../tauri.conf.json")).ok()
+            .and_then(|c| c.get("version").and_then(|v| v.as_str()).map(str::to_string))
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+    })
+}
+
 fn reply(id: Value, result: Value) -> String {
     json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string()
 }
@@ -42,7 +53,7 @@ pub(crate) fn handle_line(s: &mut Session, line: &str) -> Option<String> {
         "initialize" => reply(id, json!({
             "protocolVersion": "2025-06-18",
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "chronicle", "version": env!("CARGO_PKG_VERSION") },
+            "serverInfo": { "name": "chronicle", "version": app_version() },
             "instructions": INSTRUCTIONS,
         })),
         "ping" => reply(id, json!({})),
@@ -119,6 +130,17 @@ mod tests {
         assert_eq!(bad["result"]["content"][0]["text"], "that path isn't inside the notes vault");
         let ping = rpc(&mut s, r#"{"jsonrpc":"2.0","id":5,"method":"ping"}"#);
         assert_eq!(ping["result"], json!({}));
+    }
+
+    #[test]
+    fn the_server_reports_the_app_version_the_user_sees() {
+        let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let want = conf["version"].as_str().unwrap();
+        assert_eq!(app_version(), want);
+        assert_ne!(app_version(), env!("CARGO_PKG_VERSION"), "the crate version is not the app's");
+        let (_, mut s) = session("version");
+        let init = rpc(&mut s, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
+        assert_eq!(init["result"]["serverInfo"]["version"], want);
     }
 
     #[test]

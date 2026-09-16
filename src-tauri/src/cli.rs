@@ -10,15 +10,18 @@ pub(crate) struct Invocation { pub name: String, pub args: Value, pub dir: Optio
 #[derive(Debug)]
 pub(crate) struct Usage(pub String);
 
-const GROUPS: [(&str, &[&str]); 2] = [
+const GROUPS: [(&str, &[&str]); 5] = [
     ("notes", &["list", "read", "create", "update", "set_status", "attach"]),
     ("state", &["phases", "needs_you", "rounds"]),
+    ("round", &["plan", "start"]),
+    ("project", &["open"]),
+    ("terminal", &["read"]),
 ];
 /// Flags that repeat into a list, and flags whose value is `key=value` into an object.
 const LIST_FLAGS: [&str; 2] = ["tag", "unset"];
 const MAP_FLAGS: [&str; 1] = ["set"];
 const CSV_FLAGS: [&str; 1] = ["tags"];
-const INT_FLAGS: [&str; 2] = ["round", "limit"];
+const INT_FLAGS: [&str; 5] = ["round", "limit", "n", "lines", "id"];
 
 fn usage(group: &str) -> Usage {
     match GROUPS.iter().find(|(g, _)| *g == group) {
@@ -36,6 +39,9 @@ pub(crate) fn parse(args: &[String]) -> Result<Invocation, Usage> {
         return Err(Usage(format!("No capability named {name}. Known verbs for {group}: {}.",
             GROUPS.iter().find(|(g, _)| g == group).map(|(_, v)| v.join(", ")).unwrap_or_default())));
     }
+    // `project open <path>` is the one verb whose bare argument is not the project to
+    // run in: it names the folder to OPEN. The project dir stays wherever the shell is.
+    let target_is_positional = (group.as_str(), verb.as_str()) == ("project", "open");
     let mut obj = serde_json::Map::new();
     let mut json = false;
     let mut dir = None;
@@ -58,6 +64,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Invocation, Usage> {
                 obj.insert(flag.into(), json!(val));
             }
             i += 2;
+        } else if target_is_positional {
+            if obj.contains_key("dir") { return Err(Usage("Only one folder can be given to project open.".into())) }
+            obj.insert("dir".into(), json!(a));
+            i += 1;
         } else {
             // one bare argument is the project directory; a second is a typo, and
             // silently keeping the last one would run the call somewhere else
@@ -124,6 +134,31 @@ mod tests {
         assert_eq!(i.args["tags"], json!(["bug", "ui"]));
         let i = parse(&a("state phases")).unwrap();
         assert_eq!(i.name, "chronicle.state.phases");
+    }
+
+    #[test]
+    fn the_action_groups_reach_the_running_app() {
+        let i = parse(&a("round plan")).unwrap();
+        assert_eq!(i.name, "chronicle.round.plan");
+        assert_eq!(i.args, json!({}));
+        let i = parse(&a("round start --n 3 --where terminal")).unwrap();
+        assert_eq!(i.name, "chronicle.round.start");
+        assert_eq!(i.args, json!({"n": 3, "where": "terminal"}));
+        let i = parse(&a("terminal read --lines 50 --id 7")).unwrap();
+        assert_eq!(i.name, "chronicle.terminal.read");
+        assert_eq!(i.args, json!({"lines": 50, "id": 7}));
+        // `project open <path>`: the positional is the folder to OPEN, not the project
+        // the call runs in — that one is wherever the shell already is
+        let i = parse(&a("project open /tmp/x")).unwrap();
+        assert_eq!(i.name, "chronicle.project.open");
+        assert_eq!(i.args, json!({"dir": "/tmp/x"}));
+        assert_eq!(i.dir, None);
+        let i = parse(&a("project open /tmp/x --json")).unwrap();
+        assert!(i.json);
+        assert_eq!(i.args, json!({"dir": "/tmp/x"}));
+        assert_eq!(parse(&a("project open /tmp/x /tmp/y")).unwrap_err().0, "Only one folder can be given to project open.");
+        assert_eq!(parse(&a("round start --n three")).unwrap_err().0, "--n must be a whole number.");
+        assert_eq!(parse(&a("round")).unwrap_err().0, "Usage: chronicle round <plan|start> [--flag value] [--json] [dir].");
     }
 
     #[test]
