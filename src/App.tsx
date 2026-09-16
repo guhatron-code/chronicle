@@ -424,20 +424,25 @@ function AppShell() {
 
   /* `chronicle --open <dir>` lands straight in that project (shell launches,
      scripted checks). The handle is consumed once, so a dev double-mount is
-     harmless; doOpenProject below is initialised by the time this runs. */
+     harmless; openFromUi below is initialised by the time this runs. */
   useEffect(() => {
-    void launchOpenDir().then((dir) => { if (dir) doOpenProject(dir); }).catch(() => {});
+    void launchOpenDir().then((dir) => { if (dir) openFromUi(dir); }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const doOpenProject = useCallback((path: string) => {
+  /* Settles with the open — it resolves once the project is up and REJECTS if
+     it never came up, which is what lets the agent bridge answer honestly (a
+     failed open must not be reported as opened). The toast is still raised
+     here, so a UI caller can ignore the rejection: `openFromUi` below is that
+     door, and every button goes through it. */
+  const doOpenProject = useCallback((path: string): Promise<void> => {
     if (projectsRef.current.has(path)) {
       // already open — just foreground it, keep whatever pane the user was on
       activate(path);
       setPaletteOpen(false);
-      return;
+      return Promise.resolve();
     }
-    openProject(path)
+    return openProject(path)
       .then((p) => {
         const dir = (p as { dir?: string } | null)?.dir ?? path;
         const info = p as { manifest?: { name?: string } | null; part_of?: { name?: string; path?: string } | null } | null;
@@ -459,10 +464,18 @@ function AppShell() {
         void watchProject(dir).catch(() => {}); // freshness: fs events poll immediately
         refreshPicker();
       })
-      .catch((e) =>
-        toastError("Couldn't open the project", String(e).split("\n")[0].slice(0, 90)),
-      );
+      .catch((e) => {
+        toastError("Couldn't open the project", String(e).split("\n")[0].slice(0, 90));
+        throw e; // the toast is the user's answer; the caller still needs the truth
+      });
   }, [activate, pollOne, refreshPicker]);
+
+  /** The UI's door to the same open: the failure is already in a toast, so a
+   *  click has nothing left to handle. */
+  const openFromUi = useCallback(
+    (path: string) => { void doOpenProject(path).catch(() => {}); },
+    [doOpenProject],
+  );
 
   /* F — a ⌘-clicked terminal path lands in the repo viewer */
   useEffect(() => {
@@ -676,11 +689,11 @@ function AppShell() {
     githubClone(nameWithOwner)
       .then((dest) => {
         setPaletteOpen(false);
-        doOpenProject(dest);
+        openFromUi(dest);
       })
       .catch((e) => toastError("Couldn't clone it", String(e).slice(0, 110)))
       .finally(() => setCloningRepo(null));
-  }, [cloningRepo, doOpenProject]);
+  }, [cloningRepo, openFromUi]);
 
   const updateProps = updateAvailable()
     ? {
@@ -700,9 +713,9 @@ function AppShell() {
   const openDialog = useCallback(() => {
     setPaletteOpen(false);
     pickFolder()
-      .then((sel) => { if (typeof sel === "string" && sel) doOpenProject(sel); })
+      .then((sel) => { if (typeof sel === "string" && sel) openFromUi(sel); })
       .catch(() => {});
-  }, [doOpenProject]);
+  }, [openFromUi]);
 
   const doRemoveRecent = useCallback((path: string, name: string) => {
     setConfirm({
@@ -724,7 +737,7 @@ function AppShell() {
       .then((dir) => {
         setNewProjOpen(false);
         setNewProjError(null);
-        doOpenProject(dir);
+        openFromUi(dir);
       })
       .catch((e) => {
         const msg = String(e);
@@ -734,7 +747,7 @@ function AppShell() {
             : msg.slice(0, 120),
         );
       });
-  }, [doOpenProject]);
+  }, [openFromUi]);
 
   const refreshNow = useCallback(() => {
     setChecking(true);
@@ -884,6 +897,8 @@ function AppShell() {
         // the tab that project is looking at, and nothing when it has none
         termTail: (id, lines) => (id == null ? null : termTail(id, lines)),
         activeTerm: activeTermFor,
+        // tab ids are global — this is what keeps a read inside its own project
+        termDir: (id) => getTerm(id)?.dir ?? null,
         isProjectOpen: (dir) => projectsRef.current.has(dir),
       }),
     [doOpenProject, patchLayout],
@@ -1013,7 +1028,7 @@ function AppShell() {
         openProjects={openPalette}
         recents={paletteRecents}
         onSwitch={(dir) => { activate(dir); setPaletteOpen(false); }}
-        onOpenRecent={doOpenProject}
+        onOpenRecent={openFromUi}
         onOpenDialog={openDialog}
         onNewProject={() => { setPaletteOpen(false); setNewProjError(null); setNewProjOpen(true); }}
         githubRepos={ghRepos}
@@ -1111,7 +1126,7 @@ function AppShell() {
             update={updateProps}
             onOpenDialog={openDialog}
             onNewProject={() => { setNewProjError(null); setNewProjOpen(true); }}
-            onOpenProject={doOpenProject}
+            onOpenProject={openFromUi}
             onRemoveRecent={(path) => {
               const name = rows.find((r) => r.path === path)?.name ?? "this project";
               doRemoveRecent(path, name);
@@ -1197,7 +1212,7 @@ function AppShell() {
             partOf={active.partOf}
             justSwitched={!!active.justSwitchedAt && Date.now() - active.justSwitchedAt < 2000}
             onAgentChange={setAgent}
-            onOpenProject={doOpenProject}
+            onOpenProject={openFromUi}
             onGoRepo={() => goPane("repo")}
             onGoHistory={() => {
               openHistoryView(active.dir, "roadmap");

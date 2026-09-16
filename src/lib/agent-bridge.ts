@@ -32,7 +32,9 @@ export type RoundRoute = "pane" | "terminal";
 export interface BridgeDeps {
   planRound(dir: string): Promise<void>;
   startRound(dir: string, n: number, total: number, where: RoundRoute): Promise<void>;
-  openProject(dir: string): void;
+  /** Settles WITH the open: a folder that can't be opened must not be reported
+   *  as opened, so this resolves once the project is up and rejects if it isn't. */
+  openProject(dir: string): Promise<void>;
   revealPane(): void;
   revealTerminal(): void;
   roundTotal(dir: string, n: number): number;
@@ -41,6 +43,9 @@ export interface BridgeDeps {
   /** The tab an unnamed `terminal.read` means. Optional: without it, an agent
    *  that names no tab is simply told there is none. */
   activeTerm?(dir: string): number | null;
+  /** Which project a tab belongs to. Terminal ids are global, so this is what
+   *  keeps an agent inside the project it was asked about. */
+  termDir?(id: number): string | null;
   /** Is this project already open? Only the wording of the reply turns on it. */
   isProjectOpen?(dir: string): boolean;
 }
@@ -155,7 +160,9 @@ export async function handleAgentAction(a: AgentAction, deps: BridgeDeps): Promi
       if (dir == null) return refusal("open a project", "no folder");
       try {
         const already = deps.isProjectOpen?.(dir) ?? false;
-        deps.openProject(dir);
+        // awaited: the app's own open reports a folder it can't read, and a
+        // reply that said "Opened" beside that red toast would be a lie
+        await deps.openProject(dir);
         return { ok: true, summary: `${already ? "Switched to" : "Opened"} ${dir}.` };
       } catch (e) {
         return refusal(`open ${dir}`, e);
@@ -165,6 +172,11 @@ export async function handleAgentAction(a: AgentAction, deps: BridgeDeps): Promi
     case "terminal.read": {
       const named = intArg(args.id);
       const lines = tailLines(args.lines);
+      // tab ids are global; a named one that lives in another project is none
+      // of this agent's business, and is refused without being read
+      if (named != null && deps.termDir && deps.termDir(named) !== a.dir) {
+        return { ok: false, summary: `Terminal ${named} isn't in this project.` };
+      }
       // an agent that names no tab means the one the project is looking at
       const id = named ?? deps.activeTerm?.(a.dir) ?? null;
       const what = named == null ? "the terminal" : `terminal ${named}`;
@@ -196,20 +208,32 @@ export async function handleAgentAction(a: AgentAction, deps: BridgeDeps): Promi
  * toast only — a thing the app declined to do is not part of the project's
  * history. Mount ONCE at app scope and return the cleanup, like every other
  * listener (ipc.ts law).
+ *
+ * Exactly one reply goes out per action, whatever happens: `handleAgentAction`
+ * is not supposed to throw, and if it ever does, the agent still hears why
+ * instead of waiting out Rust's timeout. And when the REPLY is what fails,
+ * Rust has already given up on this action — the agent was told it timed out,
+ * so saying anything here would tell the user a story the agent never got.
  */
 export function mountAgentBridge(deps: BridgeDeps): () => void {
   let un: UnlistenFn | undefined;
   let dead = false;
   void onAgentAction((a) => {
-    void handleAgentAction(a, deps).then((r) => {
-      void agentActionReply(a.id, r.ok, r.summary, r.data).catch(() => {});
-      if (r.ok) {
-        toastSuccess(r.summary);
-        announce(a.dir, "agent-action", r.summary, "Chronicle");
-      } else {
-        toastError("An agent asked for something Chronicle couldn't do", r.summary);
-      }
-    });
+    void handleAgentAction(a, deps)
+      .catch((e): ActionOutcome => ({ ok: false, summary: `Couldn't do that: ${why(e)}` }))
+      .then((r) =>
+        agentActionReply(a.id, r.ok, r.summary, r.data).then(
+          () => {
+            if (r.ok) {
+              toastSuccess(r.summary);
+              announce(a.dir, "agent-action", r.summary, "Chronicle");
+            } else {
+              toastError("An agent asked for something Chronicle couldn't do", r.summary);
+            }
+          },
+          () => {}, // nobody is waiting any more
+        ),
+      );
   }).then((u) => {
     if (dead) u();
     else un = u;
