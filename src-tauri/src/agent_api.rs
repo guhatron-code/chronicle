@@ -567,12 +567,16 @@ fn round_start(dir: &Path, a: &Value) -> Result<Outcome, String> {
 /// and an agent must not be able to widen that to anywhere on the disk.
 fn project_open(_dir: &Path, a: &Value) -> Result<Outcome, String> {
     let target = required_str(a, "dir")?;
-    let p = Path::new(target);
-    if !p.is_dir() { return Err(format!("There is no folder at {target}.")) }
-    if !(p.join("chronicle.json").is_file() || p.join(".chronicle").is_dir()) {
-        return Err(format!("{target} isn't a Chronicle project."));
-    }
-    action(p, "project.open", json!({ "dir": target }), "open a project")
+    // a path typed at a shell is relative to that shell; the app is somewhere else, so
+    // what crosses the socket is always one absolute, resolved path
+    let abs = if Path::new(target).is_absolute() { PathBuf::from(target) } else {
+        std::env::current_dir().map_err(|_| format!("There is no folder at {target}."))?.join(target)
+    };
+    // the same gate the app applies on its own side of the socket, run here too: the
+    // caller gets the sentence without a round trip, and neither side trusts the other
+    let p = crate::bridge::admit_project_open(&abs.to_string_lossy())?;
+    let canon = p.to_string_lossy().into_owned();
+    action(&p, "project.open", json!({ "dir": canon }), "open a project")
 }
 
 fn terminal_read(dir: &Path, a: &Value) -> Result<Outcome, String> {

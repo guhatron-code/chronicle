@@ -3584,8 +3584,28 @@ fn main() {
                                 data: None,
                             };
                         }
-                        // only an opened project may be acted on; opening a project is the exception
-                        if req.action != "project.open" {
+                        // Only an opened project may be acted on. `project.open` is the
+                        // exception, and it is exactly the dangerous one: opening a
+                        // folder is what PUTS it on the allowlist, so it carries its own
+                        // gate (bridge::admit_project_open) rather than none, and what
+                        // the frontend is handed is the path that gate resolved — never
+                        // the caller's string, which is what it would go on to open.
+                        let mut req = req;
+                        if req.action == "project.open" {
+                            match bridge::admit_project_open(&req.dir) {
+                                Ok(canon) => {
+                                    let canon = canon.to_string_lossy().into_owned();
+                                    req.dir = canon.clone();
+                                    // the frontend opens args.dir, so that is the one
+                                    // that has to be the resolved path. Indexing a
+                                    // non-object Value panics, and a panic here is a
+                                    // caller left with no answer at all.
+                                    if !req.args.is_object() { req.args = json!({}); }
+                                    req.args["dir"] = json!(canon);
+                                }
+                                Err(e) => return bridge::Reply { ok: false, summary: e, data: None },
+                            }
+                        } else {
                             // a dir that doesn't resolve can't be one the user opened, and
                             // comparing the unresolved string against the allowlist would
                             // only ever be a miss dressed up as a check

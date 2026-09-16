@@ -3,7 +3,7 @@
 
 use crate::agent_api::{self, Outcome};
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub(crate) struct Invocation { pub name: String, pub args: Value, pub dir: Option<PathBuf>, pub json: bool }
@@ -92,6 +92,16 @@ pub(crate) fn render_table(name: &str, out: &Outcome) -> String {
     s
 }
 
+/// Which project the call runs in. Every capability but one answers about the project
+/// the shell is standing in, so that project has to exist. `project open` is the
+/// exception: it NAMES the folder, and needing to already be inside a Chronicle project
+/// to open another one would make it useless from anywhere a person actually types it.
+fn project_dir_for(name: &str, start: &Path) -> Result<PathBuf, String> {
+    if name == "chronicle.project.open" { return Ok(start.to_path_buf()) }
+    agent_api::resolve_project_dir(start).ok_or_else(||
+        format!("No Chronicle project here: nothing above {} holds chronicle.json or .chronicle/.", start.display()))
+}
+
 /// `Some(code)` when this was a CLI call (already printed); `None` to launch the app.
 pub(crate) fn run(args: &[String]) -> Option<i32> {
     let first = args.first()?;
@@ -101,9 +111,9 @@ pub(crate) fn run(args: &[String]) -> Option<i32> {
         Err(Usage(u)) => { eprintln!("{u}"); return Some(2) }
     };
     let start = inv.dir.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let Some(dir) = agent_api::resolve_project_dir(&start) else {
-        eprintln!("No Chronicle project here: nothing above {} holds chronicle.json or .chronicle/.", start.display());
-        return Some(1);
+    let dir = match project_dir_for(&inv.name, &start) {
+        Ok(d) => d,
+        Err(e) => { eprintln!("{e}"); return Some(1) }
     };
     match agent_api::call(&dir, &inv.name, &inv.args) {
         Ok(out) => {
@@ -159,6 +169,32 @@ mod tests {
         assert_eq!(parse(&a("project open /tmp/x /tmp/y")).unwrap_err().0, "Only one folder can be given to project open.");
         assert_eq!(parse(&a("round start --n three")).unwrap_err().0, "--n must be a whole number.");
         assert_eq!(parse(&a("round")).unwrap_err().0, "Usage: chronicle round <plan|start> [--flag value] [--json] [dir].");
+    }
+
+    /// `chronicle project open ~/code/foo` has to work from anywhere a person types it.
+    /// Every other verb answers about the project the shell is standing in, so that one
+    /// still has to be found before the call goes anywhere.
+    #[test]
+    fn opening_a_project_does_not_need_the_shell_to_already_be_in_one() {
+        let d = std::env::temp_dir().join(format!("chronicle-cli-start-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let elsewhere = d.join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let elsewhere = elsewhere.canonicalize().unwrap();
+        // from a folder that is not a Chronicle project and has none above it either
+        assert!(agent_api::resolve_project_dir(&elsewhere).is_none(), "nothing above {} is a project", elsewhere.display());
+
+        // project open gets past resolution and is handed the folder it started from
+        assert_eq!(project_dir_for("chronicle.project.open", &elsewhere).unwrap(), elsewhere);
+        // everything else still stops here, with the sentence that says why
+        assert_eq!(project_dir_for("chronicle.notes.list", &elsewhere).unwrap_err(),
+                   format!("No Chronicle project here: nothing above {} holds chronicle.json or .chronicle/.", elsewhere.display()));
+
+        // and inside a project, every verb resolves to the project root
+        let proj = d.join("proj");
+        std::fs::create_dir_all(proj.join(".chronicle")).unwrap();
+        let proj = proj.canonicalize().unwrap();
+        assert_eq!(project_dir_for("chronicle.notes.list", &proj).unwrap(), proj);
     }
 
     #[test]

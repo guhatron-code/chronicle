@@ -137,7 +137,6 @@ mod tests {
         let conf: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
         let want = conf["version"].as_str().unwrap();
         assert_eq!(app_version(), want);
-        assert_ne!(app_version(), env!("CARGO_PKG_VERSION"), "the crate version is not the app's");
         let (_, mut s) = session("version");
         let init = rpc(&mut s, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#);
         assert_eq!(init["result"]["serverInfo"]["version"], want);

@@ -43,6 +43,33 @@ pub(crate) fn verb_for(action: &str) -> &'static str {
     }
 }
 
+/// The gate on `project.open`, and the only one: every other action runs on a project
+/// the user already opened, so the allowlist speaks for it. This one runs on a folder
+/// the app has never seen, and opening a folder is what PUTS it on the allowlist — so
+/// whoever holds the token could otherwise hand the app `/etc`. Two conditions, and the
+/// canonical path back: the caller's string is never what the app is told to open.
+pub(crate) fn admit_project_open(dir: &str) -> Result<PathBuf, String> {
+    // relative means "from where the caller is standing", and the app is standing
+    // somewhere else entirely — resolving one here would open a folder nobody named
+    if !Path::new(dir).is_absolute() { return Err(format!("{dir} isn't an absolute path.")) }
+    // `..` inside an absolute path is no threat once it resolves: the resolved folder
+    // still has to be a Chronicle project to get past the next line
+    let canon = PathBuf::from(dir).canonicalize().map_err(|_| format!("There is no folder at {dir}."))?;
+    if !canon.is_dir() { return Err(format!("There is no folder at {dir}.")) }
+    if !(canon.join("chronicle.json").is_file() || canon.join(".chronicle").is_dir()) {
+        return Err(format!("{dir} isn't a Chronicle project."));
+    }
+    Ok(canon)
+}
+
+/// Make a directory 0700, but only if we are the ones creating it — `DirBuilder`'s mode
+/// applies to what it creates and leaves an existing folder (`$HOME`, say, when the
+/// token path is overridden) exactly as it was.
+fn make_private_dir(p: &Path) -> Result<(), String> {
+    use std::os::unix::fs::DirBuilderExt;
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(p).map_err(|e| e.to_string())
+}
+
 /// A fresh 32-byte token as hex, written 0600 — a stale `chronicle` process holding
 /// the previous launch's token is refused rather than answered.
 pub(crate) fn write_token_at(path: &Path) -> Result<String, String> {
@@ -52,12 +79,9 @@ pub(crate) fn write_token_at(path: &Path) -> Result<String, String> {
         .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut bytes))
         .map_err(|e| e.to_string())?;
     let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-    if let Some(p) = path.parent() {
-        std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
-        // a 0600 token inside a world-readable folder still leaks who is listening and
-        // lets another user drop files beside the socket — the folder is the user's alone
-        std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
-    }
+    // a 0600 token inside a world-readable folder still leaks who is listening and lets
+    // another user drop files beside the socket — a folder we make is the user's alone
+    if let Some(p) = path.parent() { make_private_dir(p)?; }
     let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600)
         .open(path).map_err(|e| e.to_string())?;
     f.write_all(token.as_bytes()).map_err(|e| e.to_string())?;
@@ -69,6 +93,15 @@ pub(crate) fn write_token_at(path: &Path) -> Result<String, String> {
 pub(crate) fn write_token() -> Result<String, String> { write_token_at(&token_path()) }
 
 const BAD_TOKEN: &str = "That token isn't this Chronicle's. Reopen the app and try again.";
+
+/// Equal lengths, then every byte, with no early exit. A `==` on the token would return
+/// the moment it found a mismatch, and a peer that can time the answer learns the token
+/// one byte at a time.
+fn token_matches(given: &str, want: &str) -> bool {
+    let (a, b) = (given.as_bytes(), want.as_bytes());
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 const NOT_A_REQUEST: &str = "That request isn't one line of JSON with token, dir, action and args.";
 /// One request is a few hundred bytes. A peer that writes and never sends a newline
 /// would otherwise grow `line` until the app runs out of memory, so the read stops here.
@@ -78,18 +111,24 @@ const MAX_REQUEST: u64 = 1 << 20;
 /// one line back. Anything malformed still gets a reply the caller can print.
 pub(crate) fn serve_connection(stream: UnixStream, token: &str, handle: &dyn Fn(Request) -> Reply) {
     let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(30)));
+    // and a write timeout: a peer that sends a request and then stops reading would
+    // otherwise park this thread in `write` for as long as it cared to
+    let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(30)));
     let mut reader = BufReader::new(match stream.try_clone() { Ok(s) => s, Err(_) => return }).take(MAX_REQUEST);
-    let mut line = String::new();
-    let Ok(n) = reader.read_line(&mut line) else { return };
+    // bytes, not a string: a line that isn't UTF-8 is still a request someone is waiting
+    // on an answer to, and `read_line` would fail it into silence
+    let mut buf = Vec::new();
+    let Ok(n) = reader.read_until(b'\n', &mut buf) else { return };
     // the cap was reached with no newline in sight: this is not a request, and the rest
     // of whatever the peer is sending is never read
-    let over = n as u64 >= MAX_REQUEST && !line.ends_with('\n');
+    let over = n as u64 == MAX_REQUEST && buf.last() != Some(&b'\n');
+    let line = String::from_utf8_lossy(&buf);
     let reply = if over {
         Reply { ok: false, summary: NOT_A_REQUEST.into(), data: None }
     } else {
         match serde_json::from_str::<Request>(line.trim()) {
             Err(_) => Reply { ok: false, summary: NOT_A_REQUEST.into(), data: None },
-            Ok(req) if req.token != token => Reply { ok: false, summary: BAD_TOKEN.into(), data: None },
+            Ok(req) if !token_matches(&req.token, token) => Reply { ok: false, summary: BAD_TOKEN.into(), data: None },
             Ok(req) => handle(req),
         }
     };
@@ -106,7 +145,9 @@ pub(crate) fn listen(token: String, handle: Arc<dyn Fn(Request) -> Reply + Send 
 
 pub(crate) fn listen_at(sock: &Path, token: String, handle: Arc<dyn Fn(Request) -> Reply + Send + Sync>) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    if let Some(p) = sock.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
+    // its own parent, the same way the token makes one: listening must not depend on
+    // `write_token` having run first
+    if let Some(p) = sock.parent() { make_private_dir(p)?; }
     let _ = std::fs::remove_file(sock);
     let listener = UnixListener::bind(sock).map_err(|e| format!("couldn't listen on {}: {e}", sock.display()))?;
     // the socket carries the token check, but only this user should be able to knock
@@ -273,5 +314,84 @@ mod tests {
         }
         assert!(!known_action("round.explode"));
         assert!(!known_action("chronicle.round.plan"), "the capability name is not the action name");
+    }
+
+    /// The one action that runs on a folder the app has never opened, so this check is
+    /// the whole of what keeps the open-project allowlist from being widened to
+    /// anywhere on the disk by whoever holds the token.
+    #[test]
+    fn only_a_real_chronicle_project_may_be_opened() {
+        let d = scratch("admit");
+        let proj = d.join("proj");
+        std::fs::create_dir_all(proj.join(".chronicle")).unwrap();
+        let by_json = d.join("byjson");
+        std::fs::create_dir_all(&by_json).unwrap();
+        std::fs::write(by_json.join("chronicle.json"), "{}").unwrap();
+
+        // admitted, and what comes back is the resolved path, not the caller's string
+        assert_eq!(admit_project_open(proj.to_str().unwrap()).unwrap(), proj.canonicalize().unwrap());
+        assert_eq!(admit_project_open(by_json.to_str().unwrap()).unwrap(), by_json.canonicalize().unwrap());
+        // `..` inside an absolute path is fine: it resolves, and what it resolves to
+        // still has to be a project
+        let climbed = format!("{}/proj/../proj", d.display());
+        assert_eq!(admit_project_open(&climbed).unwrap(), proj.canonicalize().unwrap());
+        let out = format!("{}/proj/../..", d.display());
+        assert!(admit_project_open(&out).is_err(), "climbing out lands somewhere that isn't a project");
+
+        // a relative path would resolve against the APP's directory, not the caller's
+        assert_eq!(admit_project_open("proj").unwrap_err(), "proj isn't an absolute path.");
+        assert_eq!(admit_project_open("../proj").unwrap_err(), "../proj isn't an absolute path.");
+        // a folder that isn't there, and a folder that is but isn't a project
+        let missing = d.join("nope");
+        assert_eq!(admit_project_open(missing.to_str().unwrap()).unwrap_err(),
+                   format!("There is no folder at {}.", missing.display()));
+        let plain = d.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert_eq!(admit_project_open(plain.to_str().unwrap()).unwrap_err(),
+                   format!("{} isn't a Chronicle project.", plain.display()));
+        // a file resolves, but it is not a folder, so it is not a folder we can open
+        let f = d.join("file.txt");
+        std::fs::write(&f, "x").unwrap();
+        assert_eq!(admit_project_open(f.to_str().unwrap()).unwrap_err(),
+                   format!("There is no folder at {}.", f.display()));
+        assert_eq!(admit_project_open("/etc").unwrap_err(), "/etc isn't a Chronicle project.");
+    }
+
+    #[test]
+    fn the_token_check_does_not_answer_faster_for_a_closer_guess() {
+        assert!(token_matches("abc", "abc"));
+        assert!(!token_matches("abd", "abc"));
+        assert!(!token_matches("ab", "abc"), "a prefix is not the token");
+        assert!(!token_matches("abcd", "abc"));
+        assert!(token_matches("", ""));
+    }
+
+    /// The mode belongs to folders we make. An overridden token path under an existing
+    /// folder (`$HOME`, in the worst case) must leave that folder exactly as it was.
+    #[test]
+    fn making_the_token_folder_never_re_chmods_one_that_was_already_there() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("dirmode");
+        std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o755)).unwrap();
+        write_token_at(&d.join("app.token")).unwrap();
+        assert_eq!(std::fs::metadata(&d).unwrap().permissions().mode() & 0o777, 0o755,
+                   "the folder was already there: its mode is the user's business, not ours");
+        write_token_at(&d.join("made/app.token")).unwrap();
+        assert_eq!(std::fs::metadata(d.join("made")).unwrap().permissions().mode() & 0o777, 0o700,
+                   "the one we made is ours to make private");
+    }
+
+    #[test]
+    fn a_request_line_that_isnt_utf8_still_gets_an_answer() {
+        let d = scratch("notutf8");
+        let sock = fake_app(&d, "secret", |_| Reply { ok: true, summary: "never reached".into(), data: None });
+        let mut s = UnixStream::connect(&sock).unwrap();
+        s.write_all(&[0xff, 0xfe, b'{', 0x80, b'\n']).unwrap();
+        s.flush().unwrap();
+        let mut line = String::new();
+        BufReader::new(s).read_line(&mut line).unwrap();
+        let reply: Reply = serde_json::from_str(line.trim()).unwrap();
+        assert!(!reply.ok);
+        assert_eq!(reply.summary, "That request isn't one line of JSON with token, dir, action and args.");
     }
 }
