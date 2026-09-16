@@ -18,6 +18,7 @@ mod ledger;
 mod agent_api;
 mod cli;
 mod mcp;
+mod bridge;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -81,6 +82,20 @@ struct InitState {
 /// against this allowlist — an arbitrary `dir` from the webview is rejected, so the
 /// per-project jail can't be relocated by the caller.
 pub(crate) struct OpenRoots(Mutex<HashSet<PathBuf>>);
+
+/// Every agent action in flight. The bridge thread parks on a channel; the frontend
+/// answers through `agent_action_reply` with the id it was handed, and that id is the
+/// only way back — a reply for an action that already timed out finds nothing waiting.
+pub(crate) struct BridgeState {
+    pending: Mutex<HashMap<u64, std::sync::mpsc::Sender<bridge::Reply>>>,
+    next: std::sync::atomic::AtomicU64,
+}
+
+#[tauri::command]
+fn agent_action_reply(state: State<BridgeState>, id: u64, ok: bool, summary: String, data: Option<Value>) -> Result<(), String> {
+    let tx = state.pending.lock().map_err(|e| e.to_string())?.remove(&id).ok_or("no such action is waiting")?;
+    tx.send(bridge::Reply { ok, summary, data }).map_err(|_| "the action already timed out".to_string())
+}
 
 /// Canonical key + a collision-free log path for an init run.
 fn canon_key(dir: &str) -> Result<(String, PathBuf), String> {
@@ -3340,6 +3355,10 @@ fn main() {
         .manage(web::WebState::new())
         .manage(blocklists::BlockState::new())
         .manage(notes::index::NotesState::new())
+        .manage(BridgeState {
+            pending: Mutex::new(HashMap::new()),
+            next: std::sync::atomic::AtomicU64::new(1),
+        })
         // Asynchronous on purpose: the synchronous form runs on the main thread,
         // so reading a big artifact off disk would stall the whole UI. Here the
         // read happens on a spawned thread and the responder answers when it is
@@ -3386,6 +3405,42 @@ fn main() {
                         if let Some(btn) = ns.standardWindowButton(b) { btn.setHidden(true); }
                     }
                 }
+            }
+            // The agent bridge: `chronicle --mcp` and the CLI reach the RUNNING app
+            // through a private socket under config_dir(). A fresh token each launch
+            // keeps a stale helper out; OpenRoots keeps a project the user never
+            // opened out. A bridge that can't start is a line on stderr, not a
+            // failed launch — everything that doesn't need the app still works.
+            match bridge::write_token() {
+                Ok(token) => {
+                    let h = app.handle().clone();
+                    let handler: Arc<dyn Fn(bridge::Request) -> bridge::Reply + Send + Sync> = Arc::new(move |req| {
+                        // only an opened project may be acted on; opening a project is the exception
+                        if req.action != "project.open" {
+                            let canon = PathBuf::from(&req.dir).canonicalize().unwrap_or_else(|_| PathBuf::from(&req.dir));
+                            let open = h.state::<OpenRoots>().0.lock().map(|s| s.contains(&canon)).unwrap_or(false);
+                            if !open {
+                                return bridge::Reply { ok: false, summary: "That project isn't open in Chronicle. Open it and try again.".into(), data: None };
+                            }
+                        }
+                        let st = h.state::<BridgeState>();
+                        let id = st.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        if let Ok(mut p) = st.pending.lock() { p.insert(id, tx); }
+                        let _ = h.emit("agent-action", json!({ "id": id, "dir": req.dir, "action": req.action, "args": req.args }));
+                        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                            Ok(r) => r,
+                            Err(_) => {
+                                // nothing is coming: drop the slot so a late reply is
+                                // refused rather than delivered to no one
+                                if let Ok(mut p) = st.pending.lock() { p.remove(&id); }
+                                bridge::Reply { ok: false, summary: "Chronicle didn't answer in time.".into(), data: None }
+                            }
+                        }
+                    });
+                    if let Err(e) = bridge::listen(token, handler) { eprintln!("agent bridge: {e}"); }
+                }
+                Err(e) => eprintln!("agent bridge: {e}"),
             }
             Ok(())
         })
@@ -3437,6 +3492,7 @@ fn main() {
             setup_status, setup_install, setup_fix_terminal_path, setup_cancel,
             setup_run_all, setup_open_login,
             journal_append, journal_read, ledger_mark, notify, draft_save_message,
+            agent_action_reply,
             global_search, status_report,
             github_repos, github_clone, github_create,
             watch_project, unwatch_project, launch_open_dir, quit_app,
