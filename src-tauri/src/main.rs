@@ -3474,6 +3474,32 @@ fn launch_open_dir(lo: State<LaunchOpen>) -> Option<String> {
     lo.0.lock().ok().and_then(|mut g| g.take())
 }
 
+/// A launch while Chronicle is already running. `--open <dir>` goes to the running app
+/// through the same gate `chronicle project open` uses; either way the running app is
+/// asked to come forward — by name over the bridge, so it is THAT process, never a
+/// second copy LaunchServices happens to know under the bundle id.
+fn hand_off_to_running_app(open: Option<&str>) -> i32 {
+    let opened = match open {
+        None => Ok(false),
+        Some(dir) => {
+            // a path typed at a shell is relative to that shell; the app is elsewhere
+            let abs = if Path::new(dir).is_absolute() { PathBuf::from(dir) } else {
+                std::env::current_dir().map(|c| c.join(dir)).unwrap_or_else(|_| PathBuf::from(dir))
+            };
+            bridge::admit_project_open(&abs.to_string_lossy()).and_then(|p| {
+                let canon = p.to_string_lossy().into_owned();
+                bridge::call(&p, "project.open", json!({ "dir": canon }), "open a project").map(|_| true)
+            })
+        }
+    };
+    let _ = bridge::call(Path::new("/"), "app.activate", json!({}), "come forward");
+    match opened {
+        Ok(true) => 0,
+        Ok(false) => { eprintln!("Chronicle is already running."); 0 }
+        Err(e) => { eprintln!("{e}"); 1 }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(code) = cli::run(&args[1..]) { std::process::exit(code); }
@@ -3526,6 +3552,12 @@ fn main() {
         cli::Launch::Usage(u) => { eprintln!("{u}\n\n{}", cli::help_text()); std::process::exit(2) }
         cli::Launch::Gui { open } => open,
     };
+    // One Chronicle, ever: a launch while the app is already up hands its request to the
+    // running app and ends here. It never opens a second window, and never gets far
+    // enough to overwrite the live token or sweep the live socket (round 8).
+    if bridge::running_instance(&bridge::socket_path()) {
+        std::process::exit(hand_off_to_running_app(launch_open.as_deref()));
+    }
     // Seed the allowlist from the recents the user built up — those were all opened
     // through open_project at some point, so they carry the same trust.
     let seeded: HashSet<PathBuf> = load_recents().iter()
@@ -3612,6 +3644,19 @@ fn main() {
                 Ok(token) => {
                     let h = app.handle().clone();
                     let handler: Arc<dyn Fn(bridge::Request) -> bridge::Reply + Send + Sync> = Arc::new(move |req| {
+                        // "come forward": what a second launch asks of the first (round 8).
+                        // Answered here, in Rust, with no project and no frontend round
+                        // trip — the token check that already happened is the whole gate.
+                        if req.action == "app.activate" {
+                            let h2 = h.clone();
+                            let _ = h.run_on_main_thread(move || {
+                                if let Some(w) = h2.get_webview_window("main") {
+                                    let _ = w.unminimize();
+                                    let _ = w.set_focus();
+                                }
+                            });
+                            return bridge::Reply { ok: true, summary: "Chronicle is in front.".into(), data: None };
+                        }
                         // a name the app doesn't perform never reaches the frontend: the
                         // socket is the edge of the app, and the list of actions is closed
                         if !bridge::known_action(&req.action) {

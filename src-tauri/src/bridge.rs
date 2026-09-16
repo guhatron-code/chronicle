@@ -137,8 +137,23 @@ pub(crate) fn serve_connection(stream: UnixStream, token: &str, handle: &dyn Fn(
     let _ = w.flush();
 }
 
+/// Is a Chronicle answering on this socket right now? A missing file, or one left by a
+/// crash that nobody listens on, is `false`; only a peer that ANSWERS is `true`. Connect
+/// alone is not proof (a just-closed listener can still accept for a moment), so an empty
+/// line is sent — not a request, and a Chronicle says so — and that sentence is the proof.
+/// This is what keeps a second launch from becoming a second window (main.rs).
+pub(crate) fn running_instance(sock: &Path) -> bool {
+    let Ok(mut s) = UnixStream::connect(sock) else { return false };
+    let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(3)));
+    let _ = s.set_write_timeout(Some(std::time::Duration::from_secs(3)));
+    if writeln!(s).is_err() { return false }
+    let mut line = String::new();
+    matches!(BufReader::new(s).read_line(&mut line), Ok(n) if n > 0)
+}
+
 /// Bind the socket and answer forever, one thread per connection. A socket file left
-/// behind by a crashed launch is removed first, so a bind never fails on our own litter.
+/// behind by a crashed launch is removed first, so a bind never fails on our own litter —
+/// but a socket that ANSWERS is another Chronicle, not litter, and is left alone.
 pub(crate) fn listen(token: String, handle: Arc<dyn Fn(Request) -> Reply + Send + Sync>) -> Result<(), String> {
     listen_at(&socket_path(), token, handle)
 }
@@ -148,6 +163,9 @@ pub(crate) fn listen_at(sock: &Path, token: String, handle: Arc<dyn Fn(Request) 
     // its own parent, the same way the token makes one: listening must not depend on
     // `write_token` having run first
     if let Some(p) = sock.parent() { make_private_dir(p)?; }
+    if running_instance(sock) {
+        return Err(format!("another Chronicle is already listening on {}.", sock.display()));
+    }
     let _ = std::fs::remove_file(sock);
     let listener = UnixListener::bind(sock).map_err(|e| format!("couldn't listen on {}: {e}", sock.display()))?;
     // the socket carries the token check, but only this user should be able to knock
@@ -211,6 +229,45 @@ mod tests {
             }
         });
         sock
+    }
+
+    /// A second Chronicle used to sweep the first one's socket away as "litter" and
+    /// overwrite its token, leaving the running app with a bridge nobody could reach
+    /// (round 8, Tasks/Untitled.md). A socket that answers is a neighbour, not litter.
+    #[test]
+    fn a_live_socket_is_not_litter() {
+        let d = scratch("live");
+        let p = d.join("app.sock");
+        listen_at(&p, "t".into(), Arc::new(|_| Reply { ok: true, summary: "first".into(), data: None })).unwrap();
+        let e = listen_at(&p, "t".into(), Arc::new(|_| Reply { ok: true, summary: "second".into(), data: None })).unwrap_err();
+        assert!(e.contains("already listening"), "{e}");
+        std::fs::write(d.join("app.token"), "t").unwrap();
+        let r = call_at(&p, &d.join("app.token"), Path::new("/p"), "round.plan", json!({}), "plan a round").unwrap();
+        assert_eq!(r.summary, "first", "the first listener must survive the second attempt");
+    }
+
+    #[test]
+    fn a_dead_socket_file_is_still_swept() {
+        let d = scratch("dead");
+        let p = d.join("app.sock");
+        { let _l = UnixListener::bind(&p).unwrap(); } // bound, then gone: the file stays, nobody answers
+        assert!(p.exists());
+        listen_at(&p, "t".into(), Arc::new(|_| Reply { ok: true, summary: "new".into(), data: None })).unwrap();
+        std::fs::write(d.join("app.token"), "t").unwrap();
+        let r = call_at(&p, &d.join("app.token"), Path::new("/p"), "round.plan", json!({}), "plan a round").unwrap();
+        assert_eq!(r.summary, "new");
+    }
+
+    #[test]
+    fn running_instance_is_true_only_for_a_listener() {
+        let d = scratch("running");
+        assert!(!running_instance(&d.join("missing.sock")));
+        let stale = d.join("stale.sock");
+        { let _l = UnixListener::bind(&stale).unwrap(); }
+        assert!(stale.exists());
+        assert!(!running_instance(&stale), "a crash leftover is not a running app");
+        let sock = fake_app(&d, "t", |_| Reply { ok: true, summary: String::new(), data: None });
+        assert!(running_instance(&sock));
     }
 
     #[test]
