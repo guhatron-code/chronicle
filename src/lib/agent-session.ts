@@ -362,6 +362,10 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     const state = str(params.state);
     if (state === "installing") {
       Object.assign(s, blank(), { phase: "installing" as AgentPhase, draft: s.draft });
+      // the thread and the queue are both gone; a card waiting in that queue
+      // must not go on waiting for a prompt that no longer exists (`live`
+      // only: a replay must never close the running round's card)
+      if (live) dropQueueWaiters(dir);
     } else if (state === "starting") {
       s.phase = "starting";
     } else if (state === "ready") {
@@ -492,14 +496,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     // first empties a one-message queue, so the card read "nothing is waiting",
     // sent its own prompt into the flush's in-flight one, and the single-flight
     // agent rejected it — the round never ran and the card said "stopped early".
-    if (params.error == null && str(params.stopReason) !== "cancelled" && s.queue.length > 0) {
-      const next = s.queue.shift()!;
-      // a round prompt may be the thing being flushed — it waits to hear which
-      // of these two happened, because the queue itself cannot tell it
-      void sendAgentMessage(dir, next)
-        .then(() => leftTheQueue(dir, next, "sent"))
-        .catch(() => leftTheQueue(dir, next, "dropped"));
-    }
+    if (params.error == null && str(params.stopReason) !== "cancelled") flushQueue(dir, s);
     return;
   }
 
@@ -637,6 +634,7 @@ function markRejected(s: AgentSessionState, perm: Extract<AgentEntry, { kind: "p
 export async function startAgentSession(dir: string): Promise<void> {
   const s = agentSessionFor(dir);
   Object.assign(s, blank(), { phase: "installing" as AgentPhase, draft: s.draft });
+  dropQueueWaiters(dir); // the queue went with the thread
   notify();
   try {
     await agentSessionStart(dir);
@@ -817,6 +815,7 @@ export async function resumeAgentSession(dir: string, id: string): Promise<void>
   const entries = await replayTranscript(dir, id);
   const s = agentSessionFor(dir);
   Object.assign(s, blank(), { phase: "installing" as AgentPhase, entries });
+  dropQueueWaiters(dir); // the queue went with the thread
   notify();
   try {
     await agentSessionResume(dir, id);
@@ -1036,7 +1035,14 @@ function sendWhenPaneIsFree(
       if (cur.queue.length > 0) {
         on.land(true);
         cur.queue.push(text);
-        waitOnQueue(dir, text, { sent: () => unqueueCard(dir, kind), dropped: on.fail });
+        waitOnQueue(dir, text, {
+          // asked again at the moment of sending: the wait can be long, and
+          // the card can be cancelled anywhere in it
+          stillWanted: on.stillWanted,
+          sent: () => unqueueCard(dir, kind),
+          abandon: on.abandon,
+          dropped: on.fail,
+        });
         notify();
         return;
       }
@@ -1050,16 +1056,47 @@ function sendWhenPaneIsFree(
   return un;
 }
 
-/* A prompt handed to the composer's queue, waiting its turn there. The queue
-   alone cannot say how it left: the turn-end flush sends it and the ✕ removes
-   it, and both simply make it disappear. So the two places that take a message
-   off the queue say which happened, and this is where the round card finds
-   out. */
-interface QueueWaiter { dir: string; text: string; sent: () => void; dropped: () => void }
+/* A prompt handed to the composer's queue, waiting its turn there.
+ *
+ * The queue alone cannot say what became of it: the turn-end flush sends it,
+ * the ✕ removes it, and a session restart throws the whole queue away — all
+ * three simply make it disappear. So every place that takes a message off the
+ * queue says which happened, and this is where the round card finds out.
+ *
+ * `stillWanted` is the important one. It is asked AGAIN at the moment of
+ * sending, not just when the prompt was handed over: a prompt can wait behind
+ * several of the user's messages, and in that time the round card's "Not
+ * running anymore" (or the plan card's Stop) can cancel it. A cancelled round
+ * must not be executed by a flush that happens later. */
+interface QueueWaiter {
+  dir: string;
+  text: string;
+  stillWanted: () => boolean;
+  sent: () => void;
+  /** it is no longer wanted — the user cancelled it while it waited */
+  abandon: () => void;
+  /** it was still wanted, but it will never be sent */
+  dropped: () => void;
+}
 const queueWaiters = new Set<QueueWaiter>();
-function waitOnQueue(dir: string, text: string, on: { sent: () => void; dropped: () => void }): void {
+function waitOnQueue(dir: string, text: string, on: Omit<QueueWaiter, "dir" | "text">): void {
   queueWaiters.add({ dir, text, ...on });
 }
+
+/** The flush is about to send this message. An ordinary typed message always
+ *  goes; a round prompt goes only if its card still wants it, and a cancelled
+ *  one takes itself out of the queue here instead of being executed. */
+function wantedFromQueue(dir: string, text: string): boolean {
+  for (const w of queueWaiters) {
+    if (w.dir !== dir || w.text !== text) continue;
+    if (w.stillWanted()) return true;
+    queueWaiters.delete(w);
+    w.abandon();
+    return false;
+  }
+  return true;
+}
+
 function leftTheQueue(dir: string, text: string, how: "sent" | "dropped"): void {
   for (const w of queueWaiters) {
     if (w.dir !== dir || w.text !== text) continue;
@@ -1067,6 +1104,41 @@ function leftTheQueue(dir: string, text: string, how: "sent" | "dropped"): void 
     if (how === "sent") w.sent(); else w.dropped();
     return;
   }
+}
+
+/** The whole queue is being thrown away — a session start, a resume, or the
+ *  backend announcing a fresh install. Nothing in it will ever be sent, so
+ *  every card waiting on it has to be closed rather than left open against a
+ *  prompt that no longer exists. */
+function dropQueueWaiters(dir: string): void {
+  for (const w of [...queueWaiters]) {
+    if (w.dir !== dir) continue;
+    queueWaiters.delete(w);
+    w.dropped();
+  }
+}
+
+/**
+ * Release the next queued message (FIFO, one per turn end).
+ *
+ * A round prompt that was cancelled while it waited is skipped rather than
+ * sent — and skipping it hands the turn to the message behind it, so a cancel
+ * can never leave the rest of the queue stuck waiting for a turn that is not
+ * coming.
+ */
+function flushQueue(dir: string, s: AgentSessionState): void {
+  let skipped = false;
+  while (s.queue.length > 0) {
+    const next = s.queue.shift()!;
+    if (!wantedFromQueue(dir, next)) { skipped = true; continue; }
+    // a round prompt waits to hear which of these two happened, because the
+    // queue itself cannot tell it
+    void sendAgentMessage(dir, next)
+      .then(() => leftTheQueue(dir, next, "sent"))
+      .catch(() => leftTheQueue(dir, next, "dropped"));
+    return;
+  }
+  if (skipped) notify(); // the queue strip lost a row and sent nothing
 }
 
 /** The card's message is going out now, so it is no longer waiting for the
