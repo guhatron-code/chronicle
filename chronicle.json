@@ -1,309 +1,900 @@
 {
   "chronicleVersion": 1,
   "name": "chronicle",
-  "description": "The Chronicle app itself · being rebuilt on React + shadcn with a full redesign on the Weave design system.",
-  "roots": {
-    "repo": "."
-  },
+  "description": "The build companion itself: a calm macOS app that shows where a multi-phase build stands.",
+  "roots": { "repo": "." },
   "workBranch": "react-shadcn",
   "generatedFrom": [
-    {
-      "path": "PRODUCT.md",
-      "sha256": "08185b98f4200dfe2c0932cd784a55149933aac3f76b3992692e9d80a8f1686c"
-    },
-    {
-      "path": "artifacts/audit/FIX-PLAN.md",
-      "sha256": "0ef5928660bdb90d8ba1f3960d2430b9e01713c6e44349ee586d3de5a8e90554"
-    },
-    {
-      "path": "design/CHRONICLE_DESIGN_PROMPT.md",
-      "sha256": "d8ce161a01232a83ed17846e5932e49c1d7725028690d0b2a16ea66dc301a3ce"
-    }
+    { "path": "PRODUCT.md", "sha256": "08185b98f4200dfe2c0932cd784a55149933aac3f76b3992692e9d80a8f1686c" },
+    { "path": "README.md", "sha256": "39e4a468fa7be867750b28674e5285a25dac27b8ae60f71e672dac54c056fbed" },
+    { "path": "artifacts/audit/AUDIT-2026-07-10.md", "sha256": "7dae364214b55466f7be8f6b33a15c454417199d761de9c3fbf2b0e950e3cd7f" },
+    { "path": "artifacts/audit/FIX-PLAN.md", "sha256": "0ef5928660bdb90d8ba1f3960d2430b9e01713c6e44349ee586d3de5a8e90554" },
+    { "path": "design/CHRONICLE_V2_HANDOFF.md", "sha256": "5085194068bf27291f767f647a8a1b6a1af1a589ffe9952c5fb0818e4506b8d6" },
+    { "path": "c-zed/PLAN.md", "sha256": "fd4253b199d240e11796aba7327a6938dfb33d970884f18c12790778eb47592d" },
+    { "path": "c-zed/PROGRESS.md", "sha256": "26f488ed3e5cc1f23f5ad0ca6740b69e6293dc95d4495bdb7f2e67c4f8f6cf04" },
+    { "path": "c-zed/FOLLOWUP-step-evidence.md", "sha256": "bad14ba578a7bf1b9542d539a683900205bb4e1c565a673beabbe34f587fba8c" },
+    { "path": "c-setup/PLAN.md", "sha256": "02cdc9c72d1ab631f485c0b794f67f3d0473a3ed78d059b4a51acfed46f217e2" },
+    { "path": "c-setup/PROGRESS.md", "sha256": "97f6b088137181ef95916b58345eb27fc51d119c8238b202a796292f2401053b" },
+    { "path": "docs/superpowers/plans/2026-07-18-agent-composer-improvements.md", "sha256": "5bae547b1bfc123ad9456ef25ad04bed2fbb5a80357e37eca66696576255b4ea" },
+    { "path": "docs/superpowers/specs/2026-07-18-agent-composer-improvements-design.md", "sha256": "1125ee24e06457014c915bf50f5bfc3f1c08a18576f8bbb12ba3b789c32560d3" },
+    { "path": "docs/superpowers/plans/2026-07-18-agent-chat-enhancements.md", "sha256": "47a0821137ec8469d4faa90725fd141855690530b4df5d97be38104592c33ddf" },
+    { "path": "docs/superpowers/specs/2026-07-18-agent-chat-enhancements-design.md", "sha256": "d4ddf55b17a4d809994393c5b67882dff8c7f4bef96f13fa8827d4077cff6844" },
+    { "path": "docs/superpowers/plans/2026-09-08-energy-efficiency.md", "sha256": "0426658e36e0a6a221c76519f9da27fb955649bcb175b0cd893e0a536c061e22" },
+    { "path": "docs/superpowers/specs/2026-09-08-energy-efficiency-design.md", "sha256": "115e69b46dcc202cace8e7c8d4dafa0d3ae118194bc1088c117f2cab176e052f" },
+    { "path": "docs/superpowers/plans/2026-09-09-web-pane.md", "sha256": "befe583d5d5b77abe0f874b48788808b6d430b7a353fcdce0e1891db6cd35ca8" },
+    { "path": "docs/superpowers/specs/2026-09-08-web-pane-design.md", "sha256": "fae9734bf118424d544661913bec41b12448a6924e2f52b2e85c14667cb667fd" },
+    { "path": "docs/superpowers/plans/2026-09-09-notes.md", "sha256": "b4d6d564da1b49860e4fdf7fc57106e7a3ad1009fe24eefd107f9f2af2623bdc" },
+    { "path": "docs/superpowers/specs/2026-09-09-notes-design.md", "sha256": "ee3854afc8eafa7e0965a4bd2bac9f10309976471f9e96bf594b78a552b7760d" },
+    { "path": "docs/superpowers/plans/2026-09-10-repo-editing.md", "sha256": "7007b7630b5f43535dfb8d3779441f61a3edd8253abc0c0b60d28f058b923734" },
+    { "path": "docs/superpowers/specs/2026-09-10-repo-editing-and-history-design.md", "sha256": "befe2b497c2e1ef3daad78fbfa8f9519f3e0348331a8d73a95f144f329f0feb5" },
+    { "path": "docs/superpowers/plans/2026-09-13-roadmap-accuracy.md", "sha256": "6e52f21d43d2199a1ebb35113fb7946bfabbb3a960d62a3041c1115c5a071462" },
+    { "path": "docs/superpowers/specs/2026-09-13-roadmap-accuracy-design.md", "sha256": "e49db7da10eb43bb5e90d0ad5da96443edc598e6417a9c4108ad3b2fdb822988" },
+    { "path": "docs/superpowers/plans/2026-09-16-agent-api-notes-state.md", "sha256": "e3ee7f48e3de70569500cbca608c976ce1a88b8c441807282e2d5a71d712b851" },
+    { "path": "docs/superpowers/plans/2026-09-16-rounds-you-can-watch.md", "sha256": "d7a09133431165770d20a8a27b8ee8c05d4cc0d49e62995a6873ea67e5d34032" },
+    { "path": "docs/superpowers/plans/2026-09-16-agent-actions-bridge.md", "sha256": "61364fd75d70bae05712965b27920e28ab5d823702632fbd81546b1df98a0330" },
+    { "path": "docs/superpowers/specs/2026-09-16-agent-access-and-visible-rounds-design.md", "sha256": "297f96b8134ce5c5162c59f48c09bff5ce517027c79cdf0209a70b024867e868" },
+    { "path": "fixes/phase_8_fixes_plan.md", "sha256": "5848f014bf3bd3e120d43078241cb8d1b463b8283f97ec2ef9c315618dc43d9a" },
+    { "path": "fixes/phase_9_fixes_plan.md", "sha256": "c6d918161447511cfa1507b00f01866cd0a867de3fd6531e22bf37b95ecd4f01" }
   ],
   "spine": [
-    {
-      "path": "PRODUCT.md"
-    },
-    {
-      "path": "artifacts/audit/FIX-PLAN.md"
-    },
-    {
-      "path": "design/CHRONICLE_DESIGN_PROMPT.md"
-    },
-    {
-      "path": "design/CHRONICLE_V2_HANDOFF.md"
-    }
+    { "path": "PRODUCT.md" },
+    { "path": "README.md" }
   ],
   "stages": [
     {
-      "title": "Part 1 — Foundations (no designs needed)",
-      "note": "engine and plumbing; each ends with a signed tag",
+      "title": "Part 1 · Making the old app trustworthy",
+      "note": "A four-pass audit found 140 problems. These phases fixed the foundation before anything was redrawn.",
       "phases": [
         {
           "id": "PA",
-          "name": "The new toolchain",
-          "desc": "React + Vite + every shadcn/Kibo component, themed from the Weave design system; the app builds and runs both ways.",
-          "status": {
-            "done_when": [
-              {
-                "tag": "phase-a"
-              }
-            ]
-          },
+          "name": "The typed bridge",
+          "desc": "Give the screen and the engine one clear, checked way to talk to each other, so nothing can call the wrong thing by accident.",
           "items": [
-            "Vite + React + every shadcn and Kibo component, themed from the Weave tokens.",
-            "Tauri serves the dev server in dev and the built bundle in release.",
-            "A typed bridge for every backend command."
+            "Name every request the screen can make of the engine, all 28 of them.",
+            "Move live terminal output and the window frame onto the same bridge."
           ],
-          "docs": [
-            {
-              "path": "design/CHRONICLE_V2_HANDOFF.md"
-            }
-          ]
+          "docs": [{ "path": "artifacts/audit/AUDIT-2026-07-10.md" }],
+          "status": { "done_when": [{ "tag": "phase-a" }] }
         },
         {
           "id": "R1",
           "name": "Trust and safety",
-          "desc": "The app can only read the folders you opened; roadmap sessions ask consent and can be cancelled; nothing outlives the window.",
-          "status": {
-            "done_when": [
-              {
-                "tag": "r1"
-              }
-            ]
-          },
+          "desc": "Nothing happens to a project without you asking for it, and the app can only ever read inside the folders you opened.",
           "items": [
-            "Roadmap sessions ask consent first and can be cancelled.",
-            "The app can only read folders you opened.",
-            "Nothing outlives the window — every child process is stopped and cleaned up."
-          ]
+            "Ask before a background session ever starts, and make Cancel actually stop it.",
+            "Fence every file read to the projects you opened, refusing shortcuts that point outside.",
+            "Clean up every background process when a window closes."
+          ],
+          "paste": [{ "path": "artifacts/audit/PROMPT-code.md", "into": "Claude Code", "when": "a fresh session at the project root" }],
+          "docs": [{ "path": "artifacts/audit/FIX-PLAN.md" }],
+          "status": { "done_when": [{ "tag": "r1" }] }
         },
         {
           "id": "R2",
           "name": "One-click helpers",
-          "desc": "Switch branch, clean up workspaces, and file freshness checks become real actions instead of copied commands.",
-          "status": {
-            "done_when": [
-              {
-                "tag": "r2"
-              }
-            ]
-          },
+          "desc": "Replace copy-this-command chips with buttons that just do the thing, and make the file reader notice when a file changed underneath it.",
           "items": [
-            "Switch branch and clean up workspaces become real buttons.",
-            "The file reader learns size, freshness, and file kind."
-          ]
+            "Turn save, publish and bring down into real buttons.",
+            "Tell you honestly when what you are reading is no longer what is on disk."
+          ],
+          "paste": [{ "path": "artifacts/audit/PROMPT-code.md", "into": "Claude Code", "when": "continuing the hardening pass" }],
+          "status": { "done_when": [{ "tag": "r2" }] }
         },
         {
           "id": "R3",
           "name": "Honest rules",
-          "desc": "A roadmap rule that can't be checked now says so; the rule engine is tested against a fixture project.",
-          "status": {
-            "done_when": [
-              {
-                "tag": "r3"
-              }
-            ]
-          },
+          "desc": "The roadmap engine only ever claims what it can prove, and a locked-down test proves it keeps doing so.",
           "items": [
-            "A rule that can't be checked says so instead of silently failing.",
-            "The rule engine is tested against a fixture project.",
-            "This roadmap file itself was rewritten to track the rebuild."
-          ]
+            "A rule the app cannot check is shown as unknown, never quietly counted as done.",
+            "A repeatable test pins the engine's answers so a future change cannot drift them.",
+            "Chronicle starts using its own roadmap file on itself."
+          ],
+          "paste": [{ "path": "artifacts/audit/PROMPT-code.md", "into": "Claude Code", "when": "continuing the hardening pass" }],
+          "status": { "done_when": [{ "tag": "r3" }] }
         },
         {
           "id": "R4",
-          "name": "The kanban engine",
-          "desc": "Task storage, image attachments, and the session that turns queued tasks into a fix plan.",
-          "status": {
-            "done_when": [
-              {
-                "tag": "r4"
-              }
-            ]
-          },
+          "name": "The task board engine",
+          "desc": "Write bugs and ideas down as cards, attach screenshots, and freeze a batch of them into a round the agent can work through.",
           "items": [
-            "Tasks and screenshots live inside the project and travel with it.",
-            "'Ready to execute' turns queued tasks into a fix plan the roadmap can track."
-          ]
+            "Cards, columns and attachments, stored inside the project so they travel with it.",
+            "A frozen round turns into a plan file, a prompt file, and a phase on the roadmap."
+          ],
+          "paste": [{ "path": "artifacts/audit/PROMPT-code.md", "into": "Claude Code", "when": "continuing the hardening pass" }],
+          "status": { "done_when": [{ "tag": "r4" }] }
         }
       ]
     },
     {
-      "title": "Part 2 — The design batch",
-      "note": "every screen is drawn before any is built",
+      "title": "Part 2 · The redesign",
       "phases": [
         {
           "id": "DB",
-          "name": "All 30 screens get drawn",
-          "desc": "The full redesign — picker, sidebar, roadmap, repo, terminal, and the new kanban — drawn in Claude Design on the Weave design system.",
-          "paste": [
-            {
-              "path": "design/CHRONICLE_DESIGN_PROMPT.md",
-              "into": "Claude Design",
-              "when": "run the whole file as one batch"
-            }
+          "name": "Every screen gets drawn",
+          "desc": "The whole app is redesigned from scratch on the Weave design system. Six decks, thirty frames, every state drawn before any of it is built.",
+          "items": [
+            "Send the full design brief out as one batch.",
+            "Comps come back and are read against the brief frame by frame.",
+            "The accepted decks become a written contract the build has to match."
           ],
-          "status": {
-            "done_when": [
-              {
-                "tag": "design-accepted"
-              }
-            ],
-            "current_labels": [
-              {
-                "when": [
-                  {
-                    "file_exists": "design/CHRONICLE_DESIGN_PROMPT.md"
-                  }
-                ],
-                "label": "with the designer"
-              }
-            ],
-            "default_label": "being written"
-          },
-          "docs": [
-            {
-              "path": "design/CHRONICLE_V2_HANDOFF.md"
-            }
-          ]
+          "paste": [{ "path": "design/CHRONICLE_DESIGN_PROMPT.md", "into": "Claude Design", "when": "one paste, the whole batch at once" }],
+          "docs": [{ "path": "design/CHRONICLE_V2_HANDOFF.md" }],
+          "status": { "done_when": [{ "tag": "design-accepted" }] }
         }
       ]
     },
     {
-      "title": "Part 3 — The build (needs the designs back)",
-      "note": "one slice at a time: build · review · wire · review the wiring",
+      "title": "Part 3 · Building version 2",
+      "note": "One slice at a time, each checked against its deck before the next one starts.",
       "phases": [
         {
           "id": "C1",
-          "name": "Launch screen and dialogs",
-          "desc": "The picker, the project switcher, confirms, toasts, and the shortcuts overlay.",
-          "status": {
-            "done_when": [
-              {
-                "tag": "slice-c1"
-              }
-            ]
-          },
-          "items": [
-            "The launch screen with live recents.",
-            "The project switcher, confirms, toasts, and the shortcuts overlay."
-          ],
-          "docs": [
-            {
-              "path": "design/CHRONICLE_V2_HANDOFF.md"
-            }
-          ]
+          "name": "The opening screen and its dialogs",
+          "desc": "The screen you land on: your recent projects, the switcher, and every confirm and warning that can appear over it.",
+          "paste": [{ "path": "design/CHRONICLE_V2_HANDOFF.md", "into": "Claude Code", "when": "the contract each slice is built against" }],
+          "status": { "done_when": [{ "tag": "slice-c1" }] }
         },
         {
           "id": "C2",
           "name": "The window frame and sidebar",
-          "desc": "Project tabs, the new icon sidebar, and the live status header.",
-          "status": {
-            "done_when": [
-              {
-                "tag": "slice-c2"
-              }
-            ]
-          },
-          "items": [
-            "Project tabs and the icon sidebar.",
-            "The live status header and the resizable terminal column."
-          ]
+          "desc": "Project tabs along the top, the three-surface sidebar down the left, and the honest line that tells you when something is degraded.",
+          "status": { "done_when": [{ "tag": "slice-c2" }] }
         },
         {
           "id": "C3",
           "name": "The roadmap",
-          "desc": "Current state, what needs you, the phase timeline, and the consent-first roadmap builder.",
-          "status": {
-            "done_when": [
-              {
-                "tag": "slice-c3"
-              }
-            ]
-          },
-          "items": [
-            "The current state, what needs you, and the phase timeline.",
-            "The consent-first roadmap builder with a visible cancel.",
-            "The full phase view with its documents and saves."
-          ]
+          "desc": "The main view: where the build stands right now, what needs you, the always-on documents, and the phase timeline.",
+          "status": { "done_when": [{ "tag": "slice-c3" }] }
         },
         {
           "id": "C4",
           "name": "Phase detail",
-          "desc": "The full phase view with its documents and saves — plus the one-click Start this phase button.",
+          "desc": "One phase opened up: its steps, the exact files to paste and where they go, and the saves that belong to it.",
+          "status": { "done_when": [{ "tag": "slice-c4" }] }
+        },
+        {
+          "id": "C5",
+          "name": "Files and history",
+          "desc": "The file tree, a reader that knows when a file changed on disk, and your project history in plain words instead of git jargon.",
+          "status": { "done_when": [{ "tag": "slice-c5" }] }
+        },
+        {
+          "id": "C6",
+          "name": "Terminals",
+          "desc": "Real shells inside the app, surviving pane and project switches, with tab labels that tell the truth about what is running.",
+          "status": { "done_when": [{ "tag": "slice-c6" }] }
+        },
+        {
+          "id": "C7",
+          "name": "The task board",
+          "desc": "The kanban board built to its deck: cards, columns, attachments, and the ready-to-execute flow that freezes a round.",
+          "status": { "done_when": [{ "tag": "slice-c7" }] }
+        },
+        {
+          "id": "C8",
+          "name": "The rebuild replaces the old app",
+          "desc": "Version 2 becomes the real app and ships as 0.2.0.",
+          "status": { "done_when": [{ "tag": "v2-merged" }, { "tag": "v0.2.0" }] }
+        }
+      ]
+    },
+    {
+      "title": "Part 4 · After the rebuild (0.2)",
+      "phases": [
+        {
+          "id": "FB",
+          "name": "The feature batch",
+          "desc": "Seven features land together on top of the rebuild and ship as 0.2.0.",
+          "status": { "done_when": [{ "tag": "v0.2.0" }] }
+        },
+        {
+          "id": "PR",
+          "name": "Twelve small releases",
+          "desc": "0.2.1 through 0.2.12: the agent-resolution fix, the self-installing skill, and seven rounds of bug fixes worked off the task board.",
+          "items": [
+            "Each round of bugs was frozen on the board, written up as a plan and a prompt, and worked through.",
+            "139 of the 140 audit findings are closed."
+          ],
+          "docs": [
+            { "path": "fixes/phase_1_fixes_plan.md" },
+            { "path": "fixes/phase_7_fixes_plan.md" }
+          ],
+          "status": { "done_when": [{ "tag": "v0.2.12" }] }
+        }
+      ]
+    },
+    {
+      "title": "Part 5 · The agent arrives (0.3)",
+      "note": "Chronicle stops watching Claude Code from the outside and starts driving it.",
+      "phases": [
+        {
+          "id": "Z-0",
+          "name": "The agent designs",
+          "desc": "Deck 7 is drawn and accepted: the chat thread, the tool cards, the permission cards, and every state the pane can be in.",
+          "paste": [{ "path": "c-zed/DESIGN_PROMPT.md", "into": "Claude Design", "when": "one paste, before any pane is built" }],
+          "docs": [{ "path": "c-zed/PLAN.md" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-zed/PROGRESS.md", "pattern": "(?m)^.*Deck 7 comps" } }] }
+        },
+        {
+          "id": "Z-1",
+          "name": "The agent bridge",
+          "desc": "The engine can start a real Claude Code session, send it a message, stream back what it says, and answer its permission questions.",
+          "items": [
+            "Everything the agent writes is fenced to the folders you opened.",
+            "Every change is recorded before it lands, so it can always be undone.",
+            "A cancelled turn can never leave a question hanging."
+          ],
+          "paste": [{ "path": "c-zed/PROMPT.md", "into": "Claude Code", "when": "a fresh session at the project root" }],
+          "docs": [{ "path": "c-zed/PROGRESS.md" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-zed/PROGRESS.md", "pattern": "(?m)^## Z-1 · " } }] }
+        },
+        {
+          "id": "Z-2a",
+          "name": "The three-part window",
+          "desc": "The right side stacks the agent above the terminal. Content, agent and terminal each show or hide on their own, and the last one open always stays open.",
+          "paste": [{ "path": "c-zed/PROMPT.md", "into": "Claude Code", "when": "continuing the agent update" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-zed/PROGRESS.md", "pattern": "(?m)^## Z-2a · " } }] }
+        },
+        {
+          "id": "Z-2b",
+          "name": "The agent pane",
+          "desc": "The pane itself, built to Deck 7: the thread, a card for every kind of thing the agent does, and the box you type into.",
+          "paste": [{ "path": "c-zed/PROMPT.md", "into": "Claude Code", "when": "continuing the agent update" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-zed/PROGRESS.md", "pattern": "(?m)^## Z-2b · " } }] }
+        },
+        {
+          "id": "Z-3",
+          "name": "Review and undo",
+          "desc": "Every file the agent touched is reviewable, keepable and undoable, one at a time or all at once. A snapshot before each message lets you rewind to any point in the conversation.",
+          "items": [
+            "Undo still works after you quit and reopen the app.",
+            "Files the agent created are deleted again when you rewind past them."
+          ],
+          "paste": [{ "path": "c-zed/PROMPT.md", "into": "Claude Code", "when": "continuing the agent update" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-zed/PROGRESS.md", "pattern": "(?m)^## Z-3 · " } }] }
+        },
+        {
+          "id": "Z-4",
+          "name": "Wired into Chronicle",
+          "desc": "Starting a phase and running a round of fixes both land in the agent pane, and past conversations can be reopened or picked back up.",
+          "items": [
+            "A phase prompt arrives unsent, so you can read it before it goes.",
+            "A round is only called done when the board says so, never because the agent claimed it."
+          ],
+          "paste": [{ "path": "c-zed/PROMPT.md", "into": "Claude Code", "when": "continuing the agent update" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-zed/PROGRESS.md", "pattern": "(?m)^## Z-4 · " } }] }
+        },
+        {
+          "id": "Z-5",
+          "name": "Five refinements",
+          "desc": "Plain-English publish and bring-down results, clickable file paths in the terminal, honest terminal tab labels, a better save-message prompt, and a real progress bar for app updates.",
+          "paste": [{ "path": "c-zed/PROMPT.md", "into": "Claude Code", "when": "continuing the agent update" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-zed/PROGRESS.md", "pattern": "(?m)^## Z-5 · " } }] }
+        },
+        {
+          "id": "Z-6",
+          "name": "Ship 0.3.0",
+          "desc": "The full sweep, then a signed and notarized release with an over-the-air update for everyone already running Chronicle.",
+          "status": { "done_when": [{ "tag": "v0.3.0" }, { "file_matches": { "path": "c-zed/PROGRESS.md", "pattern": "(?m)^## Z-6 · " } }] }
+        }
+      ]
+    },
+    {
+      "title": "Part 6 · Two fix releases",
+      "phases": [
+        {
+          "id": "PT",
+          "name": "0.3.1 and 0.3.2",
+          "desc": "The agent could not find Node when Chronicle was launched from the Finder, and it would not start on its own when Claude was already installed. Both fixed and released.",
+          "status": { "done_when": [{ "tag": "v0.3.2" }] }
+        }
+      ]
+    },
+    {
+      "title": "Part 7 · Getting set up without a terminal (0.4)",
+      "note": "The point where Chronicle stops assuming you already have a developer machine.",
+      "phases": [
+        {
+          "id": "S-0",
+          "name": "The setup and help designs",
+          "desc": "Deck 8 is drawn and accepted: the setup checklist in every state, the repair flows, the sign-in hand-offs, and the help screen.",
+          "paste": [{ "path": "c-setup/DESIGN_PROMPT.md", "into": "Claude Design", "when": "one paste, before any screen is built" }],
+          "docs": [{ "path": "c-setup/PLAN.md" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-setup/PROGRESS.md", "pattern": "(?m)^## S-0 · " } }] }
+        },
+        {
+          "id": "S-1",
+          "name": "The doctor",
+          "desc": "The part that works out what your machine is missing and installs it for you, with no password prompts and nothing touched outside your own home folder.",
+          "items": [
+            "Six checks: Claude, signing in to Claude, Node, terminal access, GitHub, and the plugin pack.",
+            "Downloads are checked against the vendor's own checksum before anything is unpacked.",
+            "The terminal-access repair writes one fenced block and never overwrites something you wrote by hand."
+          ],
+          "paste": [{ "path": "c-setup/PROMPT.md", "into": "Claude Code", "when": "a fresh session at the project root" }],
+          "docs": [{ "path": "c-setup/PROGRESS.md" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-setup/PROGRESS.md", "pattern": "(?m)^## S-1 · " } }] }
+        },
+        {
+          "id": "S-2",
+          "name": "The setup screen",
+          "desc": "The checklist you actually see, with a live percentage while things install, an honest message when one fails, and a Set everything up for me button.",
+          "items": [
+            "It appears over the opening screen the first time something is missing, and stays reachable afterwards as a health check.",
+            "Signing in opens a real Terminal window, and the row advances by itself once you are through."
+          ],
+          "paste": [{ "path": "c-setup/PROMPT.md", "into": "Claude Code", "when": "continuing the setup update" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-setup/PROGRESS.md", "pattern": "(?m)^## S-2 · " } }] }
+        },
+        {
+          "id": "S-3",
+          "name": "The help screen",
+          "desc": "Seven how-do-I recipes that can take you to the right screen, a plain glossary, the real keyboard shortcuts, and one search across all of it.",
+          "paste": [{ "path": "c-setup/PROMPT.md", "into": "Claude Code", "when": "continuing the setup update" }],
+          "status": { "done_when": [{ "file_matches": { "path": "c-setup/PROGRESS.md", "pattern": "(?m)^## S-3 · " } }] }
+        },
+        {
+          "id": "S-4",
+          "name": "Ship 0.4.0",
+          "desc": "Setup, help, and the agent pane reshaped into a real chat, released together. Two invisible-button bugs and a false sign-in warning were caught and fixed on the way.",
+          "status": { "done_when": [{ "tag": "v0.4.0" }, { "file_matches": { "path": "c-setup/PROGRESS.md", "pattern": "(?m)^## S-4 · " } }] }
+        }
+      ]
+    },
+    {
+      "title": "Part 8 · A composer that feels like a chat box (0.5)",
+      "note": "Five small changes to the box you type into.",
+      "phases": [
+        {
+          "id": "CI-1",
+          "name": "Somewhere for attachments to live",
+          "desc": "A file you attach is copied into the project so the agent can read it from disk, never clobbering a file that is already there.",
+          "paste": [{ "path": "docs/superpowers/plans/2026-07-18-agent-composer-improvements.md", "into": "Claude Code", "when": "a fresh session at the project root" }],
+          "docs": [{ "path": "docs/superpowers/specs/2026-07-18-agent-composer-improvements-design.md" }],
+          "status": { "done_when": [{ "commit_subject": "(?i)agent_attach seam" }] }
+        },
+        {
+          "id": "CI-2",
+          "name": "A warning before Full auto",
+          "desc": "Turning the agent fully loose asks you once per session first, so it can never happen by a stray click.",
+          "paste": [{ "path": "docs/superpowers/plans/2026-07-18-agent-composer-improvements.md", "into": "Claude Code", "when": "continuing the composer update" }],
+          "status": { "done_when": [{ "commit_subject": "(?i)warn once per session before full auto" }] }
+        },
+        {
+          "id": "CI-3",
+          "name": "Enter sends, and the box grows",
+          "desc": "Enter sends the message, Shift and Enter adds a line, and the box grows as you type instead of scrolling inside itself.",
+          "paste": [{ "path": "docs/superpowers/plans/2026-07-18-agent-composer-improvements.md", "into": "Claude Code", "when": "continuing the composer update" }],
+          "status": { "done_when": [{ "commit_subject": "(?i)enter sends, shift\\+enter newline" }] }
+        },
+        {
+          "id": "CI-4",
+          "name": "Attach files",
+          "desc": "Add a file by picking it, dragging it in from the Finder, or pasting a screenshot straight from the clipboard.",
+          "paste": [{ "path": "docs/superpowers/plans/2026-07-18-agent-composer-improvements.md", "into": "Claude Code", "when": "continuing the composer update" }],
+          "status": { "done_when": [{ "commit_subject": "(?i)attach files in the composer" }] }
+        },
+        {
+          "id": "CI-5",
+          "name": "Drag a file into a terminal",
+          "desc": "Hold Shift and drag an attachment onto a terminal to type its path there. It never presses Enter for you.",
+          "paste": [{ "path": "docs/superpowers/plans/2026-07-18-agent-composer-improvements.md", "into": "Claude Code", "when": "the last task of the composer update" }],
+          "status": { "done_when": [{ "commit_subject": "(?i)shift-drag an attachment path into a terminal" }] }
+        }
+      ]
+    },
+    {
+      "title": "Part 9 · Four things the chat was missing (0.5)",
+      "phases": [
+        {
+          "id": "CE-1",
+          "name": "Choose how hard it thinks",
+          "desc": "An effort picker next to the model picker, built from whatever the agent itself says it offers. If it offers nothing, nothing is shown.",
+          "paste": [{ "path": "docs/superpowers/plans/2026-07-18-agent-chat-enhancements.md", "into": "Claude Code", "when": "a fresh session at the project root" }],
+          "docs": [{ "path": "docs/superpowers/specs/2026-07-18-agent-chat-enhancements-design.md" }],
+          "status": { "done_when": [{ "commit_subject": "(?i)effort selector via a shared configselect" }] }
+        },
+        {
+          "id": "CE-2",
+          "name": "Line messages up mid-turn",
+          "desc": "Type while the agent is still working and your messages queue up, then send themselves in order when the turn ends.",
+          "paste": [{ "path": "docs/superpowers/plans/2026-07-18-agent-chat-enhancements.md", "into": "Claude Code", "when": "continuing the chat update" }],
+          "status": { "done_when": [{ "commit_subject": "(?i)queue messages during a turn" }] }
+        },
+        {
+          "id": "CE-3",
+          "name": "See the edit, side by side",
+          "desc": "Open any edit card in the conversation into a before-and-after view without leaving the chat.",
+          "paste": [{ "path": "docs/superpowers/plans/2026-07-18-agent-chat-enhancements.md", "into": "Claude Code", "when": "continuing the chat update" }],
+          "status": { "done_when": [{ "commit_subject": "(?i)expand edit tool cards to a side-by-side diff" }] }
+        },
+        {
+          "id": "CE-4",
+          "name": "The agent's own plan, live",
+          "desc": "When the agent writes itself a to-do list, that list appears in the chat and ticks itself off as it goes.",
+          "paste": [{ "path": "docs/superpowers/plans/2026-07-18-agent-chat-enhancements.md", "into": "Claude Code", "when": "the last task of the chat update" }],
+          "status": { "done_when": [{ "commit_subject": "(?i)render the agent's live plan/todo list" }] }
+        }
+      ]
+    },
+    {
+      "title": "Part 10 · Shipping 0.5",
+      "phases": [
+        {
+          "id": "V50",
+          "name": "Ship 0.5.0",
+          "desc": "The composer and chat updates released together, with Stop no longer throwing away your queued messages.",
+          "status": { "done_when": [{ "tag": "v0.5.0" }] }
+        },
+        {
+          "id": "V51",
+          "name": "Polish and a full icon sweep",
+          "desc": "The composer tidied up and every icon in the app redrawn as a proper vector. Released as 0.5.1.",
+          "status": { "done_when": [{ "tag": "v0.5.1" }] }
+        }
+      ]
+    },
+    {
+      "title": "Part 11 · The composer's menus",
+      "note": "Shipped in 0.6.0. There is no written plan for this one in the repo, so the roadmap follows the saves instead.",
+      "phases": [
+        {
+          "id": "M-1",
+          "name": "The slash menu",
+          "desc": "Typing a slash opens a menu of everything you can run. The agent's own commands and skills sit under their plugin's name, and Chronicle's own commands sit under their own heading so you can see which ones never reach the agent.",
+          "items": [
+            "The agent's commands arrive over the wire, so a project skill needs no special handling.",
+            "Chronicle's own commands run against the session in front of you: undo, keep, rewind.",
+            "Arrow keys move and Enter picks, and Enter never sends the message while the menu is open."
+          ],
+          "paste": [{ "label": "the plan for the composer menus", "into": "Claude Code", "when": "Never written down. It was built straight from the saves." }],
+          "status": {
+            "done_when": [
+              { "commit_subject": "(?i)(/|slash) menu" },
+              { "commit_subject": "(?i)slash commands?" },
+              { "tag": "v0.6.0" }
+            ],
+            "current_labels": [
+              { "when": [{ "file_exists": "src/lib/composer-commands.ts" }], "label": "being built now" }
+            ]
+          }
+        },
+        {
+          "id": "M-2",
+          "name": "The @ menu for files",
+          "desc": "Typing an at-sign opens the same menu against your project's files, so you can point the agent at something without typing out a path.",
+          "items": [
+            "The same menu, the same keys, pointed at your files instead of your commands.",
+            "Picking a file drops its path in where you were typing."
+          ],
+          "paste": [{ "label": "the plan for the composer menus", "into": "Claude Code", "when": "Never written down. It was built straight from the saves." }],
+          "status": {
+            "done_when": [
+              { "commit_subject": "(?i)@ menu" },
+              { "commit_subject": "(?i)file mentions?" },
+              { "commit_subject": "(?i)@ mentions in the composer" },
+              { "tag": "v0.6.0" }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "title": "Part 12 · Dropping files in (0.7)",
+      "phases": [
+        {
+          "id": "FD",
+          "name": "Drag files in from the Finder",
+          "desc": "Drop a file from the Finder onto a terminal to type its path there, or onto the chat box to attach it. Released as 0.7.0.",
           "status": {
             "done_when": [
               {
-                "tag": "slice-c4"
+                "commit_subject": "(?i)finder drops into the terminal"
+              },
+              {
+                "tag": "v0.7.0"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "title": "Part 13 · A quieter app, a browser, notes and editing (0.8)",
+      "note": "Four written plans, built one after another and released together as 0.8.0, with a steadier window following in 0.8.1.",
+      "phases": [
+        {
+          "id": "EN",
+          "name": "An idle window that costs nothing",
+          "desc": "When nobody is looking at Chronicle it stops waking itself up, stops starting background programs, and stops redrawing. On battery it slows down further.",
+          "items": [
+            "Every timer runs through one scheduler that knows whether the window is visible, focused, or on battery.",
+            "The engine announces when a session changes instead of the screen asking every few seconds.",
+            "The agent pane starts hidden, so the agent only starts when you open it.",
+            "Measured: an idle window went from 3 to 1 unit of work a second when focused, and from 5 to 0 when hidden."
+          ],
+          "paste": [
+            {
+              "path": "docs/superpowers/plans/2026-09-08-energy-efficiency.md",
+              "into": "Claude Code",
+              "when": "A fresh session at the project root"
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-09-08-energy-efficiency-design.md"
+            }
+          ],
+          "status": {
+            "done_when": [
+              {
+                "commit_subject": "(?i)docs\\(energy\\): measured results"
+              },
+              {
+                "tag": "v0.8.0"
               }
             ]
           }
         },
         {
-          "id": "C5",
-          "name": "Files and history",
-          "desc": "The file tree, the reader with live freshness, and the plain-language history pane.",
+          "id": "WP",
+          "name": "The Web pane",
+          "desc": "A fourth pane that browses the web and shows HTML pages from your project inside Chronicle, with ads and trackers blocked.",
+          "items": [
+            "Each tab is a real browser view, and it costs nothing while you are not looking at it.",
+            "The same block lists uBlock uses, built into the app.",
+            "Command-clicking a Claude artifact link or an HTML file in a terminal opens it here."
+          ],
+          "paste": [
+            {
+              "path": "docs/superpowers/plans/2026-09-09-web-pane.md",
+              "into": "Claude Code",
+              "when": "A fresh session at the project root"
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-09-08-web-pane-design.md"
+            }
+          ],
           "status": {
             "done_when": [
               {
-                "tag": "slice-c5"
+                "commit_subject": "(?i)docs\\(web\\): live test results"
+              },
+              {
+                "tag": "v0.8.0"
               }
             ]
-          },
-          "items": [
-            "The file tree with live change markers.",
-            "The reader that notices when a file changes on disk.",
-            "The plain-language history pane."
-          ]
+          }
         },
         {
-          "id": "C6",
-          "name": "Terminals",
-          "desc": "The terminal tabs and agent start buttons, rebuilt.",
+          "id": "NT",
+          "name": "Notes replace the task board",
+          "desc": "The task board becomes a folder of plain notes inside the project: a rich editor, links between notes, tags and search. A note with a status is a task, and a round takes the queued ones.",
+          "items": [
+            "Your existing board is moved into notes the first time the project opens, all or nothing.",
+            "Rounds of fixes now run from notes, and a note is locked while a round is working on it.",
+            "The notes are ordinary markdown files, so they read fine outside Chronicle too."
+          ],
+          "paste": [
+            {
+              "path": "docs/superpowers/plans/2026-09-09-notes.md",
+              "into": "Claude Code",
+              "when": "A fresh session at the project root"
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-09-09-notes-design.md"
+            }
+          ],
           "status": {
             "done_when": [
               {
-                "tag": "slice-c6"
+                "commit_subject": "(?i)docs\\(notes\\): live test results"
+              },
+              {
+                "commit_subject": "(?i)notes replaces the kanban pane"
+              },
+              {
+                "tag": "v0.8.0"
               }
             ]
-          },
-          "items": [
-            "Terminal tabs that survive switching views.",
-            "One-click agent starts."
-          ]
+          }
         },
         {
-          "id": "C7",
-          "name": "The kanban",
-          "desc": "The four-column board: write tasks, attach screenshots, and turn a round into a fix plan on the roadmap.",
+          "id": "RE",
+          "name": "Editing files, and an honest history",
+          "desc": "The Repo pane becomes a place you can work: edit a file and save it yourself, make, rename and bin files, and see four plain facts about your project's history instead of a guess.",
+          "items": [
+            "Nothing saves until you press Command S, and a bar warns you when the agent changed the file underneath you.",
+            "Deleted files go to the Trash, never straight to gone.",
+            "Checking for new saves online only happens when you press Check now."
+          ],
+          "paste": [
+            {
+              "path": "docs/superpowers/plans/2026-09-10-repo-editing.md",
+              "into": "Claude Code",
+              "when": "A fresh session at the project root"
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-09-10-repo-editing-and-history-design.md"
+            }
+          ],
           "status": {
             "done_when": [
               {
-                "tag": "slice-c7"
+                "commit_subject": "(?i)docs\\(repo\\): live test results"
+              },
+              {
+                "tag": "v0.8.0"
               }
             ]
-          },
-          "items": [
-            "The four-column board: write tasks, attach screenshots.",
-            "Turn a round into a fix plan that appears on the roadmap."
-          ]
+          }
         },
         {
-          "id": "C8",
-          "name": "Ship it",
-          "desc": "Final cleanup, the full walkthrough of every journey, and the merge back to main.",
+          "id": "V81",
+          "name": "A steadier window, and web tabs in folders",
+          "desc": "The window no longer tears or flashes grey while you resize it, web tabs move into a sidebar with folders, and the agent's permission mode becomes a dropdown. Released as 0.8.1.",
           "status": {
             "done_when": [
               {
-                "tag": "v2-merged"
+                "tag": "v0.8.1"
               }
             ]
-          },
+          }
+        }
+      ]
+    },
+    {
+      "title": "Part 14 · A roadmap that stays true, and agents that can read it (0.9)",
+      "phases": [
+        {
+          "id": "RA",
+          "name": "A roadmap that never goes backwards",
+          "desc": "A finished phase stays finished, every done phase says what proved it, and the roadmap notices when it has fallen behind the project and offers to bring itself up to date.",
           "items": [
-            "The full walkthrough of every journey.",
-            "Merge back to main."
-          ]
+            "A save can carry a one-line marker that proves a phase is done, whatever the other rules say.",
+            "Chronicle remembers every phase it has ever seen finished, so a rule that stops matching can't undo it.",
+            "New plans and newer releases the roadmap never saw show up under what needs you, with one button to catch up.",
+            "Phase detail shows the proof, and lets you mark a phase done or not done by hand."
+          ],
+          "paste": [
+            {
+              "path": "docs/superpowers/plans/2026-09-13-roadmap-accuracy.md",
+              "into": "Claude Code",
+              "when": "A fresh session at the project root"
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-09-13-roadmap-accuracy-design.md"
+            }
+          ],
+          "status": {
+            "done_when": [
+              {
+                "commit_subject": "(?i)docs\\(roadmap\\): the derive CLI shape"
+              },
+              {
+                "tag": "v0.9.0"
+              }
+            ]
+          }
+        },
+        {
+          "id": "AG-1",
+          "name": "Notes and roadmap state, for any agent",
+          "desc": "An agent, or you at a terminal, can list, read, write and update a project's notes and ask where the roadmap stands, without the app even running.",
+          "items": [
+            "The same answers the app shows, reached two ways: as a tool the agent can call, or as a command you type.",
+            "Reading the state never changes anything.",
+            "A second copy of the project on another branch shares the main copy's notes."
+          ],
+          "paste": [
+            {
+              "path": "docs/superpowers/plans/2026-09-16-agent-api-notes-state.md",
+              "into": "Claude Code",
+              "when": "A fresh session at the project root"
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-09-16-agent-access-and-visible-rounds-design.md"
+            },
+            {
+              "path": "docs/agent-api.md"
+            }
+          ],
+          "status": {
+            "done_when": [
+              {
+                "commit_subject": "(?i)serves the catalog over stdio MCP"
+              },
+              {
+                "commit_subject": "(?i)docs\\(agent\\): the agent API reference"
+              }
+            ]
+          }
+        },
+        {
+          "id": "V90",
+          "name": "Ship 0.9.0",
+          "desc": "Built, signed and tagged, with the roadmap work, a single look for every popup and menu, and the first half of agent access. It was never put out for download, because 0.10.0 followed the same day.",
+          "status": {
+            "done_when": [
+              {
+                "tag": "v0.9.0"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "title": "Part 15 · Agents that act, in plain view (0.10)",
+      "phases": [
+        {
+          "id": "AG-2",
+          "name": "Rounds you can watch",
+          "desc": "A round of fixes never runs out of sight again. Planning it is a turn in the agent pane, and running it happens in the pane or in a terminal tab you can watch.",
+          "items": [
+            "The hidden background sessions, their log panel and the progress window are gone.",
+            "A round started while the agent is busy waits its turn in the queue, and is asked again before it sends."
+          ],
+          "paste": [
+            {
+              "path": "docs/superpowers/plans/2026-09-16-rounds-you-can-watch.md",
+              "into": "Claude Code",
+              "when": "A fresh session at the project root"
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-09-16-agent-access-and-visible-rounds-design.md"
+            }
+          ],
+          "status": {
+            "done_when": [
+              {
+                "commit_subject": "(?i)docs\\(rounds\\): what changed when rounds became visible"
+              }
+            ]
+          }
+        },
+        {
+          "id": "AG-3",
+          "name": "Agents can act, when you let them",
+          "desc": "An agent can plan or start a round, open a project, and read a terminal, and every one of those happens on screen using the same code as the buttons.",
+          "items": [
+            "Nothing is reachable until you switch on Let agents reach Chronicle for that project in Setup, and one click takes it back.",
+            "The app only answers its own private connection, and only for projects you have open.",
+            "When Chronicle isn't open, the agent is told so plainly instead of failing silently."
+          ],
+          "paste": [
+            {
+              "path": "docs/superpowers/plans/2026-09-16-agent-actions-bridge.md",
+              "into": "Claude Code",
+              "when": "A fresh session at the project root"
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-09-16-agent-access-and-visible-rounds-design.md"
+            },
+            {
+              "path": "docs/agent-api.md"
+            }
+          ],
+          "status": {
+            "done_when": [
+              {
+                "commit_subject": "(?i)docs\\(agent\\): actions, the bridge, and the opt-in row"
+              }
+            ]
+          }
+        },
+        {
+          "id": "V100",
+          "name": "Ship 0.10.0",
+          "desc": "Rounds you can watch and agent actions, released together. This is the version that went out for download.",
+          "status": {
+            "done_when": [
+              {
+                "tag": "v0.10.0"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "title": "Part 16 · One Chronicle, a thread you can read, notes that name themselves (0.11)",
+      "note": "Two rounds of fixes from Notes, released together. The rounds themselves also appear under Fixes & ideas.",
+      "phases": [
+        {
+          "id": "V110",
+          "name": "Ship 0.11.0",
+          "desc": "Rounds 8 and 9, plus a few fixes, released together.",
+          "items": [
+            "Asking the app for help from the command line no longer opens another Chronicle window, and a second launch hands off to the one already running.",
+            "The work a helper agent does sits in a tree under the card that started it, and the agent's thinking is kept and folded away.",
+            "Your usage limits and this session's cost show live in the title bar.",
+            "Notes name themselves from their first line until you rename them by hand, and can be dragged between folders.",
+            "An arrow key at the end of a field no longer types a square, and a resumed session opens on its conversation."
+          ],
+          "docs": [
+            {
+              "path": "fixes/phase_8_fixes_plan.md"
+            },
+            {
+              "path": "fixes/phase_9_fixes_plan.md"
+            }
+          ],
+          "status": {
+            "done_when": [
+              {
+                "tag": "v0.11.0"
+              }
+            ]
+          }
+        },
+        {
+          "id": "V111",
+          "name": "Ship 0.11.1",
+          "desc": "Websites in the Web pane stop asking you to update your browser, and the agent's conversation moves smoothly as new rows arrive.",
+          "status": {
+            "done_when": [
+              {
+                "tag": "v0.11.1"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "title": "Part 17 · What comes next",
+      "note": "Written down and agreed. Steps that tick themselves has shipped; the rest has not started.",
+      "phases": [
+        {
+          "id": "AA",
+          "name": "One pane, any agent",
+          "desc": "The pane is written around Claude Code today. This makes it read whatever agent is on the other end, so Codex and the rest can sit in the same chat.",
+          "docs": [{ "path": "c-zed/PLAN.md" }],
+          "status": { "done_when": [{ "commit_subject": "(?i)agent-agnostic" }] }
+        },
+        {
+          "id": "SE",
+          "name": "Steps that tick themselves",
+          "desc": "Right now a phase's steps stay grey until the whole phase turns green. This lets a single step carry its own proof, so a phase can honestly read three of five.",
+          "items": [
+            "A step may stay a plain sentence, or gain a rule of its own.",
+            "The app that can read the new shape has to reach everyone before anything starts writing it.",
+            "A finished phase always shows all its steps finished, whatever the step rules say."
+          ],
+          "docs": [{ "path": "c-zed/FOLLOWUP-step-evidence.md" }],
+          "status": {
+            "done_when": [
+              { "commit_subject": "(?i)per-step evidence" },
+              { "file_matches": { "path": "skill/chronicle-init/SCHEMA.md", "pattern": "per-step" } }
+            ]
+          }
+        },
+        {
+          "id": "ID",
+          "name": "The idea shelf",
+          "desc": "Deliberately set aside when the agent landed. Each one was deferred, not rejected.",
+          "items": [
+            "Sandboxing the machine while the agent is running fully loose.",
+            "Saving a conversation out, and bringing one back in.",
+            "Branch and stash pickers, and who-changed-this-line.",
+            "Running Codex through the same bridge, once its adapter is ready."
+          ],
+          "pool": true
         }
       ]
     }
