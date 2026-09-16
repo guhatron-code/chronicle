@@ -317,8 +317,10 @@ export const agentAttachPath = (dir: string, path: string) =>
  *  round number, its note count, and the prompt text (round_plan_begin). */
 export const roundPlanBegin = (dir: string) =>
   invoke<{ n: number; total: number; prompt: string }>("round_plan_begin", { dir });
-/** Poll the plan-writing session to completion — `n` is null until it settles;
- *  `state` says whether it landed `ready` or `failed`. */
+/** Settle the record from the plan files: `state` says whether both landed
+ *  (`ready`) or not (`failed`), and `n` is null when there was no generating
+ *  record to settle. Call ONLY once the planning turn has ended — mid-turn it
+ *  would mark the round failed and requeue its notes under the agent's feet. */
 export const roundPlanSettle = (dir: string) =>
   invoke<{ n: number | null; state: "ready" | "failed" | "none" }>("round_plan_settle", { dir });
 export const roundPlanCancel = (dir: string) => invoke<void>("round_plan_cancel", { dir });

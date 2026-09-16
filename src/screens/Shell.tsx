@@ -121,8 +121,8 @@ export function Shell({
      Nothing used to focus an xterm, so the first keystroke after coming back to
      the window, or after picking a tab, went nowhere. Four moments hand the
      keyboard over: the window regaining focus; the column expanding; a session
-     appearing (every spawn — ⌘T, the column's buttons, a roadmap Start, the
-     round log — makes itself active); and a tab pick. The middle two both show
+     appearing (every spawn — ⌘T, the column's buttons, a roadmap Start, a
+     round run in a terminal — makes itself active); and a tab pick. The middle two both show
      up as a dep change below, so the effect covers them; a pick needs its own
      handler because re-clicking the tab that is already active changes no state
      at all. Every one of them is gated by shouldReclaimTerminalFocus, so the

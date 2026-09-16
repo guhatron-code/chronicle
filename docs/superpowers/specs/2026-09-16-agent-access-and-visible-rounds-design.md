@@ -129,10 +129,11 @@ The row's undo removes the `.mcp.json` entry and the cap; the skill is left inst
   `RoundFlow` progress modal are deleted. `round.plan` (from the card's `Plan a round` or
   from an agent) pushes a `round-plan` entry into the pane thread and sends the planning
   prompt (`FIXES_PROMPT_HEAD` unchanged, marker instruction included) as the session's next
-  message. The card shows "Writing the plan…" until `fixes/phase_N_fixes_plan.md` and the
-  prompt file appear on disk, which the existing file watcher already reports; then the
-  round is `ready`. If the turn ends without both files, the card says so and offers to
-  try again.
+  message. The card shows "writing the plan" until the turn ends; the turn ending is what
+  flips it, because that is when `round_plan_settle` reads `fixes/phase_N_fixes_plan.md`
+  and the prompt file back off disk and decides `ready` or `failed` from what actually
+  landed there (see the plan 2 implementation notes below — the file watcher never settles
+  a record). If the turn ends without both files, the card says so and offers to try again.
 - **The terminal route.** `Run in a terminal` spawns a terminal tab titled `Round N` with
   `autoType` set to the agent command followed by the round prompt (the same message
   `startRoundInPane` sends), so the agent starts interactively with the instructions as
