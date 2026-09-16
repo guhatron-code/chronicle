@@ -12,14 +12,18 @@ import {
   cancelCheck,
   cancelSignins,
   checkFor,
+  disableAgentAccess,
   doctorState,
+  enableAgentAccess,
   fixTerminalPath,
   installCheck,
   readyCount,
+  refreshAgentsRow,
   refreshDoctor,
   runEverything,
   startSignin,
   subscribeDoctor,
+  totalRequired,
 } from "@/lib/setup-store";
 import { CheckRow } from "./CheckRow";
 import { toastError } from "@/overlays/toasts";
@@ -33,20 +37,37 @@ const Check = ({ size = 12 }: { size?: number }) => (
 );
 
 function Checklist({ dir }: { dir: string | null }) {
-  const total = CHECK_META.length;
+  const total = totalRequired();
   const ready = readyCount();
   const running = doctorState().runningAll;
 
-  const rowFor = (id: string) => (
-    <CheckRow
-      key={id}
-      check={checkFor(id)}
-      onInstall={() => void installCheck(id).catch((e) => toastError("Couldn't install it", String(e).slice(0, 90)))}
-      onFix={() => void fixTerminalPath(id)}
-      onSignin={() => void startSignin(dir, id).catch((e) => toastError("Couldn't open the sign-in", String(e).slice(0, 90)))}
-      onCancel={() => void cancelCheck(id)}
-    />
-  );
+  useEffect(() => { void refreshAgentsRow(dir); }, [dir]);
+
+  const rowFor = (id: string) => {
+    if (id === "agents") {
+      return (
+        <CheckRow
+          key={id}
+          check={checkFor(id)}
+          onInstall={() => dir && void enableAgentAccess(dir).catch((e) => toastError("Couldn't turn it on", String(e).slice(0, 90)))}
+          onDisable={() => dir && void disableAgentAccess(dir).catch((e) => toastError("Couldn't turn it off", String(e).slice(0, 90)))}
+          onFix={() => {}}
+          onSignin={() => {}}
+          onCancel={() => {}}
+        />
+      );
+    }
+    return (
+      <CheckRow
+        key={id}
+        check={checkFor(id)}
+        onInstall={() => void installCheck(id).catch((e) => toastError("Couldn't install it", String(e).slice(0, 90)))}
+        onFix={() => void fixTerminalPath(id)}
+        onSignin={() => void startSignin(dir, id).catch((e) => toastError("Couldn't open the sign-in", String(e).slice(0, 90)))}
+        onCancel={() => void cancelCheck(id)}
+      />
+    );
+  };
 
   return (
     <>
@@ -110,7 +131,10 @@ export function SetupScreen({
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[640px] flex-col gap-[22px] px-8 py-10">
-          {done ? (
+          {/* the celebration only replaces the GATE — "agents" is per-project and opt-in,
+              so the always-reachable health console keeps showing its row (and every
+              other row) even once the required prerequisites are all ready */}
+          {done && mode === "gate" ? (
             <div className="flex flex-col items-center gap-[13px] py-16 text-center">
               <span className="flex size-[42px] items-center justify-center rounded-full border border-border-hairline bg-fill-subtle text-state-success">
                 <Check size={20} />

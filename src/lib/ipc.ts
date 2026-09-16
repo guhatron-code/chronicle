@@ -593,6 +593,23 @@ export const onAgentAction = (cb: (a: AgentAction) => void): Promise<UnlistenFn>
 /** The answer the waiting agent gets: a sentence, plus whatever it asked to read. */
 export const agentActionReply = (id: number, ok: boolean, summary: string, data?: unknown) =>
   invoke<void>("agent_action_reply", { id, ok, summary, data: data ?? null });
+/** Tell the backend the bridge's listener is live. Until this is called, every agent
+ *  action is refused with "Chronicle isn't open on this project" — call it once, right
+ *  after mounting the bridge. */
+export const agentBridgeReady = () => invoke<void>("agent_bridge_ready");
+
+/* ---------- agent access opt-in (.mcp.json, the `chronicle` skill, access.json) ---------- */
+export interface AgentsAccessStatus {
+  mcp: boolean;
+  skill: "installed" | "hand-managed" | "missing";
+  command: string;
+}
+export const agentsAccessStatus = (dir: string) =>
+  invoke<AgentsAccessStatus>("agents_access_status", { dir });
+export const agentsAccessEnable = (dir: string) =>
+  invoke<AgentsAccessStatus>("agents_access_enable", { dir });
+export const agentsAccessDisable = (dir: string) =>
+  invoke<AgentsAccessStatus>("agents_access_disable", { dir });
 
 /* ---------- the native menu (src-tauri/src/menu.rs) ---------- */
 /*

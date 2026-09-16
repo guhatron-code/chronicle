@@ -5,6 +5,9 @@
  * sign-in. Listeners register ONCE at module scope (the ipc.ts law).
  */
 import {
+  agentsAccessDisable,
+  agentsAccessEnable,
+  agentsAccessStatus,
   onSetupUpdate,
   setupCancel,
   setupFixTerminalPath,
@@ -12,20 +15,27 @@ import {
   setupOpenLogin,
   setupRunAll,
   setupStatus,
+  type AgentsAccessStatus,
   type SetupCheck,
 } from "./ipc";
 import { every } from "./scheduler";
 
 /** The row order + plain-language identity the screen renders. Names live here
  *  so the store, not the JSX, is the source of truth for what each check is. */
-export const CHECK_META: { id: string; name: string; blurb: string; kind: "claude" | "node" | "signin" | "path" | "github" | "skills" }[] = [
+export const CHECK_META: { id: string; name: string; blurb: string; kind: "claude" | "node" | "signin" | "path" | "github" | "skills" | "agents" }[] = [
   { id: "claude", name: "The AI that does the work", blurb: "Claude Code — the assistant that writes and edits your project.", kind: "claude" },
   { id: "claude_signin", name: "Sign in to Claude", blurb: "So the AI can start working on your behalf.", kind: "signin" },
   { id: "node", name: "The engine the AI runs on", blurb: "The background software the AI needs to do its work.", kind: "node" },
   { id: "terminal_path", name: "Make the AI work in the terminal", blurb: "So typing the AI's name in the terminal works.", kind: "path" },
   { id: "github", name: "Your projects' online home", blurb: "Where your projects live online, so you can publish and share them.", kind: "github" },
   { id: "superpowers", name: "Extra skills for the AI", blurb: "Extra abilities that make the AI better at bigger jobs.", kind: "skills" },
+  { id: "agents", name: "Let agents reach Chronicle", blurb: "Claude Code in this project can read and write its notes, see the roadmap, and start rounds you watch.", kind: "agents" },
 ];
+
+/** The machine-wide prerequisites the first-launch gate and the "all set" celebration
+ *  require. "agents" is excluded on purpose: it is a per-project opt-in that needs an
+ *  open project to even ask about, so it must never block reaching one. */
+const REQUIRED_META = CHECK_META.filter((c) => c.kind !== "agents");
 
 export interface DoctorState {
   checks: Map<string, SetupCheck>;
@@ -81,10 +91,13 @@ export function checkFor(id: string): SetupCheck {
 }
 
 export function readyCount(): number {
-  return CHECK_META.filter((c) => state.checks.get(c.id)?.state === "ready").length;
+  return REQUIRED_META.filter((c) => state.checks.get(c.id)?.state === "ready").length;
+}
+export function totalRequired(): number {
+  return REQUIRED_META.length;
 }
 export function allReady(): boolean {
-  return state.loaded && CHECK_META.every((c) => state.checks.get(c.id)?.state === "ready");
+  return state.loaded && REQUIRED_META.every((c) => state.checks.get(c.id)?.state === "ready");
 }
 
 /** Pull a fresh full status (re-check). */
@@ -180,4 +193,56 @@ export function cancelSignins(): void {
 
 export function waitingSignin(id: string): boolean {
   return state.waitingSignins.has(id);
+}
+
+/* ---------- the "agents" row (src-tauri/src/main.rs: agents_access_*) ----------
+ * Per-project, not machine-wide, so it does not come from setupStatus() — it is
+ * fetched with the currently open project's dir and mapped here, kept pure so the
+ * mapping is testable without a Tauri runtime. */
+
+/** Pure: what the row should show for a given backend status and the currently
+ *  open project's dir. No dir ⇒ blocked (nothing to turn on yet); a dir with no
+ *  status yet (still loading) ⇒ checking; otherwise ready/needs_you from `mcp`. */
+export function agentsRowFor(status: AgentsAccessStatus | null, dir: string | null): SetupCheck {
+  if (!dir) return { id: "agents", state: "blocked", detail: "Open a project first", action: "" };
+  if (!status) return { id: "agents", state: "checking" };
+  if (status.mcp) return { id: "agents", state: "ready" };
+  return {
+    id: "agents",
+    state: "needs_you",
+    detail: "Writes .mcp.json in this project and installs the chronicle skill.",
+    action: "install",
+  };
+}
+
+/** Pull the agents row fresh for whichever project is open (or blocked, if none is). */
+export async function refreshAgentsRow(dir: string | null): Promise<void> {
+  if (!dir) {
+    state.checks.set("agents", agentsRowFor(null, null));
+    notify();
+    return;
+  }
+  try {
+    const status = await agentsAccessStatus(dir);
+    state.checks.set("agents", agentsRowFor(status, dir));
+  } catch {
+    state.checks.set("agents", agentsRowFor(null, dir));
+  }
+  notify();
+}
+
+export async function enableAgentAccess(dir: string): Promise<void> {
+  try {
+    await agentsAccessEnable(dir);
+  } finally {
+    await refreshAgentsRow(dir);
+  }
+}
+
+export async function disableAgentAccess(dir: string): Promise<void> {
+  try {
+    await agentsAccessDisable(dir);
+  } finally {
+    await refreshAgentsRow(dir);
+  }
 }

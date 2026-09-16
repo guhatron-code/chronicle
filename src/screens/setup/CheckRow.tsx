@@ -33,6 +33,14 @@ function KindIcon({ kind }: { kind: string }) {
         <path d="M8 8v4.8M6.2 10.4 8 12.4l1.8-2" />
       </svg>
     );
+  if (kind === "agents")
+    return (
+      <svg {...common} strokeWidth="1.4" className="text-text-subtle">
+        <circle cx="8" cy="4.6" r="2" />
+        <path d="M8 6.6v2.2M4.6 13.4a3.4 3.4 0 0 1 6.8 0" />
+        <path d="m3.4 8.4-1.6 1M14.2 9.4l-1.6-1" />
+      </svg>
+    );
   return (
     <svg {...common} strokeWidth="1.3" className="text-text-subtle">
       <path d="M4.6 2.5h4.2l3.6 3.6v7.4H4.6z" />
@@ -91,14 +99,18 @@ export function CheckRow({
   onFix,
   onSignin,
   onCancel,
+  onDisable,
 }: {
   check: SetupCheck;
   onInstall: () => void;
   onFix: () => void;
   onSignin: () => void;
   onCancel: () => void;
+  /** kind "agents" only: the ready row's quiet "Turn off". */
+  onDisable?: () => void;
 }) {
   const meta = CHECK_META.find((m) => m.id === check.id)!;
+  const isAgents = meta.kind === "agents";
   const installing = check.state === "installing";
   const failed = check.state === "couldnt_finish";
   const waiting = waitingSignin(check.id);
@@ -147,7 +159,7 @@ export function CheckRow({
         </button>
       ) : check.action === "install" ? (
         <button data-check-action="install" onClick={onInstall} className="h-[33px] shrink-0 whitespace-nowrap rounded-lg border border-border-strong px-[14px] text-[12.5px] font-medium text-text-primary hover:bg-fill-hover">
-          Install
+          {isAgents ? "Turn on" : "Install"}
         </button>
       ) : check.action === "fix_path" ? (
         <button data-check-action="fix" onClick={onFix} className="h-[33px] shrink-0 whitespace-nowrap rounded-lg border border-border-strong px-[14px] text-[12.5px] font-medium text-text-primary hover:bg-fill-hover">
@@ -156,6 +168,10 @@ export function CheckRow({
       ) : check.action === "signin" && !waiting ? (
         <button data-check-action="signin" onClick={onSignin} className="h-[33px] shrink-0 whitespace-nowrap rounded-lg border border-border-strong px-[14px] text-[12.5px] font-medium text-text-primary hover:bg-fill-hover">
           Sign in
+        </button>
+      ) : isAgents && check.state === "ready" ? (
+        <button data-check-action="disable" onClick={onDisable} className="h-[33px] shrink-0 whitespace-nowrap rounded-lg px-[13px] text-[12.5px] font-medium text-text-muted hover:bg-fill-hover hover:text-text-primary">
+          Turn off
         </button>
       ) : null}
     </div>

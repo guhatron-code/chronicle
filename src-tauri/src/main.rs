@@ -235,10 +235,15 @@ fn skill_set_hash(bodies: &[String]) -> String {
     format!("{:x}", h.finalize())
 }
 
-fn install_init_skill(base: &Path) -> Result<&'static str, String> {
-    let dir = base.join(".claude/skills/chronicle-init");
+/// Self-installs any skill this app embeds at `<base>/.claude/skills/<name>/`, the same
+/// clobber-safe way: a marker file records the hash of what Chronicle wrote, and only a
+/// copy that still matches its marker (unmodified by a human) is upgraded. `files` is
+/// `(relative path, body)` pairs; a nested path (e.g. `examples/foo.json`) gets its
+/// parent directory created for it.
+fn install_skill(base: &Path, name: &str, files: &[(&str, &str)]) -> Result<&'static str, String> {
+    let dir = base.join(".claude/skills").join(name);
     let marker = dir.join(".chronicle-managed");
-    let on_disk: Vec<String> = SKILL_FILES.iter()
+    let on_disk: Vec<String> = files.iter()
         .map(|(n, _)| std::fs::read_to_string(dir.join(n)).unwrap_or_default())
         .collect();
     let have_any = on_disk.iter().any(|b| !b.is_empty());
@@ -246,22 +251,131 @@ fn install_init_skill(base: &Path) -> Result<&'static str, String> {
     if have_any && !managed {
         return Ok("hand-managed — left alone"); // a human owns this copy
     }
-    let embedded: Vec<String> = SKILL_FILES.iter().map(|(_, b)| b.to_string()).collect();
+    let embedded: Vec<String> = files.iter().map(|(_, b)| b.to_string()).collect();
     if have_any && on_disk == embedded {
         return Ok("already current");
     }
-    std::fs::create_dir_all(dir.join("examples")).map_err(|e| e.to_string())?;
-    for (name, body) in SKILL_FILES {
-        std::fs::write(dir.join(name), body).map_err(|e| e.to_string())?;
+    for (name, body) in files {
+        let path = dir.join(name);
+        if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        std::fs::write(&path, body).map_err(|e| e.to_string())?;
     }
     std::fs::write(&marker, skill_set_hash(&embedded)).map_err(|e| e.to_string())?;
     Ok(if have_any { "upgraded" } else { "installed" })
+}
+
+fn install_init_skill(base: &Path) -> Result<&'static str, String> {
+    install_skill(base, "chronicle-init", &SKILL_FILES)
 }
 
 fn ensure_init_skill() {
     if let Ok(home) = std::env::var("HOME") {
         let _ = install_init_skill(&PathBuf::from(home));
     }
+}
+
+/* ================= agent access opt-in (.mcp.json, the `chronicle` skill, access.json) ====
+   Task 4 of the agent-actions-bridge plan: the explicit per-project opt-in that lets an
+   agent (Claude Code) reach this project's notes/state/actions over the MCP bridge. Nothing
+   below runs unless the user turns it on for a project from the Setup screen. */
+
+const AGENT_SKILL_FILES: [(&str, &str); 1] = [
+    ("SKILL.md", include_str!("../../skill/chronicle/SKILL.md")),
+];
+
+/// `<home>/.claude/skills/<name>`'s install state, the way the Setup row needs to show it.
+fn skill_status(home: &Path, name: &str, files: &[(&str, &str)]) -> &'static str {
+    let dir = home.join(".claude/skills").join(name);
+    let on_disk: Vec<String> = files.iter()
+        .map(|(n, _)| std::fs::read_to_string(dir.join(n)).unwrap_or_default())
+        .collect();
+    if !on_disk.iter().any(|b| !b.is_empty()) { return "missing"; }
+    let managed = std::fs::read_to_string(dir.join(".chronicle-managed"))
+        .map(|m| m.trim() == skill_set_hash(&on_disk)).unwrap_or(false);
+    if managed { "installed" } else { "hand-managed" }
+}
+
+/// Parses a file as a JSON object; a missing file, invalid JSON, or a non-object value
+/// all read back as `{}` — every caller below only ever adds/removes keys, so a blank
+/// object is always a safe starting point.
+fn read_json_object(path: &Path) -> Value {
+    std::fs::read_to_string(path).ok()
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}))
+}
+
+/// Read-only: what `.mcp.json`, `.chronicle/agent/access.json`, and the skill folder say
+/// right now. Never writes anything, so the Setup row can poll it freely.
+fn agents_access_status_in(dir: &Path, home: &Path, exe: &Path) -> Value {
+    let mcp_json = read_json_object(&dir.join(".mcp.json"));
+    let has_server = mcp_json.pointer("/mcpServers/chronicle").is_some();
+    let access = read_json_object(&dir.join(".chronicle/agent/access.json"));
+    let access_mcp = access.get("mcp").and_then(Value::as_bool).unwrap_or(false);
+    json!({
+        "mcp": has_server && access_mcp,
+        "skill": skill_status(home, "chronicle", &AGENT_SKILL_FILES),
+        "command": exe.to_string_lossy(),
+    })
+}
+
+/// Opts a project in: merges `.mcp.json` (creating it if missing, preserving every other
+/// key and server), installs the `chronicle` skill at `<home>/.claude/skills/chronicle/`,
+/// and records the choice at `.chronicle/agent/access.json` — including whether WE created
+/// `.mcp.json`, so disabling can clean it back up exactly when it is safe to.
+fn agents_access_enable_in(dir: &Path, home: &Path, exe: &Path) -> Result<Value, String> {
+    let mcp_path = dir.join(".mcp.json");
+    let created = !mcp_path.exists();
+    let mut mcp_json = read_json_object(&mcp_path);
+    {
+        let obj = mcp_json.as_object_mut().expect("read_json_object always returns an object");
+        let servers = obj.entry("mcpServers".to_string()).or_insert_with(|| json!({}));
+        let servers_obj = servers.as_object_mut().ok_or("`.mcp.json`'s mcpServers must be an object")?;
+        servers_obj.insert("chronicle".into(), json!({
+            "command": exe.to_string_lossy(),
+            "args": ["--mcp", "."],
+        }));
+    }
+    std::fs::write(&mcp_path, serde_json::to_string_pretty(&mcp_json).unwrap()).map_err(|e| e.to_string())?;
+
+    install_skill(home, "chronicle", &AGENT_SKILL_FILES)?;
+
+    let access_dir = dir.join(".chronicle/agent");
+    std::fs::create_dir_all(&access_dir).map_err(|e| e.to_string())?;
+    let access = json!({ "mcp": true, "createdBy": if created { json!("chronicle") } else { Value::Null } });
+    std::fs::write(access_dir.join("access.json"), serde_json::to_string_pretty(&access).unwrap()).map_err(|e| e.to_string())?;
+
+    Ok(agents_access_status_in(dir, home, exe))
+}
+
+/// Opts a project out: removes the `chronicle` server from `.mcp.json` (deleting the file
+/// only when WE created it and it is now nothing but an empty `mcpServers`), and removes
+/// `access.json`. The skill at `~/.claude/skills/chronicle/` is left in place — other
+/// projects may still be using it.
+fn agents_access_disable_in(dir: &Path) -> Result<Value, String> {
+    let mcp_path = dir.join(".mcp.json");
+    let access_path = dir.join(".chronicle/agent/access.json");
+    let access = read_json_object(&access_path);
+    let we_created_it = access.get("createdBy").and_then(Value::as_str) == Some("chronicle");
+
+    if mcp_path.exists() {
+        let mut mcp_json = read_json_object(&mcp_path);
+        if let Some(servers) = mcp_json.get_mut("mcpServers").and_then(Value::as_object_mut) {
+            servers.remove("chronicle");
+        }
+        let is_empty_shell = we_created_it && mcp_json.as_object()
+            .map(|o| o.len() == 1 && o.get("mcpServers").and_then(|v| v.as_object()).map(|m| m.is_empty()).unwrap_or(false))
+            .unwrap_or(false);
+        if is_empty_shell {
+            std::fs::remove_file(&mcp_path).map_err(|e| e.to_string())?;
+        } else {
+            std::fs::write(&mcp_path, serde_json::to_string_pretty(&mcp_json).unwrap()).map_err(|e| e.to_string())?;
+        }
+    }
+    let _ = std::fs::remove_file(&access_path);
+    let _ = std::fs::remove_dir(dir.join(".chronicle/agent")); // tidy up if that leaves it empty; fine to fail otherwise
+
+    Ok(json!({ "mcp": false }))
 }
 
 fn load_config() -> Value {
@@ -1871,6 +1985,35 @@ fn attach_from_path(root: &Path, src: &Path) -> Result<String, String> {
 async fn agent_attach_path(roots: State<'_, OpenRoots>, dir: String, path: String) -> Result<String, String> {
     let p = project_for(&roots, &dir)?;
     attach_from_path(&p.dir, &PathBuf::from(&path))
+}
+
+fn home_dir() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_default())
+}
+
+/// The Setup row's "is this project opted in" read.
+#[tauri::command]
+async fn agents_access_status(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok(agents_access_status_in(&p.dir, &home_dir(), &exe))
+}
+
+/// The Setup row's "Turn on".
+#[tauri::command]
+async fn agents_access_enable(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    agents_access_enable_in(&p.dir, &home_dir(), &exe)
+}
+
+/// The Setup row's "Turn off".
+#[tauri::command]
+async fn agents_access_disable(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    agents_access_disable_in(&p.dir)?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    Ok(agents_access_status_in(&p.dir, &home_dir(), &exe))
 }
 
 /// The one line every prompt Chronicle writes ends with. The two-message commit form
@@ -3502,6 +3645,7 @@ fn main() {
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
             init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
             agent_attach, agent_attach_path,
+            agents_access_status, agents_access_enable, agents_access_disable,
             notes::notes_index, notes::notes_read, notes::notes_write, notes::notes_move,
             notes::notes_delete, notes::notes_search, notes::notes_attach, notes::notes_detach,
             notes::notes_reveal, notes::notes_reveal_vault,
@@ -3864,6 +4008,36 @@ mod r3_tests {
         git(&d, &["init", "-q", "-b", "main"]);
         git(&d, &["-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "feat: first save"]);
         d
+    }
+
+    #[test]
+    fn enabling_agent_access_merges_mcp_json_and_records_the_choice() {
+        let d = repo("access");
+        std::fs::write(d.join(".mcp.json"), r#"{"mcpServers":{"other":{"command":"x"}},"note":"keep"}"#).unwrap();
+        let home = tmp("access-home");
+        let st = agents_access_enable_in(&d, &home, Path::new("/Applications/Chronicle.app/Contents/MacOS/chronicle")).unwrap();
+        assert_eq!(st["mcp"], true);
+        let m: Value = serde_json::from_str(&std::fs::read_to_string(d.join(".mcp.json")).unwrap()).unwrap();
+        assert_eq!(m["mcpServers"]["other"]["command"], "x", "other servers survive");
+        assert_eq!(m["note"], "keep");
+        assert_eq!(m["mcpServers"]["chronicle"]["args"], json!(["--mcp", "."]));
+        assert!(home.join(".claude/skills/chronicle/SKILL.md").exists());
+        assert!(home.join(".claude/skills/chronicle/.chronicle-managed").exists());
+        let a: Value = serde_json::from_str(&std::fs::read_to_string(d.join(".chronicle/agent/access.json")).unwrap()).unwrap();
+        assert_eq!(a["mcp"], true);
+        assert_eq!(a["createdBy"], Value::Null, "we did not create .mcp.json");
+        let st = agents_access_disable_in(&d).unwrap();
+        assert_eq!(st["mcp"], false);
+        let m: Value = serde_json::from_str(&std::fs::read_to_string(d.join(".mcp.json")).unwrap()).unwrap();
+        assert!(m["mcpServers"].get("chronicle").is_none());
+        assert_eq!(m["mcpServers"]["other"]["command"], "x");
+        assert!(!d.join(".chronicle/agent/access.json").exists());
+        // a project with no .mcp.json: we create it and delete it again on disable
+        let d2 = repo("access2");
+        agents_access_enable_in(&d2, &home, Path::new("/x/chronicle")).unwrap();
+        assert!(d2.join(".mcp.json").exists());
+        agents_access_disable_in(&d2).unwrap();
+        assert!(!d2.join(".mcp.json").exists(), "created by us and now empty: gone");
     }
 
     #[test]

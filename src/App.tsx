@@ -93,7 +93,7 @@ import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent } from "@/lib/agent-session";
 import { startRoundInTerminal } from "@/lib/round-run";
 import { mountAgentBridge } from "@/lib/agent-bridge";
-import { agentSessionStop, readFileText } from "@/lib/ipc";
+import { agentBridgeReady, agentSessionStop, readFileText } from "@/lib/ipc";
 import { openAgentReview } from "@/screens/repo/RepoPane";
 import { copyText, githubClone, githubRepos, initStatus, launchOpenDir, openUrl, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
@@ -881,28 +881,30 @@ function AppShell() {
      re-mounting the listener under it. */
   const agentRef = useRef(agent);
   agentRef.current = agent;
-  useEffect(
-    () =>
-      mountAgentBridge({
-        planRound: startRoundPlanInPane,
-        startRound: (dir, n, total, where) =>
-          where === "terminal"
-            ? startRoundInTerminal(dir, n, total, agentRef.current)
-            : startRoundInPane(dir, n, total),
-        openProject: doOpenProject,
-        revealPane: () => patchLayout({ agent: true, agentCollapsed: false }),
-        revealTerminal: () => patchLayout({ terminal: true, terminalCollapsed: false }),
-        roundTotal: (dir, n) => roundNotesFor(dir, n).length,
-        // the registry answers for a tab by id; an agent that names none gets
-        // the tab that project is looking at, and nothing when it has none
-        termTail: (id, lines) => (id == null ? null : termTail(id, lines)),
-        activeTerm: activeTermFor,
-        // tab ids are global — this is what keeps a read inside its own project
-        termDir: (id) => getTerm(id)?.dir ?? null,
-        isProjectOpen: (dir) => projectsRef.current.has(dir),
-      }),
-    [doOpenProject, patchLayout],
-  );
+  useEffect(() => {
+    const unmount = mountAgentBridge({
+      planRound: startRoundPlanInPane,
+      startRound: (dir, n, total, where) =>
+        where === "terminal"
+          ? startRoundInTerminal(dir, n, total, agentRef.current)
+          : startRoundInPane(dir, n, total),
+      openProject: doOpenProject,
+      revealPane: () => patchLayout({ agent: true, agentCollapsed: false }),
+      revealTerminal: () => patchLayout({ terminal: true, terminalCollapsed: false }),
+      roundTotal: (dir, n) => roundNotesFor(dir, n).length,
+      // the registry answers for a tab by id; an agent that names none gets
+      // the tab that project is looking at, and nothing when it has none
+      termTail: (id, lines) => (id == null ? null : termTail(id, lines)),
+      activeTerm: activeTermFor,
+      // tab ids are global — this is what keeps a read inside its own project
+      termDir: (id) => getTerm(id)?.dir ?? null,
+      isProjectOpen: (dir) => projectsRef.current.has(dir),
+    });
+    // until the backend knows the listener above is live, every agent action
+    // times out with "isn't open" — this is what turns the bridge on
+    void agentBridgeReady();
+    return unmount;
+  }, [doOpenProject, patchLayout]);
 
   /* ---- the same map, arriving from the native menu (src-tauri/src/menu.rs) ----
      The Web pane's page is a native WKWebView: while it is first responder our
