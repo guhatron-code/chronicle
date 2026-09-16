@@ -48,6 +48,10 @@ export interface BridgeDeps {
   termDir?(id: number): string | null;
   /** Is this project already open? Only the wording of the reply turns on it. */
   isProjectOpen?(dir: string): boolean;
+  /** Tell the backend the listener below is live. Called once `onAgentAction`'s
+   *  promise below has resolved — never before, or an action arriving in that
+   *  window would be emitted into the socket with nobody home to hear it. */
+  bridgeReady?(): void | Promise<void>;
 }
 
 /** What `handleAgentAction` hands back to Rust, and to the user. */
@@ -214,6 +218,10 @@ export async function handleAgentAction(a: AgentAction, deps: BridgeDeps): Promi
  * instead of waiting out Rust's timeout. And when the REPLY is what fails,
  * Rust has already given up on this action — the agent was told it timed out,
  * so saying anything here would tell the user a story the agent never got.
+ *
+ * `deps.bridgeReady` (usually `agentBridgeReady` from ipc.ts) is called only once
+ * `onAgentAction`'s listener is actually registered — calling it any earlier would
+ * tell the backend it is safe to emit into a socket nobody is listening on yet.
  */
 export function mountAgentBridge(deps: BridgeDeps): () => void {
   let un: UnlistenFn | undefined;
@@ -235,8 +243,9 @@ export function mountAgentBridge(deps: BridgeDeps): () => void {
         ),
       );
   }).then((u) => {
-    if (dead) u();
-    else un = u;
+    if (dead) { u(); return; }
+    un = u;
+    void deps.bridgeReady?.();
   });
   return () => {
     dead = true;

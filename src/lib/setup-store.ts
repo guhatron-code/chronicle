@@ -202,11 +202,21 @@ export function waitingSignin(id: string): boolean {
 
 /** Pure: what the row should show for a given backend status and the currently
  *  open project's dir. No dir ⇒ blocked (nothing to turn on yet); a dir with no
- *  status yet (still loading) ⇒ checking; otherwise ready/needs_you from `mcp`. */
+ *  status yet (still loading) ⇒ checking; otherwise ready/needs_you from `mcp`.
+ *  A ready row whose skill is hand-managed says so — the human owns that copy,
+ *  and Chronicle isn't quietly overwriting it. */
 export function agentsRowFor(status: AgentsAccessStatus | null, dir: string | null): SetupCheck {
   if (!dir) return { id: "agents", state: "blocked", detail: "Open a project first", action: "" };
   if (!status) return { id: "agents", state: "checking" };
-  if (status.mcp) return { id: "agents", state: "ready" };
+  if (status.mcp) {
+    return {
+      id: "agents",
+      state: "ready",
+      ...(status.skill === "hand-managed"
+        ? { detail: "The chronicle skill at ~/.claude/skills/chronicle is yours to manage." }
+        : {}),
+    };
+  }
   return {
     id: "agents",
     state: "needs_you",

@@ -899,10 +899,10 @@ function AppShell() {
       // tab ids are global — this is what keeps a read inside its own project
       termDir: (id) => getTerm(id)?.dir ?? null,
       isProjectOpen: (dir) => projectsRef.current.has(dir),
+      // until the backend knows the listener above is live, every agent action
+      // times out with "isn't open" — mountAgentBridge calls this once it is
+      bridgeReady: agentBridgeReady,
     });
-    // until the backend knows the listener above is live, every agent action
-    // times out with "isn't open" — this is what turns the bridge on
-    void agentBridgeReady();
     return unmount;
   }, [doOpenProject, patchLayout]);
 

@@ -295,14 +295,31 @@ fn skill_status(home: &Path, name: &str, files: &[(&str, &str)]) -> &'static str
     if managed { "installed" } else { "hand-managed" }
 }
 
-/// Parses a file as a JSON object; a missing file, invalid JSON, or a non-object value
-/// all read back as `{}` — every caller below only ever adds/removes keys, so a blank
-/// object is always a safe starting point.
+/// Parses a file as a JSON object; a missing file, invalid JSON, or a non-object value all
+/// read back as `{}`. Permissive on purpose, and safe ONLY for READ-ONLY callers (the
+/// status read below) and for `access.json`, which Chronicle owns outright and is free to
+/// treat as blank if it's ever corrupt. A WRITE path for `.mcp.json` must NOT use this —
+/// that file is the user's, and defaulting a parse failure to `{}` would silently replace
+/// whatever servers they already declared. See `read_mcp_json_strict`.
 fn read_json_object(path: &Path) -> Value {
     std::fs::read_to_string(path).ok()
         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
         .filter(Value::is_object)
         .unwrap_or_else(|| json!({}))
+}
+
+const MCP_JSON_UNREADABLE: &str = "Chronicle couldn't read .mcp.json in this project. It isn't valid JSON, so nothing was changed. Fix or move it and try again.";
+
+/// `.mcp.json`, read the way a WRITE must: a MISSING file is fine to start from `{}` (there
+/// is nothing to lose), but a file that EXISTS and turns out not to be valid JSON, or not a
+/// JSON object, is a hard stop — every write path below uses this instead of the permissive
+/// `read_json_object`, so a malformed file is reported back, never quietly overwritten.
+fn read_mcp_json_strict(path: &Path) -> Result<Value, String> {
+    if !path.exists() { return Ok(json!({})); }
+    let text = std::fs::read_to_string(path).map_err(|_| MCP_JSON_UNREADABLE.to_string())?;
+    let v: Value = serde_json::from_str(&text).map_err(|_| MCP_JSON_UNREADABLE.to_string())?;
+    if !v.is_object() { return Err(MCP_JSON_UNREADABLE.to_string()); }
+    Ok(v)
 }
 
 /// Read-only: what `.mcp.json`, `.chronicle/agent/access.json`, and the skill folder say
@@ -319,16 +336,24 @@ fn agents_access_status_in(dir: &Path, home: &Path, exe: &Path) -> Value {
     })
 }
 
-/// Opts a project in: merges `.mcp.json` (creating it if missing, preserving every other
-/// key and server), installs the `chronicle` skill at `<home>/.claude/skills/chronicle/`,
-/// and records the choice at `.chronicle/agent/access.json` — including whether WE created
-/// `.mcp.json`, so disabling can clean it back up exactly when it is safe to.
+/// Opts a project in. Order matters, so a failure midway leaves as little behind as
+/// possible: (1) validate `.mcp.json` strictly BEFORE touching anything — a malformed
+/// file is refused, not replaced; (2) install the `chronicle` skill at
+/// `<home>/.claude/skills/chronicle/` — if THIS fails, the project is untouched; (3) merge
+/// and write `.mcp.json` (creating it if missing, preserving every other key and server);
+/// (4) write `.chronicle/agent/access.json` last, recording whether WE created `.mcp.json`
+/// — preserving `createdBy: "chronicle"` across a retry (read the prior access.json before
+/// overwriting it), so a later disable can still clean the file up exactly when it is safe
+/// to, even after an enable that partially failed and was retried.
 fn agents_access_enable_in(dir: &Path, home: &Path, exe: &Path) -> Result<Value, String> {
     let mcp_path = dir.join(".mcp.json");
-    let created = !mcp_path.exists();
-    let mut mcp_json = read_json_object(&mcp_path);
+    let existed_before = mcp_path.exists();
+    let mut mcp_json = read_mcp_json_strict(&mcp_path)?;
+
+    install_skill(home, "chronicle", &AGENT_SKILL_FILES)?;
+
     {
-        let obj = mcp_json.as_object_mut().expect("read_json_object always returns an object");
+        let obj = mcp_json.as_object_mut().expect("read_mcp_json_strict always returns an object");
         let servers = obj.entry("mcpServers".to_string()).or_insert_with(|| json!({}));
         let servers_obj = servers.as_object_mut().ok_or("`.mcp.json`'s mcpServers must be an object")?;
         servers_obj.insert("chronicle".into(), json!({
@@ -338,28 +363,30 @@ fn agents_access_enable_in(dir: &Path, home: &Path, exe: &Path) -> Result<Value,
     }
     std::fs::write(&mcp_path, serde_json::to_string_pretty(&mcp_json).unwrap()).map_err(|e| e.to_string())?;
 
-    install_skill(home, "chronicle", &AGENT_SKILL_FILES)?;
-
     let access_dir = dir.join(".chronicle/agent");
     std::fs::create_dir_all(&access_dir).map_err(|e| e.to_string())?;
-    let access = json!({ "mcp": true, "createdBy": if created { json!("chronicle") } else { Value::Null } });
-    std::fs::write(access_dir.join("access.json"), serde_json::to_string_pretty(&access).unwrap()).map_err(|e| e.to_string())?;
+    let access_path = access_dir.join("access.json");
+    let prior_created_by_us = read_json_object(&access_path).get("createdBy").and_then(Value::as_str) == Some("chronicle");
+    let created_by_us = !existed_before || prior_created_by_us;
+    let access = json!({ "mcp": true, "at": epoch_ms(), "createdBy": if created_by_us { json!("chronicle") } else { Value::Null } });
+    std::fs::write(&access_path, serde_json::to_string_pretty(&access).unwrap()).map_err(|e| e.to_string())?;
 
     Ok(agents_access_status_in(dir, home, exe))
 }
 
-/// Opts a project out: removes the `chronicle` server from `.mcp.json` (deleting the file
-/// only when WE created it and it is now nothing but an empty `mcpServers`), and removes
+/// Opts a project out: removes the `chronicle` server from `.mcp.json` (refusing to touch
+/// a file that's there but malformed, same as enable; deleting the file only when WE
+/// created it and it is now nothing but an empty `mcpServers`), and removes
 /// `access.json`. The skill at `~/.claude/skills/chronicle/` is left in place — other
 /// projects may still be using it.
-fn agents_access_disable_in(dir: &Path) -> Result<Value, String> {
+fn agents_access_disable_in(dir: &Path, home: &Path, exe: &Path) -> Result<Value, String> {
     let mcp_path = dir.join(".mcp.json");
     let access_path = dir.join(".chronicle/agent/access.json");
     let access = read_json_object(&access_path);
     let we_created_it = access.get("createdBy").and_then(Value::as_str) == Some("chronicle");
 
     if mcp_path.exists() {
-        let mut mcp_json = read_json_object(&mcp_path);
+        let mut mcp_json = read_mcp_json_strict(&mcp_path)?;
         if let Some(servers) = mcp_json.get_mut("mcpServers").and_then(Value::as_object_mut) {
             servers.remove("chronicle");
         }
@@ -372,10 +399,12 @@ fn agents_access_disable_in(dir: &Path) -> Result<Value, String> {
             std::fs::write(&mcp_path, serde_json::to_string_pretty(&mcp_json).unwrap()).map_err(|e| e.to_string())?;
         }
     }
-    let _ = std::fs::remove_file(&access_path);
+    if let Err(e) = std::fs::remove_file(&access_path) {
+        if e.kind() != std::io::ErrorKind::NotFound { return Err(e.to_string()); }
+    }
     let _ = std::fs::remove_dir(dir.join(".chronicle/agent")); // tidy up if that leaves it empty; fine to fail otherwise
 
-    Ok(json!({ "mcp": false }))
+    Ok(agents_access_status_in(dir, home, exe))
 }
 
 fn load_config() -> Value {
@@ -1987,33 +2016,38 @@ async fn agent_attach_path(roots: State<'_, OpenRoots>, dir: String, path: Strin
     attach_from_path(&p.dir, &PathBuf::from(&path))
 }
 
-fn home_dir() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_default())
+/// The real `$HOME`, or a sentence — never a silent `""` that would quietly install the
+/// skill under `./.claude` instead. Mirrors the guard `ensure_init_skill` already uses.
+fn home_dir() -> Result<PathBuf, String> {
+    std::env::var("HOME").map(PathBuf::from)
+        .map_err(|_| "Chronicle couldn't find your home folder (no HOME set), so it can't do this.".to_string())
 }
 
 /// The Setup row's "is this project opted in" read.
 #[tauri::command]
 async fn agents_access_status(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
+    let home = home_dir()?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(agents_access_status_in(&p.dir, &home_dir(), &exe))
+    Ok(agents_access_status_in(&p.dir, &home, &exe))
 }
 
 /// The Setup row's "Turn on".
 #[tauri::command]
 async fn agents_access_enable(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
+    let home = home_dir()?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    agents_access_enable_in(&p.dir, &home_dir(), &exe)
+    agents_access_enable_in(&p.dir, &home, &exe)
 }
 
 /// The Setup row's "Turn off".
 #[tauri::command]
 async fn agents_access_disable(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
-    agents_access_disable_in(&p.dir)?;
+    let home = home_dir()?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    Ok(agents_access_status_in(&p.dir, &home_dir(), &exe))
+    agents_access_disable_in(&p.dir, &home, &exe)
 }
 
 /// The one line every prompt Chronicle writes ends with. The two-message commit form
@@ -4035,7 +4069,8 @@ mod r3_tests {
         let d = repo("access");
         std::fs::write(d.join(".mcp.json"), r#"{"mcpServers":{"other":{"command":"x"}},"note":"keep"}"#).unwrap();
         let home = tmp("access-home");
-        let st = agents_access_enable_in(&d, &home, Path::new("/Applications/Chronicle.app/Contents/MacOS/chronicle")).unwrap();
+        let exe = Path::new("/Applications/Chronicle.app/Contents/MacOS/chronicle");
+        let st = agents_access_enable_in(&d, &home, exe).unwrap();
         assert_eq!(st["mcp"], true);
         let m: Value = serde_json::from_str(&std::fs::read_to_string(d.join(".mcp.json")).unwrap()).unwrap();
         assert_eq!(m["mcpServers"]["other"]["command"], "x", "other servers survive");
@@ -4046,7 +4081,8 @@ mod r3_tests {
         let a: Value = serde_json::from_str(&std::fs::read_to_string(d.join(".chronicle/agent/access.json")).unwrap()).unwrap();
         assert_eq!(a["mcp"], true);
         assert_eq!(a["createdBy"], Value::Null, "we did not create .mcp.json");
-        let st = agents_access_disable_in(&d).unwrap();
+        assert!(a["at"].as_u64().unwrap_or(0) > 0, "records when: {a:?}");
+        let st = agents_access_disable_in(&d, &home, exe).unwrap();
         assert_eq!(st["mcp"], false);
         let m: Value = serde_json::from_str(&std::fs::read_to_string(d.join(".mcp.json")).unwrap()).unwrap();
         assert!(m["mcpServers"].get("chronicle").is_none());
@@ -4056,8 +4092,78 @@ mod r3_tests {
         let d2 = repo("access2");
         agents_access_enable_in(&d2, &home, Path::new("/x/chronicle")).unwrap();
         assert!(d2.join(".mcp.json").exists());
-        agents_access_disable_in(&d2).unwrap();
+        agents_access_disable_in(&d2, &home, Path::new("/x/chronicle")).unwrap();
         assert!(!d2.join(".mcp.json").exists(), "created by us and now empty: gone");
+    }
+
+    #[test]
+    fn a_malformed_mcp_json_is_refused_not_replaced() {
+        let d = repo("access-malformed");
+        let bad = r#"{"mcpServers":{"other":{"command":"x"}},}"#; // trailing comma
+        std::fs::write(d.join(".mcp.json"), bad).unwrap();
+        let home = tmp("access-malformed-home");
+        let exe = Path::new("/x/chronicle");
+
+        let err = agents_access_enable_in(&d, &home, exe).unwrap_err();
+        assert!(err.contains("isn't valid JSON"), "got: {err}");
+        assert_eq!(std::fs::read_to_string(d.join(".mcp.json")).unwrap(), bad, "untouched");
+        assert!(!d.join(".chronicle/agent/access.json").exists());
+
+        // disable refuses the same way, and never removes an existing access.json either
+        std::fs::create_dir_all(d.join(".chronicle/agent")).unwrap();
+        std::fs::write(d.join(".chronicle/agent/access.json"), r#"{"mcp":true,"createdBy":null}"#).unwrap();
+        let err = agents_access_disable_in(&d, &home, exe).unwrap_err();
+        assert!(err.contains("isn't valid JSON"), "got: {err}");
+        assert_eq!(std::fs::read_to_string(d.join(".mcp.json")).unwrap(), bad, "still untouched");
+        assert!(d.join(".chronicle/agent/access.json").exists(), "not removed by a failed disable");
+    }
+
+    #[test]
+    fn a_retried_enable_keeps_created_by_us_true() {
+        let d = repo("access-retry");
+        let home = tmp("access-retry-home");
+        let exe = Path::new("/x/chronicle");
+        agents_access_enable_in(&d, &home, exe).unwrap();
+        let a: Value = serde_json::from_str(&std::fs::read_to_string(d.join(".chronicle/agent/access.json")).unwrap()).unwrap();
+        assert_eq!(a["createdBy"], "chronicle");
+        // enabling again — .mcp.json now exists, but it is still ours from the first call
+        agents_access_enable_in(&d, &home, exe).unwrap();
+        let a: Value = serde_json::from_str(&std::fs::read_to_string(d.join(".chronicle/agent/access.json")).unwrap()).unwrap();
+        assert_eq!(a["createdBy"], "chronicle", "a retry must not lose provenance");
+        agents_access_disable_in(&d, &home, exe).unwrap();
+        assert!(!d.join(".mcp.json").exists(), "still ours to clean up");
+    }
+
+    #[test]
+    fn a_skill_install_failure_leaves_the_project_untouched() {
+        let d = repo("access-partial-failure");
+        // a regular FILE standing in for $HOME: install_skill can't create directories
+        // under a path whose parent is a file, so it errors before .mcp.json is ever written
+        let parent = tmp("access-partial-failure-home");
+        std::fs::write(parent.join("not-a-dir"), "x").unwrap();
+        let fake_home = parent.join("not-a-dir");
+        agents_access_enable_in(&d, &fake_home, Path::new("/x/chronicle")).unwrap_err();
+        assert!(!d.join(".mcp.json").exists(), "nothing written to the project");
+        assert!(!d.join(".chronicle/agent/access.json").exists());
+    }
+
+    #[test]
+    fn status_reads_mcp_skill_and_command_independently() {
+        let d = repo("access-status");
+        let home = tmp("access-status-home");
+        let exe = Path::new("/x/chronicle");
+        // .mcp.json already has the server, but access.json says nothing: not really on
+        std::fs::write(d.join(".mcp.json"), r#"{"mcpServers":{"chronicle":{"command":"x","args":["--mcp","."]}}}"#).unwrap();
+        let st = agents_access_status_in(&d, &home, exe);
+        assert_eq!(st["mcp"], false, "no access.json => not opted in, whatever .mcp.json says");
+        assert_eq!(st["skill"], "missing");
+        assert_eq!(st["command"], exe.to_string_lossy().to_string());
+
+        // a hand-written, marker-less skill folder reads back as hand-managed
+        std::fs::create_dir_all(home.join(".claude/skills/chronicle")).unwrap();
+        std::fs::write(home.join(".claude/skills/chronicle/SKILL.md"), "mine, not Chronicle's").unwrap();
+        let st = agents_access_status_in(&d, &home, exe);
+        assert_eq!(st["skill"], "hand-managed");
     }
 
     #[test]

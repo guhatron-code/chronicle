@@ -1,5 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { describeAction, handleAgentAction } from "./agent-bridge";
+
+/* mountAgentBridge is the one impure export here — it calls onAgentAction and
+ * agentActionReply from ./ipc directly (the wire itself, not a decision), so
+ * the ordering test below fakes just those two instead of the whole deps
+ * surface handleAgentAction already covers. */
+let resolveListener: ((unlisten: () => void) => void) | null = null;
+vi.mock("./ipc", () => ({
+  onAgentAction: vi.fn(() => new Promise<() => void>((resolve) => { resolveListener = resolve; })),
+  agentActionReply: vi.fn(async () => {}),
+}));
+
+import { describeAction, handleAgentAction, mountAgentBridge } from "./agent-bridge";
 
 describe("what an agent asked for, in words", () => {
   it("names each action", () => {
@@ -80,5 +91,40 @@ describe("handling an action", () => {
     d.startRound.mockRejectedValueOnce(new Error("no queued notes"));
     const r = await handleAgentAction({ id: 1, dir: "/p", action: "round.start", args: { n: 1 } }, d);
     expect(r).toEqual({ ok: false, summary: "Couldn't start round 1: no queued notes" });
+  });
+});
+
+describe("mounting the bridge", () => {
+  const minimalDeps = () => ({
+    planRound: vi.fn(async () => {}), startRound: vi.fn(async () => {}), openProject: vi.fn(),
+    revealPane: vi.fn(), revealTerminal: vi.fn(), roundTotal: vi.fn(() => 0),
+    termTail: vi.fn(() => null),
+  });
+
+  it("signals ready only after onAgentAction's listener is registered", async () => {
+    resolveListener = null;
+    const order: string[] = [];
+    const bridgeReady = vi.fn(() => { order.push("ready"); });
+    mountAgentBridge({ ...minimalDeps(), bridgeReady });
+
+    // onAgentAction was called, but its promise has not settled yet: too early
+    await Promise.resolve();
+    expect(bridgeReady).not.toHaveBeenCalled();
+
+    order.push("registered");
+    resolveListener!(() => {}); // the listener is "live" now
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(order).toEqual(["registered", "ready"]);
+    expect(bridgeReady).toHaveBeenCalledTimes(1);
+  });
+
+  it("tolerates a deps object with no bridgeReady at all", async () => {
+    resolveListener = null;
+    expect(() => mountAgentBridge(minimalDeps())).not.toThrow();
+    resolveListener!(() => {});
+    await Promise.resolve();
+    await Promise.resolve(); // nothing throws once the listener resolves either
   });
 });

@@ -22,4 +22,13 @@ describe("agentsRowFor", () => {
       action: "install",
     });
   });
+
+  it("says the skill is hand-managed when ready but the human owns that copy", () => {
+    const handManaged: AgentsAccessStatus = { mcp: true, skill: "hand-managed", command: "/x/chronicle" };
+    expect(agentsRowFor(handManaged, "/tmp/p")).toEqual({
+      id: "agents",
+      state: "ready",
+      detail: "The chronicle skill at ~/.claude/skills/chronicle is yours to manage.",
+    });
+  });
 });
