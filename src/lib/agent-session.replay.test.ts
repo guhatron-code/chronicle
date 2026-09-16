@@ -32,7 +32,7 @@ vi.mock("./notes-store", () => ({
 vi.mock("./journal", () => ({ announce: vi.fn() }));
 vi.mock("@/overlays/toasts", () => ({ toastAction: vi.fn(), toastError: vi.fn() }));
 
-const { reduceLines } = await import("./agent-session");
+const { groupEntries, reduceLines } = await import("./agent-session");
 
 const DIR = "/home/u/proj";
 const lines = readFileSync(path.join(__dirname, "__fixtures__/agent-fanout.jsonl"), "utf8")
@@ -59,8 +59,15 @@ describe("a recorded fan-out session replays through the reducer", () => {
     expect(tools.filter((t) => t.toolKind === "execute")).toHaveLength(8);
   });
 
-  it("does not yet know which calls belong to which subagent (Item 2 changes this)", () => {
-    expect(tools.some((t) => "parentId" in t)).toBe(false);
+  it("knows which calls belong to which subagent, and the view folds them under their Task", () => {
+    const tasks = tools.filter((t) => t.subagent);
+    expect(tasks).toHaveLength(2);
+    const view = groupEntries(s.entries);
+    const groups = view.filter((v) => v.kind === "subagent");
+    expect(groups).toHaveLength(2);
+    expect(groups.map((g) => (g.kind === "subagent" ? g.children.length : -1))).toEqual([4, 4]);
+    // nothing a subagent did is left lying in the main transcript
+    expect(view.filter((v) => v.kind === "tool")).toHaveLength(0);
   });
 
   it("ends with the last context reading", () => {

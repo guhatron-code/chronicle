@@ -59,7 +59,8 @@ function midTruncate(s: string, max = 46): string {
 
 export function ToolCard({ tool, dir, readOnly, onViewChanges }: { tool: Tool; dir: string; readOnly?: boolean; onViewChanges?: () => void }) {
   const [open, setOpen] = useState(false);
-  const quiet = ["read", "search", "fetch", "think"].includes(tool.toolKind) && tool.status !== "failed" && !tool.rejected;
+  // a Task card is a subagent's home, never a quiet one-liner (SubagentCard draws it)
+  const quiet = ["read", "search", "fetch", "think"].includes(tool.toolKind) && tool.status !== "failed" && !tool.rejected && !tool.subagent;
   const running = tool.status === "pending" || tool.status === "in_progress";
   const failed = tool.status === "failed" && !tool.rejected;
   const detail = midTruncate(tool.detail || tool.title);

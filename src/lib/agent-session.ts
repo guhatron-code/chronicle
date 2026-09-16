@@ -85,6 +85,12 @@ export type AgentEntry =
       output?: string;
       /** the user said no to this call's permission ask */
       rejected?: boolean;
+      /** the call a subagent made: `_meta.claudeCode.parentToolUseId` — the
+       *  Task card it belongs under (round 9). Grouping is a view, see
+       *  `groupEntries`; the thread itself stays flat and in wire order */
+      parentId?: string;
+      /** a Task/Agent call — the card the subagent's own calls fold under */
+      subagent?: true;
     }
   | {
       kind: "perm";
@@ -337,6 +343,46 @@ function applyToolContent(dir: string, entry: Extract<AgentEntry, { kind: "tool"
   }
 }
 
+/** The linkage the adapter stamps on every tool update: which Task a call
+ *  belongs to, and whether the call IS a Task. Read from `_meta.claudeCode`
+ *  (claude-agent-acp ≥ 0.75), ignored when absent. */
+function applyLinkage(entry: Extract<AgentEntry, { kind: "tool" }>, tc: Raw) {
+  const meta = (tc._meta ?? {}) as Raw;
+  const cc = (meta.claudeCode ?? {}) as Raw;
+  const parent = str(cc.parentToolUseId);
+  if (parent) entry.parentId = parent;
+  const name = str(cc.toolName);
+  if (cc.subagent === true || name === "Agent" || name === "Task") entry.subagent = true;
+}
+
+/** One item of the thread as the pane draws it: an entry, or a Task card with
+ *  the calls its subagent made folded under it. */
+export type ThreadItem =
+  | AgentEntry
+  | { kind: "subagent"; tool: Extract<AgentEntry, { kind: "tool" }>; children: Extract<AgentEntry, { kind: "tool" }>[] };
+
+/**
+ * The subagent tree, as a VIEW over the flat thread. Every tool entry whose
+ * `parentId` names a Task card in the list moves under that card, in wire
+ * order; the card keeps its own place. An orphan — a parent the thread never
+ * saw — stays at the top level exactly as before. Grouping is by id, so a child
+ * that streamed in before its parent's first frame still lands in the right
+ * place. Pure: live and replayed threads group identically.
+ */
+export function groupEntries(entries: AgentEntry[]): ThreadItem[] {
+  type Tool = Extract<AgentEntry, { kind: "tool" }>;
+  const parents = new Map<string, Tool[]>();
+  for (const e of entries) if (e.kind === "tool" && e.subagent) parents.set(e.toolCallId, []);
+  const out: ThreadItem[] = [];
+  for (const e of entries) {
+    if (e.kind !== "tool") { out.push(e); continue; }
+    if (e.parentId && parents.has(e.parentId)) { parents.get(e.parentId)!.push(e); continue; }
+    if (e.subagent) { out.push({ kind: "subagent", tool: e, children: parents.get(e.toolCallId)! }); continue; }
+    out.push(e);
+  }
+  return out;
+}
+
 function settleStreaming(s: AgentSessionState) {
   for (const e of s.entries) if (e.kind === "assistant") e.streaming = false;
 }
@@ -570,6 +616,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
         detail: toolDetail(dir, toolKind, update),
       };
       applyToolContent(dir, entry, update.content);
+      applyLinkage(entry, update);
       s.entries.push(entry);
     } else if (kind === "tool_call_update") {
       const id = str(update.toolCallId);
@@ -581,6 +628,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
           const freshDetail = toolDetail(dir, e.toolKind, update);
           if (freshDetail && freshDetail !== str(update.title)) e.detail = freshDetail;
           applyToolContent(dir, e, update.content);
+          applyLinkage(e, update);
         }
       }
     } else if (kind === "current_mode_update") {

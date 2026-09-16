@@ -13,9 +13,11 @@ import {
   adoptAgentSession,
   closeAgentViewing,
   dequeueAgentMessage,
+  groupEntries,
   subscribeAgent,
   type AgentEntry,
   type AgentSessionState,
+  type ThreadItem,
 } from "@/lib/agent-session";
 import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
 import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint, agentsAvailable } from "@/lib/ipc";
@@ -29,6 +31,7 @@ import { BtnPrimary, BtnSecondary, Spinner } from "@/components/chrome/atoms";
 import { cn } from "@/lib/utils";
 import { Composer } from "./Composer";
 import { ToolCard } from "./ToolCard";
+import { SubagentCard } from "./SubagentCard";
 import { PermissionCard } from "./PermissionCard";
 
 /** Projects we've auto-started the agent for this app session — so toggling the
@@ -366,7 +369,7 @@ function Entry({
   onOpenNotes,
 }: {
   dir: string;
-  entry: AgentEntry;
+  entry: ThreadItem;
   turnActive: boolean;
   onConfirm: (spec: ConfirmSpec) => void;
   readOnly?: boolean;
@@ -423,6 +426,12 @@ function Entry({
     return (
       <div className="px-3.5 py-1">
         <PlanCard entry={entry} />
+      </div>
+    );
+  if (entry.kind === "subagent")
+    return (
+      <div className="px-3.5 py-1">
+        <SubagentCard group={entry} dir={dir} readOnly={readOnly} />
       </div>
     );
   return (
@@ -635,7 +644,7 @@ export function AgentPane({
           </BtnPrimary>
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
-          {s.viewing.entries.map((entry, i) => (
+          {groupEntries(s.viewing.entries).map((entry, i) => (
             <Entry key={i} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} />
           ))}
         </div>
@@ -665,7 +674,7 @@ export function AgentPane({
           }}
           className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-3"
         >
-          {s.entries.map((entry, i) => (
+          {groupEntries(s.entries).map((entry, i) => (
             <Entry
               key={i}
               dir={dir}
