@@ -9,12 +9,14 @@
  * a drag, whose insertion line would otherwise be under the page — counts as
  * an overlay. `onOverlay` tells the pane to hide the page while one is up.
  *
- * Reorder is HTML5 drag and drop rather than a library: the whole integration
- * is a dragstart, a dragover and a drop, against @dnd-kit's sensors, contexts
- * and collision detection for the same three. The keyboard route is
+ * Reorder is pointer-driven, the same way the notes sidebar drags a note: a
+ * press that travels past a few pixels becomes a drag, and the drop is
+ * hit-tested against `data-web-drop` under the pointer. Not HTML5 drag and
+ * drop: the webview starts a native drag session but never reports the pointer
+ * over the page, so dragover and drop never arrive. The keyboard route is
  * "Move to ▸" in the row menu, which every tab row has.
  */
-import { useCallback, useEffect, useRef, useState, type ComponentProps, type ComponentType, type DragEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentProps, type ComponentType, type ReactNode } from "react";
 import {
   ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
   ContextMenuSub, ContextMenuSubContent, ContextMenuSubTrigger, ContextMenuTrigger,
@@ -179,14 +181,32 @@ function sameDrop(a: DropAt | null, b: DropAt): boolean {
   return true;
 }
 
-/** WebKit refuses to start a drag with an empty dataTransfer. */
-const DRAG_MIME = "application/x-chronicle-web-tab";
+/** how far a press travels before it is a drag, not a click */
+const DRAG_SLOP = 5;
+
+/** The drop under a point: the innermost `data-web-drop` wins, so a tab row
+ *  inside a folder beats the folder, and the folder beats the scroller (the
+ *  end of the root). A tab row's upper half inserts above it, the lower below. */
+function dropAtPoint(x: number, y: number): DropAt | null {
+  const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-web-drop]");
+  const id = el?.dataset.webDrop;
+  if (!el || !id) return null;
+  if (id === "root") return { kind: "root-end" };
+  const i = id.indexOf(":");
+  const kind = id.slice(0, i), rest = id.slice(i + 1);
+  if (kind === "folder") return { kind: "folder", id: rest };
+  if (kind === "tab") {
+    const r = el.getBoundingClientRect();
+    return { kind: "tab", id: Number(rest), before: y < r.top + r.height / 2 };
+  }
+  return null;
+}
 /** Past the end of any container — moveTab clamps it. */
 const END = Number.MAX_SAFE_INTEGER;
 
 /* ---------- one tab row ---------- */
 
-function TabRow({ tab, depth, selected, dragging, dropAt, nodes, dir, onMenuOpen, onDragStart, onDragEnd, onOver, onDrop }: {
+function TabRow({ tab, depth, selected, dragging, dropAt, nodes, dir, onMenuOpen, onPress, swallowedClick }: {
   tab: WebTab;
   depth: number;
   selected: boolean;
@@ -195,31 +215,16 @@ function TabRow({ tab, depth, selected, dragging, dropAt, nodes, dir, onMenuOpen
   nodes: MenuNode[];
   dir: string;
   onMenuOpen: (open: boolean) => void;
-  onDragStart: (id: number) => void;
-  onDragEnd: () => void;
-  onOver: (at: DropAt, e: DragEvent) => void;
-  onDrop: (at: DropAt, e: DragEvent) => void;
+  /** a press on the row: it may become a drag, or stay a click */
+  onPress: (id: number, e: React.PointerEvent) => void;
+  /** the click a drag just swallowed must not activate the tab */
+  swallowedClick: () => boolean;
 }) {
   const dot = tabDot(tab);
   const label = tabLabel(tab);
   const line = dropAt?.kind === "tab" && dropAt.id === tab.id ? (dropAt.before ? "top" : "bottom") : null;
-  const half = (e: DragEvent): DropAt => {
-    const r = e.currentTarget.getBoundingClientRect();
-    return { kind: "tab", id: tab.id, before: e.clientY < r.top + r.height / 2 };
-  };
   return (
-    <div
-      className="relative"
-      draggable
-      onDragStart={(e) => {
-        onDragStart(tab.id);
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData(DRAG_MIME, String(tab.id));
-      }}
-      onDragEnd={onDragEnd}
-      onDragOver={(e) => onOver(half(e), e)}
-      onDrop={(e) => onDrop(half(e), e)}
-    >
+    <div className="relative" data-web-drop={`tab:${tab.id}`}>
       {line && (
         <span aria-hidden className={cn("pointer-events-none absolute inset-x-1 z-10 h-0.5 rounded-[1px] bg-text-primary", line === "top" ? "-top-px" : "-bottom-px")} />
       )}
@@ -232,10 +237,12 @@ function TabRow({ tab, depth, selected, dragging, dropAt, nodes, dir, onMenuOpen
             marquee
             selected={selected}
             icon={<WebGlyph size={13} className="shrink-0 text-text-subtle" />}
-            onClick={() => activateId(dir, tab.id)}
-            // WebKit will not begin a drag on an ancestor of a <button>; making
-            // the row itself the drag source is what gets dragstart to fire
-            className="[-webkit-user-drag:element]"
+            onClick={() => { if (!swallowedClick()) activateId(dir, tab.id); }}
+            onPointerDown={(e) => {
+              // the ⋯ and × are their own buttons; a press there is never a drag
+              if ((e.target as Element).closest("[role=button]")) return;
+              onPress(tab.id, e);
+            }}
             trailing={
               <span className="flex flex-none items-center gap-1">
                 {dot && <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", DOT_CLASS[dot])} />}
@@ -281,28 +288,11 @@ export function WebSidebar({ dir, p, width, onNewTab, onOverlay, onConfirm }: {
 
   const [naming, setNaming] = useState<{ kind: "new" } | { kind: "rename"; id: string } | null>(null);
 
-  const endDrag = useCallback(() => { setDragging(null); setDropAt(null); }, []);
-
-  /** Every dragover stops here rather than bubbling: the scroller behind the
-   *  rows is itself a drop target (the end of the root), and a bubbled event
-   *  would overwrite the row the pointer is actually on. */
-  const onOver = (at: DropAt, e: DragEvent) => {
-    if (dragging === null) return;
-    e.preventDefault();
-    e.stopPropagation();
-    e.dataTransfer.dropEffect = "move";
-    setDropAt((cur) => (sameDrop(cur, at) ? cur : at));
-  };
-
-  /** Turn a hover into a (folder, index) the model can take. The index counts
+  /** Turn a drop into a (folder, index) the model can take. The index counts
    *  the destination's tabs with the dragged one already lifted out, which is
    *  what moveTab expects. */
-  const onDrop = (at: DropAt, e: DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const id = dragging;
-    endDrag();
-    if (id === null) return;
+  const drop = (id: number, at: DropAt | null) => {
+    if (!at) return;
     if (at.kind === "folder") { moveWebTab(dir, id, at.id, END); return; }
     if (at.kind === "root-end") { moveWebTab(dir, id, null, END); return; }
     const target = p.tabs.find((t) => t.id === at.id);
@@ -312,6 +302,54 @@ export function WebSidebar({ dir, p, width, onNewTab, onOverlay, onConfirm }: {
     const i = siblings.findIndex((t) => t.id === target.id);
     moveWebTab(dir, id, dest, (i < 0 ? siblings.length : i) + (at.before ? 0 : 1));
   };
+  const dropRef = useRef(drop); dropRef.current = drop;
+
+  /** the press being watched; a drag begins once it travels DRAG_SLOP */
+  const press = useRef<{ id: number; x: number; y: number; live: boolean } | null>(null);
+  const swallowed = useRef(false);
+  const [ghost, setGhost] = useState<{ x: number; y: number; name: string } | null>(null);
+  const tabsRef = useRef(p.tabs); tabsRef.current = p.tabs;
+
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      const pr = press.current;
+      if (!pr) return;
+      if (!pr.live) {
+        if (Math.hypot(e.clientX - pr.x, e.clientY - pr.y) < DRAG_SLOP) return;
+        pr.live = true;
+        setDragging(pr.id);
+      }
+      const at = dropAtPoint(e.clientX, e.clientY);
+      setDropAt((cur) => (at && sameDrop(cur, at) ? cur : at));
+      const t = tabsRef.current.find((x) => x.id === pr.id);
+      setGhost({ x: e.clientX, y: e.clientY, name: t ? tabLabel(t) : "" });
+    };
+    const up = (e: PointerEvent) => {
+      const pr = press.current;
+      press.current = null;
+      if (!pr) return;
+      if (pr.live) {
+        swallowed.current = true; // the click that follows this release is the drag's
+        dropRef.current(pr.id, dropAtPoint(e.clientX, e.clientY));
+      }
+      setDragging(null); setDropAt(null); setGhost(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, []);
+
+  const onPress = useCallback((id: number, e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    swallowed.current = false; // a drag released over empty space fires no click to consume the flag
+    press.current = { id, x: e.clientX, y: e.clientY, live: false };
+  }, []);
+  const swallowedClick = useCallback(() => { const s = swallowed.current; swallowed.current = false; return s; }, []);
 
   /** "Move to ▸" — the keyboard route to everything the drag does. */
   const tabMenu = (tab: WebTab): MenuNode[] => {
@@ -362,7 +400,7 @@ export function WebSidebar({ dir, p, width, onNewTab, onOverlay, onConfirm }: {
     },
   ];
 
-  const rowProps = { dragging, dropAt, dir, onMenuOpen, onDragStart: setDragging, onDragEnd: endDrag, onOver, onDrop };
+  const rowProps = { dragging, dropAt, dir, onMenuOpen, onPress, swallowedClick };
 
   return (
     <div data-chrome style={{ width }} className="flex h-full flex-none flex-col border-r border-border-hairline">
@@ -377,8 +415,7 @@ export function WebSidebar({ dir, p, width, onNewTab, onOverlay, onConfirm }: {
 
       <div
         className="min-h-0 flex-1 overflow-y-auto px-2 py-1 text-[12.5px] text-text-secondary"
-        onDragOver={(e) => onOver({ kind: "root-end" }, e)}
-        onDrop={(e) => onDrop({ kind: "root-end" }, e)}
+        data-web-drop="root"
       >
         {naming?.kind === "new" && (
           <NameInput initial="" onDone={(name) => { setNaming(null); if (name?.trim()) addWebFolder(dir, name); }} />
@@ -395,11 +432,7 @@ export function WebSidebar({ dir, p, width, onNewTab, onOverlay, onConfirm }: {
           // where they are — the list must not jump under the caret
           const renaming = naming?.kind === "rename" && naming.id === f.id;
           return (
-            <div
-              key={f.id}
-              onDragOver={(e) => onOver({ kind: "folder", id: f.id }, e)}
-              onDrop={(e) => onDrop({ kind: "folder", id: f.id }, e)}
-            >
+            <div key={f.id} data-web-drop={`folder:${f.id}`}>
               {renaming ? (
                 <NameInput
                   initial={f.name}
@@ -441,6 +474,15 @@ export function WebSidebar({ dir, p, width, onNewTab, onOverlay, onConfirm }: {
           <div className="px-1.5 py-2 text-[11.5px] text-text-dimmer">No tabs yet — “+” opens one.</div>
         )}
       </div>
+      {ghost && (
+        <div
+          aria-hidden
+          style={{ left: ghost.x + 12, top: ghost.y + 8 }}
+          className="pointer-events-none fixed z-50 max-w-[220px] truncate rounded-sm border border-border-strong bg-surface-card px-2 py-0.5 text-[11.5px] text-text-primary shadow-md"
+        >
+          {ghost.name}
+        </div>
+      )}
     </div>
   );
 }
