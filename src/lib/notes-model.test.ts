@@ -5,7 +5,7 @@ import {
   outlinksFor, pillFor, roundPhaseOf, roundPlanOutcome, roundSubline, sanitizeTitle,
   setStatusInFront, slugFor,
   roundsJustFinished, splitFrontMatter, statusInFront, tagCounts, terminalRoundCommand,
-} from "./notes-model";
+ deriveTitle } from "./notes-model";
 
 const note = (path: string, p: Partial<NoteEntry> = {}): NoteEntry => ({
   path, title: (path.split("/").pop() ?? path).replace(/\.md$/, ""),
@@ -261,5 +261,49 @@ describe("how a planning turn settles", () => {
     expect(entries[1]).toEqual({ kind: "round", ended: true }); // no outcome on a run card
     expect(entries[0]).toEqual({ kind: "round-plan" });
     expect(endNewestRoundCard(entries, "round")).toBe(false);
+  });
+});
+
+describe("deriveTitle", () => {
+  it("takes the first heading", () => {
+    expect(deriveTitle("# Weekly plan\n\nsome text")).toBe("Weekly plan");
+  });
+  it("takes the first non-blank line when there is no heading", () => {
+    expect(deriveTitle("\n\nMeeting with Sam\nmore")).toBe("Meeting with Sam");
+  });
+  it("a heading further down wins over an earlier plain line", () => {
+    expect(deriveTitle("just a lead-in\n\n## The real title\n")).toBe("The real title");
+  });
+  it("strips markdown noise", () => {
+    expect(deriveTitle("- [ ] **Fix** the [[Other note|link]] and `code`")).toBe("Fix the link and code");
+    expect(deriveTitle("> *quoted* _thing_ ~~gone~~ [site](https://x.y) ![pic](a.png)")).toBe("quoted thing gone site pic");
+    expect(deriveTitle("[[Target note]] first")).toBe("Target note first");
+    expect(deriveTitle("<b>bold</b> tag")).toBe("bold tag");
+  });
+  it("strips a numbered list marker and trailing hashes", () => {
+    expect(deriveTitle("1. Buy milk")).toBe("Buy milk");
+    expect(deriveTitle("### Closing ###")).toBe("Closing");
+  });
+  it("cuts a long line at a word boundary at or before 60", () => {
+    const line = "The quick brown fox jumps over the lazy dog and keeps running far away";
+    const t = deriveTitle(line);
+    expect(t.length).toBeLessThanOrEqual(60);
+    expect(line.startsWith(t)).toBe(true);
+    expect(t.endsWith(" ")).toBe(false);
+    expect(line[t.length]).toBe(" ");
+  });
+  it("hard-cuts a single word longer than 60", () => {
+    expect(deriveTitle("a".repeat(70))).toBe("a".repeat(60));
+  });
+  it("is Untitled for whitespace, rules, and nothing", () => {
+    expect(deriveTitle("")).toBe("Untitled");
+    expect(deriveTitle("  \n---\n\n")).toBe("Untitled");
+    expect(deriveTitle("# ")).toBe("Untitled");
+  });
+  it("never reads inside a fenced block", () => {
+    expect(deriveTitle("```\n# not a title\nconsole.log(1)\n```\nAfter the code")).toBe("After the code");
+  });
+  it("passes through the file-system sanitiser", () => {
+    expect(deriveTitle("# Sam: notes / plan?")).toBe("Sam- notes - plan");
   });
 });

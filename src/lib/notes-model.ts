@@ -135,6 +135,43 @@ export function sanitizeTitle(raw: string): string {
     .trim().replace(/^[-.]+|-+$/g, "")
     .slice(0, 80).trim();
 }
+/**
+ * The title a note names itself with (round 9): its first heading, else its
+ * first line, with the markdown taken off, cut at 60 on a word, then made
+ * safe for the file system. `body` is the note without its front matter.
+ * Deterministic and cheap — nothing here asks a model. Empty → "Untitled".
+ */
+export function deriveTitle(body: string): string {
+  const lines = body.split(/\r?\n/);
+  let firstPlain: string | null = null;
+  let heading: string | null = null;
+  let inFence = false;
+  for (let i = 0; i < lines.length && i < 40; i++) {
+    const raw = lines[i];
+    const t = raw.trim();
+    if (/^(```|~~~)/.test(t)) { inFence = !inFence; continue; }
+    if (inFence || !t || /^-{3,}$/.test(t)) continue;
+    if (/^#{1,6}(\s|$)/.test(t)) { heading = t; break; }
+    if (firstPlain == null) firstPlain = t;
+  }
+  const line = heading ?? firstPlain ?? "";
+  let text = line
+    .replace(/^#{1,6}\s*/, "").replace(/\s+#+\s*$/, "")
+    .replace(/^(>\s*)+/, "")
+    .replace(/^([-*+]|\d+[.)])\s+/, "")
+    .replace(/^\[[ xX]\]\s+/, "")
+    .replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2").replace(/\[\[([^\]]*)\]\]/g, "$1")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/(\*\*|__|~~|[*_`])/g, "")
+    .replace(/\s+/g, " ").trim();
+  if (text.length > 60) {
+    const cut = text.lastIndexOf(" ", 60);
+    text = (cut > 0 ? text.slice(0, cut) : text.slice(0, 60)).trim();
+  }
+  return sanitizeTitle(text) || "Untitled";
+}
+
 export function newNotePath(folder: string, title: string, taken: Set<string>): string {
   const base = sanitizeTitle(title) || "Untitled";
   const at = (name: string) => (folder ? `${folder}/${name}.md` : `${name}.md`);
