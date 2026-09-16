@@ -125,10 +125,124 @@ pub(crate) fn run(args: &[String]) -> Option<i32> {
     }
 }
 
+/* ================= the launch plan: what a command line that is NOT a verb gets ==========
+   Everything the binary is asked for that isn't a capability verb, `--mcp`, `--derive` or
+   `--state` ends here. Only a bare launch or `--open <dir>` may reach the desktop app: a
+   rebuild agent once ran `chronicle --help` to see whether the CLI existed, and every
+   such probe opened another Chronicle window (round 8, Tasks/Untitled.md). */
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum Launch {
+    /// The ONLY path that reaches `tauri::Builder`.
+    Gui { open: Option<String> },
+    /// Usage on stdout, exit 0.
+    Help,
+    /// `chronicle <version>` on stdout, exit 0.
+    Version,
+    /// One sentence on stderr, exit 2. Never a window.
+    Usage(String),
+}
+
+/// The forms the binary knows, one per line, for `--help` and for the refusal.
+pub(crate) fn help_text() -> String {
+    let groups = GROUPS.iter().map(|(g, _)| *g).collect::<Vec<_>>().join("|");
+    format!(
+        "Chronicle {}\n\n\
+         Usage:\n\
+         \x20 chronicle                          open the app\n\
+         \x20 chronicle --open <dir>             open the app on that project\n\
+         \x20 chronicle --derive <dir>           the derived roadmap state as JSON (exit 1 on a broken manifest)\n\
+         \x20 chronicle --state <dir>            the full project state as JSON\n\
+         \x20 chronicle --mcp <dir>              serve the capability catalog over MCP on stdin/stdout\n\
+         \x20 chronicle <{groups}> <verb> [--flag value] [--json] [dir]\n\
+         \x20                                    the same catalog from the shell (chronicle <group> for its verbs)\n\
+         \x20 chronicle --version                print the version\n\
+         \x20 chronicle --help                   this text\n\n\
+         Any other command line is refused with this text and exit code 2 instead of opening the app.\n",
+        crate::mcp::app_version()
+    )
+}
+
+/// `args` is everything after argv[0], with the verb groups, `--mcp`, `--derive` and
+/// `--state` already answered by the caller. Left to right, first decision wins.
+pub(crate) fn launch_plan(args: &[String]) -> Launch {
+    let mut open = None;
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        match a {
+            "--help" | "-h" | "help" => return Launch::Help,
+            "--version" | "-V" | "version" => return Launch::Version,
+            "--open" => {
+                let Some(v) = args.get(i + 1).filter(|v| !v.starts_with("--")) else {
+                    return Launch::Usage("--open needs a folder.".into());
+                };
+                if open.is_some() { return Launch::Usage("Only one folder can be given to --open.".into()) }
+                open = Some(v.clone());
+                i += 2;
+                continue;
+            }
+            // legacy LaunchServices process serial numbers: noise, not a request
+            _ if a.starts_with("-psn_") => {}
+            _ => return Launch::Usage(format!("Unknown argument {a}. Run chronicle --help for the forms Chronicle knows.")),
+        }
+        i += 1;
+    }
+    Launch::Gui { open }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     fn a(s: &str) -> Vec<String> { s.split_whitespace().map(String::from).collect() }
+
+    /// The desktop app is what a command line that nobody recognises used to get: a
+    /// rebuild agent ran `chronicle --help` to see whether the CLI existed and opened a
+    /// second Chronicle window every time. Only a bare launch or `--open <dir>` reaches
+    /// the app now; everything else is words on the terminal and an exit code.
+    #[test]
+    fn only_a_bare_launch_or_open_reaches_the_app() {
+        assert!(matches!(launch_plan(&[]), Launch::Gui { open: None }));
+        assert!(matches!(launch_plan(&a("--open /tmp/x")), Launch::Gui { open: Some(ref d) } if d == "/tmp/x"));
+        // legacy LaunchServices process serial numbers are noise, not a request
+        assert!(matches!(launch_plan(&a("-psn_0_12345")), Launch::Gui { open: None }));
+        assert!(matches!(launch_plan(&a("--open /tmp/x -psn_0_1")), Launch::Gui { open: Some(ref d) } if d == "/tmp/x"));
+        assert!(matches!(launch_plan(&a("--open")), Launch::Usage(ref u) if u == "--open needs a folder."));
+        assert!(matches!(launch_plan(&a("--open /a --open /b")), Launch::Usage(ref u) if u == "Only one folder can be given to --open."));
+    }
+
+    #[test]
+    fn help_and_version_are_words_not_windows() {
+        for form in ["--help", "-h", "help"] {
+            assert!(matches!(launch_plan(&a(form)), Launch::Help), "{form}");
+        }
+        // whatever follows --help is irrelevant: the person asked for help
+        assert!(matches!(launch_plan(&a("--help | head -5")), Launch::Help));
+        for form in ["--version", "-V", "version"] {
+            assert!(matches!(launch_plan(&a(form)), Launch::Version), "{form}");
+        }
+        let h = help_text();
+        for line in ["chronicle --open <dir>", "chronicle --derive <dir>", "chronicle --state <dir>", "chronicle --mcp <dir>",
+                     "chronicle <notes|state|round|project|terminal> <verb> [--flag value] [--json] [dir]", "chronicle --version"] {
+            assert!(h.contains(line), "help text is missing {line:?}:\n{h}");
+        }
+        assert!(!h.contains('\u{2014}'), "no em dash in the help text");
+    }
+
+    #[test]
+    fn anything_else_is_refused_instead_of_opening_the_app() {
+        assert!(matches!(launch_plan(&a("--bogus")), Launch::Usage(ref u)
+            if u == "Unknown argument --bogus. Run chronicle --help for the forms Chronicle knows."));
+        assert!(matches!(launch_plan(&a("roadmap")), Launch::Usage(ref u)
+            if u == "Unknown argument roadmap. Run chronicle --help for the forms Chronicle knows."));
+        assert!(matches!(launch_plan(&a("--open /tmp/x extra")), Launch::Usage(ref u)
+            if u == "Unknown argument extra. Run chronicle --help for the forms Chronicle knows."));
+        // --derive, --state and --mcp are answered BEFORE the launch plan is consulted (main);
+        // if one ever reaches it, it is refused rather than turned into a window
+        for form in ["--derive .", "--state .", "--mcp ."] {
+            assert!(matches!(launch_plan(&a(form)), Launch::Usage(_)), "{form}");
+        }
+    }
 
     #[test]
     fn flags_become_the_same_json_args_mcp_sends() {

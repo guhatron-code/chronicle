@@ -3477,7 +3477,6 @@ fn launch_open_dir(lo: State<LaunchOpen>) -> Option<String> {
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(code) = cli::run(&args[1..]) { std::process::exit(code); }
-    let launch_open = args.iter().position(|a| a == "--open").and_then(|i| args.get(i + 1).cloned());
     if let Some(i) = args.iter().position(|a| a == "--mcp") {
         let start = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
         match agent_api::resolve_project_dir(&start) {
@@ -3517,6 +3516,16 @@ fn main() {
         })).unwrap());
         std::process::exit(0);
     }
+    // Everything else is the launch plan (cli.rs): only a bare launch or `--open <dir>`
+    // goes on to open the app. `--help`, `--version` and any unknown argument are words
+    // on the terminal and an exit code — a probe like `chronicle --help` used to open a
+    // second Chronicle window (round 8).
+    let launch_open = match cli::launch_plan(&args[1..]) {
+        cli::Launch::Help => { print!("{}", cli::help_text()); std::process::exit(0) }
+        cli::Launch::Version => { println!("chronicle {}", mcp::app_version()); std::process::exit(0) }
+        cli::Launch::Usage(u) => { eprintln!("{u}\n\n{}", cli::help_text()); std::process::exit(2) }
+        cli::Launch::Gui { open } => open,
+    };
     // Seed the allowlist from the recents the user built up — those were all opened
     // through open_project at some point, so they carry the same trust.
     let seeded: HashSet<PathBuf> = load_recents().iter()

@@ -114,6 +114,10 @@ panes · ⌃Tab cycle panes · ⌥⌘1/2/3 show/hide content · agent · termina
 ## Accuracy contract
 
 - `chronicle --derive <dir>` / `chronicle --state <dir>` — the derived state as JSON.
+- `chronicle --help` / `chronicle --version` — the forms the binary knows, and its version.
+  Any other command line is refused with that usage text (exit 2) rather than opening the
+  app; only a bare `chronicle` or `chronicle --open <dir>` launches it, and while it is
+  already running either one hands off to the open app instead of starting a second.
 - `test/golden.sh` — the golden-equivalence test: both bundled examples must derive exactly
   the states the original hand-built apps showed.
 - `generatedFrom` sha256 hashes surface "the plan changed — rebuild the roadmap" honestly.
