@@ -273,6 +273,41 @@ fn is_loading_of(app: &AppHandle, label: &str) -> bool {
  * overlay, with no DOM able to cover it. They do no I/O worth moving off the
  * main thread anyway. Do not make them async.
  */
+/// The user agent the page view sends. WKWebView's own default —
+/// `Mozilla/5.0 (Macintosh; …) AppleWebKit/605.1.15 (KHTML, like Gecko)` — has no
+/// `Version/… Safari/…` tokens, and a site that parses a browser version out of
+/// those reads "unknown, ancient" and refuses to load. The engine IS Safari's, so
+/// the string says so, with the installed Safari's version (a fixed recent one
+/// when it can't be read).
+pub(crate) fn safari_user_agent() -> String {
+    let version = safari_version().unwrap_or_else(|| FALLBACK_SAFARI_VERSION.to_string());
+    safari_user_agent_for(&version)
+}
+
+const FALLBACK_SAFARI_VERSION: &str = "26.0";
+
+pub(crate) fn safari_user_agent_for(version: &str) -> String {
+    format!("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/{version} Safari/605.1.15")
+}
+
+/// `CFBundleShortVersionString` of /Applications/Safari.app, read once. Only a
+/// plain dotted number is trusted; anything else falls back.
+fn safari_version() -> Option<String> {
+    static V: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        let out = std::process::Command::new("/usr/bin/defaults")
+            .args(["read", "/Applications/Safari.app/Contents/Info.plist", "CFBundleShortVersionString"])
+            .output().ok()?;
+        if !out.status.success() { return None; }
+        let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        plain_version(&v).then_some(v)
+    }).clone()
+}
+
+fn plain_version(v: &str) -> bool {
+    !v.is_empty() && v.len() <= 16 && v.split('.').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
 #[tauri::command]
 pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<WebState>, block: State<crate::blocklists::BlockState>, dir: String, url: Option<String>) -> Result<String, String> {
     let _ = crate::project_for(&roots, &dir)?;
@@ -298,6 +333,9 @@ pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<W
     let app_load = app.clone(); let label_load = label.clone();
     let builder = WebviewBuilder::new(&label, WebviewUrl::External("about:blank".parse().unwrap()))
         .data_store_identifier(WEB_PROFILE_ID)
+        // WebKit's bare default string carries no browser version, so sites that
+        // sniff one show an "update your browser" wall; say what this is: Safari
+        .user_agent(&safari_user_agent())
         .zoom_hotkeys_enabled(false)
         .on_navigation(move |u| url_allowed(u))
         .on_new_window(move |u, _features| {
@@ -408,6 +446,17 @@ pub fn web_tab_reload(web: State<WebState>, label: String) -> Result<(), String>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_page_view_calls_itself_safari_with_a_version() {
+        let ua = safari_user_agent_for("26.0");
+        assert_eq!(ua, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15");
+        // whatever the machine's Safari says, the live string has both tokens a sniffer wants
+        let live = safari_user_agent();
+        assert!(live.contains(" Version/") && live.ends_with(" Safari/605.1.15"), "{live}");
+        assert!(plain_version("26.0") && plain_version("18.6.1"));
+        assert!(!plain_version("") && !plain_version("26.0 beta") && !plain_version("../x"));
+    }
+
     use super::*;
 
     fn tmp(name: &str) -> PathBuf {
