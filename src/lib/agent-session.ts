@@ -786,19 +786,26 @@ export async function listAgentSessions(dir: string): Promise<AgentHistoryRow[]>
   return Array.isArray(r?.sessions) ? r.sessions : [];
 }
 
-/** Rebuild a thread by replaying stored lines through the ONE reducer. */
-async function replayTranscript(dir: string, id: string): Promise<AgentEntry[]> {
-  const r = (await agentHistoryRead(dir, id)) as { lines?: AcpUpdate["message"][] } | null;
+/** Rebuild a state from stored lines through the ONE reducer, with nothing
+ *  live: no toasts, no round marks, no limits reading. The replay harness
+ *  (agent-session.replay.test.ts) feeds a recorded session through this. */
+export function reduceLines(dir: string, lines: unknown[]): AgentSessionState {
   const tmp = blank();
-  for (const line of r?.lines ?? []) {
-    if (line && typeof line === "object") reduceInto(tmp, dir, line, false);
+  for (const line of lines) {
+    if (line && typeof line === "object") reduceInto(tmp, dir, line as AcpUpdate["message"], false);
   }
   settleStreaming(tmp);
   // asks from an ended session can't be answered anymore
   for (const e of tmp.entries) {
     if (e.kind === "perm" && !e.outcome) e.outcome = { type: "cancelled" };
   }
-  return tmp.entries;
+  return tmp;
+}
+
+/** Rebuild a thread by replaying stored lines through the ONE reducer. */
+async function replayTranscript(dir: string, id: string): Promise<AgentEntry[]> {
+  const r = (await agentHistoryRead(dir, id)) as { lines?: AcpUpdate["message"][] } | null;
+  return reduceLines(dir, r?.lines ?? []).entries;
 }
 
 /** Read-only view of an earlier session ("View" in the history list). */
