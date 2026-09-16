@@ -99,7 +99,7 @@ fn front_of(dir: &Path, rel: &str) -> Option<parse::FrontMatter> {
 fn live(r: &Round) -> bool { r.state == "generating" || r.state == "ready" }
 
 /// True while the note's round is `generating` or `ready`. Two ways in, because
-/// there is a window between them: `fixes_generate` saves the round record
+/// there is a window between them: `round_plan_begin_in` saves the round record
 /// FIRST and only then stamps `round:` into each note's front matter, so during
 /// that window the record is the only place the ownership is written down.
 /// The record's own list is therefore checked first, and the front matter
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn the_round_record_locks_before_the_front_matter_is_stamped() {
-        // fixes_generate saves the round, THEN writes `round: n` into each note.
+        // round_plan_begin_in saves the round, THEN writes `round: n` into each note.
         // A save in that window used to slip through and clobber the agent's input.
         let d = tmp("window");
         note(&d, "Tasks/A.md", "status: queued\n", "a\n");
@@ -302,8 +302,9 @@ mod tests {
         let garbage = b"{ not json at all\n";
         std::fs::write(&f, garbage).unwrap();
         assert!(load(&d).is_err(), "unparseable is an error, never an empty list");
-        // every writer goes through that error: `fixes_generate` and `round_execute`
-        // return it with `?` before they save, `settle_done` bails out here.
+        // every writer goes through that error: `round_plan_begin_in` and
+        // `round_plan_cancel_in` return it with `?` before they save, `settle_done`
+        // bails out here.
         settle_done(&d);
         assert!(!is_locked(&d, "Tasks/A.md"), "a store we cannot read locks nothing");
         assert_eq!(std::fs::read(&f).unwrap(), garbage, "the file is byte-identical afterwards");

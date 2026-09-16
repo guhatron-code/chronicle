@@ -262,3 +262,61 @@ CLI plus the vault resolution (§1, §2 notes/state, §6); (2) rounds you can wa
   checkout: its parent is the folder that holds the worktrees, and borrowing it would put
   the vault outside every project and leave that parent's `.chronicle` findable from
   anywhere beneath it. Such a worktree is its own vault root.
+
+## Implementation notes (plan 2, 2026-09-16)
+
+- **Planning is a pane turn.** "Start a round" sends the planning prompt as an ordinary
+  turn in the agent pane, so the user watches the plan get written the same way they watch
+  any other agent work. `round_plan_begin_in` freezes the queued notes into a `generating`
+  record and stamps `round: n` into each note's front matter before the turn is sent, so a
+  save mid-turn can never clobber what the agent is reading. The turn's end is the only
+  place the record is settled: `round_plan_settle` reads `fixes/phase_{n}_fixes_plan.md`
+  and `..._fixes_prompt.md` back off disk and decides `ready` or `failed` from what
+  actually landed there, never from what the agent said about itself.
+- **A stranded `generating` record is cleared by Stop, not by the turn.** If the pane has
+  no live turn — the app restarted mid-plan, say — the round card's Stop button still
+  works: it calls `round_plan_cancel` directly, with no turn to cancel first. Either path
+  into `round_plan_cancel_in` does the same three things: drop the `generating` record,
+  requeue its notes, and sweep the abandoned attempt's half-written files
+  (`fixes/phase_{n}_fixes_plan.md`, `..._fixes_prompt.md`, `.chronicle/round_{n}_notes.json`)
+  so a later round reusing `n` never settles "ready" on a stale plan.
+- **The terminal route's command and tab title.** `startRoundInTerminal` opens a tab
+  titled `Round N` and types `terminalRoundCommand(agent, message)` into it — the agent
+  binary (`claude` or `codex`) followed by the Rust-built run message as one single-quoted
+  argument (quotes escaped as `'\''`) and a trailing newline as the submit, so the prompt's
+  own backticks, quotes and line breaks reach the agent instead of the shell.
+- **The mark goes up before the spawn.** `markRunningRound` is called with no tab id
+  before the first `await`, so the card flips from "plan ready" to "executing" ahead of
+  the two awaits between click and a running tab — marking afterwards left both Run
+  buttons live for that whole window, and a second click during it spawned a second agent
+  on the same round. The tab's id is written into the mark once `spawnTerm` returns; a
+  start that fails takes the interim (tab-less) mark back down, but only if nothing has
+  since claimed the round on a real tab.
+- **A finished round is announced once, from the record, on either route.** `refreshNotes`
+  is the single place that compares a round's before/after state on every notes read; it
+  fires `round-done` the moment a round's state moves `ready` → `done` (every note ticked),
+  regardless of whether the pane turn or the terminal tab is what triggered the read. Ending
+  a run — the pane's turn ending, or the round's terminal tab dying — is a separate, narrower
+  event handled by the shared `settleRoundRun` (`agent-session.ts`, called from both
+  `round-run.ts`'s tab-death watcher and the pane's turn-end path): it reads the round back
+  and announces `round-ended` only if the record is still `ready`, i.e. the run stopped with
+  work left in it. A round that finished in the same instant its run ended never double-fires,
+  because `round-done` already fired from the record moving off `ready` and `settleRoundRun`'s
+  check finds it no longer there.
+- **The pane and the terminal send the same run message.** Both routes call the one Rust
+  `round_run_message(n)` builder for the sentence that starts (or resumes) a round's
+  execution — "read the plan and prompt, execute every item, set `status: done` on each
+  note as it's verified" — plus `marker_instruction`, the same commit-trailer instruction
+  every agent turn gets. Neither route writes its own copy of that text.
+- **The round-plan journal line.** Task 5 kept it: `refreshNotes` also detects a round's
+  state moving `generating` → `ready` (`roundsJustReady`, a `notes-store.ts`-local helper
+  mirroring `roundsJustFinished`) and journals "A round's fix plan is ready" once, on
+  either route, the same way `round-done` does. The toast that used to accompany it
+  (`toastSuccess("The fix plan is written", ...)`, from the deleted roadmap effect) was not
+  re-created — the brief's ruling covered only the journal line.
+- **`SessionKind` is `init` only.** The `"exec"`/`"fixes"` stub kinds Task 2 left for
+  typecheck are gone along with the roadmap's session-mirroring effects (Task 5); the type
+  now names the one session the roadmap still watches.
+- **Gone:** the `RoundFlow` progress modal, the `RoundLog` panel, and the "Run headless"
+  button. Watching a round now means watching the pane turn that plans it, or a `Round N`
+  terminal tab; there is no separate log view or headless process to check on.
