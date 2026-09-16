@@ -712,7 +712,10 @@ pub fn start(
     std::thread::spawn(move || rs.reader_loop(stdout));
 
     // the handshake runs off-thread: npx may download the bridge first
-    session.emit_state(json!({ "state": "installing" }));
+    // `resume` tells the frontend to KEEP the thread it just replayed: the
+    // installing state otherwise blanks it (agent-session.ts) — which is what
+    // made every resumed session open empty
+    session.emit_state(json!({ "state": "installing", "resume": session.resume.is_some() }));
     let hs = session.clone();
     let hcwd = cwd;
     std::thread::spawn(move || hs.handshake(&hcwd));

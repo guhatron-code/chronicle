@@ -68,18 +68,9 @@ function HistoryPopoverBody({ dir, onClose }: { dir: string; onClose: () => void
               <span className="flex-1" />
               {r.active ? (
                 <span className="text-[11px] text-text-dim">current</span>
-              ) : r.resumable ? (
-                <button
-                  onClick={() => {
-                    onClose();
-                    void resumeAgentSession(dir, r.id).catch((e) => toastError("Couldn't resume it", String(e).slice(0, 110)));
-                  }}
-                  className="h-6 rounded-sm border border-border-strong px-2.5 text-[11px] font-medium text-text-primary hover:bg-fill-hover"
-                >
-                  Resume
-                </button>
               ) : (
                 <>
+                  {/* View is a replay of our own transcript, so it is always on offer */}
                   <button
                     onClick={() => {
                       onClose();
@@ -90,6 +81,17 @@ function HistoryPopoverBody({ dir, onClose }: { dir: string; onClose: () => void
                     View
                   </button>
                   <span className="text-[11px] text-text-dimmer">·</span>
+                  {r.resumable ? (
+                  <button
+                    onClick={() => {
+                      onClose();
+                      void resumeAgentSession(dir, r.id).catch((e) => toastError("Couldn't resume it", String(e).slice(0, 110)));
+                    }}
+                    className="h-6 rounded-sm border border-border-strong px-2.5 text-[11px] font-medium text-text-primary hover:bg-fill-hover"
+                  >
+                    Resume
+                  </button>
+                  ) : (
                   <button
                     onClick={() => {
                       onClose();
@@ -102,6 +104,7 @@ function HistoryPopoverBody({ dir, onClose }: { dir: string; onClose: () => void
                   >
                     Continue in a new session
                   </button>
+                  )}
                 </>
               )}
             </div>

@@ -419,7 +419,11 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
   if (method === "_chronicle/session_state") {
     const state = str(params.state);
     if (state === "installing") {
-      Object.assign(s, blank(), { phase: "installing" as AgentPhase, draft: s.draft });
+      // a resume has ALREADY put the old thread in place (resumeAgentSession);
+      // the adapter's own replay is suppressed, so blanking here would leave
+      // the session open on nothing — the empty-thread-after-Resume bug
+      const keep = params.resume === true ? s.entries : [];
+      Object.assign(s, blank(), { phase: "installing" as AgentPhase, draft: s.draft, entries: keep });
       // the thread and the queue are both gone; a card waiting in that queue
       // must not go on waiting for a prompt that no longer exists (`live`
       // only: a replay must never close the running round's card)
