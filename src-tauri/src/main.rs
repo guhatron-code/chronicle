@@ -1482,10 +1482,12 @@ fn probe_step(exit: Option<i32>, log: &Path, last_len: &mut u64, ui_visible: boo
     ProbeOutcome::Quiet
 }
 
-/// One thread per live background session (init · fixes · exec). It replaces
-/// four 3s IPC pollers in the webview with a 1 Hz stat in Rust that emits
-/// `session-status` only on CHANGE: the log grew (and someone can see the
-/// window), or the child exited (or was cancelled — its entry vanished).
+/// One thread per live background session — today just the /chronicle-init
+/// session (`init_start`); planning and running a round spawn nothing, so
+/// they never call this. It replaces a 3s IPC poller in the webview with a
+/// 1 Hz stat in Rust that emits `session-status` only on CHANGE: the log
+/// grew (and someone can see the window), or the child exited (or was
+/// cancelled — its entry vanished).
 /// `pid` ties this waiter to the exact run it was spawned for: if `key` gets
 /// reused by a cancel-then-restart before this waiter's next tick, the pid
 /// mismatch is treated as "this run vanished" so the waiter never adopts a
@@ -1859,6 +1861,9 @@ const FIXES_PROMPT_HEAD: &str = "You are turning a queue of user-written notes (
 /// the agent pane so the user watches the plan being written.
 pub(crate) fn round_plan_begin_in(dir: &Path) -> Result<Value, String> {
     let mut rounds = notes::rounds::load(dir)?;
+    // no `init.runs` lock here on purpose: two concurrent begins can only race
+    // to save one identical "generating" record (last write wins, nothing is
+    // lost), and the frontend single-flights the click anyway.
     if rounds.iter().any(|r| r.state == "generating") {
         return Err("a round is already being planned".into());
     }
@@ -1900,13 +1905,22 @@ pub(crate) fn round_plan_settle_in(dir: &Path) -> Result<Value, String> {
     Ok(json!({ "n": n, "state": state }))
 }
 
-/// The user stopped the planning turn: drop the generating record, requeue its notes.
+/// The user stopped the planning turn: drop the generating record, requeue its notes,
+/// and sweep whatever the abandoned attempt half-wrote.
 pub(crate) fn round_plan_cancel_in(dir: &Path) -> Result<(), String> {
     let mut rounds = notes::rounds::load(dir)?;
     if let Some(i) = rounds.iter().rposition(|r| r.state == "generating") {
-        let paths = rounds.remove(i).note_paths;
-        for rel in &paths { let _ = notes::rounds::set_status(dir, rel, Some("queued"), None); }
+        let removed = rounds.remove(i);
+        // save BEFORE requeueing: if the save fails, the record is still there
+        // (still generating, notes still in_progress) instead of a generating
+        // record with queued notes and no way forward.
         notes::rounds::save(dir, &rounds)?;
+        for rel in &removed.note_paths { let _ = notes::rounds::set_status(dir, rel, Some("queued"), None); }
+        let n = removed.n;
+        // a later round reusing n must not settle "ready" on a stale plan
+        let _ = std::fs::remove_file(dir.join(format!("fixes/phase_{n}_fixes_plan.md")));
+        let _ = std::fs::remove_file(dir.join(format!("fixes/phase_{n}_fixes_prompt.md")));
+        let _ = std::fs::remove_file(dir.join(format!(".chronicle/round_{n}_notes.json")));
     }
     Ok(())
 }
@@ -1936,7 +1950,7 @@ fn round_run_message_cmd(roots: State<OpenRoots>, dir: String, n: u64) -> Result
     let _ = project_for(&roots, &dir)?; Ok(round_run_message(n))
 }
 
-/// After a generation session exits: read what it actually wrote and record the truth —
+/// When the planning turn ends: read what it actually wrote and record the truth —
 /// the plan file's first line names the round kind; both files must exist or it failed.
 fn settle_round(dir: &Path) {
     let Ok(mut rounds) = notes::rounds::load(dir) else { return }; // never write over corrupt
@@ -4329,9 +4343,15 @@ mod r4_tests {
         // cancel: a third generating round is removed and its note requeued
         std::fs::write(d.join(".chronicle/notes/Tasks/D.md"), "---\nstatus: queued\n---\n\n# D\n").unwrap();
         round_plan_begin_in(&d).unwrap();
+        // the abandoned attempt half-wrote its plan files before the turn was cancelled
+        std::fs::write(d.join("fixes/phase_3_fixes_plan.md"), "Round kind: bug fixes\n\n1. D\n").unwrap();
+        std::fs::write(d.join("fixes/phase_3_fixes_prompt.md"), "Execute the plan.\n").unwrap();
         round_plan_cancel_in(&d).unwrap();
         assert_eq!(notes::rounds::load(&d).unwrap().len(), 2, "the generating record is gone");
         assert!(std::fs::read_to_string(d.join(".chronicle/notes/Tasks/D.md")).unwrap().contains("status: queued"));
+        assert!(!d.join("fixes/phase_3_fixes_plan.md").exists(), "the stale plan is swept so round 3 can't settle ready later");
+        assert!(!d.join("fixes/phase_3_fixes_prompt.md").exists());
+        assert!(!d.join(".chronicle/round_3_notes.json").exists());
         assert!(round_run_message(2).contains("fixes/phase_2_fixes_prompt.md") && round_run_message(2).contains("Chronicle-Phase: FX-2 done"));
     }
 
