@@ -478,6 +478,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
         message: str(err.message) || "The agent stopped with an error.",
       });
     }
+    notify();
     // #4 — a clean turn end releases the next queued message (FIFO, one/turn).
     // A cancel (Stop) ends with stopReason "cancelled" and no error — it must
     // NOT flush (the queue persists so the user can still cancel items); on an
@@ -485,11 +486,20 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     // NOTE: this is safe under transcript replay because replay runs on a blank
     // tmp state whose queue is always empty (the queue is only populated from
     // the composer, never from the wire).
+    //
+    // AFTER the notify, not before: a round or plan card waiting for this turn
+    // wakes up in that notify and has to see the queue as it really is. Flushing
+    // first empties a one-message queue, so the card read "nothing is waiting",
+    // sent its own prompt into the flush's in-flight one, and the single-flight
+    // agent rejected it — the round never ran and the card said "stopped early".
     if (params.error == null && str(params.stopReason) !== "cancelled" && s.queue.length > 0) {
       const next = s.queue.shift()!;
-      void sendAgentMessage(dir, next).catch(() => {});
+      // a round prompt may be the thing being flushed — it waits to hear which
+      // of these two happened, because the queue itself cannot tell it
+      void sendAgentMessage(dir, next)
+        .then(() => leftTheQueue(dir, next, "sent"))
+        .catch(() => leftTheQueue(dir, next, "dropped"));
     }
-    notify();
     return;
   }
 
@@ -747,8 +757,12 @@ export function enqueueAgentMessage(dir: string, text: string) {
 export function dequeueAgentMessage(dir: string, index: number) {
   const s = agentSessionFor(dir);
   if (index >= 0 && index < s.queue.length) {
-    s.queue.splice(index, 1);
+    const [gone] = s.queue.splice(index, 1);
     notify();
+    // if that was a round's prompt waiting its turn, the ✕ has just cancelled
+    // the round — the card must not sit open waiting for a turn that is never
+    // coming (leftTheQueue is a no-op for an ordinary typed message)
+    leftTheQueue(dir, gone, "dropped");
   }
 }
 
@@ -936,24 +950,28 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
   // "waiting for the pane", and no turn ending is its own) and the subscriber
   // sends the moment the turn drops.
   const needsStart = s.phase !== "ready" && s.phase !== "installing" && s.phase !== "starting";
-  const land = () => {
-    agentSessionFor(dir).entries.push({ kind: "round-plan", n, total, queued: true });
+  /* Once. A session that turns out to be ready while `startAgentSession` is
+     still in flight sends from the subscriber before the line below runs, and
+     landing a SECOND card — one that says it is still waiting — would leave a
+     card no turn ending can close. */
+  let landed = false;
+  const land = (queued: boolean) => {
+    if (landed) return;
+    landed = true;
+    agentSessionFor(dir).entries.push({ kind: "round-plan", n, total, queued });
     notify();
   };
-  const un = subscribeAgent(() => {
-    const cur = agentSessionFor(dir);
-    if (cur.phase === "ready" && !cur.turnActive) {
-      un();
-      // the card's Stop can land while the session is still starting — a plan
-      // nobody is waiting for any more must not be sent the moment it is, and
-      // its card must not sit open waiting for a turn that will never come
-      if (over || !roundGenerating(dir)) { over = true; endCard(); return; }
-      unqueueCard(dir, "round-plan");
-      void sendAgentMessage(dir, prompt).catch(() => giveUp());
-    }
-    if (cur.phase === "error" || cur.phase === "needs-login") { un(); giveUp(); }
+  const un = sendWhenPaneIsFree(dir, "round-plan", prompt, {
+    land,
+    // the card's Stop can land while the session is still starting — a plan
+    // nobody is waiting for any more must not be sent the moment it is, and
+    // its card must not sit open waiting for a turn that will never come
+    stillWanted: () => !over && roundGenerating(dir),
+    // Stop has already cancelled the record; only the card is left to close
+    abandon: () => { over = true; endCard(); },
+    fail: giveUp,
   });
-  if (!needsStart) { land(); return; }
+  if (!needsStart) { land(true); return; }
   // startAgentSession resets the thread, so the card goes in AFTER it
   try {
     await startAgentSession(dir);
@@ -965,7 +983,90 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
   // the subscriber may already have given up while the session was starting —
   // landing a card for an abandoned plan would strand it open
   if (over) return;
-  land();
+  land(true);
+}
+
+/**
+ * Wait for the pane to be free, then hand the card's prompt over — and stop
+ * watching once it is out of our hands, whichever way that happens.
+ *
+ * "Free" is not just `ready && !turnActive`. The composer has a queue of its
+ * own: a turn ending flushes ONE message off it, and the agent takes one
+ * prompt at a time (Rust's `Agent::prompt` is single-flight). Sending straight
+ * into that flush was rejected with "the agent is still working", which landed
+ * in the catch and ended the card "stopped early" without the round ever
+ * running. So when the composer has messages waiting, the prompt joins the
+ * BACK of that queue and goes out in FIFO order behind them — the user's
+ * messages were typed first, and they keep their place.
+ *
+ * A prompt sitting in that queue is visible in the composer's queued-message
+ * strip like any other, ✕ included. That is honest: it is genuinely waiting
+ * its turn, and a user who removes it there has cancelled the round, which is
+ * `fail`.
+ *
+ * The card stays `queued` for as long as the prompt is: only the message
+ * actually going out unqueues it, because until then no turn ending is the
+ * card's own. `land` is idempotent for the same reason the card is landed by
+ * whichever comes first — a session that was already idle can send before the
+ * caller's own `land()` runs, and a card landed after that must not say it is
+ * still waiting.
+ */
+interface PaneHandoff {
+  /** put the card in the thread if it is not there yet */
+  land: (queued: boolean) => void;
+  /** is the card still wanted? Stop, or the run's mark taken down, says no */
+  stillWanted: () => boolean;
+  /** it is not wanted: close the card the way this caller closes an abandoned one */
+  abandon: () => void;
+  /** it was wanted and could not be sent */
+  fail: () => void;
+}
+
+function sendWhenPaneIsFree(
+  dir: string,
+  kind: "round" | "round-plan",
+  text: string,
+  on: PaneHandoff,
+): () => void {
+  const un = subscribeAgent(() => {
+    const cur = agentSessionFor(dir);
+    if (cur.phase === "ready" && !cur.turnActive) {
+      un();
+      if (!on.stillWanted()) { on.abandon(); return; }
+      if (cur.queue.length > 0) {
+        on.land(true);
+        cur.queue.push(text);
+        waitOnQueue(dir, text, { sent: () => unqueueCard(dir, kind), dropped: on.fail });
+        notify();
+        return;
+      }
+      on.land(false);
+      unqueueCard(dir, kind);
+      void sendAgentMessage(dir, text).catch(on.fail);
+      return;
+    }
+    if (cur.phase === "error" || cur.phase === "needs-login") { un(); on.fail(); }
+  });
+  return un;
+}
+
+/* A prompt handed to the composer's queue, waiting its turn there. The queue
+   alone cannot say how it left: the turn-end flush sends it and the ✕ removes
+   it, and both simply make it disappear. So the two places that take a message
+   off the queue say which happened, and this is where the round card finds
+   out. */
+interface QueueWaiter { dir: string; text: string; sent: () => void; dropped: () => void }
+const queueWaiters = new Set<QueueWaiter>();
+function waitOnQueue(dir: string, text: string, on: { sent: () => void; dropped: () => void }): void {
+  queueWaiters.add({ dir, text, ...on });
+}
+function leftTheQueue(dir: string, text: string, how: "sent" | "dropped"): void {
+  for (const w of queueWaiters) {
+    if (w.dir !== dir || w.text !== text) continue;
+    queueWaiters.delete(w);
+    if (how === "sent") w.sent(); else w.dropped();
+    return;
+  }
 }
 
 /** The card's message is going out now, so it is no longer waiting for the
@@ -1038,21 +1139,31 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
   // as in startRoundPlanInPane: only a session that is not there is started —
   // a `ready` pane mid-turn queues behind the turn instead of being restarted
   const needsStart = s.phase !== "ready" && s.phase !== "installing" && s.phase !== "starting";
-  const land = () => {
-    agentSessionFor(dir).entries.push({ kind: "round", n, total, queued: true });
+  // once, and whoever gets there first — see startRoundPlanInPane
+  let landed = false;
+  const land = (queued: boolean) => {
+    if (landed) return;
+    landed = true;
+    agentSessionFor(dir).entries.push({ kind: "round", n, total, queued });
     notify();
   };
-  const un = subscribeAgent(() => {
-    const cur = agentSessionFor(dir);
-    if (cur.phase === "ready" && !cur.turnActive) {
-      un();
-      if (over) return;
-      unqueueCard(dir, "round");
-      void sendAgentMessage(dir, message).catch(() => giveUp());
-    }
-    if (cur.phase === "error" || cur.phase === "needs-login") { un(); giveUp(); }
+  const un = sendWhenPaneIsFree(dir, "round", message, {
+    land,
+    // "Not running anymore" on the round card just takes the mark down, and a
+    // run still waiting for the pane is exactly the case where the user can
+    // hit it before anything was sent. The mark IS this route's record of the
+    // run, so a mark that is gone (or names some other round) means the user
+    // has already said this is not running: give up quietly rather than start
+    // the round they just cancelled.
+    stillWanted: () => {
+      if (over) return false;
+      const m = runningRoundFor(dir);
+      return m?.n === n && m.route === "pane";
+    },
+    abandon: giveUp,
+    fail: giveUp,
   });
-  if (!needsStart) { land(); return; }
+  if (!needsStart) { land(true); return; }
   // startAgentSession resets the thread, so the card goes in AFTER it
   try {
     await startAgentSession(dir);
@@ -1064,7 +1175,7 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
   // the subscriber may have given up while the session was starting — landing
   // a card for a run that will never be sent would strand it open
   if (over) return;
-  land();
+  land(true);
 }
 
 export function agentLive(dir: string): boolean {
