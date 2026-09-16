@@ -20,7 +20,7 @@ export function ThoughtCard({ text, streaming }: { text: string; streaming: bool
   return (
     <Reasoning isStreaming={streaming} defaultOpen={false} data-thought className="mb-0">
       <ReasoningTrigger className="group w-auto gap-2 whitespace-nowrap px-[11px] py-[5px] text-text-dim hover:text-text-secondary">
-        {streaming ? <Spinner size={11} /> : <span className="text-text-dim"><ThoughtGlyph /></span>}
+        {streaming ? <Spinner size={11} /> : <span className="wv-pop text-text-dim"><ThoughtGlyph /></span>}
         <span className="text-[12.5px]">{streaming ? "Thinking…" : "Thought"}</span>
         <ThoughtChevron />
       </ReasoningTrigger>

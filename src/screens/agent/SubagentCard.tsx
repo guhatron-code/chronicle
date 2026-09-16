@@ -42,7 +42,7 @@ export function SubagentCard({ group, dir, readOnly }: { group: Group; dir: stri
       <TaskTrigger title={title}>
         <div className="flex w-full cursor-pointer items-center gap-2 whitespace-nowrap px-[11px] py-2 text-left">
           <span className={cn("text-text-dim transition-transform", open && "rotate-90")}><ChevronRightGlyph size={10} /></span>
-          {running ? <Spinner size={11} /> : failed ? <span className="text-state-error"><ErrorGlyph size={11} /></span> : <span className="text-state-success"><CheckGlyph size={11} /></span>}
+          {running ? <Spinner size={11} /> : failed ? <span className="wv-pop text-state-error"><ErrorGlyph size={11} /></span> : <span className="wv-pop text-state-success"><CheckGlyph size={11} /></span>}
           <span className="text-text-dim"><AgentGlyph /></span>
           <span className="overflow-hidden text-ellipsis text-[12.5px] font-medium text-text-primary">{title}</span>
           <span className="shrink-0 font-mono text-[11px] text-text-dim tabular-nums">{n} {n === 1 ? "call" : "calls"}</span>

@@ -89,7 +89,7 @@ export function ToolCard({ tool, dir, readOnly, onViewChanges }: { tool: Tool; d
   if (quiet) {
     return (
       <div className="flex items-center gap-2 whitespace-nowrap px-[11px] py-[5px]">
-        {running ? <Spinner size={11} /> : <span className="text-text-dim"><BookGlyph /></span>}
+        {running ? <Spinner size={11} /> : <span key={tool.status} className="wv-pop text-text-dim"><BookGlyph /></span>}
         <span className="text-[12.5px] text-text-dim">{verb(tool)}</span>
         <span className="overflow-hidden text-ellipsis font-mono text-[11.5px] text-text-muted">{detail}</span>
       </div>
@@ -126,7 +126,7 @@ export function ToolCard({ tool, dir, readOnly, onViewChanges }: { tool: Tool; d
           </span>
         )}
         {tool.status === "completed" && tool.toolKind === "execute" && (
-          <span className="inline-flex shrink-0 items-center gap-[5px] text-[11.5px] text-state-success">
+          <span className="wv-pop inline-flex shrink-0 items-center gap-[5px] text-[11.5px] text-state-success">
             <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M2 6.5 5 9.5 10 3" /></svg>
             finished
           </span>
@@ -138,7 +138,7 @@ export function ToolCard({ tool, dir, readOnly, onViewChanges }: { tool: Tool; d
           </span>
         )}
         {failed && (
-          <span className="inline-flex shrink-0 items-center gap-[5px] text-[11.5px] text-state-error">
+          <span className="wv-pop inline-flex shrink-0 items-center gap-[5px] text-[11.5px] text-state-error">
             <span className="size-1 shrink-0 rounded-full bg-state-error" />
             failed
           </span>

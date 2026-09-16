@@ -6,6 +6,7 @@
  * this component only renders and dispatches.
  */
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   agentSessionFor,
   startAgentSession,
@@ -38,6 +39,32 @@ import { PermissionCard } from "./PermissionCard";
 /** Projects we've auto-started the agent for this app session — so toggling the
  *  pane's visibility or ending a session never re-triggers auto-start. */
 const autoStarted = new Set<string>();
+
+const reducedMotion = () =>
+  typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+/** One row of the thread as it arrives: it settles in from just below, once,
+ *  on mount (index.css `wv-enter`). A replayed thread mounts all its rows at
+ *  once, so the whole thing fades in as one — never a stagger. */
+function Appear({ children }: { children: ReactNode }) {
+  return <div className="wv-enter">{children}</div>;
+}
+
+/** Keys that follow a row, not its position: a subagent's calls fold under
+ *  their card when it arrives, which shifts every later index — and an
+ *  index key would remount (and re-animate) rows that did not move. Identity
+ *  where the wire gives one; the n-th of its kind otherwise. */
+function rowKeys(items: ThreadItem[]): string[] {
+  const seen = new Map<string, number>();
+  return items.map((it) => {
+    if (it.kind === "tool") return `tool:${it.toolCallId}`;
+    if (it.kind === "subagent") return `sub:${it.tool.toolCallId}`;
+    if (it.kind === "perm") return `perm:${it.requestId}`;
+    const n = (seen.get(it.kind) ?? 0) + 1;
+    seen.set(it.kind, n);
+    return `${it.kind}:${n}`;
+  });
+}
 
 /** F33 — the checkpoint row: a thin divider above each user message; the
  *  hover-revealed "Undo to here" restores the snapshot taken before it. */
@@ -516,12 +543,20 @@ export function AgentPane({
   }, [dir]);
   const s = agentSessionFor(dir);
 
-  /* stick to the bottom while the thread grows, unless the user scrolled up */
+  /* stick to the bottom while the thread grows, unless the user scrolled up.
+     A NEW row glides into view; text streaming into the last row jumps, since
+     a smooth scroll restarted on every chunk never lands. */
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
+  const rowCount = useRef(0);
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && nearBottom.current) el.scrollTop = el.scrollHeight;
+    const rows = s.entries.length;
+    const grew = rows !== rowCount.current;
+    rowCount.current = rows;
+    if (!el || !nearBottom.current) return;
+    if (grew && !reducedMotion()) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    else el.scrollTop = el.scrollHeight;
   });
 
   /* needs-login: run `claude /login` in a terminal tab; when that tab's
@@ -651,9 +686,11 @@ export function AgentPane({
           </BtnPrimary>
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
-          {groupEntries(s.viewing.entries).map((entry, i) => (
-            <Entry key={i} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} />
-          ))}
+          {(() => { const items = groupEntries(s.viewing.entries); const keys = rowKeys(items); return items.map((entry, i) => (
+            <Appear key={keys[i]}>
+              <Entry dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} />
+            </Appear>
+          )); })()}
         </div>
       </div>
     );
@@ -681,23 +718,24 @@ export function AgentPane({
           }}
           className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-3"
         >
-          {groupEntries(s.entries).map((entry, i) => (
-            <Entry
-              key={i}
-              dir={dir}
-              entry={entry}
-              turnActive={s.turnActive}
-              onConfirm={onConfirm}
-              onOpenNotes={onOpenNotes}
-              onRetryRound={(n, total) => {
-                void startRoundInPane(dir, n, total).catch((e) => toastError("Couldn't restart the round", String(e).slice(0, 90)));
-              }}
-            />
-          ))}
+          {(() => { const items = groupEntries(s.entries); const keys = rowKeys(items); return items.map((entry, i) => (
+            <Appear key={keys[i]}>
+              <Entry
+                dir={dir}
+                entry={entry}
+                turnActive={s.turnActive}
+                onConfirm={onConfirm}
+                onOpenNotes={onOpenNotes}
+                onRetryRound={(n, total) => {
+                  void startRoundInPane(dir, n, total).catch((e) => toastError("Couldn't restart the round", String(e).slice(0, 90)));
+                }}
+              />
+            </Appear>
+          )); })()}
           {/* the "thinking" beat before the first token, so a turn never
               looks stalled — the classic chat typing signal */}
           {s.turnActive && s.entries.at(-1)?.kind !== "assistant" && (
-            <div className="flex gap-2.5 px-3.5 pb-1 pt-2">
+            <div className="wv-enter flex gap-2.5 px-3.5 pb-1 pt-2">
               <AssistantAvatar />
               <div className="pt-1.5"><TypingDots /></div>
             </div>
