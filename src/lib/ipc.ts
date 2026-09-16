@@ -623,21 +623,15 @@ export function windowControls() {
  * call the old wrappers below; each is rewritten (or deleted) by the task
  * named on it, which is also the task that deletes the matching stub here.
  */
-/** REMOVED in plan 2 Task 1; stub until Task 3 rewires RoundCard/RoundFlow. */
-export const fixesGenerate = (_dir: string, _agent: string | null) =>
-  Promise.reject(new Error("removed"));
-/** REMOVED in plan 2 Task 1; stub until Task 3/4 rewire RoundFlow/RoundLog. */
+/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
 export const fixesStatus = (_dir: string) => Promise.reject(new Error("removed")) as Promise<InitStatusData>;
-/** REMOVED in plan 2 Task 1; stub until Task 3/5 rewire RoundCard/RoadmapPane. */
+/** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
 export const fixesCancel = (_dir: string) => Promise.reject(new Error("removed"));
 /** REMOVED in plan 2 Task 1; stub until Task 5 rewires RoadmapPane. */
 export const fixesLogPath = (_dir: string) => Promise.reject(new Error("removed")) as Promise<string>;
-/** REMOVED in plan 2 Task 1; stub until Task 3 rewires RoundCard. */
-export const roundExecute = (_dir: string, _n: number, _agent: string | null) =>
-  Promise.reject(new Error("removed"));
 /** REMOVED in plan 2 Task 1; stub until Task 4/5 rewire RoundLog/RoadmapPane. */
 export const roundExecStatus = (_dir: string) => Promise.reject(new Error("removed")) as Promise<InitStatusData>;
-/** REMOVED in plan 2 Task 1; stub until Task 3/5 rewire RoundCard/RoadmapPane. */
+/** REMOVED in plan 2 Task 1; stub until Task 4/5 rewire RoundCard/RoadmapPane. */
 export const roundExecCancel = (_dir: string) => Promise.reject(new Error("removed"));
 /** REMOVED in plan 2 Task 1; stub until Task 4/5 rewire RoundLog/RoadmapPane. */
 export const execLogPath = (_dir: string) => Promise.reject(new Error("removed")) as Promise<string>;

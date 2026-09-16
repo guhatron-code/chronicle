@@ -187,6 +187,19 @@ export function roundPhaseOf(
   return { phase: over.find((r) => r.n === n)?.state === "failed" ? "failed" : "finished", n };
 }
 
+/**
+ * How a planning turn ended, from the only two things that can say so: the
+ * turn's stop reason and what `round_plan_settle` found on disk. The agent's
+ * prose never gets a vote — a plan is ready when the record says the round is.
+ */
+export function roundPlanOutcome(
+  stopReason: string | null | undefined,
+  settled: "ready" | "failed" | "none",
+): "ready" | "failed" | "cancelled" {
+  if (stopReason === "cancelled") return "cancelled";
+  return settled === "ready" ? "ready" : "failed";
+}
+
 /** The panel never grows without bound: a long round's tail is thousands of
  *  lines nobody scrolls back through, and the DOM pays for every one. The
  *  session carries the WHOLE last 30 kB of the log on each event rather than a

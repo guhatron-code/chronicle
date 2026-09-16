@@ -389,6 +389,22 @@ function Entry({
         />
       </div>
     );
+  if (entry.kind === "round-plan")
+    return (
+      <div data-round-plan className="mx-3.5 my-1 flex items-center gap-2 rounded-lg border border-border-hairline bg-surface-card-raised px-3.5 py-2.5">
+        <span className="text-[13px] font-semibold text-text-primary">Round {entry.n} · planning {entry.total} {entry.total === 1 ? "note" : "notes"}</span>
+        <span className="flex-1" />
+        {!entry.ended ? (
+          <span className="inline-flex items-center gap-[5px] text-xs text-state-neutral"><span className="size-[5px] rounded-full bg-state-neutral" style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }} />writing the plan</span>
+        ) : entry.outcome === "ready" ? (
+          <span className="text-xs text-state-success">plan ready</span>
+        ) : entry.outcome === "cancelled" ? (
+          <span className="text-xs text-text-dim">stopped</span>
+        ) : (
+          <span className="text-xs text-state-error">not written</span>
+        )}
+      </div>
+    );
   if (entry.kind === "assistant") return <AssistantMessage text={entry.text} streaming={entry.streaming} />;
   if (entry.kind === "turn-error") return <TurnError message={entry.message} />;
   if (entry.kind === "perm")

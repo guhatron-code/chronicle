@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { NoteEntry } from "./ipc";
 import {
   backlinksFor, buildTree, joinFrontMatter, nestTree, newNotePath,
-  outlinksFor, pillFor, roundLogHeader, roundPhaseOf, roundSubline, sanitizeTitle, setStatusInFront, slugFor,
+  outlinksFor, pillFor, roundLogHeader, roundPhaseOf, roundPlanOutcome, roundSubline, sanitizeTitle,
+  setStatusInFront, slugFor,
   splitFrontMatter, statusInFront, stickToBottom, tagCounts, tailLines, LOG_MAX_LINES, STICK_SLOP,
 } from "./notes-model";
 
@@ -232,5 +233,14 @@ describe("which phase a round is in", () => {
   it("takes the newest round of its kind", () => {
     expect(roundPhaseOf([{ n: 2, state: "ready" }, { n: 9, state: "ready" }], null))
       .toEqual({ phase: "plan-ready", n: 9 });
+  });
+});
+
+describe("how a planning turn settles", () => {
+  it("a planning turn's outcome comes from the stop reason and the record", () => {
+    expect(roundPlanOutcome("cancelled", "none")).toBe("cancelled");
+    expect(roundPlanOutcome(null, "ready")).toBe("ready");
+    expect(roundPlanOutcome("end_turn", "failed")).toBe("failed");
+    expect(roundPlanOutcome("error", "none")).toBe("failed");
   });
 });

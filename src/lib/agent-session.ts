@@ -20,10 +20,17 @@ import {
   agentSessionsList,
   agentSetMode,
   onAcpUpdate,
+  roundPlanBegin,
+  roundPlanCancel,
+  roundPlanSettle,
   type AcpUpdate,
   type AgentEditFile,
 } from "./ipc";
-import { clearRunningRound } from "./round-log";
+import { clearRunningRound, markRunningRound } from "./round-log";
+import { refreshNotes, roundGenerating, roundNotesFor, setRoundGenerating } from "./notes-store";
+import { roundPlanOutcome } from "./notes-model";
+import { announce } from "./journal";
+import { toastAction, toastError, toastSuccess } from "@/overlays/toasts";
 
 export type AgentPhase =
   | "none" // never started (or explicitly reset)
@@ -97,6 +104,15 @@ export type AgentEntry =
        *  the NOTES' statuses plus this stop reason, never the agent's claim */
       ended?: boolean;
       stopReason?: string | null;
+    }
+  | {
+      kind: "round-plan";
+      n: number;
+      total: number;
+      /** set when the planning turn ended — the outcome comes from the record
+       *  `round_plan_settle` read back, never from what the agent said */
+      ended?: boolean;
+      outcome?: "ready" | "failed" | "cancelled";
     }
   | {
       kind: "plan";
@@ -317,11 +333,19 @@ function settleStreaming(s: AgentSessionState) {
 }
 
 function routeUpdate(u: AcpUpdate) {
-  reduceInto(agentSessionFor(u.dir), u.dir, u.message ?? {});
+  reduceInto(agentSessionFor(u.dir), u.dir, u.message ?? {}, true);
 }
 
-/** The ONE reducer — live events and transcript replay share it. */
-function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]) {
+/**
+ * The ONE reducer — live events and transcript replay share it.
+ *
+ * `live` is false while an OLD session's transcript is being replayed into a
+ * throwaway state. Everything that touches the world outside the thread — the
+ * running-round mark, settling a round's record, a toast, a journal line —
+ * is gated on it: replaying a round you watched last week must not cancel the
+ * round running right now.
+ */
+function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"], live: boolean) {
   const method = str(msg.method);
   const params = (msg.params ?? {}) as Raw;
 
@@ -358,13 +382,13 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       s.errorMessage = str(params.message) || "The agent bridge stopped.";
       s.turnActive = false;
       settleStreaming(s);
-      clearRunningRound(dir); // a dead bridge is not running anyone's round
+      if (live) clearRunningRound(dir); // a dead bridge is not running anyone's round
     } else if (state === "ended") {
       // needs-login/error keep their more specific face over the shutdown event
       if (s.phase !== "needs-login" && s.phase !== "error") s.phase = "ended";
       s.turnActive = false;
       settleStreaming(s);
-      clearRunningRound(dir);
+      if (live) clearRunningRound(dir);
     }
     notify();
     return;
@@ -401,17 +425,36 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
   if (method === "_chronicle/turn_end") {
     s.turnActive = false;
     settleStreaming(s);
+    const stopReason = params.error != null ? "error" : str(params.stopReason) || null;
+    // A turn carries a plan or a run, never both. The plan's record is settled
+    // HERE and nowhere else: `round_plan_settle` mid-turn would mark the round
+    // failed and put every note back in the queue under the agent's feet.
+    let settledPlan = false;
+    if (live) {
+      for (let i = s.entries.length - 1; i >= 0; i--) {
+        const e = s.entries[i];
+        if (e.kind === "round-plan" && !e.ended) {
+          e.ended = true;
+          settledPlan = true;
+          void settleRoundPlan(dir, e, stopReason);
+          break;
+        }
+      }
+    }
     // a running round settles with the turn — its face derives from the notes
-    for (let i = s.entries.length - 1; i >= 0; i--) {
-      const e = s.entries[i];
-      if (e.kind === "round" && !e.ended) {
-        e.ended = true;
-        e.stopReason = params.error != null ? "error" : str(params.stopReason) || null;
-        // the Notes card has no session to watch for this route — the thread IS
-        // the round — so the turn ending is the only thing that can tell it the
-        // round is no longer running, however it ended
-        clearRunningRound(dir);
-        break;
+    if (live && !settledPlan) {
+      for (let i = s.entries.length - 1; i >= 0; i--) {
+        const e = s.entries[i];
+        if (e.kind === "round" && !e.ended) {
+          e.ended = true;
+          e.stopReason = stopReason;
+          // the Notes card has no session to watch for this route — the thread IS
+          // the round — so the turn ending is the only thing that can tell it the
+          // round is no longer running, however it ended
+          clearRunningRound(dir);
+          settleRoundRun(dir, e.n);
+          break;
+        }
       }
     }
     if (params.error != null) {
@@ -716,7 +759,7 @@ async function replayTranscript(dir: string, id: string): Promise<AgentEntry[]> 
   const r = (await agentHistoryRead(dir, id)) as { lines?: AcpUpdate["message"][] } | null;
   const tmp = blank();
   for (const line of r?.lines ?? []) {
-    if (line && typeof line === "object") reduceInto(tmp, dir, line);
+    if (line && typeof line === "object") reduceInto(tmp, dir, line, false);
   }
   settleStreaming(tmp);
   // asks from an ended session can't be answered anymore
@@ -759,6 +802,113 @@ export async function resumeAgentSession(dir: string, id: string): Promise<void>
 
 /* ---------- round-in-pane (F39) ---------- */
 
+/**
+ * A planning turn has ENDED — the only moment the round's record may settle.
+ * What the agent wrote decides nothing: `round_plan_settle` reads the plan
+ * back off disk and says ready or failed, and a cancelled turn hands the
+ * notes back to the queue instead.
+ */
+async function settleRoundPlan(
+  dir: string,
+  entry: Extract<AgentEntry, { kind: "round-plan" }>,
+  stopReason: string | null,
+): Promise<void> {
+  let state: "ready" | "failed" | "none" = "none";
+  try {
+    if (stopReason === "cancelled") await roundPlanCancel(dir);
+    else state = (await roundPlanSettle(dir)).state;
+  } catch {
+    /* the record keeps whatever it had; the outcome below stays honest */
+  }
+  entry.outcome = roundPlanOutcome(stopReason, state);
+  setRoundGenerating(dir, false);
+  notify();
+  await refreshNotes(dir);
+  if (entry.outcome === "ready") {
+    toastAction(`Round ${entry.n} is ready`, "Run it in the pane", () => {
+      void startRoundInPane(dir, entry.n, entry.total).catch((e) =>
+        toastError("Couldn't start the round", String(e).slice(0, 110)),
+      );
+    });
+  } else if (entry.outcome === "failed") {
+    toastError("The plan wasn't written", "Your notes are back in the queue");
+  }
+}
+
+/** A round's turn has ended. Finished or not is the NOTES' answer, so read
+ *  them back first — a note ticked in the last second is still a tick. */
+function settleRoundRun(dir: string, n: number): void {
+  void refreshNotes(dir).then(() => {
+    const notes = roundNotesFor(dir, n);
+    if (notes.length > 0 && notes.every((x) => x.status === "done")) {
+      announce(dir, "round-done", `Round ${n} finished`, "Chronicle");
+      toastSuccess("The round finished", "Check Notes — finished items are ticked");
+    } else {
+      announce(dir, "round-ended", `Round ${n} ended early`, "Chronicle");
+    }
+  });
+}
+
+/**
+ * "Start a round": freeze the queued notes into a round, then write its plan
+ * as a turn in this pane — no background session, nothing to watch but the
+ * thread. The record settles when that turn ends, never before.
+ */
+export async function startRoundPlanInPane(dir: string): Promise<void> {
+  const s = agentSessionFor(dir);
+  const { n, total, prompt } = await roundPlanBegin(dir);
+  setRoundGenerating(dir, true);
+  void refreshNotes(dir);
+  s.viewing = null;
+
+  // the plan never got its turn — hand the notes straight back to the queue
+  let over = false;
+  const giveUp = () => {
+    if (over) return;
+    over = true;
+    void roundPlanCancel(dir).catch(() => {});
+    setRoundGenerating(dir, false);
+    void refreshNotes(dir);
+  };
+
+  if (s.phase === "ready" && !s.turnActive) {
+    s.entries.push({ kind: "round-plan", n, total });
+    notify();
+    try {
+      await sendAgentMessage(dir, prompt);
+    } catch (e) {
+      giveUp();
+      throw e;
+    }
+    return;
+  }
+  // start (or restart) the session, then land the card and send once ready —
+  // startAgentSession resets the thread, so the card goes in AFTER it
+  const un = subscribeAgent(() => {
+    const cur = agentSessionFor(dir);
+    if (cur.phase === "ready" && !cur.turnActive) {
+      un();
+      // the card's Stop can land while the session is still starting — a plan
+      // nobody is waiting for any more must not be sent the moment it is
+      if (!roundGenerating(dir)) return;
+      void sendAgentMessage(dir, prompt).catch(() => giveUp());
+    }
+    if (cur.phase === "error" || cur.phase === "needs-login") { un(); giveUp(); }
+  });
+  if (s.phase !== "installing" && s.phase !== "starting") {
+    try {
+      await startAgentSession(dir);
+    } catch (e) {
+      un();
+      giveUp();
+      throw e;
+    }
+  }
+  const cur = agentSessionFor(dir);
+  cur.entries.push({ kind: "round-plan", n, total });
+  notify();
+}
+
 /** Run a round in the pane: the round card enters the thread, the round
  *  prompt becomes the session's next message (sent as soon as the session is
  *  ready — starting one if needed). Done/failed derive from the NOTES plus the
@@ -769,6 +919,9 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
     `Read fixes/phase_${n}_fixes_prompt.md and fixes/phase_${n}_fixes_plan.md in this project and execute the round exactly as the prompt instructs: ` +
     `every item, verified honestly, and after each item completes set \`status: done\` in that note's front matter (the file named by the item's path, under .chronicle/notes/), changing nothing else in that file.`;
   s.viewing = null;
+  // this route has no log and no session of its own — the mark IS the record
+  // that the round is running here, and every exit below clears it
+  markRunningRound(dir, { n, route: "pane" });
   if (s.phase === "ready" && !s.turnActive) {
     s.entries.push({ kind: "round", n, total });
     notify();

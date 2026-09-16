@@ -111,7 +111,7 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, no
  */
 export const Sidebar = memo(function Sidebar({
   dir, notes, openPath, onOpenNote, onNewNote, onOpenSearch, onRevealVault,
-  queued, round, agent, onStartRound, onRunRoundInPane, logOpen, onToggleLog,
+  queued, round, onStartRound, onRunRoundInPane, logOpen, onToggleLog,
   vault, borrowed,
   width = 232,
 }: {
@@ -131,7 +131,7 @@ export const Sidebar = memo(function Sidebar({
   borrowed: boolean;
   /** the pinned round, in whatever phase it is in — null when there is none */
   round: RoundCardData | null;
-  agent: "claude" | "codex";
+  /** "Start a round" — the plan is written as a turn in the agent pane */
   onStartRound: () => void;
   onRunRoundInPane?: (n: number, total: number) => void;
   logOpen: boolean;
@@ -232,7 +232,6 @@ export const Sidebar = memo(function Sidebar({
       {round && (
         <RoundCard
           dir={dir}
-          agent={agent}
           round={round}
           openPath={openPath}
           onOpenNote={onOpenNote}

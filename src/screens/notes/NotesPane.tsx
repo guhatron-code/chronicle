@@ -16,7 +16,6 @@ import { NoteEditor } from "./editor/NoteEditor";
 import { Sidebar } from "./Sidebar";
 import { NoteHeader } from "./NoteHeader";
 import { Backlinks } from "./Backlinks";
-import { RoundFlow, type RoundFlowHandle } from "./RoundFlow";
 import { RoundLog } from "./RoundLog";
 import { BtnPrimary } from "@/components/chrome/atoms";
 import { SplitHandle } from "@/components/chrome/SplitHandle";
@@ -65,18 +64,18 @@ function markMissingLinks(container: HTMLElement, notes: NoteEntry[], path: stri
 }
 
 export function NotesPane({
-  dir, agent, onScreen, onConfirm, onGoRoadmap, onOpenSearch, onOpenFile, onOpenUrl,
-  onRunRoundInPane, onRevealTerminal,
+  dir, onScreen, onConfirm, onOpenSearch, onOpenFile, onOpenUrl,
+  onPlanRound, onRunRoundInPane, onRevealTerminal,
 }: {
   dir: string;
-  agent: "claude" | "codex";
   onScreen: boolean;
   onConfirm: (spec: ConfirmSpec) => void;
-  onGoRoadmap: () => void;
   /** the sidebar's search button — App opens the overlay scoped to the vault */
   onOpenSearch: () => void;
   onOpenFile: (path: string) => void;
   onOpenUrl: (url: string) => void;
+  /** "Start a round" — App writes the plan as a turn in the agent pane */
+  onPlanRound: () => void;
   onRunRoundInPane?: (n: number, total: number) => void;
   /** "Open full log" tails the real file in a terminal tab — show the column */
   onRevealTerminal?: () => void;
@@ -202,8 +201,11 @@ export function NotesPane({
   revealRef.current = onRevealTerminal;
   const revealTerminal = useCallback(() => revealRef.current?.(), []);
 
-  const roundFlowRef = useRef<RoundFlowHandle>(null);
-  const onStartRound = useCallback(() => roundFlowRef.current?.start(), []);
+  /* same reason: "Start a round" arrives as an inline arrow from App, and the
+     sidebar's memo is what keeps typing cheap */
+  const planRef = useRef(onPlanRound);
+  planRef.current = onPlanRound;
+  const planRound = useCallback(() => planRef.current(), []);
 
   /* stamp data-missing on every rendered wikilink after each commit */
   const docRef = useRef<HTMLDivElement | null>(null);
@@ -244,8 +246,7 @@ export function NotesPane({
         onRevealVault={onRevealVault}
         queued={queued}
         round={round}
-        agent={agent}
-        onStartRound={onStartRound}
+        onStartRound={planRound}
         onRunRoundInPane={onRunRoundInPane}
         logOpen={logOpen}
         onToggleLog={toggleLog}
@@ -316,8 +317,6 @@ export function NotesPane({
           />
         )}
       </div>
-
-      <RoundFlow ref={roundFlowRef} dir={dir} agent={agent} onRunInPane={onRunRoundInPane} onGoRoadmap={onGoRoadmap} />
     </div>
   );
 }

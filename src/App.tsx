@@ -88,7 +88,7 @@ import { HelpScreen } from "@/screens/help/HelpScreen";
 import type { HelpTarget } from "@/lib/help-content";
 import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/lib/setup-store";
 import { AgentPane } from "@/screens/agent/AgentPane";
-import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, subscribeAgent } from "@/lib/agent-session";
+import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent } from "@/lib/agent-session";
 import { agentSessionStop, readFileText } from "@/lib/ipc";
 import { openAgentReview } from "@/screens/repo/RepoPane";
 import { copyText, githubClone, githubRepos, initStatus, launchOpenDir, openUrl, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
@@ -1191,14 +1191,18 @@ function AppShell() {
           <NotesPane
             key={active.dir}
             dir={active.dir}
-            agent={agent}
             onScreen={paneLayout.content && !overlayOpen}
             onConfirm={setConfirm}
-            onGoRoadmap={() => goPane("road")}
             onOpenSearch={() => { setSearchScope("notes"); setSearchOpen(true); }}
             onOpenFile={(path) => { openFileInRepo(active.dir, path); goPane("repo"); }}
             onOpenUrl={(url) => { void openInWeb(active.dir, { url }); goPane("web"); }}
             onRevealTerminal={() => patchLayout({ terminal: true, terminalCollapsed: false })}
+            onPlanRound={() => {
+              patchLayout({ agent: true, agentCollapsed: false });
+              void startRoundPlanInPane(active.dir).catch((e) =>
+                toastError("Couldn't start the round", String(e).slice(0, 110)),
+              );
+            }}
             onRunRoundInPane={(n, total) => {
               patchLayout({ agent: true, agentCollapsed: false });
               void startRoundInPane(active.dir, n, total).catch((e) =>

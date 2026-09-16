@@ -17,9 +17,10 @@ import { memo, useState } from "react";
 import { TreeRow } from "@/components/chrome/Tree";
 import { DocGlyph } from "@/components/chrome/icons";
 import {
-  copyText, fixesCancel, readFileText, roundExecCancel, roundExecute, type NoteEntry,
+  copyText, readFileText, roundExecCancel, roundPlanCancel, type NoteEntry,
 } from "@/lib/ipc";
-import { clearRunningRound, dismissRound, markRunningRound } from "@/lib/round-log";
+import { agentSessionFor, cancelAgentTurn } from "@/lib/agent-session";
+import { clearRunningRound, dismissRound } from "@/lib/round-log";
 import { refreshNotes, setRoundGenerating } from "@/lib/notes-store";
 import { roundSubline, type RoundPhase, type RoundRoute } from "@/lib/notes-model";
 import { toastError, toastSuccess } from "@/overlays/toasts";
@@ -50,10 +51,9 @@ function rowStatus(note: NoteEntry, phase: RoundPhase): { label: string; tone: s
 const BTN = "shrink-0 rounded-xs border border-border-hairline px-[7px] py-[3px] text-[10.5px] text-text-dim hover:bg-fill-hover hover:text-text-primary disabled:opacity-50";
 
 export const RoundCard = memo(function RoundCard({
-  dir, agent, round, openPath, onOpenNote, logOpen, onToggleLog, onRunInPane,
+  dir, round, openPath, onOpenNote, logOpen, onToggleLog, onRunInPane,
 }: {
   dir: string;
-  agent: "claude" | "codex";
   round: RoundCardData;
   openPath: string | null;
   onOpenNote: (path: string) => void;
@@ -66,19 +66,7 @@ export const RoundCard = memo(function RoundCard({
   const [busy, setBusy] = useState(false);
   const total = notes.length;
 
-  const runHeadless = () => {
-    setBusy(true);
-    roundExecute(dir, n, agent)
-      .then(() => refreshNotes(dir))
-      .catch((e) => toastError("Couldn't start the round", String(e).slice(0, 110)))
-      .finally(() => setBusy(false));
-  };
-
-  const runInPane = () => {
-    // the ACP route writes no log of its own, so the card has to remember it
-    markRunningRound(dir, { n, route: "pane" });
-    onRunInPane?.(n, total);
-  };
+  const runInPane = () => onRunInPane?.(n, total);
 
   const copyPrompt = () => {
     readFileText(dir, `fixes/phase_${n}_fixes_prompt.md`)
@@ -92,12 +80,25 @@ export const RoundCard = memo(function RoundCard({
      when the turn died without the pane hearing about it. */
   const forgetAgentRun = () => clearRunningRound(dir);
 
-  const cancel = () => {
+  /* A plan being written is a turn in the agent pane — but the record can be
+     stranded (the app restarted mid-plan, the session died without the turn
+     ever ending), so Stop cancels the RECORD first and the turn only if one is
+     actually live. That way there is always a way out of "writing the plan…". */
+  const stopPlan = () => {
     setBusy(true);
-    const stop = phase === "generating" ? fixesCancel(dir) : roundExecCancel(dir);
-    stop
-      .then(() => { if (phase === "generating") setRoundGenerating(dir, false); return refreshNotes(dir); })
-      .then(() => toastSuccess(phase === "generating" ? "Stopped the session" : "Stopped the round"))
+    roundPlanCancel(dir)
+      .then(() => (agentSessionFor(dir).turnActive ? cancelAgentTurn(dir) : undefined))
+      .then(() => { setRoundGenerating(dir, false); return refreshNotes(dir); })
+      .then(() => toastSuccess("Stopped the plan", "Your notes are back in the queue"))
+      .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)))
+      .finally(() => setBusy(false));
+  };
+
+  const cancelTerminalRun = () => {
+    setBusy(true);
+    roundExecCancel(dir)
+      .then(() => refreshNotes(dir))
+      .then(() => toastSuccess("Stopped the round"))
       .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)))
       .finally(() => setBusy(false));
   };
@@ -148,7 +149,6 @@ export const RoundCard = memo(function RoundCard({
 
       {phase === "plan-ready" && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
-          <button type="button" disabled={busy} onClick={runHeadless} className={BTN}>Run headless</button>
           {onRunInPane && (
             <button type="button" disabled={busy} onClick={runInPane} className={BTN}>Run in the agent pane</button>
           )}
@@ -156,9 +156,15 @@ export const RoundCard = memo(function RoundCard({
         </div>
       )}
 
-      {(phase === "generating" || (phase === "executing" && route === "terminal")) && (
+      {phase === "generating" && (
         <div className="mt-2.5 flex gap-1.5">
-          <button type="button" disabled={busy} onClick={cancel} className={BTN}>Cancel</button>
+          <button type="button" disabled={busy} onClick={stopPlan} className={BTN}>Stop</button>
+        </div>
+      )}
+
+      {phase === "executing" && route === "terminal" && (
+        <div className="mt-2.5 flex gap-1.5">
+          <button type="button" disabled={busy} onClick={cancelTerminalRun} className={BTN}>Cancel</button>
         </div>
       )}
 
