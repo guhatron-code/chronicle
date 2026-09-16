@@ -20,7 +20,7 @@ import { BtnPrimary } from "@/components/chrome/atoms";
 import { SplitHandle } from "@/components/chrome/SplitHandle";
 import { notesRevealVault, type NoteEntry } from "@/lib/ipc";
 import {
-  createNote, editBody, indexFor, noteEntry, openFor, openNote, settleNote,
+  createNote, editBody, indexFor, moveNote, noteEntry, openFor, openNote, settleNote,
   queuedCountFor, roundKindFor, roundNotesFor, roundPhase, roundRoute, roundTermId, setNotesOnScreen,
   subscribeNotes, takePendingOpenNote,
 } from "@/lib/notes-store";
@@ -175,6 +175,7 @@ export function NotesPane({
     const folder = entry?.folder ?? "";
     createNote(dir, folder, title.split("/").pop() ?? title).catch((e) => toastError("Couldn't create the note", String(e).slice(0, 90)));
   }, [dir, entry?.folder]);
+  const onMoveNote = useCallback((from: string, folder: string) => moveNote(dir, from, folder), [dir]);
   const onRevealVault = useCallback(() => {
     notesRevealVault(dir).catch((e) => toastError("Couldn't reveal it", String(e).slice(0, 90)));
   }, [dir]);
@@ -230,6 +231,7 @@ export function NotesPane({
         openPath={open?.path ?? null}
         onOpenNote={openNoteHere}
         onNewNote={newNoteIn}
+        onMoveNote={onMoveNote}
         onOpenSearch={onOpenSearch}
         onRevealVault={onRevealVault}
         queued={queued}

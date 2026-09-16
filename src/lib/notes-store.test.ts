@@ -387,6 +387,22 @@ describe("the notes store", () => {
   });
 
 
+  describe("dragging a note into another folder", () => {
+    it("moves it through the link-rewriting rename, keeps its name, and suffixes a collision", async () => {
+      indexNotes = [A_NOTE, { path: "Ideas/A.md", title: "A", folder: "Ideas", status: null, round: null }];
+      await store.refreshNotes("/p");
+      expect(await store.moveNote("/p", "Tasks/A.md", "Ideas")).toBe("Ideas/A 2.md");
+      expect(moves).toEqual([{ from: "Tasks/A.md", to: "Ideas/A 2.md" }]);
+      expect(await store.moveNote("/p", "Tasks/A.md", "Archive")).toBe("Archive/A.md");
+      expect(await store.moveNote("/p", "Tasks/A.md", "")).toBe("A.md");
+    });
+    it("does nothing when the note is already in that folder", async () => {
+      await store.refreshNotes("/p");
+      expect(await store.moveNote("/p", "Tasks/A.md", "Tasks")).toBe("Tasks/A.md");
+      expect(moves).toEqual([]);
+    });
+  });
+
   describe("a note names itself while the name is still ours (round 9)", () => {
     const untitled = { path: "Tasks/Untitled.md", title: "Untitled", folder: "Tasks", status: null, round: null };
     const openUntitled = async (body = "") => {

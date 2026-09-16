@@ -44,10 +44,39 @@ export function setStatusInFront(front: string, status: NoteStatus | null): stri
   return front.replace(/^---(\r?\n)/, `---$1status: ${status}$1`);
 }
 
+/** The order the user dragged a folder's notes into: folder → paths. A note
+ *  not in its folder's list sorts by title after the ones that are. Kept by
+ *  the sidebar (localStorage), never in the vault. */
+export type NoteOrder = Record<string, string[]>;
+
+export const folderOf = (path: string): string => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
+
+/** A folder's notes in their manual order, then the rest by title. */
+export function orderNotes(notes: NoteEntry[], order: string[] | undefined): NoteEntry[] {
+  const byPath = new Map(notes.map((n) => [n.path, n] as const));
+  const placed: NoteEntry[] = [];
+  const seen = new Set<string>();
+  for (const p of order ?? []) {
+    const n = byPath.get(p);
+    if (n && !seen.has(p)) { placed.push(n); seen.add(p); }
+  }
+  const rest = notes.filter((n) => !seen.has(n.path)).sort((a, b) => a.title.localeCompare(b.title));
+  return [...placed, ...rest];
+}
+
+/** The folder's order after `moved` lands before `before` — or last when
+ *  `before` is null or not a sibling. `siblings` is the folder's displayed
+ *  order; `moved` may or may not already be in it. */
+export function placeInOrder(siblings: string[], moved: string, before: string | null): string[] {
+  const rest = siblings.filter((p) => p !== moved);
+  const i = before == null ? -1 : rest.indexOf(before);
+  return i < 0 ? [...rest, moved] : [...rest.slice(0, i), moved, ...rest.slice(i)];
+}
+
 /** Folders before notes at the vault root; inside a folder its own notes come
- *  before its subfolders. Each level sorted by name; a collapsed folder hides
- *  its subtree. */
-export function buildTree(notes: NoteEntry[], collapsed: Set<string>): TreeNode[] {
+ *  before its subfolders. Each level sorted by name — or by the folder's
+ *  manual `order` first — and a collapsed folder hides its subtree. */
+export function buildTree(notes: NoteEntry[], collapsed: Set<string>, order?: NoteOrder): TreeNode[] {
   const folders = new Set<string>();
   for (const n of notes) {
     const parts = n.path.split("/").slice(0, -1);
@@ -55,8 +84,7 @@ export function buildTree(notes: NoteEntry[], collapsed: Set<string>): TreeNode[
   }
   const childFolders = (parent: string) =>
     [...folders].filter((f) => (f.includes("/") ? f.slice(0, f.lastIndexOf("/")) : "") === parent).sort();
-  const childNotes = (parent: string) =>
-    notes.filter((n) => n.folder === parent).sort((a, b) => a.title.localeCompare(b.title));
+  const childNotes = (parent: string) => orderNotes(notes.filter((n) => n.folder === parent), order?.[parent]);
 
   const out: TreeNode[] = [];
   const emitFolder = (f: string, depth: number) => {

@@ -77,12 +77,21 @@ export type TreeRowProps = {
   className?: string;
   onClick?: () => void;
   onDoubleClick?: () => void;
+  /** Drag and drop (the notes sidebar), pointer-driven: the row where a press
+   *  may become a drag, and the name the sidebar hit-tests a drop against
+   *  (`data-drop-target`). Nothing here uses the browser's own drag session,
+   *  which the webview does not deliver reliably. */
+  onPointerDown?: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  dropTarget?: string;
+  /** A drag is over this row and it will take the drop. */
+  dropping?: boolean;
 };
 
 export function TreeRow({
   depth = 0, leading, icon, name, title, after, trailing,
   selected, dimmed, struck, tint, hover = true, marquee,
   className, onClick, onDoubleClick,
+  onPointerDown, dropTarget, dropping,
 }: TreeRowProps) {
   const nameRef = useRef<HTMLSpanElement | null>(null);
   const [box, setBox] = useState({ scrollWidth: 0, clientWidth: 0, hovered: false });
@@ -102,6 +111,9 @@ export function TreeRow({
       onDoubleClick={onDoubleClick}
       onMouseEnter={marquee ? onEnter : undefined}
       onMouseLeave={marquee ? onLeave : undefined}
+      onPointerDown={onPointerDown}
+      data-drop-target={dropTarget}
+      data-dropping={dropping || undefined}
       style={marquee ? (nameStyle.style as CSSProperties) : undefined}
       className={cn(
         "relative flex h-7 w-full items-center gap-1.5 rounded-sm px-1.5 text-left",
@@ -109,6 +121,7 @@ export function TreeRow({
         selected ? "bg-fill-hover text-text-primary" : hover && "hover:bg-fill-hover",
         dimmed && !selected && "text-text-dim",
         tint && "bg-fill-subtle",
+        dropping && "bg-fill-hover [box-shadow:inset_0_0_0_1px_var(--border-strong)]",
         className,
       )}
     >

@@ -5,7 +5,7 @@ import {
   outlinksFor, pillFor, roundPhaseOf, roundPlanOutcome, roundSubline, sanitizeTitle,
   setStatusInFront, slugFor,
   roundsJustFinished, splitFrontMatter, statusInFront, tagCounts, terminalRoundCommand,
- deriveTitle } from "./notes-model";
+ deriveTitle, orderNotes, placeInOrder, folderOf } from "./notes-model";
 
 const note = (path: string, p: Partial<NoteEntry> = {}): NoteEntry => ({
   path, title: (path.split("/").pop() ?? path).replace(/\.md$/, ""),
@@ -305,5 +305,30 @@ describe("deriveTitle", () => {
   });
   it("passes through the file-system sanitiser", () => {
     expect(deriveTitle("# Sam: notes / plan?")).toBe("Sam- notes - plan");
+  });
+});
+
+describe("manual order (drag and drop)", () => {
+  const note = (path: string) => ({ path, title: path.split("/").pop()!.replace(/\.md$/, ""), folder: path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "", status: null, round: null, tags: [], links: [], resolved: [], ambiguous: [], mtime: 0, size: 0, snippet: "", unreadable: false });
+  const notes = [note("Tasks/C.md"), note("Tasks/A.md"), note("Tasks/B.md")];
+
+  it("orders the dragged notes first, then the rest by title, and ignores paths that are gone", () => {
+    expect(orderNotes(notes, ["Tasks/B.md", "Tasks/Gone.md"]).map((n) => n.path)).toEqual(["Tasks/B.md", "Tasks/A.md", "Tasks/C.md"]);
+    expect(orderNotes(notes, undefined).map((n) => n.path)).toEqual(["Tasks/A.md", "Tasks/B.md", "Tasks/C.md"]);
+    expect(orderNotes(notes, ["Tasks/B.md", "Tasks/B.md"]).map((n) => n.path)).toEqual(["Tasks/B.md", "Tasks/A.md", "Tasks/C.md"]);
+  });
+
+  it("places a note before a sibling, or last", () => {
+    expect(placeInOrder(["a", "b", "c"], "c", "a")).toEqual(["c", "a", "b"]);
+    expect(placeInOrder(["a", "b", "c"], "a", null)).toEqual(["b", "c", "a"]);
+    expect(placeInOrder(["a", "b"], "z", "b")).toEqual(["a", "z", "b"]);
+    expect(placeInOrder(["a", "b"], "z", "not-here")).toEqual(["a", "b", "z"]);
+  });
+
+  it("the tree honours a folder's order and falls back to titles elsewhere", () => {
+    const flat = buildTree([...notes, note("Root.md"), note("Other/X.md")], new Set(), { Tasks: ["Tasks/C.md", "Tasks/B.md"] });
+    expect(flat.filter((n) => n.kind === "note").map((n) => n.path)).toEqual(["Other/X.md", "Tasks/C.md", "Tasks/B.md", "Tasks/A.md", "Root.md"]);
+    expect(folderOf("Tasks/A.md")).toBe("Tasks");
+    expect(folderOf("Root.md")).toBe("");
   });
 });

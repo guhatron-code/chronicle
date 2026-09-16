@@ -386,6 +386,19 @@ export async function renameNote(dir: string, from: string, to: string): Promise
   if (h) history.set(dir, h.map((p) => (p === from ? to : p)));
 }
 
+/** Drag a note into another folder (round 9 follow-up): same name, suffixed on a
+ *  collision, through the link-rewriting rename. The folder it leaves ceases to
+ *  exist if it was the last note there — a folder IS its notes. Returns the path
+ *  the note lives at now; the same path when it was already in that folder. */
+export async function moveNote(dir: string, from: string, toFolder: string): Promise<string> {
+  const here = from.includes("/") ? from.slice(0, from.lastIndexOf("/")) : "";
+  if (here === toFolder) return from;
+  const taken = new Set(indexFor(dir).notes.map((n) => n.path).filter((p) => p !== from));
+  const to = newNotePath(toFolder, fileTitleOf(from), taken);
+  await renameNote(dir, from, to);
+  return to;
+}
+
 export async function deleteNote(dir: string, path: string): Promise<void> {
   await notesDelete(dir, path);
   if (opens.get(dir)?.path === path) opens.delete(dir);

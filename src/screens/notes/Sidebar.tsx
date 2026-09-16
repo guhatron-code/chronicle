@@ -6,7 +6,7 @@
  * and head parts the Repo pane's explorer draws with — so nothing here wraps
  * and nothing here drifts from the explorer.
  */
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -14,8 +14,9 @@ import { Eyebrow } from "@/components/chrome/atoms";
 import { AccBody } from "@/screens/roadmap/bits";
 import { TreeFolderRow, TreeGuide, TreeHeader, TreeIconButton, TreeRow } from "@/components/chrome/Tree";
 import { ChevronRightGlyph, DocGlyph, PlusGlyph, SearchGlyph } from "@/components/chrome/icons";
-import { buildTree, nestTree, sanitizeTitle, tagCounts, type TreeBranch } from "@/lib/notes-model";
+import { buildTree, folderOf, nestTree, orderNotes, placeInOrder, sanitizeTitle, tagCounts, type NoteOrder, type TreeBranch } from "@/lib/notes-model";
 import type { NoteEntry } from "@/lib/ipc";
+import { toastError } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
 import { RoundCard, type RoundCardData } from "./RoundCard";
 import { StatusChip } from "./StatusChip";
@@ -32,6 +33,46 @@ function loadCollapsed(dir: string): Set<string> {
   } catch { return new Set(); }
 }
 
+/* Drag and drop: a note row is picked up and dropped on a folder (goes in, last),
+   on another note (goes in that note's folder, before it), or on the empty space
+   under the tree (goes to the vault root). Moving between folders is a real file
+   move through the link-rewriting rename; the order inside a folder is the
+   sidebar's own, kept per project in localStorage like the collapse state.
+   Pointer events drive it, not the browser's drag session: the webview starts
+   that session but never reports where the pointer is over the page. */
+const ORDER_KEY = (dir: string) => `chronicle.notes.order.${dir}`;
+/** how far a press travels before it is a drag, not a click */
+const DRAG_SLOP = 5;
+
+function loadOrder(dir: string): NoteOrder {
+  try {
+    const raw = localStorage.getItem(ORDER_KEY(dir));
+    return raw ? (JSON.parse(raw) as NoteOrder) : {};
+  } catch { return {}; }
+}
+
+/** Where a drag is, as the rows need it. */
+type DropTarget = { kind: "folder" | "note" | "root"; path: string };
+interface Dnd {
+  dragging: string | null;
+  over: DropTarget | null;
+  /** a press on a note row: it may become a drag, or stay a click */
+  press: (path: string, e: React.PointerEvent) => void;
+  /** the click a drag just swallowed must not open the note */
+  swallowedClick: () => boolean;
+}
+const sameTarget = (a: DropTarget | null, b: DropTarget) => !!a && a.kind === b.kind && a.path === b.path;
+const targetId = (t: DropTarget) => (t.kind === "root" ? "root" : `${t.kind}:${t.path}`);
+function targetAt(x: number, y: number): DropTarget | null {
+  const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-drop-target]");
+  const id = el?.dataset.dropTarget;
+  if (!id) return null;
+  if (id === "root") return { kind: "root", path: "" };
+  const i = id.indexOf(":");
+  const kind = id.slice(0, i);
+  return kind === "folder" || kind === "note" ? { kind, path: id.slice(i + 1) } : null;
+}
+
 function rowStatus(entry: NoteEntry): { label: string; tone: string } | null {
   if (entry.unreadable) return { label: "unreadable", tone: "unknown" };
   if (entry.status === "queued") return { label: "queued", tone: "queued" };
@@ -44,7 +85,7 @@ function rowStatus(entry: NoteEntry): { label: string; tone: string } | null {
 /** One node of the notes tree, drawn with the explorer's parts: a folder is a
  *  chevron + folder glyph with its children inside one guide line, a note is a
  *  file row with the status chip in the trailing slot. */
-function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, notFirstRoot }: {
+function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, notFirstRoot, dnd }: {
   node: TreeBranch;
   depth: number;
   /** the explorer's 4 px breath above every root folder after the first */
@@ -53,9 +94,11 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, no
   openPath: string | null;
   onOpenFolder: (path: string) => void;
   onOpenNote: (node: TreeBranch) => void;
+  dnd: Dnd;
 }) {
   if (node.kind === "note") {
     const status = node.entry ? rowStatus(node.entry) : null;
+    const target: DropTarget = { kind: "note", path: node.path };
     return (
       <TreeRow
         depth={depth}
@@ -64,11 +107,16 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, no
         icon={<DocGlyph size={13} strokeWidth={1.2} className="shrink-0 text-text-subtle" />}
         selected={node.path === openPath}
         trailing={status ? <StatusChip {...status} /> : undefined}
-        onClick={() => onOpenNote(node)}
+        onClick={() => { if (!dnd.swallowedClick()) onOpenNote(node); }}
+        onPointerDown={(e) => dnd.press(node.path, e)}
+        dropTarget={targetId(target)}
+        dropping={sameTarget(dnd.over, target)}
+        className={cn(dnd.dragging === node.path && "opacity-50")}
       />
     );
   }
   const open = !collapsed.has(node.path);
+  const target: DropTarget = { kind: "folder", path: node.path };
   return (
     <div>
       <TreeFolderRow
@@ -78,6 +126,8 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, no
         open={open}
         marquee
         onClick={() => onOpenFolder(node.path)}
+        dropTarget={targetId(target)}
+        dropping={sameTarget(dnd.over, target)}
       />
       {(node.children.length > 0 || open) && (
         <AccBody open={open}>
@@ -91,6 +141,7 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, no
                 openPath={openPath}
                 onOpenFolder={onOpenFolder}
                 onOpenNote={onOpenNote}
+                dnd={dnd}
               />
             ))}
           </TreeGuide>
@@ -110,7 +161,7 @@ function Branch({ node, depth, collapsed, openPath, onOpenFolder, onOpenNote, no
  * and typing in the editor no longer re-reconciles the whole tree.
  */
 export const Sidebar = memo(function Sidebar({
-  dir, notes, openPath, onOpenNote, onNewNote, onOpenSearch, onRevealVault,
+  dir, notes, openPath, onOpenNote, onNewNote, onMoveNote, onOpenSearch, onRevealVault,
   queued, round, onStartRound, onRunRoundInPane, onRunRoundInTerminal,
   onRevealPane, onRevealTerminal, vault, borrowed,
   width = 232,
@@ -122,6 +173,8 @@ export const Sidebar = memo(function Sidebar({
   /** Both the "+" button and "New folder" fold into this — a folder with no
    *  note in it does not exist, so "New folder" seeds an Untitled note. */
   onNewNote: (folder: string) => void;
+  /** A dropped note goes into `folder` ("" is the root); resolves to the path it lives at now. */
+  onMoveNote: (from: string, folder: string) => Promise<string>;
   onOpenSearch: () => void;
   onRevealVault: () => void;
   queued: number;
@@ -151,6 +204,84 @@ export const Sidebar = memo(function Sidebar({
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [newFolder, setNewFolder] = useState<string | null>(null);
 
+  /* ---- drag and drop ---- */
+  const [order, setOrder] = useState<NoteOrder>(() => loadOrder(dir));
+  useEffect(() => setOrder(loadOrder(dir)), [dir]);
+  useEffect(() => {
+    try { localStorage.setItem(ORDER_KEY(dir), JSON.stringify(order)); } catch { /* private mode etc. */ }
+  }, [dir, order]);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<DropTarget | null>(null);
+  const [ghost, setGhost] = useState<{ x: number; y: number; name: string } | null>(null);
+  /** the press being watched; a drag begins once it travels DRAG_SLOP */
+  const press = useRef<{ path: string; x: number; y: number; live: boolean } | null>(null);
+  const swallowed = useRef(false);
+  const notesRef = useRef(notes); notesRef.current = notes;
+  const orderRef = useRef(order); orderRef.current = order;
+
+  const finishDrop = (from: string, t: DropTarget | null) => {
+    if (!t || (t.kind === "note" && t.path === from)) return;
+    const toFolder = t.kind === "folder" ? t.path : t.kind === "note" ? folderOf(t.path) : "";
+    const before = t.kind === "note" ? t.path : null;
+    const fromFolder = folderOf(from);
+    void onMoveNote(from, toFolder)
+      .then((to) => {
+        setOrder((o) => {
+          const siblings = orderNotes(notesRef.current.filter((n) => n.folder === toFolder && n.path !== from), o[toFolder]).map((n) => n.path);
+          const next: NoteOrder = { ...o, [toFolder]: placeInOrder(siblings, to, before) };
+          if (fromFolder !== toFolder) next[fromFolder] = (o[fromFolder] ?? []).filter((p) => p !== from);
+          return next;
+        });
+      })
+      .catch((err) => toastError("Couldn't move the note", String(err).slice(0, 110)));
+  };
+
+  useEffect(() => {
+    const move = (e: PointerEvent) => {
+      const p = press.current;
+      if (!p) return;
+      if (!p.live) {
+        if (Math.hypot(e.clientX - p.x, e.clientY - p.y) < DRAG_SLOP) return;
+        p.live = true;
+        setDragging(p.path);
+      }
+      const t = targetAt(e.clientX, e.clientY);
+      setOver((cur) => (t && cur && sameTarget(cur, t) ? cur : t));
+      setGhost({ x: e.clientX, y: e.clientY, name: p.path.split("/").pop()!.replace(/\.md$/, "") });
+    };
+    const up = (e: PointerEvent) => {
+      const p = press.current;
+      press.current = null;
+      if (!p) return;
+      if (p.live) {
+        swallowed.current = true; // the click that follows this release is the drag's, not a pick
+        finishDrop(p.path, targetAt(e.clientX, e.clientY));
+      }
+      setDragging(null); setOver(null); setGhost(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onMoveNote]);
+
+  const dnd: Dnd = {
+    dragging,
+    over,
+    press: (path, e) => {
+      if (e.button !== 0) return;
+      swallowed.current = false; // a drag released over empty space fires no click to consume the flag
+      press.current = { path, x: e.clientX, y: e.clientY, live: false };
+    },
+    swallowedClick: () => { const s = swallowed.current; swallowed.current = false; return s; },
+  };
+  const rootTarget: DropTarget = { kind: "root", path: "" };
+
   const toggle = (folder: string) =>
     setCollapsed((c) => { const n = new Set(c); if (n.has(folder)) n.delete(folder); else n.add(folder); return n; });
 
@@ -161,7 +292,7 @@ export const Sidebar = memo(function Sidebar({
   // the tree is built with NOTHING pruned — a closed folder keeps its children
   // so AccBody has a body to collapse, exactly as the explorer's does. Which
   // folders are closed is `collapsed`, read per row by Branch.
-  const tree = useMemo(() => nestTree(buildTree(filtered, NOTHING_COLLAPSED)), [filtered]);
+  const tree = useMemo(() => nestTree(buildTree(filtered, NOTHING_COLLAPSED, order)), [filtered, order]);
   const tags = useMemo(() => tagCounts(notes), [notes]);
 
   /* A round that has ENDED still holds the card until it is dismissed, so
@@ -251,7 +382,15 @@ export const Sidebar = memo(function Sidebar({
         />
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 text-[12.5px] text-text-secondary">
+      <div
+        data-notes-tree
+        data-drop-target="root"
+        data-dropping={sameTarget(over, rootTarget) || undefined}
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto px-2 pb-3 text-[12.5px] text-text-secondary",
+          sameTarget(over, rootTarget) && "[box-shadow:inset_0_0_0_1px_var(--border-strong)]",
+        )}
+      >
         {tree.map((node, i) => (
           <Branch
             key={node.path}
@@ -262,9 +401,20 @@ export const Sidebar = memo(function Sidebar({
             openPath={openPath}
             onOpenFolder={(path) => { toggle(path); setActiveFolder(path); }}
             onOpenNote={(n) => { setActiveFolder(n.entry?.folder ?? ""); onOpenNote(n.path); }}
+            dnd={dnd}
           />
         ))}
+        {dragging && <div className="h-7 text-center text-[11px] leading-7 text-text-dim">Drop here to move it to the top level</div>}
       </div>
+      {ghost && (
+        <div
+          aria-hidden
+          className="pointer-events-none fixed z-50 rounded-sm border border-border-strong bg-surface-card px-2 py-0.5 text-[11.5px] text-text-primary shadow-md"
+          style={{ left: ghost.x + 12, top: ghost.y + 8 }}
+        >
+          {ghost.name}
+        </div>
+      )}
 
       {tags.length > 0 && (
         <div className="flex-none border-t border-border-hairline px-3.5 py-2.5">
