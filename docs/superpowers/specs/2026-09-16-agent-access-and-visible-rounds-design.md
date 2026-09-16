@@ -321,3 +321,99 @@ CLI plus the vault resolution (§1, §2 notes/state, §6); (2) rounds you can wa
 - **Gone:** the `RoundFlow` progress modal, the `RoundLog` panel, and the "Run headless"
   button. Watching a round now means watching the pane turn that plans it, or a `Round N`
   terminal tab; there is no separate log view or headless process to check on.
+
+## Implementation notes (plan 3, 2026-09-16)
+
+- **The bridge's paths.** `bridge::socket_path()` and `bridge::token_path()` are
+  `config_dir().join("app.sock")` and `config_dir().join("app.token")`; `config_dir()` is
+  `~/Library/Application Support/Chronicle` (capital C, matching the app's own name), not
+  the lowercase `chronicle` this design's §3 wrote when it was drafted. Both are overridable
+  by `CHRONICLE_BRIDGE_SOCKET` / `CHRONICLE_BRIDGE_TOKEN`, a seam used by exactly one test
+  (`agent_api::tests::actions_go_through_the_bridge_and_report_its_sentence`, the only test
+  in the crate allowed to set them, since the crate's tests run as threads in one process
+  and the vars are shared state); with both unset, `socket_path()`/`token_path()` fall back
+  to the real `config_dir()` paths.
+- **The token is content-compared in constant time.** `token_matches` walks every byte of
+  both strings and ORs the differences, rather than short-circuiting on the first mismatch
+  the way `==` would, so a peer that can time the answer cannot learn the token one byte at
+  a time.
+- **`ACTIONS` is a closed list.** `bridge::ACTIONS` names exactly `round.plan`,
+  `round.start`, `project.open`, `terminal.read`; `bridge::known_action` checks against it
+  before an action ever reaches the frontend, and `main.rs`'s socket handler answers an
+  unknown name with `"No action named {action}."` itself, without emitting `agent-action` at
+  all. `verb_for` turns each of the four into the phrase its refusal sentence names ("plan a
+  round", "start a round", "open a project", "read a terminal"); anything else maps to the
+  generic "do that", which is unreachable in practice because `known_action` gates first.
+- **`project.open`'s allowlist exception, both sides of the socket.** Every other action's
+  `dir` is checked against `OpenRoots` (the app's set of already-opened, canonicalised
+  project paths); `project.open` instead runs `bridge::admit_project_open`, which requires
+  the target to be an absolute path ("{dir} isn't an absolute path." for a relative one, so
+  a shell's own working directory never leaks in as the resolved folder), to exist as a
+  directory ("There is no folder at {dir}."), and to hold `chronicle.json` or `.chronicle/`
+  ("{dir} isn't a Chronicle project."). `agent_api::project_open` (the client side, in
+  `agent_api.rs`) runs the identical check before ever dialling the socket, so a caller
+  hears the refusal without a round trip; `main.rs`'s socket handler (the app side) runs it
+  again and rewrites `req.dir` and `req.args["dir"]` to the canonical path it resolved,
+  never the string that crossed the wire. Neither side trusts the other's canonicalisation.
+- **The window-not-mounted refusal reuses the not-open sentence.** `BridgeState.ready` is an
+  atomic flag the frontend flips once its `agent-action` listener is mounted; a request that
+  arrives before that returns the identical "Chronicle isn't open on this project, so it
+  can't {verb}. Open it and try again." sentence the client already produces when nothing is
+  listening on the socket at all (`bridge::call_at`'s `not_open` closure), so an agent
+  cannot tell "no app" from "app still starting up" apart, and is refused rather than made
+  to wait: the request is answered immediately, never queued for the window to catch up to.
+- **One reply per action, always.** `main.rs`'s handler blocks on an mpsc channel with a 30
+  second timeout; a timeout removes the pending slot before answering "Chronicle didn't
+  answer in time.", so a reply that arrives late from a frontend that took its time has
+  nowhere left to deliver to. On the frontend, `mountAgentBridge` treats
+  `handleAgentAction` as never throwing (it does not throw by construction) but still wraps
+  it in `.catch` for defence, and never re-announces after a reply the app could not send
+  (`agentActionReply` rejecting): the agent already heard it timed out, so a toast/journal
+  line at that point would tell the user a story the agent never received.
+- **Every performed action is visible twice: a toast and a journal line.**
+  `mountAgentBridge` (`src/lib/agent-bridge.ts`) calls `toastSuccess`/`toastError` and, only
+  on success, `announce(dir, "agent-action", summary, "Chronicle")`: a refusal gets the
+  toast alone, since the design in §2 treats a declined action as not part of the project's
+  history.
+- **The env overrides are the test's alone.** The crate's tests run as parallel threads in
+  one process; `CHRONICLE_BRIDGE_SOCKET`/`CHRONICLE_BRIDGE_TOKEN` are process-wide state, so
+  exactly one test is allowed to set them, and it unsets both before its last assertion
+  (which re-checks that `socket_path()`/`token_path()` fall back to the real `config_dir()`
+  paths with nothing set). No other test may touch either variable.
+- **The skill's location and content.** The Setup row installs `skill/chronicle/SKILL.md`
+  (embedded at compile time via `include_str!`) at `~/.claude/skills/chronicle/SKILL.md`,
+  through the same `install_skill` helper `chronicle-init` uses: a `.chronicle-managed`
+  marker records the sha256 of what Chronicle wrote, and only a copy whose on-disk marker
+  still matches is upgraded; a copy with no marker, or one that no longer matches (a human
+  edited it), is left alone and reported "hand-managed — left alone". The skill names all
+  three tool groups, tells the agent to prefer them over reading `.chronicle/` directly
+  (an implementation detail that can change shape), and carries the same warning the plan's
+  §4 called for: never start a round unless the user asked for one in this conversation.
+- **`access.json`'s shape and its `createdBy` provenance.** `agents_access_enable_in`
+  (`main.rs`) writes `<project>/.chronicle/agent/access.json` as
+  `{ "mcp": true, "at": <epoch ms from epoch_ms()>, "createdBy": "chronicle" | null }`:
+  `"chronicle"` when enabling created `.mcp.json` (it did not exist before), `null` when a
+  `.mcp.json` was already there and enable only added a server entry to it. That value is
+  what `agents_access_disable_in` reads back to decide whether disabling may delete
+  `.mcp.json`: only `createdBy == "chronicle"`, AND the file being nothing but an empty
+  `mcpServers` object after the `chronicle` entry is removed, clears the file itself;
+  otherwise disable rewrites `.mcp.json` with the entry removed and leaves the file in
+  place. Provenance is meant to survive a disable/enable cycle on the same project rather
+  than being reset to "we probably created it" on every enable.
+- **Enable refuses an unparsable `.mcp.json` rather than overwriting it.** `read_json_object`
+  treats a missing file, invalid JSON, or a non-object top-level value alike, as `{}`, safe
+  for every other caller of that helper, which only ever adds or removes keys, but not safe
+  for `agents_access_enable_in`, whose whole point is to preserve what was already in the
+  file: silently starting from `{}` would replace a `.mcp.json` a person hand-edited into
+  invalid JSON with one holding only the `chronicle` entry. Enable checks first and, when
+  `.mcp.json` exists but does not parse as a JSON object, refuses with a sentence naming
+  that, and writes nothing.
+- **Disable's file cleanup, both levels.** Besides `.mcp.json`, `agents_access_disable_in`
+  always removes `.chronicle/agent/access.json`, and then tries `remove_dir` (not
+  `remove_dir_all`) on `.chronicle/agent/` itself, which only succeeds if the skill left
+  nothing else there, a tidy-up that is fine to fail silently otherwise.
+- **`serverInfo.version` is the app's version, not the crate's.** `mcp::app_version()`
+  parses `version` out of `tauri.conf.json` (`include_str!`'d in at compile time, the same
+  file the app's own "About" reads), falling back to `CARGO_PKG_VERSION` only if that parse
+  ever fails; `initialize`'s `serverInfo` reports that value so an agent asking an MCP
+  session what it's talking to sees the same number the user sees, not `0.1.0`.
