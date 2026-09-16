@@ -30,6 +30,15 @@ describe("recordRateLimit normalises what the adapter forwards", () => {
     expect(limitsReading()).toBe(r);
   });
 
+  it("reads the wire's fraction as a percentage, and a percentage as itself", () => {
+    // measured live: utilization 0.54 with status allowed_warning means 54%
+    expect(recordRateLimit({ status: "allowed_warning", utilization: 0.54, rateLimitType: "seven_day" }, NOW)?.utilization).toBe(54);
+    expect(recordRateLimit({ status: "allowed", utilization: 0.0017, rateLimitType: "five_hour" }, NOW)?.utilization).toBe(0.2);
+    expect(recordRateLimit({ status: "allowed", utilization: 62, rateLimitType: "five_hour" }, NOW)?.utilization).toBe(62);
+    const r = recordRateLimit({ status: "allowed", rateLimitType: "five_hour", unifiedWindows: { five_hour: { utilization: 0.17, resetsAt: 1 } } }, NOW);
+    expect(r?.utilization).toBe(17);
+  });
+
   it("rejected is kept as rejected", () => {
     expect(recordRateLimit({ status: "rejected", rateLimitType: "five_hour" }, NOW)?.status).toBe("rejected");
   });

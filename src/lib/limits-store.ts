@@ -35,6 +35,10 @@ export function resetLimits(): void { reading = null; }
 
 type Raw = Record<string, unknown>;
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+/** The wire says 0.54 for 54% (a fraction, measured live on claude-agent-acp
+ *  0.75.1 with Claude Code 2.1), though older notes describe 0–100. Both read
+ *  as a percentage: anything at or under 1 is a fraction. */
+const pct = (v: unknown): number | null => { const n = num(v); return n == null ? null : n <= 1 ? Math.round(n * 1000) / 10 : n; };
 const secsToMs = (v: unknown): number | null => { const n = num(v); return n == null ? null : Math.round(n * 1000); };
 
 /** Normalise one `_claude/rateLimit` payload into the reading and publish it.
@@ -51,13 +55,13 @@ export function recordRateLimit(meta: unknown, now: number = Date.now()): Limits
     for (const [k, w] of Object.entries(unified as Raw)) {
       if (!w || typeof w !== "object") continue;
       const win = w as Raw;
-      windows[k] = { utilization: num(win.utilization), resetsAt: secsToMs(win.resetsAt) };
+      windows[k] = { utilization: pct(win.utilization), resetsAt: secsToMs(win.resetsAt) };
     }
   }
   const binding = windows[windowType];
   reading = {
     status,
-    utilization: num(m.utilization) ?? binding?.utilization ?? null,
+    utilization: pct(m.utilization) ?? binding?.utilization ?? null,
     resetsAt: secsToMs(m.resetsAt) ?? binding?.resetsAt ?? null,
     windowType,
     windows,
