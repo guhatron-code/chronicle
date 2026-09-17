@@ -34,7 +34,8 @@
     { "path": "docs/superpowers/plans/2026-09-16-agent-actions-bridge.md", "sha256": "61364fd75d70bae05712965b27920e28ab5d823702632fbd81546b1df98a0330" },
     { "path": "docs/superpowers/specs/2026-09-16-agent-access-and-visible-rounds-design.md", "sha256": "297f96b8134ce5c5162c59f48c09bff5ce517027c79cdf0209a70b024867e868" },
     { "path": "fixes/phase_8_fixes_plan.md", "sha256": "5848f014bf3bd3e120d43078241cb8d1b463b8283f97ec2ef9c315618dc43d9a" },
-    { "path": "fixes/phase_9_fixes_plan.md", "sha256": "c6d918161447511cfa1507b00f01866cd0a867de3fd6531e22bf37b95ecd4f01" }
+    { "path": "fixes/phase_9_fixes_plan.md", "sha256": "c6d918161447511cfa1507b00f01866cd0a867de3fd6531e22bf37b95ecd4f01" },
+    { "path": "docs/superpowers/specs/2026-09-17-design-pane-foundation-design.md", "sha256": "a18c29b3633c0397f6728eff0d1b1027b28e1900c66b5caf075a076cc793b85f" }
   ],
   "spine": [
     { "path": "PRODUCT.md" },
@@ -813,7 +814,7 @@
     },
     {
       "title": "Part 16 · One Chronicle, a thread you can read, notes that name themselves (0.11)",
-      "note": "Two rounds of fixes from Notes, released together. The rounds themselves also appear under Fixes & ideas.",
+      "note": "Two rounds of fixes from Notes released together, then two small follow-ups. The rounds themselves also appear under Fixes & ideas.",
       "phases": [
         {
           "id": "V110",
@@ -853,11 +854,223 @@
               }
             ]
           }
+        },
+        {
+          "id": "V112",
+          "name": "Ship 0.11.2",
+          "desc": "Signing in with Google works inside the Web pane, and web tabs drag between folders and rows again.",
+          "items": [
+            "Sign-in windows open as real popups, so a Google login finishes inside the page view.",
+            "A sign-in popup closes itself when it is done, and closing one no longer shuts down your terminals.",
+            "Web tabs can be dragged between folders and rows again."
+          ],
+          "status": {
+            "done_when": [
+              {
+                "tag": "v0.11.2"
+              }
+            ]
+          }
         }
       ]
     },
     {
-      "title": "Part 17 · What comes next",
+      "title": "Part 17 · The Design pane",
+      "note": "A fifth pane where an agent works as your art director and UX director, built in nine parts. Each part gets its own spec, plan and release.",
+      "phases": [
+        {
+          "id": "DP-0",
+          "name": "Draw the Design pane first",
+          "desc": "Before any code, every screen of the Design pane was drawn and approved: the empty pane, the canvas, history, errors and the settings it needs.",
+          "docs": [
+            {
+              "path": "design/comps/design-pane/Main.dc.html"
+            },
+            {
+              "path": "docs/superpowers/specs/2026-09-17-design-pane-foundation-design.md"
+            }
+          ],
+          "status": {
+            "done_when": [
+              {
+                "commit_subject": "(?i)^docs\\(design\\): the Design pane program, its approved comps"
+              }
+            ]
+          }
+        },
+        {
+          "id": "DP-1",
+          "name": "The foundation: a pane, a canvas and a second session",
+          "desc": "A Design pane with a zoomable canvas of live pages, a second agent session that may only write inside the designs folder, and a version saved after every turn.",
+          "items": [
+            "A Design button joins the rail after Web, with a start screen where you pick a kind of design and write a brief.",
+            "A second agent session runs next to the chat one. It can read the whole project but may only write inside <b>.chronicle/designs/</b>, and anything it changes elsewhere is listed with Undo.",
+            "Designs stay on this Mac. The designs folder keeps itself out of git.",
+            "The canvas shows every page side by side at full height, and you can zoom, pan, drag, and drive it all from the keyboard.",
+            "Generated pages run sealed off from Chronicle, so a page can never reach the app.",
+            "Each turn that changes a design saves a version with thumbnails, and you can compare, restore or branch from any of them.",
+            "Designs can be renamed, duplicated, reordered, moved to another kind, or deleted with undo.",
+            "Agents can list and read designs through Chronicle's agent tools, but not change them."
+          ],
+          "paste": [
+            {
+              "label": "the foundation plan",
+              "into": "Claude Code",
+              "when": "Not written yet. It comes from the approved foundation spec."
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-09-17-design-pane-foundation-design.md"
+            },
+            {
+              "path": "design/comps/design-pane/Main.dc.html"
+            }
+          ],
+          "status": {
+            "done_when": [
+              {
+                "commit_subject": "(?i)^docs\\(design(-pane)?\\): live (test|check)"
+              }
+            ],
+            "current_labels": [
+              {
+                "when": [
+                  {
+                    "file_exists": "src/screens/design"
+                  }
+                ],
+                "label": "being built now"
+              },
+              {
+                "when": [
+                  {
+                    "file_glob": {
+                      "dir": "docs/superpowers/plans",
+                      "contains": "design-pane"
+                    }
+                  }
+                ],
+                "label": "plan written, ready to build"
+              }
+            ],
+            "default_label": "spec written, plan next"
+          }
+        },
+        {
+          "id": "DP-2",
+          "name": "The director",
+          "desc": "The agent gets its art director persona, design skills, a lint check, a critique panel with scores, and a benchmark against Claude Design.",
+          "items": [
+            "A clarifying form asks what it needs before it starts.",
+            "Every design is checked and critiqued before you see it.",
+            "A fixed set of briefs is rerun each release to prove it beats Claude Design."
+          ],
+          "paste": [
+            {
+              "label": "its own spec and plan",
+              "into": "Claude Code",
+              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+            }
+          ],
+          "status": {
+            "done_when": []
+          }
+        },
+        {
+          "id": "DP-3",
+          "name": "Design systems",
+          "desc": "The director reads your colors, type and components from the repo, a website or Figma, and keeps designs in step with the code.",
+          "paste": [
+            {
+              "label": "its own spec and plan",
+              "into": "Claude Code",
+              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+            }
+          ],
+          "status": {
+            "done_when": []
+          }
+        },
+        {
+          "id": "DP-4",
+          "name": "Refining a design",
+          "desc": "Click a spot to comment on it, edit directly and have it written to the page, try tweaks and variations, and sketch on top.",
+          "paste": [
+            {
+              "label": "its own spec and plan",
+              "into": "Claude Code",
+              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+            }
+          ],
+          "status": {
+            "done_when": []
+          }
+        },
+        {
+          "id": "DP-5",
+          "name": "Prototypes",
+          "desc": "Link frames together, walk through a flow, add transitions, and see the whole flow as a map.",
+          "paste": [
+            {
+              "label": "its own spec and plan",
+              "into": "Claude Code",
+              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+            }
+          ],
+          "status": {
+            "done_when": []
+          }
+        },
+        {
+          "id": "DP-6",
+          "name": "Decks",
+          "desc": "Slides at 1920 by 1080, with speaker notes and a presenter view.",
+          "paste": [
+            {
+              "label": "its own spec and plan",
+              "into": "Claude Code",
+              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+            }
+          ],
+          "status": {
+            "done_when": []
+          }
+        },
+        {
+          "id": "DP-7",
+          "name": "Export and handoff",
+          "desc": "Export as HTML, ZIP, PDF, PowerPoint or PNG, and hand a design over to be built.",
+          "paste": [
+            {
+              "label": "its own spec and plan",
+              "into": "Claude Code",
+              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+            }
+          ],
+          "status": {
+            "done_when": []
+          }
+        },
+        {
+          "id": "DP-8",
+          "name": "Imagery",
+          "desc": "Generate images with your own key. Without one, designs use drawn shapes, icons and labelled spaces.",
+          "paste": [
+            {
+              "label": "its own spec and plan",
+              "into": "Claude Code",
+              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+            }
+          ],
+          "status": {
+            "done_when": []
+          }
+        }
+      ]
+    },
+    {
+      "title": "Part 18 · What comes next",
       "note": "Written down and agreed. Steps that tick themselves has shipped; the rest has not started.",
       "phases": [
         {
