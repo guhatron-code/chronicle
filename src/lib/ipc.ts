@@ -523,10 +523,19 @@ export const decodePtyChunk = (b64: string): Uint8Array =>
 
 /* ---------- the agent pane (ACP — src-tauri/src/acp.rs) ---------- */
 
+/** The chat lane is keyed by the project dir alone; the design lane suffixes
+ *  it with `#design` — the same project, a second session beside it. */
+export type Lane = "chat" | "design";
+export function splitLaneKey(key: string): { dir: string; lane: Lane } {
+  return key.endsWith("#design") ? { dir: key.slice(0, -"#design".length), lane: "design" } : { dir: key, lane: "chat" };
+}
+const laneArgs = (key: string) => splitLaneKey(key);
+
 /** One `acp-update` event: the raw agent→client JSON plus our session key.
  *  Chronicle lifecycle events ride the same channel as `_chronicle/*` methods. */
 export interface AcpUpdate {
   dir: string;
+  lane?: Lane;
   message: {
     id?: unknown;
     method?: string;
@@ -534,24 +543,24 @@ export interface AcpUpdate {
     [k: string]: unknown;
   };
 }
-export const agentSessionStart = (dir: string) => invoke("agent_session_start", { dir });
-export const agentSessionState = (dir: string) => invoke<Record<string, unknown>>("agent_session_state", { dir });
+export const agentSessionStart = (dir: string) => invoke("agent_session_start", laneArgs(dir));
+export const agentSessionState = (dir: string) => invoke<Record<string, unknown>>("agent_session_state", laneArgs(dir));
 /** `blocks` is the ACP prompt array; `display` is the flat text the thread and
  *  transcript show — what the user typed, not what the agent receives. */
 export const agentPrompt = (dir: string, blocks: unknown[], display: string) =>
-  invoke("agent_prompt", { dir, blocks, display });
-export const agentCancel = (dir: string) => invoke("agent_cancel", { dir });
-export const agentSetMode = (dir: string, mode: string) => invoke("agent_set_mode", { dir, mode });
+  invoke("agent_prompt", { ...laneArgs(dir), blocks, display });
+export const agentCancel = (dir: string) => invoke("agent_cancel", laneArgs(dir));
+export const agentSetMode = (dir: string, mode: string) => invoke("agent_set_mode", { ...laneArgs(dir), mode });
 export const agentSetConfigOption = (dir: string, configId: string, value: string) =>
-  invoke("agent_set_config_option", { dir, configId, value });
+  invoke("agent_set_config_option", { ...laneArgs(dir), configId, value });
 export const agentRespondPermission = (dir: string, requestId: string, option: string | null) =>
-  invoke("agent_respond_permission", { dir, requestId, option });
+  invoke("agent_respond_permission", { ...laneArgs(dir), requestId, option });
 /** clean=true (default) is the explicit "End session" — unresolved edits
  *  auto-keep. Project close passes false so the ledger survives reopen. */
-export const agentSessionStop = (dir: string, clean = true) => invoke("agent_session_stop", { dir, clean });
-export const agentSessionResume = (dir: string, id: string) => invoke("agent_session_resume", { dir, id });
-export const agentSessionsList = (dir: string) => invoke<Record<string, unknown>>("agent_sessions_list", { dir });
-export const agentHistoryRead = (dir: string, id: string) => invoke<Record<string, unknown>>("agent_history_read", { dir, id });
+export const agentSessionStop = (dir: string, clean = true) => invoke("agent_session_stop", { ...laneArgs(dir), clean });
+export const agentSessionResume = (dir: string, id: string) => invoke("agent_session_resume", { ...laneArgs(dir), id });
+export const agentSessionsList = (dir: string) => invoke<Record<string, unknown>>("agent_sessions_list", laneArgs(dir));
+export const agentHistoryRead = (dir: string, id: string) => invoke<Record<string, unknown>>("agent_history_read", { ...laneArgs(dir), id });
 export const onAcpUpdate = (cb: (u: AcpUpdate) => void): Promise<UnlistenFn> =>
   listen<AcpUpdate>("acp-update", (e) => cb(e.payload));
 
@@ -566,6 +575,10 @@ export interface AgentEditFile {
 }
 export const agentEdits = (dir: string) =>
   invoke<{ files: AgentEditFile[] }>("agent_edits", { dir });
+/** The design lane's own outside-change ledger: files a live design's watcher
+ *  saw change on disk without going through the agent. */
+export const designOutsideFiles = (dir: string) => invoke<AgentEditFile[]>("design_outside_files", { dir });
+export const designOutsideUndo = (dir: string, path: string | null) => invoke<number>("design_outside_undo", { dir, path });
 export const agentEditDiff = (dir: string, path: string) =>
   invoke<string>("agent_edit_diff", { dir, path });
 export const agentEditKeep = (dir: string, path: string | null) =>

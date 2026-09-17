@@ -26,6 +26,7 @@ import {
   roundRunMessage,
   type AcpUpdate,
   type AgentEditFile,
+  type Lane,
 } from "./ipc";
 import { clearRunningRound, markRunningRound, runningRoundFor } from "./round-log";
 import { indexFor, refreshNotes, roundGenerating, roundNotesFor, setRoundGenerating } from "./notes-store";
@@ -33,6 +34,19 @@ import { endNewestRoundCard, roundPlanOutcome } from "./notes-model";
 import { announce } from "./journal";
 import { recordRateLimit } from "./limits-store";
 import { toastAction, toastError } from "@/overlays/toasts";
+
+export { type Lane } from "./ipc";
+/** The chat lane's key IS the project dir; the design lane's is
+ *  `laneKey(dir, "design")` — the same project, a second session beside it. */
+export const laneKey = (dir: string, lane: Lane): string => (lane === "chat" ? dir : `${dir}#design`);
+/** The inverse of `laneKey` — kept as our own pure logic (not imported from
+ *  ./ipc) so the reducer never depends on a live binding into a module every
+ *  suite in this file mocks wholesale. Suffix stays byte-identical to ipc.ts's
+ *  own `splitLaneKey`, which is what the public export below re-exports. */
+function splitKey(key: string): { dir: string; lane: Lane } {
+  return key.endsWith("#design") ? { dir: key.slice(0, -"#design".length), lane: "design" } : { dir: key, lane: "chat" };
+}
+export { splitKey as splitLaneKey };
 
 export type AgentPhase =
   | "none" // never started (or explicitly reset)
@@ -106,6 +120,8 @@ export type AgentEntry =
       outcome?: PermOutcome;
     }
   | { kind: "turn-error"; message: string }
+  /** the acp seam refused a tool call outside the design's own folder (Design pane) */
+  | { kind: "guard"; allowed: boolean; path: string; reason: string }
   | {
       kind: "round";
       n: number;
@@ -138,6 +154,8 @@ export type AgentEntry =
     };
 
 export interface AgentSessionState {
+  /** which lane this state belongs to — set once, from the key it was created under */
+  lane: Lane;
   phase: AgentPhase;
   sessionId: string | null;
   modes: { currentModeId: string; availableModes: AgentMode[] } | null;
@@ -172,9 +190,19 @@ export interface AgentSessionState {
   editsResolved: boolean;
   /** a checkpoint announced before its user message landed in the thread */
   pendingCheckpoint: string | null;
+  /** files a design's watcher saw change on disk without going through the
+   *  agent (Design pane, `_chronicle/outside_changes`) */
+  outside: string[];
+  /** the design lane's own idle-stop face — 15 minutes with no turn running */
+  endedReason: "idle" | null;
+  /** how many turns have ended this session — the design lane's own counter */
+  turnEnds: number;
+  /** the last prompt's plain (unprefixed) text, for the design lane's echo */
+  lastPrompt: string;
 }
 
 const blank = (): AgentSessionState => ({
+  lane: "chat",
   phase: "none",
   sessionId: null,
   modes: null,
@@ -196,6 +224,10 @@ const blank = (): AgentSessionState => ({
   editFiles: [],
   editsResolved: false,
   pendingCheckpoint: null,
+  outside: [],
+  endedReason: null,
+  turnEnds: 0,
+  lastPrompt: "",
 });
 
 const sessions = new Map<string, AgentSessionState>();
@@ -217,6 +249,7 @@ export function agentSessionFor(dir: string): AgentSessionState {
   let s = sessions.get(dir);
   if (!s) {
     s = blank();
+    s.lane = splitKey(dir).lane;
     sessions.set(dir, s);
   }
   return s;
@@ -400,7 +433,8 @@ function settleThoughtTail(s: AgentSessionState) {
 }
 
 function routeUpdate(u: AcpUpdate) {
-  reduceInto(agentSessionFor(u.dir), u.dir, u.message ?? {}, true);
+  const key = laneKey(u.dir, u.lane ?? "chat");
+  reduceInto(agentSessionFor(key), key, u.message ?? {}, true);
 }
 
 /**
@@ -415,6 +449,7 @@ function routeUpdate(u: AcpUpdate) {
 function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"], live: boolean) {
   const method = str(msg.method);
   const params = (msg.params ?? {}) as Raw;
+  const { dir: projectDir, lane } = splitKey(dir);
 
   if (method === "_chronicle/session_state") {
     const state = str(params.state);
@@ -423,16 +458,17 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       // the adapter's own replay is suppressed, so blanking here would leave
       // the session open on nothing — the empty-thread-after-Resume bug
       const keep = params.resume === true ? s.entries : [];
-      Object.assign(s, blank(), { phase: "installing" as AgentPhase, draft: s.draft, entries: keep });
+      Object.assign(s, blank(), { lane: s.lane, phase: "installing" as AgentPhase, draft: s.draft, entries: keep });
       // the thread and the queue are both gone; a card waiting in that queue
       // must not go on waiting for a prompt that no longer exists (`live`
       // only: a replay must never close the running round's card)
-      if (live) dropQueueWaiters(dir);
+      if (live && lane === "chat") dropQueueWaiters(dir);
     } else if (state === "starting") {
       s.phase = "starting";
     } else if (state === "ready") {
       s.phase = "ready";
       s.sessionId = str(params.sessionId) || null;
+      s.endedReason = null;
       const modes = params.modes as Raw | null;
       s.modes = modes
         ? {
@@ -455,21 +491,22 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       // nothing queued is going anywhere until someone signs in and the session
       // is restarted, and a restart drops the queue: the card ends now rather
       // than reading "waiting for the pane" for the rest of the session
-      if (live) dropQueuedPrompts(s, dir);
+      if (live && lane === "chat") dropQueuedPrompts(s, dir);
     } else if (state === "error") {
       s.phase = "error";
       s.errorMessage = str(params.message) || "The agent bridge stopped.";
       s.turnActive = false;
       settleStreaming(s);
-      if (live) clearRunningRound(dir); // a dead bridge is not running anyone's round
-      if (live) dropQueuedPrompts(s, dir); // and it will not send what was waiting, either
+      if (live && lane === "chat") clearRunningRound(dir); // a dead bridge is not running anyone's round
+      if (live && lane === "chat") dropQueuedPrompts(s, dir); // and it will not send what was waiting, either
     } else if (state === "ended") {
       // needs-login/error keep their more specific face over the shutdown event
       if (s.phase !== "needs-login" && s.phase !== "error") s.phase = "ended";
       s.turnActive = false;
       settleStreaming(s);
-      if (live) clearRunningRound(dir);
-      if (live) dropQueuedPrompts(s, dir);
+      s.endedReason = params.reason === "idle" ? "idle" : null;
+      if (live && lane === "chat") clearRunningRound(dir);
+      if (live && lane === "chat") dropQueuedPrompts(s, dir);
     }
     notify();
     return;
@@ -492,7 +529,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
   }
 
   if (method === "_chronicle/write" || method === "_chronicle/edits_changed") {
-    refreshAgentEdits(dir);
+    if (lane === "chat") refreshAgentEdits(dir);
     return;
   }
 
@@ -506,6 +543,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
   if (method === "_chronicle/turn_end") {
     s.turnActive = false;
     settleStreaming(s);
+    if (live) s.turnEnds += 1;
     const stopReason = params.error != null ? "error" : str(params.stopReason) || null;
     // A turn carries a plan or a run, never both. The plan's record is settled
     // HERE and nowhere else: `round_plan_settle` mid-turn would mark the round
@@ -516,7 +554,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     // end — so the turn that is ending belongs to whatever the user was doing,
     // never to it.
     let settledPlan = false;
-    if (live) {
+    if (live && lane === "chat") {
       for (let i = s.entries.length - 1; i >= 0; i--) {
         const e = s.entries[i];
         if (e.kind === "round-plan" && !e.ended && !e.queued) {
@@ -528,7 +566,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       }
     }
     // a running round settles with the turn — its face derives from the notes
-    if (live && !settledPlan) {
+    if (live && lane === "chat" && !settledPlan) {
       for (let i = s.entries.length - 1; i >= 0; i--) {
         const e = s.entries[i];
         if (e.kind === "round" && !e.ended && !e.queued) {
@@ -568,6 +606,19 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     return;
   }
 
+  if (method === "_chronicle/guard") {
+    s.entries.push({ kind: "guard", allowed: !!params.allowed, path: str(params.path), reason: str(params.reason) });
+    notify();
+    return;
+  }
+
+  if (method === "_chronicle/outside_changes") {
+    const paths = Array.isArray(params.paths) ? (params.paths as unknown[]).map(String) : [];
+    s.outside = typeof params.reverted === "number" ? [] : Array.from(new Set([...s.outside, ...paths]));
+    notify();
+    return;
+  }
+
   if (method === "_chronicle/permission_resolved") {
     const id = str(params.requestId);
     const outcome = str(params.outcome);
@@ -597,7 +648,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
             : kind === "read" || kind === "search" || kind === "fetch"
               ? "The agent wants to read"
               : "The agent asks to continue",
-      detail: toolDetail(dir, kind, tc),
+      detail: toolDetail(projectDir, kind, tc),
       options: Array.isArray(params.options)
         ? (params.options as Raw[]).map((o) => ({
             optionId: str(o.optionId),
@@ -639,9 +690,9 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
         toolKind,
         title: str(update.title),
         status: (str(update.status) || "pending") as Extract<AgentEntry, { kind: "tool" }>["status"],
-        detail: toolDetail(dir, toolKind, update),
+        detail: toolDetail(projectDir, toolKind, update),
       };
-      applyToolContent(dir, entry, update.content);
+      applyToolContent(projectDir, entry, update.content);
       applyLinkage(entry, update);
       s.entries.push(entry);
     } else if (kind === "tool_call_update") {
@@ -651,9 +702,9 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
           if (update.status != null) e.status = str(update.status) as typeof e.status;
           if (update.title != null) e.title = str(update.title);
           if (update.kind != null) e.toolKind = str(update.kind);
-          const freshDetail = toolDetail(dir, e.toolKind, update);
+          const freshDetail = toolDetail(projectDir, e.toolKind, update);
           if (freshDetail && freshDetail !== str(update.title)) e.detail = freshDetail;
-          applyToolContent(dir, e, update.content);
+          applyToolContent(projectDir, e, update.content);
           applyLinkage(e, update);
         }
       }
@@ -719,7 +770,7 @@ function markRejected(s: AgentSessionState, perm: Extract<AgentEntry, { kind: "p
 
 export async function startAgentSession(dir: string): Promise<void> {
   const s = agentSessionFor(dir);
-  Object.assign(s, blank(), { phase: "installing" as AgentPhase, draft: s.draft });
+  Object.assign(s, blank(), { lane: s.lane, phase: "installing" as AgentPhase, draft: s.draft });
   dropQueueWaiters(dir); // the queue went with the thread
   notify();
   try {
@@ -768,18 +819,30 @@ export async function adoptAgentSession(dir: string): Promise<void> {
  * wire when the composer built something richer than plain text (file links,
  * inlined note/roadmap context). Omit it and the message is one text block —
  * which is what every non-composer caller wants.
+ *
+ * `opts.prefix` (the Design pane's own context line — which design, its
+ * folder) is prepended to the text block actually sent, plus a blank line;
+ * the thread and the `display` string the wire echoes back both show `text`
+ * alone, never the prefix.
  */
-export async function sendAgentMessage(dir: string, text: string, blocks?: unknown[]): Promise<void> {
+export async function sendAgentMessage(
+  dir: string,
+  text: string,
+  blocks?: unknown[],
+  opts?: { prefix?: string },
+): Promise<void> {
   const s = agentSessionFor(dir);
   const body = text.trim();
   if (!body) return;
+  const sent = opts?.prefix ? `${opts.prefix}\n\n${body}` : body;
   // throws before anything is shown, honest to the wire
-  await agentPrompt(dir, blocks ?? [{ type: "text", text: body }], body);
+  await agentPrompt(dir, blocks ?? [{ type: "text", text: sent }], body);
   s.entries.push({ kind: "user", text: body, checkpoint: s.pendingCheckpoint ?? undefined });
   s.pendingCheckpoint = null;
   s.turnActive = true;
   s.draft = null;
   s.editsResolved = false; // the strip's resolution flash ends with a new turn
+  s.lastPrompt = body;
   notify();
 }
 
@@ -907,7 +970,7 @@ export function closeAgentViewing(dir: string) {
 export async function resumeAgentSession(dir: string, id: string): Promise<void> {
   const entries = await replayTranscript(dir, id);
   const s = agentSessionFor(dir);
-  Object.assign(s, blank(), { phase: "installing" as AgentPhase, entries });
+  Object.assign(s, blank(), { lane: s.lane, phase: "installing" as AgentPhase, entries });
   dropQueueWaiters(dir); // the queue went with the thread
   notify();
   try {
