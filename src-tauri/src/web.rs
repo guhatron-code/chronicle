@@ -262,6 +262,19 @@ fn serve_design_file(design_root: &Path, hash: &str, rel: &str) -> Served {
     let Ok(canon_root) = design_root.canonicalize() else { return plain(404, b"not found") };
     let Ok(rel_to_root) = file.strip_prefix(&canon_root) else { return plain(404, b"not found") };
     if !crate::designs::frame::is_design_file(rel_to_root) { return plain(404, b"not found"); }
+    let slug = match rel_to_root.components().next() {
+        Some(Component::Normal(s)) => s.to_string_lossy().into_owned(),
+        _ => return plain(404, b"not found"),
+    };
+    // the slug names a real folder on disk. A newly created design's folder
+    // is always slugify()'d, but a design host serves whatever sits under
+    // .chronicle/designs — a folder renamed by hand, restored from an old
+    // export, or synced from somewhere else could be named anything, and this
+    // string goes straight into a CSP header below (`design_headers`). A name
+    // like `a; connect-src *` would inject its own directive into the policy
+    // the browser parses, so nothing gets served for a slug that isn't the
+    // shape `slugify()` promises.
+    if !crate::designs::valid_slug(&slug) { return plain(404, b"not found"); }
 
     if std::fs::metadata(&file).map(|m| m.len() > MAX_SERVED_BYTES).unwrap_or(false) {
         return plain(413, b"file too large to show here");
@@ -271,10 +284,6 @@ fn serve_design_file(design_root: &Path, hash: &str, rel: &str) -> Served {
     let mime = mime_for(&file);
     let ext = file.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase());
     let body = if mime.starts_with("text/html") { crate::designs::frame::inject_reporter(&bytes) } else { bytes };
-    let slug = match rel_to_root.components().next() {
-        Some(Component::Normal(s)) => s.to_string_lossy().into_owned(),
-        _ => String::new(),
-    };
     Served { status: 200, mime, body, headers: crate::designs::frame::design_headers(hash, &slug, ext.as_deref()) }
 }
 
@@ -688,8 +697,15 @@ mod tests {
     /// root (what `web_open_file` would do) and as a design root (what
     /// `design_frame_base` now does). Returns `(project_hash, design_hash,
     /// WebState)`.
+    ///
+    /// Each call gets its OWN directory (`process::id()` alone is the same
+    /// for every thread in this test binary, so several tests calling this
+    /// concurrently would otherwise share one directory and race each
+    /// other's `remove_dir_all`/writes).
     fn design_fixture() -> (WebState, String, String) {
-        let d = std::env::temp_dir().join(format!("chronicle-serve-design-{}", std::process::id()));
+        static N: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let d = std::env::temp_dir().join(format!("chronicle-serve-design-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join(".chronicle/designs/home/frames")).unwrap();
         std::fs::create_dir_all(d.join(".chronicle/designs/home/assets/fonts")).unwrap();
@@ -782,6 +798,34 @@ mod tests {
         } else {
             assert_eq!(s.status, 404);
         }
+    }
+
+    #[test]
+    fn a_folder_name_that_looks_like_csp_syntax_never_reaches_the_header() {
+        // a normal design's folder is always slugify()'d, but the design host
+        // serves whatever sits under .chronicle/designs on disk — a folder
+        // renamed by hand could be anything, and it must never be trusted as
+        // a fragment of the CSP header
+        let d = std::env::temp_dir().join(format!("chronicle-serve-design-badslug-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let evil = "a; connect-src *";
+        std::fs::create_dir_all(d.join(".chronicle/designs/home/frames")).unwrap();
+        std::fs::write(d.join(".chronicle/designs/home/frames/a.html"), "<html><head></head><body>x</body></html>").unwrap();
+        std::fs::create_dir_all(d.join(".chronicle/designs").join(evil)).unwrap();
+        std::fs::write(d.join(".chronicle/designs").join(evil).join("x.html"), "<html><head></head><body>x</body></html>").unwrap();
+        let web = WebState::new();
+        let design_hash = register_design_root(&web, &d.join(".chronicle/designs")).unwrap();
+
+        // the folder whose name would inject a CSP directive is refused entirely
+        let enc = percent_encoding::utf8_percent_encode(evil, percent_encoding::NON_ALPHANUMERIC).to_string();
+        let s = serve_project_file(&web, &format!("chronicle-file://{design_hash}/{enc}/x.html"));
+        assert_eq!(s.status, 404);
+        assert!(s.headers.is_empty());
+
+        // a normal slug alongside it is unaffected and still gets its scoped CSP
+        let ok = serve_project_file(&web, &format!("chronicle-file://{design_hash}/home/frames/a.html"));
+        assert_eq!(ok.status, 200);
+        assert!(ok.headers.iter().any(|(k, v)| *k == "Content-Security-Policy" && v.contains(&format!("chronicle-file://{design_hash}/home/"))));
     }
 
     #[test]

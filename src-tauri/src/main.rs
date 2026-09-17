@@ -3706,7 +3706,17 @@ fn main() {
                     .header("Content-Type", served.mime)
                     .header("Cache-Control", "no-store");
                 for (k, v) in served.headers { b = b.header(k, v); }
-                responder.respond(b.body(served.body).unwrap());
+                // A header value that `http` rejects (a control character
+                // sneaking through, say) must never crash this thread with an
+                // unwrap — every request in flight on it would die too.
+                // Fall back to a fixed, always-valid 500 instead of the
+                // response `served` describes.
+                let response = b.body(served.body).unwrap_or_else(|_| {
+                    let mut r = tauri::http::Response::new(b"internal error".to_vec());
+                    *r.status_mut() = tauri::http::StatusCode::INTERNAL_SERVER_ERROR;
+                    r
+                });
+                responder.respond(response);
             });
         })
         .setup(|app| {

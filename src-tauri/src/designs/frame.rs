@@ -48,7 +48,18 @@ pub fn is_design_file(rel: &Path) -> bool {
 /// folding the whole directive to nothing because the origin is opaque — is
 /// not something a Rust unit test can confirm. That is what Task 20's live
 /// check in a real window is for; this module only builds the string.
+///
+/// `slug` becomes a fragment of an HTTP header, so it must already be the
+/// shape `super::valid_slug` promises before it gets here — a folder named
+/// e.g. `a; connect-src *` would otherwise inject its own directive into the
+/// policy the browser parses (CSP takes the first of a duplicated directive,
+/// so an attacker-chosen folder name could win). The caller (`web::
+/// serve_design_file`) is the one place a slug comes from disk rather than
+/// `slugify()`, and it checks this before ever calling here; this debug
+/// assertion is the belt to that caller's suspenders, not a substitute for it
+/// — it does nothing in a release build.
 pub fn design_csp(hash: &str, slug: &str) -> String {
+    debug_assert!(super::valid_slug(slug), "a design CSP must never be built from an unvalidated slug");
     let src = format!("chronicle-file://{hash}/{slug}/");
     format!(
         "default-src 'none'; script-src {src} 'unsafe-inline'; style-src {src} 'unsafe-inline'; img-src {src} data: https:; font-src {src}; media-src {src}; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'"
@@ -150,6 +161,16 @@ mod tests {
         assert!(!is_design_file(Path::new(".gitignore")));
         // the slug alone, nothing inside it
         assert!(!is_design_file(Path::new("home")));
+    }
+
+    #[test]
+    #[should_panic]
+    fn design_csp_refuses_to_build_from_an_unvalidated_slug() {
+        // a folder that reached disk without going through slugify() (hand
+        // edited, or from before slugify() existed) must never be trusted as
+        // a CSP header fragment — the caller is supposed to reject it before
+        // this ever runs; this is the debug-only belt behind that suspenders
+        let _ = design_csp("abc123", "a; connect-src *");
     }
 
     #[test]
