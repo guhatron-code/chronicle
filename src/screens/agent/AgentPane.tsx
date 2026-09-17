@@ -492,7 +492,9 @@ function GuardRow({ entry }: { entry: { allowed: boolean; path: string; reason: 
     <div className="mx-3.5 my-1 flex items-start gap-2 rounded-md border border-border-hairline bg-surface-card px-[11px] py-2">
       <span className="mt-0.5 shrink-0 text-state-warn"><ErrorGlyph size={12} /></span>
       <span className="min-w-0 text-xs leading-[1.55] text-text-muted">
-        Kept a change out of your project: <span className="font-mono text-[11px]">{entry.path}</span>. {entry.reason}
+        {entry.path
+          ? <>Kept a change out of your project: <span className="font-mono text-[11px]">{entry.path}</span>. {entry.reason}</>
+          : entry.reason}
       </span>
     </div>
   );

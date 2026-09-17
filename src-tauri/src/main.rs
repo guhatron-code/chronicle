@@ -3352,12 +3352,14 @@ async fn design_outside_files(roots: State<'_, OpenRoots>, dir: String) -> Resul
 }
 
 /// Put back one (or, with no path, every) outside change the design session made.
+/// Refused while a design turn runs; never unlinks (the current file is trashed).
 #[tauri::command]
-async fn design_outside_undo(app: tauri::AppHandle, roots: State<'_, OpenRoots>, dir: String, path: Option<String>) -> Result<u64, String> {
+async fn design_outside_undo(app: tauri::AppHandle, roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, path: Option<String>) -> Result<u64, String> {
     let p = project_for(&roots, &dir)?;
     let store = acp::Lane::Design.store(&p.dir);
-    let sid = acp::ledger::current_session(&store).ok_or("there's nothing to undo")?;
-    let n = acp::ledger::revert(&store, &sid, path.as_deref(), &project_roots(&p))?;
+    let live = agents.get(&session_key(&dir, acp::Lane::Design)?);
+    // the file's current content goes to the Trash before its base is put back
+    let n = acp::design_outside_undo(live.as_deref(), &store, path.as_deref(), &project_roots(&p), &files::move_to_trash)?;
     let key = canon_key(&dir)?.0;
     let _ = app.emit("acp-update", json!({ "dir": key, "lane": "design", "message": { "method": "_chronicle/outside_changes", "params": { "paths": [], "reverted": n } } }));
     Ok(n as u64)

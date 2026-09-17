@@ -283,16 +283,29 @@ pub mod ledger {
     /// (the strip never claims per-file undo it can't do). `path: None`
     /// undoes every direct entry.
     pub fn undo(store: &Path, sid: &str, path: Option<&str>, roots: &[PathBuf]) -> Result<usize, String> {
-        put_back(store, sid, path, roots, false)
+        put_back(store, sid, path, roots, false, None)
     }
+
+    /// Moves one file to the Trash (restorable). Injected so tests never touch
+    /// the real Trash; the app passes `files::move_to_trash`.
+    pub type TrashFn<'a> = &'a dyn Fn(&Path) -> Result<(), String>;
 
     /// Like `undo`, but also puts back files a command changed: the design lane's
     /// outside changes are recorded with via_command and must still be undoable.
-    pub fn revert(store: &Path, sid: &str, path: Option<&str>, roots: &[PathBuf]) -> Result<usize, String> {
-        put_back(store, sid, path, roots, true)
+    /// The list can include the user's own edits made while the design turn ran,
+    /// so nothing is ever unlinked: the file's CURRENT content goes to the Trash
+    /// first (a created file is trashed; a modified one is trashed, then its base
+    /// is written back).
+    pub fn revert(store: &Path, sid: &str, path: Option<&str>, roots: &[PathBuf], trash: TrashFn) -> Result<usize, String> {
+        put_back(store, sid, path, roots, true, Some(trash))
     }
 
-    fn put_back(store: &Path, sid: &str, path: Option<&str>, roots: &[PathBuf], include_commands: bool) -> Result<usize, String> {
+    /// Every absolute path this session's ledger records (resolved or not yet).
+    pub fn recorded_paths(store: &Path, sid: &str) -> Vec<String> {
+        load_index(store, sid).into_keys().collect()
+    }
+
+    fn put_back(store: &Path, sid: &str, path: Option<&str>, roots: &[PathBuf], include_commands: bool, trash: Option<TrashFn>) -> Result<usize, String> {
         let _g = LOCK.lock().map_err(|e| e.to_string())?;
         let mut idx = load_index(store, sid);
         let targets: Vec<String> = match path {
@@ -311,6 +324,13 @@ pub mod ledger {
         // `../..` must never pick the bytes that land on a target. Checked for
         // every target BEFORE anything is touched.
         for key in &targets {
+            // `base` is a file name or null — anything else is a damaged record,
+            // and reading it as "no base" would turn a put-back into a deletion
+            if let Some(b) = idx.get(key).and_then(|m| m.get("base")) {
+                if !b.is_string() && !b.is_null() {
+                    return Err("the record for this change is damaged — refused".into());
+                }
+            }
             if let Some(n) = idx.get(key).and_then(|m| m.get("base")).and_then(|v| v.as_str()) {
                 let mut comps = Path::new(n).components();
                 let plain = !n.contains('/') && !n.contains('\\')
@@ -321,38 +341,62 @@ pub mod ledger {
             }
         }
         let mut undone = 0usize;
+        let mut failure: Option<String> = None;
         for key in targets {
-            let meta = idx.get(&key).cloned().unwrap_or(Value::Null);
-            if !include_commands && meta.get("via_command").and_then(|v| v.as_bool()).unwrap_or(false) {
-                return Err("this file changed through commands — Undo to here covers it".into());
-            }
-            let target = PathBuf::from(&key);
-            if !path_in_roots(&target, roots) {
-                return Err("the path is outside this project — refused".into());
-            }
-            match meta.get("base").and_then(|v| v.as_str()) {
-                Some(n) => {
-                    let bytes = std::fs::read(bases_dir(store, sid).join(n)).map_err(|e| e.to_string())?;
-                    if let Some(parent) = target.parent() {
-                        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                    }
-                    std::fs::write(&target, bytes).map_err(|e| e.to_string())?;
-                    let _ = std::fs::remove_file(bases_dir(store, sid).join(n));
-                }
-                None => {
-                    // created by the agent — undo = deletion
-                    match std::fs::remove_file(&target) {
-                        Ok(()) => {}
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(e) => return Err(e.to_string()),
-                    }
-                }
+            if let Err(e) = put_back_one(store, sid, &key, &idx, roots, include_commands, trash) {
+                failure = Some(e);
+                break;
             }
             idx.remove(&key);
             undone += 1;
         }
+        // entries already put back leave the index even when a later one fails
         save_index(store, sid, &idx)?;
-        Ok(undone)
+        match failure { Some(e) => Err(e), None => Ok(undone) }
+    }
+
+    fn put_back_one(
+        store: &Path,
+        sid: &str,
+        key: &str,
+        idx: &BTreeMap<String, Value>,
+        roots: &[PathBuf],
+        include_commands: bool,
+        trash: Option<TrashFn>,
+    ) -> Result<(), String> {
+        let meta = idx.get(key).cloned().unwrap_or(Value::Null);
+        if !include_commands && meta.get("via_command").and_then(|v| v.as_bool()).unwrap_or(false) {
+            return Err("this file changed through commands — Undo to here covers it".into());
+        }
+        let target = PathBuf::from(key);
+        if !path_in_roots(&target, roots) {
+            return Err("the path is outside this project — refused".into());
+        }
+        let present = std::fs::symlink_metadata(&target).is_ok();
+        match meta.get("base").and_then(|v| v.as_str()) {
+            Some(n) => {
+                let bytes = std::fs::read(bases_dir(store, sid).join(n)).map_err(|e| e.to_string())?;
+                if let (Some(t), true) = (trash, present) {
+                    t(&target)?;
+                }
+                if let Some(parent) = target.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                std::fs::write(&target, bytes).map_err(|e| e.to_string())?;
+                let _ = std::fs::remove_file(bases_dir(store, sid).join(n));
+            }
+            None => match trash {
+                // the design lane never unlinks: the file goes to the Trash
+                Some(t) => { if present { t(&target)?; } }
+                // created by the chat agent — undo = deletion
+                None => match std::fs::remove_file(&target) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e.to_string()),
+                },
+            },
+        }
+        Ok(())
     }
 
     /// Wipe the ledger without touching any file (after a checkpoint restore
@@ -650,9 +694,9 @@ fn has_dangling_link(p: &Path) -> bool {
 }
 
 /// Strictly inside a design: absolute, no `..`, no dangling link, and the
-/// canonical path is `<designs root>/<slug>/…` where slug is a normal name that
-/// doesn't start with `.` — so `.threads` (the lane's own records, which undo
-/// trusts), `.gitignore` and any future dot entry are out of reach.
+/// canonical path is `<designs root>/<slug>/…` where no component starts with
+/// `.` — so `.threads` (the lane's own records, which undo trusts),
+/// `.gitignore`, a design's `.versions/` and any future dot entry are out of reach.
 fn strictly_inside(p: &Path, root: &Path) -> bool {
     use std::path::Component;
     if !p.is_absolute()
@@ -674,9 +718,11 @@ fn strictly_inside(p: &Path, root: &Path) -> bool {
     for part in tail.iter().rev() { canon.push(part); }
     let Ok(rel) = canon.strip_prefix(&croot) else { return false };
     let parts: Vec<Component> = rel.components().collect();
+    // no dot-leading component anywhere below the root: not the slug (`.threads`,
+    // `.gitignore`) and not inside a design (`<slug>/.versions/**`, which restore
+    // and compare trust as Chronicle's own history)
     parts.len() >= 2
-        && parts.iter().all(|c| matches!(c, Component::Normal(_)))
-        && matches!(parts[0], Component::Normal(first) if !first.to_string_lossy().starts_with('.'))
+        && parts.iter().all(|c| matches!(c, Component::Normal(n) if !n.to_string_lossy().starts_with('.')))
 }
 
 /// Layer 1 of the design lane's fence: a permission request for a file-writing
@@ -701,6 +747,55 @@ pub fn design_write_decision(params: &Value, designs_root: &Path) -> Option<Writ
     })
 }
 
+/// The design lane's mode lock, at the permission layer: leaving plan mode is a
+/// permission ask whose "yes" options switch the session into an elevated mode
+/// (acceptEdits, bypassPermissions, auto). The design lane answers it here with
+/// the reject option (or cancels when there is none) — never shown.
+pub fn design_exit_plan_outcome(params: &Value) -> Option<Value> {
+    let call = params.get("toolCall")?;
+    let name = call.get("name").and_then(|v| v.as_str())
+        .or_else(|| call.pointer("/_meta/claudeCode/toolName").and_then(|v| v.as_str()))?;
+    if name != "ExitPlanMode" { return None; }
+    let options = params.get("options").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let by_kind = |k: &str| options.iter().find(|o| o["kind"] == k).and_then(|o| o["optionId"].as_str()).map(String::from);
+    Some(match by_kind("reject_once").or_else(|| by_kind("reject_always")) {
+        Some(option_id) => json!({ "outcome": "selected", "optionId": option_id }),
+        None => json!({ "outcome": "cancelled" }),
+    })
+}
+
+pub const DESIGN_MODE_LOCK: &str = "The design session stays in ask-first mode.";
+
+/// Put back one (or, with no path, every) outside change the design session
+/// made. Refused while the design lane has a turn running — the list is still
+/// changing, and a put-back could land under the agent's feet.
+pub fn design_outside_undo(
+    live: Option<&AcpSession>,
+    store: &Path,
+    path: Option<&str>,
+    roots: &[PathBuf],
+    trash: ledger::TrashFn,
+) -> Result<usize, String> {
+    if live.map(|s| s.turn_active.load(Ordering::SeqCst)).unwrap_or(false) {
+        return Err("The design session is still working, so wait for its turn to end before you undo.".into());
+    }
+    let sid = ledger::current_session(store).ok_or("there's nothing to undo")?;
+    ledger::revert(store, &sid, path, roots, trash)
+}
+
+/// The deepest existing ancestor canonicalized, with the missing tail appended.
+fn canonical_deep(p: &Path) -> Option<PathBuf> {
+    let mut existing = p.to_path_buf();
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    while !existing.exists() {
+        tail.push(existing.file_name()?.to_os_string());
+        if !existing.pop() { return None; }
+    }
+    let mut canon = existing.canonicalize().ok()?;
+    for part in tail.iter().rev() { canon.push(part); }
+    Some(canon)
+}
+
 pub struct AcpSession {
     key: String,
     /// `Some` exactly for the design lane: every write must land inside it.
@@ -709,6 +804,9 @@ pub struct AcpSession {
     lane: Lane,
     /// The lane's record store — transcripts, ledger, `current` pointer.
     store: PathBuf,
+    /// The CHAT lane's store for this project: the design lane's turn-end
+    /// reconciliation skips every path the chat session has already ledgered.
+    chat_store: PathBuf,
     /// The jail: fs/read + fs/write must resolve inside these roots.
     roots: Vec<PathBuf>,
     /// The git root — checkpoints and reconciliation live here.
@@ -838,6 +936,7 @@ pub fn start(
         designs_root,
         lane,
         store: lane.store(&project_dir),
+        chat_store: Lane::Chat.store(&project_dir),
         roots,
         repo: cwd.clone(),
         last_checkpoint: Mutex::new(None),
@@ -1055,13 +1154,13 @@ impl AcpSession {
                 }));
                 // design lane mode lock: the fence in handle_fs_write and
                 // design_write_decision only holds while the session stays
-                // in an ask-first mode — an agent that starts (or resumes)
-                // in something else (e.g. bypassPermissions) is walked back
+                // in ask-first mode — an agent that starts (or resumes) in
+                // anything else (plan, bypassPermissions, …) is walked back
                 // to "default". set_mode blocks on a response, so it runs
                 // off this thread, after ready has already been emitted.
                 if self.designs_root.is_some() {
                     let current = resp.pointer("/modes/currentModeId").and_then(|v| v.as_str());
-                    if !matches!(current, Some("default") | Some("plan")) {
+                    if current != Some("default") {
                         let ms = self.clone();
                         std::thread::spawn(move || { let _ = ms.set_mode("default"); });
                     }
@@ -1148,6 +1247,17 @@ impl AcpSession {
                         if let Ok(mut g) = self.config_options.lock() { *g = opts.clone(); }
                     }
                 }
+                // design lane mode lock, after the handshake: the agent can
+                // switch its own mode (e.g. entering plan mode, which exits
+                // into an elevated one) — every switch away from "default" is
+                // walked back, once per update, off the reader thread
+                if self.designs_root.is_some()
+                    && msg.pointer("/params/update/sessionUpdate").and_then(|v| v.as_str()) == Some("current_mode_update")
+                    && msg.pointer("/params/update/currentModeId").and_then(|v| v.as_str()) != Some("default")
+                {
+                    let ms = self.clone();
+                    std::thread::spawn(move || { let _ = ms.set_mode("default"); });
+                }
                 if msg.get("method").and_then(|m| m.as_str()) == Some("session/update") {
                     self.append_transcript(&msg);
                 }
@@ -1206,6 +1316,17 @@ impl AcpSession {
             "fs/read_text_file" => self.handle_fs_read(&id, params),
             "fs/write_text_file" => self.handle_fs_write(&id, params),
             "session/request_permission" => {
+                if self.designs_root.is_some() {
+                    if let Some(outcome) = design_exit_plan_outcome(&params) {
+                        let tool_call_id = params.pointer("/toolCall/toolCallId").cloned().unwrap_or(Value::Null);
+                        self.respond_ok(&id, json!({ "outcome": outcome }));
+                        let guard = json!({ "method": "_chronicle/guard", "params": {
+                            "toolCallId": tool_call_id, "allowed": false, "path": "", "reason": DESIGN_MODE_LOCK } });
+                        self.append_transcript(&guard);
+                        self.emit_msg(guard);
+                        return;
+                    }
+                }
                 if let Some(root) = &self.designs_root {
                     if let Some(decision) = design_write_decision(&params, root) {
                         let tool_call_id = params.pointer("/toolCall/toolCallId").cloned().unwrap_or(Value::Null);
@@ -1476,6 +1597,9 @@ impl AcpSession {
     /// includes bypassPermissions ("Full auto"): once the agent offers it, the
     /// pane exposes it, and the user owns that choice.
     pub fn set_mode(&self, mode_id: &str) -> Result<(), String> {
+        if self.designs_root.is_some() && mode_id != "default" {
+            return Err(DESIGN_MODE_LOCK.into());
+        }
         let advertised = self.modes.lock().map_err(|e| e.to_string())?
             .get("availableModes").and_then(|v| v.as_array())
             .map(|a| a.iter().any(|m| m.get("id").and_then(|i| i.as_str()) == Some(mode_id)))
@@ -1572,19 +1696,29 @@ impl AcpSession {
         }
     }
 
-    /// Layer 3: anything the design turn changed outside `.chronicle/` (a shell command,
-    /// or a write the user's own Claude settings auto-allowed) is recorded with its base
-    /// so it can be undone, and listed in the thread.
+    /// Layer 3: anything that changed outside `.chronicle/` while the design turn ran (a
+    /// shell command, a write the user's own Claude settings auto-allowed — or the user's
+    /// own edits, which git can't tell apart) is recorded with its base so it can be
+    /// undone one file at a time, and listed in the thread. Paths the chat session has
+    /// ledgered are the chat lane's and are never listed here.
     fn reconcile_design_turn_end(&self) {
         let Some(cp) = self.last_checkpoint.lock().ok().and_then(|g| g.clone()) else { return };
         let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) else { return };
         let Ok(now_tree) = checkpoint::snapshot_tree_as(&self.repo, self.lane.as_str()) else { return };
+        // the chat session's own edits are the chat lane's to review and undo —
+        // never listed (or undoable) here
+        let chat_paths: std::collections::HashSet<String> = ledger::current_session(&self.chat_store)
+            .map(|chat_sid| ledger::recorded_paths(&self.chat_store, &chat_sid).into_iter().collect())
+            .unwrap_or_default();
         let mut paths = Vec::new();
         for (status, rel) in checkpoint::changed_since(&self.repo, &cp, &now_tree) {
             // the app itself writes under .chronicle/ mid-turn (notes, the chat ledger,
             // journal, rounds) — an Undo there could revert the user's own work
             if rel.starts_with(".chronicle/") { continue; }
             let abs = self.repo.join(&rel);
+            let chat_owned = chat_paths.contains(abs.to_string_lossy().as_ref())
+                || canonical_deep(&abs).map(|c| chat_paths.contains(c.to_string_lossy().as_ref())).unwrap_or(false);
+            if chat_owned { continue; }
             let base = if status == 'A' { None } else { checkpoint::bytes_at(&self.repo, &cp, &rel) };
             if let Ok(true) = ledger::record_base(&self.store, &sid, &abs, true, base.as_deref()) { paths.push(rel); }
         }
@@ -1651,7 +1785,17 @@ for line in sys.stdin:
         sid = msg["params"]["sessionId"]
         state["prompt_id"] = msg["id"]
         text = " ".join(b.get("text", "") for b in msg["params"].get("prompt", []))
-        if "DESIGN-FENCE" in text:
+        if "EXIT-PLAN" in text:
+            turn -= 1
+            send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":sid,
+                "update":{"sessionUpdate":"current_mode_update","currentModeId":"plan"}}})
+            send({"jsonrpc":"2.0","id":400,"method":"session/request_permission","params":{
+                "sessionId":sid,"toolCall":{"toolCallId":"x1","name":"ExitPlanMode","rawInput":{"plan":"p"}},
+                "options":[{"optionId":"exit_plan_bypass","name":"Yes, and bypass permissions","kind":"allow_always"},
+                           {"optionId":"exit_plan_default","name":"Yes, manually approve edits","kind":"allow_once"},
+                           {"optionId":"reject","name":"No, keep planning","kind":"reject_once"}]}})
+            state["waiting"] = {"400"}
+        elif "DESIGN-FENCE" in text:
             turn -= 1
             opts = [{"optionId":"allow","name":"Allow","kind":"allow_once"},
                     {"optionId":"always","name":"Always","kind":"allow_always"},
@@ -1680,6 +1824,8 @@ for line in sys.stdin:
                 "options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}})
             state["waiting"] = {"200"}
     elif m == "session/set_mode":
+        with open(project + "/.set-mode.json", "w") as f:
+            json.dump(msg["params"], f)
         send({"jsonrpc":"2.0","id":msg["id"],"result":{}})
     elif m == "session/cancel":
         state["cancelled"] = True
@@ -1687,6 +1833,12 @@ for line in sys.stdin:
         rid = str(msg["id"])
         w = state.get("waiting", set())
         if rid in w:
+            if rid == "400":
+                with open(project + "/.exit-plan-answer.json", "w") as f:
+                    json.dump(msg.get("result", {}).get("outcome", {}), f)
+                w.discard(rid)
+                send({"jsonrpc":"2.0","id":state["prompt_id"],"result":{"stopReason":"end_turn"}})
+                continue
             if rid in ("300", "301"):
                 state["fence"][rid] = msg.get("result", {}).get("outcome", {}).get("optionId")
                 w.discard(rid)
@@ -1747,6 +1899,18 @@ for line in sys.stdin:
             if left.is_zero() { panic!("timed out waiting for an acp-update event"); }
             let v = rx.recv_timeout(left).expect("timed out waiting for an acp-update event");
             if pred(&v) { return v; }
+        }
+    }
+
+    /// A stand-in for the macOS Trash: moves the file into `bin` (numbered, so
+    /// repeats never collide) and records the path it was asked to trash.
+    fn fake_trash(bin: PathBuf, log: Arc<Mutex<Vec<PathBuf>>>) -> impl Fn(&Path) -> Result<(), String> {
+        move |p: &Path| {
+            std::fs::create_dir_all(&bin).map_err(|e| e.to_string())?;
+            let mut g = log.lock().unwrap();
+            std::fs::rename(p, bin.join(format!("{}", g.len()))).map_err(|e| e.to_string())?;
+            g.push(p.to_path_buf());
+            Ok(())
         }
     }
 
@@ -1915,6 +2079,7 @@ for line in sys.stdin:
             repo: dir.clone(),
             lane: Lane::Chat,
             store: ledger::agent_dir(&dir),
+            chat_store: ledger::agent_dir(&dir),
             last_checkpoint: Mutex::new(None),
             child: Mutex::new(None),
             writer: Mutex::new(None),
@@ -2067,8 +2232,11 @@ for line in sys.stdin:
         assert!(ledger::files(&ledger::agent_dir(&d), sid, &d).is_empty(), "keep resolves everything");
     }
 
+    /// Defence in depth: adapter 0.75.1 writes files itself (after the permission
+    /// ask) and never calls fs/write_text_file, so `handle_fs_write`'s design
+    /// fence is a second wall for an adapter that does route writes through us.
     #[test]
-    fn the_design_lane_writes_only_inside_its_folder_and_lists_outside_changes() {
+    fn defence_in_depth_design_fs_write_stays_inside_and_outside_changes_are_listed() {
         let d = repo("design-fence-io");
         std::fs::write(d.join("app.txt"), "original").unwrap();
         git(&d, &["add", "-A"]);
@@ -2084,6 +2252,7 @@ for line in sys.stdin:
             repo: d.clone(),
             lane: Lane::Design,
             store: Lane::Design.store(&d),
+            chat_store: Lane::Chat.store(&d),
             last_checkpoint: Mutex::new(None),
             child: Mutex::new(None),
             writer: Mutex::new(None),
@@ -2120,7 +2289,9 @@ for line in sys.stdin:
         s.reconcile_design_turn_end();
         let listed = rx.try_iter().find(|v| method_is(v, "_chronicle/outside_changes")).expect("outside changes listed");
         assert_eq!(listed["message"]["params"]["paths"], json!(["app.txt"]));
-        let n = ledger::revert(&s.store, sid, None, &[d.clone()]).unwrap();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let trash = fake_trash(tmp("design-fence-io-bin"), log.clone());
+        let n = ledger::revert(&s.store, sid, None, &[d.clone()], &trash).unwrap();
         assert_eq!(n, 1);
         assert_eq!(std::fs::read_to_string(d.join("app.txt")).unwrap(), "original");
     }
@@ -2142,6 +2313,7 @@ for line in sys.stdin:
             repo: d.clone(),
             lane: Lane::Chat,
             store: ledger::agent_dir(&d),
+            chat_store: ledger::agent_dir(&d),
             last_checkpoint: Mutex::new(None),
             child: Mutex::new(None),
             writer: Mutex::new(None),
@@ -2384,6 +2556,15 @@ for line in sys.stdin:
         let forged = root.join(".threads/s/bases/index.json");
         assert!(matches!(design_write_decision(&perm("Write", forged.to_str().unwrap()), &root), Some(WriteDecision::Refuse { .. })));
         assert!(matches!(design_write_decision(&perm("Write", root.join(".gitignore").to_str().unwrap()), &root), Some(WriteDecision::Refuse { .. })));
+        // …and so is any dot entry INSIDE a design (its own version history)
+        std::fs::create_dir_all(root.join("home/.versions/v1/frames")).unwrap();
+        let history = root.join("home/.versions/v1/frames/desktop.html");
+        assert!(matches!(design_write_decision(&perm("Write", history.to_str().unwrap()), &root), Some(WriteDecision::Refuse { .. })));
+        assert!(!strictly_inside(&root.join("home/assets/.hidden/x.css"), &root));
+        // normal nested paths still land
+        let font = root.join("home/assets/fonts/x.woff2");
+        assert!(strictly_inside(&font, &root), "nested asset paths are inside");
+        assert!(matches!(design_write_decision(&perm("Write", font.to_str().unwrap()), &root), Some(WriteDecision::Allow { .. })));
         #[cfg(unix)] {
             // …also through a link inside a design
             std::fs::create_dir_all(root.join(".threads")).unwrap();
@@ -2476,15 +2657,33 @@ for line in sys.stdin:
         let store = d.join("store");
         let f = d.join("cmd.txt");
         std::fs::write(&f, "after").unwrap();
+        let bin = d.join("bin");
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let trash = fake_trash(bin.clone(), log.clone());
         ledger::record_base(&store, "s1", &f, true, Some(b"before")).unwrap();
         assert!(ledger::undo(&store, "s1", Some(&f.to_string_lossy()), &[d.clone()]).is_err());
-        assert_eq!(ledger::revert(&store, "s1", Some(&f.to_string_lossy()), &[d.clone()]).unwrap(), 1);
+        assert_eq!(ledger::revert(&store, "s1", Some(&f.to_string_lossy()), &[d.clone()], &trash).unwrap(), 1);
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "before");
+        // the modified file's CURRENT content went to the Trash first
+        assert_eq!(log.lock().unwrap().as_slice(), &[f.clone()]);
+        assert_eq!(std::fs::read_to_string(bin.join("0")).unwrap(), "after");
         let made = d.join("made.txt");
         std::fs::write(&made, "x").unwrap();
         ledger::record_base(&store, "s1", &made, true, None).unwrap();
-        assert_eq!(ledger::revert(&store, "s1", None, &[d.clone()]).unwrap(), 1);
+        assert_eq!(ledger::revert(&store, "s1", None, &[d.clone()], &trash).unwrap(), 1);
         assert!(!made.exists());
+        // a created file is trashed, never unlinked
+        assert_eq!(log.lock().unwrap().last(), Some(&made));
+        assert_eq!(std::fs::read_to_string(bin.join("1")).unwrap(), "x");
+        // a trash that fails leaves the file where it is and the entry listed
+        let kept = d.join("kept.txt");
+        std::fs::write(&kept, "mine now").unwrap();
+        ledger::record_base(&store, "s1", &kept, true, Some(b"old")).unwrap();
+        let refuse = |_: &Path| -> Result<(), String> { Err("no trash".into()) };
+        assert!(ledger::revert(&store, "s1", Some(&kept.to_string_lossy()), &[d.clone()], &refuse).is_err());
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "mine now");
+        assert_eq!(ledger::recorded_paths(&store, "s1"), vec![kept.to_string_lossy().to_string()]);
+        ledger::keep(&store, "s1", None).unwrap();
         // a forged base name that climbs out of bases/ is refused, target untouched
         // planted where bases/../../x resolves, so only the name check stops it
         std::fs::write(store.join("x"), "planted").unwrap();
@@ -2494,9 +2693,171 @@ for line in sys.stdin:
         std::fs::write(&idx, serde_json::to_string(&json!({
             victim.to_string_lossy(): { "base": "../../x", "via_command": true }
         })).unwrap()).unwrap();
-        assert!(ledger::revert(&store, "s1", None, &[d.clone()]).is_err());
-        assert!(ledger::revert(&store, "s1", Some(&victim.to_string_lossy()), &[d.clone()]).is_err());
+        assert!(ledger::revert(&store, "s1", None, &[d.clone()], &trash).is_err());
+        assert!(ledger::revert(&store, "s1", Some(&victim.to_string_lossy()), &[d.clone()], &trash).is_err());
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), "mine");
+    }
+
+    #[test]
+    fn a_base_that_is_neither_a_name_nor_null_is_refused_and_touches_nothing() {
+        let d = tmp("bad-base");
+        let store = d.join("store");
+        let victim = d.join("victim.txt");
+        std::fs::write(&victim, "mine").unwrap();
+        ledger::record_base(&store, "s1", &victim, true, None).unwrap();
+        for forged in [json!(7), json!(true), json!({ "name": "x" }), json!(["x"])] {
+            let idx = store.join("s1/bases/index.json");
+            std::fs::write(&idx, serde_json::to_string(&json!({
+                victim.to_string_lossy(): { "base": forged, "via_command": false }
+            })).unwrap()).unwrap();
+            let log = Arc::new(Mutex::new(Vec::new()));
+            let trash = fake_trash(d.join("bin"), log.clone());
+            let err = ledger::revert(&store, "s1", None, &[d.clone()], &trash).unwrap_err();
+            assert!(err.contains("damaged"), "{err}");
+            assert!(ledger::undo(&store, "s1", Some(&victim.to_string_lossy()), &[d.clone()]).is_err());
+            assert!(log.lock().unwrap().is_empty(), "nothing trashed for {forged}");
+            assert_eq!(std::fs::read_to_string(&victim).unwrap(), "mine", "untouched for {forged}");
+        }
+    }
+
+    fn design_session(d: &Path, root: &Path, sid: &str, emit: Emit) -> AcpSession {
+        AcpSession {
+            key: Lane::Design.key(&d.to_string_lossy()),
+            designs_root: Some(root.to_path_buf()),
+            roots: vec![d.to_path_buf()],
+            repo: d.to_path_buf(),
+            lane: Lane::Design,
+            store: Lane::Design.store(d),
+            chat_store: Lane::Chat.store(d),
+            last_checkpoint: Mutex::new(None),
+            child: Mutex::new(None),
+            writer: Mutex::new(None),
+            next_id: AtomicU64::new(1),
+            pending: Mutex::new(HashMap::new()),
+            perms: Mutex::new(HashMap::new()),
+            session_id: Mutex::new(Some(sid.into())),
+            modes: Mutex::new(json!({ "currentModeId": "default", "availableModes": [
+                { "id": "default" }, { "id": "plan" }, { "id": "acceptEdits" }, { "id": "bypassPermissions" } ] })),
+            agent_caps: Mutex::new(Value::Null),
+            config_options: Mutex::new(Value::Null),
+            turn_active: AtomicBool::new(false),
+            last_activity: Mutex::new(std::time::Instant::now()),
+            resume: None,
+            suppress_updates: AtomicBool::new(false),
+            emit,
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    #[test]
+    fn the_design_lane_never_lists_a_path_the_chat_session_ledgered() {
+        let d = repo("design-skips-chat");
+        std::fs::write(d.join("chat.txt"), "chat original").unwrap();
+        std::fs::write(d.join("shell.txt"), "shell original").unwrap();
+        git(&d, &["add", "-A"]);
+        git(&d, &["commit", "-q", "-m", "first"]);
+        let root = d.join(".chronicle/designs");
+        std::fs::create_dir_all(&root).unwrap();
+        let (tx, rx) = mpsc::channel::<Value>();
+        let s = design_session(&d, &root, "sess-d", Arc::new(move |v| { let _ = tx.send(v); }));
+        let cp = checkpoint::create_as(&d, "sess-d", "design").unwrap();
+        *s.last_checkpoint.lock().unwrap() = Some(cp);
+        // mid-turn, the chat session edits chat.txt (ledgered in ITS current session)
+        let chat_store = ledger::agent_dir(&d);
+        ledger::set_current_session(&chat_store, "sess-chat");
+        ledger::record_base(&chat_store, "sess-chat", &d.join("chat.txt"), false, Some(b"chat original")).unwrap();
+        std::fs::write(d.join("chat.txt"), "chat edit").unwrap();
+        // …and a design-turn command changes shell.txt
+        std::fs::write(d.join("shell.txt"), "shell edit").unwrap();
+        s.reconcile_design_turn_end();
+        let listed = rx.try_iter().find(|v| method_is(v, "_chronicle/outside_changes")).expect("outside changes listed");
+        assert_eq!(listed["message"]["params"]["paths"], json!(["shell.txt"]));
+        assert_eq!(ledger::recorded_paths(&s.store, "sess-d"), vec![d.join("shell.txt").to_string_lossy().to_string()]);
+    }
+
+    #[test]
+    fn design_undo_is_refused_while_a_design_turn_runs() {
+        let d = tmp("design-undo-busy");
+        let root = d.join(".chronicle/designs");
+        std::fs::create_dir_all(&root).unwrap();
+        let s = design_session(&d, &root, "sess-d", Arc::new(|_| {}));
+        let f = d.join("app.txt");
+        std::fs::write(&f, "after").unwrap();
+        ledger::set_current_session(&s.store, "sess-d");
+        ledger::record_base(&s.store, "sess-d", &f, true, Some(b"before")).unwrap();
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let trash = fake_trash(d.join("bin"), log.clone());
+        s.turn_active.store(true, Ordering::SeqCst);
+        let err = design_outside_undo(Some(&s), &s.store, Some(&f.to_string_lossy()), &[d.clone()], &trash).unwrap_err();
+        assert!(err.contains("still working"), "{err}");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "after");
+        assert!(log.lock().unwrap().is_empty());
+        s.turn_active.store(false, Ordering::SeqCst);
+        assert_eq!(design_outside_undo(Some(&s), &s.store, Some(&f.to_string_lossy()), &[d.clone()], &trash).unwrap(), 1);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "before");
+        assert_eq!(log.lock().unwrap().as_slice(), &[f.clone()]);
+    }
+
+    #[test]
+    fn the_design_lane_refuses_every_mode_but_ask_first() {
+        let d = tmp("design-mode-lock");
+        let root = d.join(".chronicle/designs");
+        std::fs::create_dir_all(&root).unwrap();
+        let s = design_session(&d, &root, "sess-d", Arc::new(|_| {}));
+        for mode in ["plan", "acceptEdits", "bypassPermissions", "auto"] {
+            assert_eq!(s.set_mode(mode).unwrap_err(), DESIGN_MODE_LOCK, "{mode}");
+        }
+        // "default" passes the lock (it then fails only because no adapter is attached)
+        assert_ne!(s.set_mode("default").unwrap_err(), DESIGN_MODE_LOCK);
+    }
+
+    #[test]
+    fn leaving_plan_mode_is_answered_with_the_reject_option() {
+        let ask = |options: Value| json!({ "sessionId": "s",
+            "toolCall": { "toolCallId": "p1", "name": "ExitPlanMode", "rawInput": { "plan": "do it" } },
+            "options": options });
+        let out = design_exit_plan_outcome(&ask(json!([
+            { "optionId": "exit_plan_bypass", "name": "Yes, and bypass permissions", "kind": "allow_always" },
+            { "optionId": "exit_plan_default", "name": "Yes, manually approve edits", "kind": "allow_once" },
+            { "optionId": "reject", "name": "No, keep planning", "kind": "reject_once" } ]))).unwrap();
+        assert_eq!(out, json!({ "outcome": "selected", "optionId": "reject" }));
+        let none = design_exit_plan_outcome(&ask(json!([{ "optionId": "a", "name": "Yes", "kind": "allow_always" }]))).unwrap();
+        assert_eq!(none, json!({ "outcome": "cancelled" }));
+        let mut via_meta = ask(json!([]));
+        via_meta["toolCall"] = json!({ "toolCallId": "p2", "_meta": { "claudeCode": { "toolName": "ExitPlanMode" } } });
+        assert!(design_exit_plan_outcome(&via_meta).is_some());
+        assert!(design_exit_plan_outcome(&perm("Write", "/tmp/x")).is_none(), "other tools are not decided here");
+    }
+
+    #[test]
+    fn the_design_lane_answers_exit_plan_mode_itself_and_walks_back_mode_changes() {
+        let Some(py) = python3() else { return };
+        let dir = tmp("exit-plan-live");
+        std::fs::create_dir_all(dir.join(".chronicle/designs")).unwrap();
+        let script = dir.join(".mock-agent.py");
+        std::fs::write(&script, MOCK_AGENT).unwrap();
+        let mut cmd = std::process::Command::new(py); cmd.arg(&script).arg(&dir);
+        let (tx, rx) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let state = AcpState::new();
+        let key = Lane::Design.key(&dir.to_string_lossy());
+        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), None, cmd).unwrap());
+        wait_for(&rx, 20, |v| state_is(v, "ready"));
+        state.get(&key).unwrap().prompt(vec![json!({"type":"text","text":"EXIT-PLAN"})], "EXIT-PLAN".into()).unwrap();
+        let guard = wait_for(&rx, 20, |v| method_is(v, "_chronicle/guard"));
+        assert_eq!(guard["message"]["params"]["allowed"], false);
+        assert_eq!(guard["message"]["params"]["reason"], DESIGN_MODE_LOCK);
+        wait_for(&rx, 20, |v| method_is(v, "_chronicle/turn_end"));
+        let answer: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".exit-plan-answer.json")).unwrap()).unwrap();
+        assert_eq!(answer, json!({ "outcome": "selected", "optionId": "reject" }));
+        // the mock switched itself to plan mid-turn: the lane set it back to default
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !dir.join(".set-mode.json").exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let set: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".set-mode.json")).unwrap()).unwrap();
+        assert_eq!(set["modeId"], "default");
+        state.drain();
     }
 
     #[test]

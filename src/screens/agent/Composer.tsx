@@ -455,7 +455,6 @@ export function Composer({
   // Claude Code's classifier-driven mode: routine actions are approved by the
   // agent itself, risky ones still ask. Only offered when the adapter lists it.
   const autoMode = s.modes?.availableModes.find((m) => m.id === "auto");
-  const planMode = s.modes?.availableModes.find((m) => m.id === "plan");
   const current = s.modes?.currentModeId;
 
   return (
@@ -608,8 +607,9 @@ export function Composer({
             disabled={disabled}
             onPick={switchMode}
             options={[
+              // ask-first only: every other mode (plan included, which exits into
+              // an elevated one) would take the design session past its fence
               { value: "default", name: "Ask first", description: "The design session asks before running commands. It never changes files outside the designs folder." },
-              ...(planMode ? [{ value: "plan", name: "Plan", description: "It thinks through the design with you and changes nothing." }] : []),
             ]}
           />
         )}

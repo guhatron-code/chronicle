@@ -8,7 +8,6 @@ import { agentSessionFor, laneKey, refreshDesignOutside, subscribeAgent } from "
 import { designOutsideUndo } from "@/lib/ipc";
 import { limitsReading, subscribeLimits, fmtResetTime } from "@/lib/limits-store";
 import { designProjectFor, subscribeDesigns } from "@/lib/design-store";
-import { BtnSecondary } from "@/components/chrome/atoms";
 import { toastError } from "@/overlays/toasts";
 
 export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
@@ -27,9 +26,11 @@ export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
   const s = agentSessionFor(key);
   // the ledger keys its undo by absolute path; the list shows the relative one.
   // Re-read after every undo: one file put back leaves the others listed.
-  const undo = (f: string | null) =>
-    designOutsideUndo(dir, f == null ? null : (s.outsideAbs[f] ?? f))
-      .catch((e) => toastError(f == null ? "Couldn't undo them" : "Couldn't undo it", String(e).slice(0, 90)))
+  // One file at a time, never all at once: the list can include the user's own
+  // edits, and each Undo moves the file's current content to the Trash first.
+  const undo = (f: string) =>
+    designOutsideUndo(dir, s.outsideAbs[f] ?? f)
+      .catch((e) => toastError("Couldn't undo it", String(e).slice(0, 90)))
       .finally(() => void refreshDesignOutside(key));
   const limits = limitsReading();
   const p = designProjectFor(dir);
@@ -38,7 +39,8 @@ export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
     <div className="flex w-[392px] shrink-0 flex-col border-l border-border-hairline bg-surface-panel">
       {s.outside.length > 0 && (
         <div className="mx-3 mt-3 flex flex-col gap-2 rounded-md border border-border-hairline bg-surface-card px-3 py-2.5">
-          <span className="text-[12.5px] text-text-primary">Changed outside the designs folder</span>
+          <span className="text-[12.5px] text-text-primary">Changed while the design session worked</span>
+          <span className="text-[11.5px] leading-relaxed text-text-muted">This can include your own edits. Undo moves the current file to the Trash first.</span>
           <ul className="flex flex-col gap-0.5">
             {s.outside.map((f) => (
               <li key={f} className="flex items-center gap-2">
@@ -48,7 +50,6 @@ export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
               </li>
             ))}
           </ul>
-          <BtnSecondary size="sm" onClick={() => void undo(null)}>Undo all</BtnSecondary>
         </div>
       )}
       {limits?.status === "rejected" && (

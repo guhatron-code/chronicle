@@ -234,6 +234,13 @@ pub(crate) fn trash_at(p: &Project, rel: &str) -> Result<(), String> {
 ///
 /// `NSFileManager.trashItemAtURL:` is the same Trash — restorable, "Put Back" and
 /// all — done by the app itself: no Finder, no Apple event, no permission prompt.
+/// Moves one path to the Trash the same way `trash_at` does, with no project
+/// jail of its own — callers jail first (the design lane's undo does).
+pub(crate) fn move_to_trash(full: &std::path::Path) -> Result<(), String> {
+    trash_context().delete(full)
+        .map_err(|e| format!("couldn't move it to the Trash — {}.", e.to_string().trim_end_matches('.')))
+}
+
 fn trash_context() -> trash::TrashContext {
     #[allow(unused_mut)]
     let mut ctx = trash::TrashContext::new();
