@@ -308,6 +308,54 @@ fn plain_version(v: &str) -> bool {
     !v.is_empty() && v.len() <= 16 && v.split('.').all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
 }
 
+/// A popup window for a page's `window.open`, tied to its opener: WebKit's own
+/// configuration for it (same cookies, same block rules, `window.opener` intact),
+/// Safari's user agent, the same scheme gate. Popups a popup opens are popups too.
+/// No capability names a `web-popup-*` label, so the page reaches no app command.
+fn open_popup(app: &AppHandle, features: tauri::webview::NewWindowFeatures) -> tauri::webview::NewWindowResponse<tauri::Wry> {
+    install_popup_close();
+    let n = POPUP_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let app_child = app.clone();
+    let built = tauri::WebviewWindowBuilder::new(app, format!("web-popup-{n}"), WebviewUrl::External("about:blank".parse().unwrap()))
+        .window_features(features)
+        .title("")
+        .user_agent(&safari_user_agent())
+        .zoom_hotkeys_enabled(false)
+        .on_navigation(move |u| url_allowed(u))
+        .on_new_window(move |_u, f| open_popup(&app_child, f))
+        .on_document_title_changed(|w, t| { let _ = w.set_title(&t); })
+        .build();
+    match built {
+        Ok(window) => tauri::webview::NewWindowResponse::Create { window },
+        Err(_) => tauri::webview::NewWindowResponse::Deny,
+    }
+}
+
+static POPUP_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
+/// wry's UI delegate doesn't answer `webViewDidClose:`, so a popup's own
+/// `window.close()` (how a sign-in popup ends) would leave an empty window up.
+/// Teach the delegate class once: close the web view's window the way its close
+/// button does. Only script-opened views ever send it, so the main window and
+/// the pane's tabs are never touched.
+fn install_popup_close() {
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    unsafe extern "C-unwind" fn did_close(_this: *mut AnyObject, _cmd: Sel, webview: *mut AnyObject) {
+        if webview.is_null() { return; }
+        let window: *mut AnyObject = unsafe { objc2::msg_send![webview, window] };
+        if window.is_null() { return; }
+        let _: () = unsafe { objc2::msg_send![window, performClose: std::ptr::null::<AnyObject>()] };
+    }
+    ONCE.call_once(|| {
+        let Some(cls) = AnyClass::get(c"WryWebViewUIDelegate") else { return };
+        unsafe {
+            let imp: Imp = std::mem::transmute(did_close as unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject));
+            objc2::ffi::class_addMethod(cls as *const AnyClass as *mut AnyClass, objc2::sel!(webViewDidClose:), imp, c"v@:@".as_ptr());
+        }
+    });
+}
+
 #[tauri::command]
 pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<WebState>, block: State<crate::blocklists::BlockState>, dir: String, url: Option<String>) -> Result<String, String> {
     let _ = crate::project_for(&roots, &dir)?;
@@ -338,7 +386,11 @@ pub fn web_tab_open(app: AppHandle, roots: State<crate::OpenRoots>, web: State<W
         .user_agent(&safari_user_agent())
         .zoom_hotkeys_enabled(false)
         .on_navigation(move |u| url_allowed(u))
-        .on_new_window(move |u, _features| {
+        .on_new_window(move |u, features| {
+            // a script popup (window.open with a size — Google/Apple sign-in and
+            // every other OAuth flow) must stay a real popup: the page it opens
+            // reports back through window.opener, and a tab has none
+            if features.size().is_some() { return open_popup(&app_new, features); }
             let _ = app_new.emit_to(ui(), "web-open-tab", json!({ "from_label": label_new, "url": u.to_string() }));
             tauri::webview::NewWindowResponse::Deny
         })
