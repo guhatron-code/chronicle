@@ -109,11 +109,16 @@ fn snapshot_png(win: &tauri::WebviewWindow, snapshot_width: u32) -> Result<Vec<u
     rx.recv_timeout(Duration::from_secs(10)).map_err(|_| "the capture timed out".to_string())?
 }
 
+/// The only place a capture window may go: `chronicle-file://<that design host's hash>/…`.
+fn stays_on_design_host(u: &url::Url, hash: &str) -> bool {
+    u.scheme() == "chronicle-file" && u.host_str() == Some(hash)
+}
+
 static THUMB_WINDOWS: AtomicU64 = AtomicU64::new(0);
 
 /// Renders one frame in its own hidden window and returns PNG bytes. The window is
 /// destroyed on every path out of here, early errors included.
-fn render_frame(app: &tauri::AppHandle, url: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
+fn render_frame(app: &tauri::AppHandle, hash: &str, url: &str, width: u32, height: u32) -> Result<Vec<u8>, String> {
     let parsed = url.parse().map_err(|_| "that frame's address couldn't be built".to_string())?;
     // label never "main": the IPC capability is scoped to "main", so this window gets none
     let label = format!("design-thumb-{}", THUMB_WINDOWS.fetch_add(1, Ordering::Relaxed));
@@ -123,8 +128,8 @@ fn render_frame(app: &tauri::AppHandle, url: &str, width: u32, height: u32) -> R
     let win = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(parsed))
         .visible(false).focused(false).skip_taskbar(true).decorations(false)
         .inner_size(width as f64, height as f64)
-        // the capture window stays on its own design page: no link or script can move it elsewhere
-        .on_navigation(|u| u.scheme() == "chronicle-file")
+        // the capture window stays on its own design host: no link or script can move it elsewhere
+        .on_navigation({ let hash = hash.to_string(); move |u| stays_on_design_host(u, &hash) })
         .build().map_err(|e| e.to_string())?;
     let guard = CloseOnDrop(win);
     let win = &guard.0;
@@ -156,7 +161,7 @@ fn render_version(app: &tauri::AppHandle, hash: &str, slug: &str, n: u32, vdir: 
     let mut failures: Vec<String> = Vec::new();
     for (id, file, width, height) in frames {
         let url = format!("chronicle-file://{hash}/{slug}/.versions/v{n}/{file}");
-        let out = render_frame(app, &url, width, height)
+        let out = render_frame(app, hash, &url, width, height)
             .and_then(|bytes| std::fs::write(thumbs.join(format!("{id}.png")), bytes).map_err(|e| e.to_string()));
         match out {
             Ok(()) => written.push(thumb_rel(slug, n, &id)),
@@ -214,6 +219,15 @@ mod tests {
             let (sw, wh) = capture_size(w, h);
             assert!((wh as u64 * sw as u64 * 2 / w as u64) < 16_000, "{w}x{h}");
         }
+    }
+
+    #[test]
+    fn the_capture_window_only_goes_to_its_own_design_host() {
+        let ok = |s: &str| stays_on_design_host(&s.parse().unwrap(), "abc123");
+        assert!(ok("chronicle-file://abc123/home/.versions/v1/frames/a.html"));
+        assert!(!ok("chronicle-file://other/home/.versions/v1/frames/a.html"));
+        assert!(!ok("https://abc123/home"));
+        assert!(!ok("about:blank"));
     }
 
     #[test]

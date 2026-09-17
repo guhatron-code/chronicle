@@ -29,7 +29,7 @@ tauri-plugin-notification = "2.3.3"
 core-foundation = "0.10"      # CFString → Rust string for the IOKit power-source type
 core-foundation-sys = "0.8"   # CFRunLoop + CFRelease for the power-source notification
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", features = ["NSString", "NSURL", "NSError", "NSObject", "NSData", "NSDictionary"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSURL", "NSError", "NSObject", "NSData", "NSDictionary", "NSValue"] }
 objc2-app-kit = { version = "0.3", features = ["NSWindow", "NSButton", "NSControl", "NSView", "NSResponder", "NSImage", "NSImageRep", "NSBitmapImageRep"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKWebViewConfiguration", "WKUserContentController", "WKContentRuleList", "WKContentRuleListStore", "WKNavigation", "WKSnapshotConfiguration", "block2"] }
 block2 = "0.6"
