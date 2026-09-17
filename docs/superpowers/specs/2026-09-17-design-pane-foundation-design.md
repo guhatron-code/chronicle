@@ -108,8 +108,11 @@ skills and review loop on without changing the plumbing.
   starts a design. Hiding the pane does not stop it, so a running turn finishes. The idle
   watchdog lives in Rust, on the session (last activity stamped on every prompt and turn end,
   checked every 30 seconds); it emits `ended` with `reason: "idle"`.
-- **Modes.** The design lane offers only the adapter's ask-first mode (`default`) and plan mode (`plan`). Auto
-  and Unattended are never offered, because they approve every tool call and would defeat §3.
+- **Modes.** The design lane runs only in the adapter's ask-first mode (`default`). Plan, Auto,
+  Execute and Unattended are never offered: leaving plan mode offers modes that write without
+  asking, which would defeat §3. The app refuses any other mode for this lane, switches the
+  session back if it reports another mode, and answers ExitPlanMode asks itself with a refusal.
+  (Amended during the build, final review I2.)
 
 ### 3 · What the design session may touch: three layers
 
@@ -120,17 +123,22 @@ skills and review loop on without changing the plumbing.
      resolves (canonicalised, symlinks followed) inside `.chronicle/designs/` is allowed
      without asking; any other path is refused with a one-sentence reason the thread shows.
      `fs/write_text_file` applies the same rule.
-  2. **An allow rule and a locked mode.** Claude Code's permission rules cannot express "any
-     path outside a folder" (and deny always beats allow), so the session options instead
-     allow `Edit` and `Write` on `//<absolute designs path>/**` (passed as
-     `_meta.claudeCode.options.settings.permissions.allow`), so writes inside never prompt,
-     and the lane is held in the ask-first mode (`default`): if the session reports any other
-     mode when ready, the app switches it back. Writes anywhere else therefore always reach
-     layer 1. (Verified against adapter 0.75.1, §12.)
-  3. **Turn-end check** (it also catches writes a user's own Claude settings auto-allow). At turn end, anything that changed in the project outside
-     `.chronicle/designs/` since the turn's checkpoint (the chat lane's `reconcile_turn_end`
-     machinery) is listed in the thread as "changed outside the designs folder" with Undo for
-     each file and for all.
+  2. **A locked mode, and no allow rules.** Every write ask must reach layer 1, so the session
+     is held in ask-first mode (see Modes) and the session `_meta` carries **no** Claude Code
+     allow rules. An allow rule for `<designs>/**` would also cover the lane's own records in
+     `.chronicle/designs/.threads/`, letting the session forge its undo ledger without asking
+     Chronicle. Layer 1 refuses any dot-leading path component under the designs root (the
+     records, `.gitignore`, `<slug>/.versions/`), so only `<slug>/…` design content is writable.
+     `fs/write_text_file` gets the same rule as defence in depth; adapter 0.75.1 writes files
+     itself and never calls it. (Amended during the build.)
+  3. **Turn-end check** (it also catches writes a user's own Claude settings auto-allow). At
+     turn end, anything outside `.chronicle/` that changed since the turn's checkpoint, and that
+     the chat lane's ledger doesn't already account for, is listed in the thread as "Changed
+     while the design session worked" (it can include the user's own edits). Each file has
+     Undo, refused while a turn runs; Undo first moves the current file to the Trash, then puts
+     the pre-turn bytes back. There is no "Undo all". `.chronicle/` itself is excluded because
+     the app writes notes, ledgers and the journal there during a turn. (Amended during the
+     build.)
 - Shell commands ask permission every time, as in the agent pane's ask-first mode.
 - The design lane shows **no keep/undo review strip for design files**; versions (§5) cover
   them.
@@ -220,7 +228,7 @@ The slug is made from the title at creation (lower case, hyphens, numeric suffix
    brief, no frames), starts or resumes the design lane, and sends the brief.
 3. The design appears in the list as "working"; the canvas shows placeholder frames until the
    first `ready` report (§7).
-4. Every prompt the app sends is prefixed with the active design's slug and folder; switching
+4. Every prompt the app sends is prefixed with the active design's slug and its folder as an absolute path; switching
    designs in the list changes what the canvas shows and which design the next message is
    about.
 
@@ -244,7 +252,8 @@ stays.
 ### 7 · The canvas
 
 **Rendering.** Each frame is an `<iframe>` in the app's own webview, loading
-`chronicle-file://<hash>/.chronicle/designs/<slug>/frames/<file>`, inside a canvas layer moved
+`chronicle-file://<designs-hash>/<slug>/frames/<file>` (designs are served from their own host,
+whose root is the canonical `.chronicle/designs` directory and nothing else), inside a canvas layer moved
 and scaled with a CSS transform. The app CSP in `tauri.conf.json` gains
 `frame-src chronicle-file:` (today `default-src 'none'` blocks frames).
 
@@ -252,12 +261,16 @@ and scaled with a CSS transform. The app CSP in `tauri.conf.json` gains
 
 - Every frame iframe is `sandbox="allow-scripts"` **without** `allow-same-origin`: an opaque
   origin, no access to Chronicle's IPC, storage or DOM.
-- For paths under `.chronicle/designs/`, `serve_project_file` adds:
-  - a response CSP: scripts, styles, fonts and images from the design's own path and inline;
-    images also from `data:` and `https:`; `font-src` the design's path only;
-    `connect-src 'none'`; no `frame-src`; no `form-action`;
-  - `Access-Control-Allow-Origin: *`, because an opaque-origin page loads its own fonts and
-    module scripts as cross-origin requests and would otherwise silently fall back.
+- On the design host, the file is resolved canonically; only `<slug>/…` paths with a valid
+  slug and no dot-leading first component are served, and each gets:
+  - a response CSP built per response with the source `chronicle-file://<designs-hash>/<slug>/`
+    for scripts, styles, fonts, images and media (plus inline scripts/styles, and `data:` and
+    `https:` images); `default-src`, `connect-src`, `frame-src`, `form-action` and `base-uri`
+    are `'none'`;
+  - `Access-Control-Allow-Origin: *` only for fonts and `.mjs`, which an opaque-origin page
+    loads in CORS mode. Ordinary project hosts never get design treatment.
+  (Amended during the build after a security review found URL-spelling and folder-name
+  injection bypasses.)
 - A test proves a frame cannot reach `invoke`.
 
 **Frame state.** For HTML under `.chronicle/designs/`, the protocol handler injects a small
@@ -415,3 +428,22 @@ The app's `--text-dimmer` (2.9:1 on the app ground) and `--text-dim` (3.9:1) fai
 readable text, and the shipped `Eyebrow` and `Kbd` atoms use `--text-dimmer`. The comps use
 `--text-faint` (4.9:1) for meaningful text. The Design pane follows the comps; fixing the
 shared atoms is a separate change.
+
+
+## Changes made during the build (2026-09-17)
+
+Every change below came from a task or final review and is recorded as a ruling in the build
+ledger; the sections above are already amended.
+
+- §2 Modes: ask-first only (plan mode removed).
+- §3 Layer 2: no Claude Code allow rules; dot-leading paths under the designs root refused.
+- §3 Layer 3: excludes paths the chat ledger records; Undo trashes the current file first; no
+  "Undo all"; refused mid-turn.
+- §6 The prompt prefix names the design folder by absolute path (worktrees resolve to the main
+  checkout).
+- §7 Designs served from their own host; per-slug CSP; CORS only for fonts.
+- §5 Restored and branched versions inherit the source version's thumbnails; thumbnails are at
+  most 720 points wide, rendered one version at a time in a window pinned to the design host.
+- History compare uses the current frame list; a frame missing from an older version shows a
+  placeholder (reading a version's own frame list is a follow-up).
+- The design thread never offers the chat's checkpoint restore or edit diffs.
