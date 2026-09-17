@@ -91,7 +91,8 @@ import { HelpScreen } from "@/screens/help/HelpScreen";
 import type { HelpTarget } from "@/lib/help-content";
 import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/lib/setup-store";
 import { AgentPane } from "@/screens/agent/AgentPane";
-import { agentLive, agentSessionFor, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent } from "@/lib/agent-session";
+import { agentLive, agentSessionFor, laneKey, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent } from "@/lib/agent-session";
+import { evictDesignProject } from "@/lib/design-store";
 import { startRoundInTerminal } from "@/lib/round-run";
 import { mountAgentBridge } from "@/lib/agent-bridge";
 import { agentBridgeReady, agentSessionStop, readFileText } from "@/lib/ipc";
@@ -632,6 +633,10 @@ function AppShell() {
     const agentRunning = agentLive(dir);
     const doClose = () => {
       if (agentRunning) void agentSessionStop(dir, false).catch(() => {});
+      // the design lane is a second session for the same project — it stops too
+      // (records kept, like the chat lane's), whether or not it's running
+      void agentSessionStop(laneKey(dir, "design"), false).catch(() => {});
+      evictDesignProject(dir);
       closeTermsFor(dir);
       evictRepo(dir);
       evictNotes(dir);

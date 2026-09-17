@@ -18,6 +18,7 @@ const h = vi.hoisted(() => {
   return {
     calls: [] as string[],
     restore: vi.fn(async (_d: string, _s: string, n: number) => n + 10),
+    designsChanged: null as null | ((e: { dir: string; slug: string; paths: string[] }) => void),
     agentSubs: new Set<() => void>(),
     sessions,
     sessionFor,
@@ -29,7 +30,8 @@ const fireAgent = () => { for (const cb of h.agentSubs) cb(); };
 
 vi.mock("./ipc", async (orig) => ({
   ...(await orig<typeof import("./ipc")>()),
-  onDesignsChanged: vi.fn(async () => () => {}),
+  onDesignsChanged: vi.fn(async (cb: (e: { dir: string; slug: string; paths: string[] }) => void) => { h.designsChanged = cb; return () => {}; }),
+  designRootPath: vi.fn(async () => "/Users/me/main-checkout/.chronicle/designs"),
   designsList: vi.fn(async () => ({ rows: [{ slug: "home", title: "Home", kind: "app", frames: 1, created: "", latestVersion: 1, updatedMs: 1, bad: false }], order: {} })),
   designRead: vi.fn(async () => ({ design: { v: 1, title: "Home", kind: "app", brief: "", created: "", frames: [{ id: "d", file: "frames/d.html", label: "D", width: 1440, height: 900, group: "bp" }], groups: [{ id: "bp", label: "BP", kind: "breakpoints" }], chosen: null }, canvas: { positions: {}, viewport: null }, bad: false })),
   designFrameBase: vi.fn(async () => "chronicle-file://h/"),
@@ -85,7 +87,8 @@ describe("design store", () => {
   });
   it("summarises and prefixes", async () => {
     const m = await import("./design-store");
-    expect(m.designPrefix("home")).toBe("[design: home · .chronicle/designs/home/]");
+    expect(m.designPrefix("home", "/Users/me/main/.chronicle/designs")).toBe("[design: home · /Users/me/main/.chronicle/designs/home/]");
+    expect(m.designPrefix("home", "/r/.chronicle/designs/")).toBe("[design: home · /r/.chronicle/designs/home/]");
     expect(m.summaryOf([{ kind: "assistant", text: "Added three frames. Then more." } as never])).toBe("Added three frames.");
   });
 
@@ -136,6 +139,11 @@ describe("design store", () => {
     p.active = "home";
     await m.sendDesignMessage(DIR, "make it pop");
     expect(p.turnSlug).toBe("home");
+    // the prefix names the design's folder by its absolute path (linked worktrees)
+    const agentMod = await import("./agent-session");
+    const send = agentMod.sendAgentMessage as unknown as ReturnType<typeof vi.fn>;
+    expect(send).toHaveBeenLastCalledWith(key, "make it pop", undefined,
+      { prefix: "[design: home · /Users/me/main-checkout/.chronicle/designs/home/]" });
     p.active = "someone-else"; // the user clicked over to another design mid-turn
     h.sessions.get(key)!.turnEnds += 1; // the turn that was sending "home" ends
     fireAgent();
@@ -143,6 +151,49 @@ describe("design store", () => {
     expect(snap).toHaveBeenCalledTimes(1);
     expect(snap).toHaveBeenCalledWith(DIR, "home", expect.any(String), expect.any(String), expect.any(String));
     expect(p.turnSlug).toBeNull();
+  });
+
+  it("forgets a send's design when the send itself fails", async () => {
+    const m = await import("./design-store");
+    const agentMod = await import("./agent-session");
+    const send = agentMod.sendAgentMessage as unknown as ReturnType<typeof vi.fn>;
+    const p = m.designProjectFor(DIR);
+    p.active = "home"; p.turnSlug = null;
+    send.mockRejectedValueOnce(new Error("the agent is still working"));
+    await expect(m.sendDesignMessage(DIR, "again")).rejects.toThrow("still working");
+    expect(p.turnSlug).toBeNull();
+  });
+
+  it("ignores a canvas-only change and reloads on anything else", async () => {
+    const m = await import("./design-store");
+    const ipc = await import("./ipc");
+    const list = ipc.designsList as unknown as ReturnType<typeof vi.fn>;
+    const read = ipc.designRead as unknown as ReturnType<typeof vi.fn>;
+    await m.openDesign(DIR, "home");
+    expect(h.designsChanged).not.toBeNull();
+    list.mockClear(); read.mockClear();
+    h.designsChanged!({ dir: DIR, slug: "home", paths: ["canvas.json", "canvas.json.tmp"] });
+    await Promise.resolve();
+    expect(list).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    h.designsChanged!({ dir: DIR, slug: "home", paths: ["canvas.json", "frames/d.html"] });
+    await Promise.resolve();
+    expect(list).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    // a failing reload never surfaces as an unhandled rejection
+    list.mockRejectedValueOnce(new Error("gone"));
+    read.mockRejectedValueOnce(new Error("gone"));
+    h.designsChanged!({ dir: DIR, slug: "home", paths: ["design.json"] });
+    await new Promise((r) => setImmediate(r));
+  });
+
+  it("closing a project forgets its design state", async () => {
+    const m = await import("./design-store");
+    const p = m.designProjectFor("/closing");
+    p.active = "home";
+    m.evictDesignProject("/closing");
+    expect(m.designProjectFor("/closing")).not.toBe(p);
+    expect(m.designProjectFor("/closing").active).toBeNull();
   });
 
   it("resumes only when the session says it can reload; otherwise starts fresh (finding 5)", async () => {

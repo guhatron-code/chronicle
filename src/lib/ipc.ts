@@ -597,6 +597,8 @@ export const designVersions = (dir: string, slug: string) => invoke<VersionMeta[
 export const designRestore = (dir: string, slug: string, n: number) => invoke<number>("design_restore", { dir, slug, n });
 export const designBranch = (dir: string, slug: string, n: number | null) => invoke<string>("design_branch", { dir, slug, n });
 export const designFrameBase = (dir: string) => invoke<string>("design_frame_base", { dir });
+/** The designs folder as an absolute path (in a linked worktree it's the main checkout's). */
+export const designRootPath = (dir: string) => invoke<string>("design_root_path", { dir });
 export const designThumbnails = (dir: string, slug: string, n: number) => invoke<string[]>("design_thumbnails", { dir, slug, n });
 export const onDesignsChanged = (cb: (e: DesignsChanged) => void) => listen<DesignsChanged>("designs-changed", (e) => cb(e.payload));
 export const agentEditDiff = (dir: string, path: string) =>

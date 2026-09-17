@@ -21,7 +21,7 @@ use std::path::Path;
 
 pub const DESIGN_PROMPT: &str = r#"You are working in Chronicle's Design pane. You make designs as real HTML files that Chronicle shows side by side on a canvas.
 
-Every message starts with a line like `[design: <slug> · .chronicle/designs/<slug>/]`. That names the active design and its folder. Work only on that design.
+Every message starts with a line like `[design: <slug> · <folder>/]`. That names the active design and its folder, as an absolute path. Work only on that design, in the folder named in the prefix (an absolute path).
 
 File contract:
 - One self-contained HTML page per frame, in `frames/` inside the design's folder (for example `frames/desktop.html`).
@@ -29,7 +29,7 @@ File contract:
 - Put breakpoints in a group of kind "breakpoints" and alternative directions in a group of kind "variations", under "groups": {"id", "label", "kind"}.
 - Put images, stylesheets and scripts in `assets/`, and link them with relative paths.
 - Fonts are local: download any font you use once into `assets/fonts/` and load it with @font-face from there. Never link a font service.
-- Never write outside the active design's folder. Never edit `canvas.json`; Chronicle owns it.
+- Never write outside the active design's folder, and never into a name that starts with a dot. Never edit `canvas.json`; Chronicle owns it.
 
 End every turn with one sentence saying what changed."#;
 
@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn the_prompt_states_the_file_contract() {
-        for needle in [".chronicle/designs/", "design.json", "frames/", "assets/fonts/", "[design:", "one sentence"] {
+        for needle in ["the folder named in the prefix (an absolute path)", "design.json", "frames/", "assets/fonts/", "[design:", "one sentence"] {
             assert!(DESIGN_PROMPT.contains(needle), "prompt is missing {needle}");
         }
     }

@@ -4,7 +4,7 @@
 import {
   designsList, designRead, designFrameBase, designVersions, designCanvasSave, designRename, designSetKind,
   designTrash, designUntrash, designsOrderSave, designCreate, designSnapshot, designThumbnails, onDesignsChanged,
-  designRestore, designBranch, type VersionMeta,
+  designRestore, designBranch, designRootPath, type VersionMeta,
 } from "./ipc";
 import { parseDesign, type CanvasFile, type Design, type DesignKind, type DesignRow } from "./design-model";
 import {
@@ -17,6 +17,8 @@ export type UndoEntry = { label: string; undo: () => Promise<void>; redo: () => 
 export interface DesignProject {
   rows: DesignRow[]; order: Record<string, string[]>; active: string | null; design: Design | null; canvas: CanvasFile;
   bad: boolean; frameStates: Record<string, FrameState>; base: string | null; versions: VersionMeta[]; reloadTick: number;
+  /** the designs folder as an absolute, canonical path — the message prefix names it */
+  rootPath: string | null;
   undo: UndoEntry[]; redo: UndoEntry[]; seenTurnEnds: number;
   /** the version History has selected to compare against the newest, or null
    *  when the History panel isn't comparing anything — DesignCanvas splits
@@ -43,7 +45,7 @@ export function designProjectFor(dir: string): DesignProject {
     // Seed the counter from the design lane's OWN turnEnds — an already-running
     // session's past turns are not new turns this store needs to version.
     const seenTurnEnds = agentSessionFor(laneKey(dir, "design")).turnEnds;
-    p = { rows: [], order: {}, active: null, design: null, canvas: emptyCanvas(), bad: false, frameStates: {}, base: null, versions: [], reloadTick: 0, undo: [], redo: [], seenTurnEnds, turnSlug: null, openToken: 0, compare: null };
+    p = { rows: [], order: {}, active: null, design: null, canvas: emptyCanvas(), bad: false, frameStates: {}, base: null, rootPath: null, versions: [], reloadTick: 0, undo: [], redo: [], seenTurnEnds, turnSlug: null, openToken: 0, compare: null };
     projects.set(dir, p);
   }
   return p;
@@ -51,14 +53,22 @@ export function designProjectFor(dir: string): DesignProject {
 
 export function subscribeDesigns(cb: () => void): () => void { ensure(); subs.add(cb); return () => subs.delete(cb); }
 
+/** Closing a project forgets its design state (the next open starts fresh). */
+export function evictDesignProject(dir: string): void {
+  if (projects.delete(dir)) notify();
+}
+
 function ensure() {
   if (ready) return;
   ready = true;
   void onDesignsChanged((e) => {
     const p = projects.get(e.dir);
     if (!p) return;
-    void loadDesigns(e.dir);
-    if (p.active === e.slug && e.paths.some((x) => x !== "canvas.json")) void openDesign(e.dir, e.slug, true);
+    // a pan or zoom rewrites canvas.json (via its .tmp sibling) — nothing the
+    // list or the open design shows changed
+    if (e.paths.length > 0 && e.paths.every((x) => x === "canvas.json" || x === "canvas.json.tmp")) return;
+    loadDesigns(e.dir).catch(() => {});
+    if (p.active === e.slug) openDesign(e.dir, e.slug, true).catch(() => {});
   });
   subscribeAgent(() => {
     for (const [dir, p] of projects) {
@@ -80,7 +90,9 @@ function ensure() {
   });
 }
 
-export const designPrefix = (slug: string) => `[design: ${slug} · .chronicle/designs/${slug}/]`;
+/** `root` is the absolute designs folder: in a linked worktree it isn't under the
+ *  session's cwd, so a relative `.chronicle/designs/` would name the wrong folder. */
+export const designPrefix = (slug: string, root: string) => `[design: ${slug} · ${root.replace(/\/+$/, "")}/${slug}/]`;
 
 export function summaryOf(entries: AgentEntry[]): string {
   const last = [...entries].reverse().find((e) => e.kind === "assistant") as { text?: string } | undefined;
@@ -260,8 +272,16 @@ export async function sendDesignMessage(dir: string, text: string): Promise<void
     const resumeId = s.sessionId;
     if (canResume) await resumeAgentSession(key, resumeId!);
     else if (s.phase === "none" || s.phase === "ended" || s.phase === "error") await startAgentSession(key);
-    await waitForReady(key, 90_000);
+    // the Rust handshake allows 180 s for initialize; this outlasts it
+    await waitForReady(key, 200_000);
   }
+  if (!p.rootPath) p.rootPath = await designRootPath(dir);
   p.turnSlug = slug;
-  await sendAgentMessage(key, text, undefined, { prefix: designPrefix(slug) });
+  try {
+    await sendAgentMessage(key, text, undefined, { prefix: designPrefix(slug, p.rootPath) });
+  } catch (e) {
+    // no turn started, so no turn end will ever claim this slug
+    if (p.turnSlug === slug) p.turnSlug = null;
+    throw e;
+  }
 }
