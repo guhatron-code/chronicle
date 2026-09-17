@@ -19,6 +19,7 @@ import {
   agentSessionStop,
   agentSessionsList,
   agentSetMode,
+  designOutsideFiles,
   onAcpUpdate,
   roundPlanBegin,
   roundPlanCancel,
@@ -193,6 +194,9 @@ export interface AgentSessionState {
   /** files a design's watcher saw change on disk without going through the
    *  agent (Design pane, `_chronicle/outside_changes`) */
   outside: string[];
+  /** display path → the absolute path the outside ledger keys its undo by;
+   *  filled by `refreshDesignOutside` */
+  outsideAbs: Record<string, string>;
   /** the design lane's own idle-stop face — 15 minutes with no turn running */
   endedReason: "idle" | null;
   /** how many turns have ended this session — the design lane's own counter */
@@ -225,6 +229,7 @@ const blank = (): AgentSessionState => ({
   editsResolved: false,
   pendingCheckpoint: null,
   outside: [],
+  outsideAbs: {},
   endedReason: null,
   turnEnds: 0,
   lastPrompt: "",
@@ -325,6 +330,22 @@ export function refreshAgentEdits(dir: string) {
       notify();
     })
     .catch(() => {});
+}
+
+/** The design lane's outside changes, re-read from its ledger: what's still
+ *  there after an undo, and the absolute paths an undo needs. `key` is the
+ *  design lane key. */
+export async function refreshDesignOutside(key: string): Promise<void> {
+  const s = agentSessionFor(key);
+  try {
+    const files = await designOutsideFiles(splitKey(key).dir);
+    const list = Array.isArray(files) ? files : [];
+    s.outside = list.map((f) => f.path);
+    s.outsideAbs = Object.fromEntries(list.map((f) => [f.path, f.abs]));
+    notify();
+  } catch {
+    // a failed read keeps the last list rather than blanking it
+  }
 }
 
 /** A cheap, honest ± stat: multiset line difference (not a full Myers diff,
@@ -614,8 +635,10 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
 
   if (method === "_chronicle/outside_changes") {
     const paths = Array.isArray(params.paths) ? (params.paths as unknown[]).map(String) : [];
-    s.outside = typeof params.reverted === "number" ? [] : Array.from(new Set([...s.outside, ...paths]));
+    // an undo reports how many it put back, not which — the ledger decides what's left
+    if (typeof params.reverted !== "number") s.outside = Array.from(new Set([...s.outside, ...paths]));
     notify();
+    if (live && lane === "design") void refreshDesignOutside(dir);
     return;
   }
 

@@ -1285,7 +1285,13 @@ function AppShell() {
         ) : pane === "web" ? (
           <WebPane key={active.dir} dir={active.dir} onScreen={paneLayout.content && !overlayOpen} onConfirm={setConfirm} />
         ) : (
-          <DesignPane key={active.dir} dir={active.dir} onScreen={paneLayout.content && !overlayOpen} onConfirm={setConfirm} />
+          <DesignPane
+            key={active.dir}
+            dir={active.dir}
+            onScreen={paneLayout.content && !overlayOpen}
+            onConfirm={setConfirm}
+            onRevealTerminal={() => patchLayout({ terminal: true, terminalCollapsed: false })}
+          />
         )}
       </Shell>
       {overlays}

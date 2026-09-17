@@ -161,7 +161,10 @@ export function Composer({
   onSend?: (text: string) => Promise<void>;
 }) {
   const s = agentSessionFor(dir);
-  const designLane = splitLaneKey(dir).lane === "design";
+  // `dir` is the session's lane key; files, notes, phases and attachments
+  // belong to the project, whichever lane is talking
+  const { dir: projectDir, lane } = splitLaneKey(dir);
+  const designLane = lane === "design";
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -178,11 +181,11 @@ export function Composer({
         let bin = "";
         for (const byte of buf) bin += String.fromCharCode(byte);
         const name = f.name || `pasted-${(attachSeq.current += 1)}.png`;
-        const relPath = await agentAttach(dir, name, btoa(bin));
+        const relPath = await agentAttach(projectDir, name, btoa(bin));
         const ext = relPath.split(".").pop()?.toLowerCase() ?? "";
         setAttachments((prev) => [
           ...prev,
-          { id: `${Date.now()}-${attachSeq.current++}`, name, absPath: `${dir}/${relPath}`, relPath, isImage: ext in IMG_MIME },
+          { id: `${Date.now()}-${attachSeq.current++}`, name, absPath: `${projectDir}/${relPath}`, relPath, isImage: ext in IMG_MIME },
         ]);
       } catch (e) {
         toastError("Couldn't attach the file", String(e).slice(0, 90));
@@ -196,12 +199,12 @@ export function Composer({
   const addPaths = async (paths: string[]) => {
     for (const abs of paths) {
       try {
-        const relPath = await agentAttachPath(dir, abs);
+        const relPath = await agentAttachPath(projectDir, abs);
         const name = abs.split("/").pop() || relPath;
         const ext = relPath.split(".").pop()?.toLowerCase() ?? "";
         setAttachments((prev) => [
           ...prev,
-          { id: `${Date.now()}-${attachSeq.current++}`, name, absPath: `${dir}/${relPath}`, relPath, isImage: ext in IMG_MIME },
+          { id: `${Date.now()}-${attachSeq.current++}`, name, absPath: `${projectDir}/${relPath}`, relPath, isImage: ext in IMG_MIME },
         ]);
       } catch (e) {
         toastError("Couldn't attach the file", String(e).slice(0, 90));
@@ -268,7 +271,11 @@ export function Composer({
 
   const items: PickerItem[] =
     trigger?.kind === "slash"
-      ? commandRows(dir, trigger.query).map((r) => ({
+      ? commandRows(dir, trigger.query)
+          // Chronicle's own commands (undo/keep/revert) act on the chat's edit
+          // review — the design lane never offers them
+          .filter((r) => !designLane || r.kind !== "local")
+          .map((r) => ({
           id: `${r.kind}:${r.name}`,
           label: `/${r.name}`,
           detail: r.description,
@@ -277,7 +284,7 @@ export function Composer({
         }))
       : trigger?.kind === "at"
         ? mentionRows(
-            dir,
+            projectDir,
             trigger.query,
             attachments.map((a) => ({ name: a.name, relPath: a.relPath })),
           ).map((m) => ({
@@ -295,8 +302,8 @@ export function Composer({
   const syncTrigger = (value: string, caret: number) => {
     const t = findTrigger(value, caret);
     if (t?.kind === "at") {
-      ensureFileIndex(dir, rerender);
-      ensurePhases(dir, rerender);
+      ensureFileIndex(projectDir, rerender);
+      ensurePhases(projectDir, rerender);
     }
     setTrigger(t);
     setActive(0);
@@ -307,7 +314,7 @@ export function Composer({
     const ta = taRef.current;
     if (trigger.kind === "slash") {
       const local = LOCAL_COMMANDS.find((c) => `local:${c.name}` === item.id);
-      if (local) {
+      if (local && !designLane) {
         // Chronicle's own — run it and clear; nothing goes to the agent
         closeMenu();
         setText("");
@@ -329,7 +336,7 @@ export function Composer({
 
     // @ — swap the typed query for the token and remember what it points at
     const row = mentionRows(
-      dir,
+      projectDir,
       trigger.query,
       attachments.map((a) => ({ name: a.name, relPath: a.relPath })),
     ).find((m) => m.key === item.id);
@@ -380,8 +387,8 @@ export function Composer({
     // inline — a note's text is read from the vault here, at send time
     setSending(true);
     const job = onSend
-      ? onSend(flattenMentions(withRefs, mentions.current, splitLaneKey(dir).dir))
-      : buildBlocks(withRefs, mentions.current, dir).then((blocks) => sendAgentMessage(dir, withRefs, blocks));
+      ? onSend(flattenMentions(withRefs, mentions.current, projectDir))
+      : buildBlocks(withRefs, mentions.current, projectDir).then((blocks) => sendAgentMessage(dir, withRefs, blocks));
     job
       .then(() => {
         setText("");
@@ -398,7 +405,7 @@ export function Composer({
     if (!typed) return;
     // a queued message goes out unattended later — expand its mentions now,
     // while the table still holds what they pointed at
-    enqueueAgentMessage(dir, flattenMentions(typed, mentions.current, dir));
+    enqueueAgentMessage(dir, flattenMentions(typed, mentions.current, projectDir));
     setText("");
     mirrorComposerText(dir, "");
     mentions.current.clear();
@@ -448,6 +455,7 @@ export function Composer({
   // Claude Code's classifier-driven mode: routine actions are approved by the
   // agent itself, risky ones still ask. Only offered when the adapter lists it.
   const autoMode = s.modes?.availableModes.find((m) => m.id === "auto");
+  const planMode = s.modes?.availableModes.find((m) => m.id === "plan");
   const current = s.modes?.currentModeId;
 
   return (
@@ -601,7 +609,7 @@ export function Composer({
             onPick={switchMode}
             options={[
               { value: "default", name: "Ask first", description: "The design session asks before running commands. It never changes files outside the designs folder." },
-              { value: "plan", name: "Plan", description: "It thinks through the design with you and changes nothing." },
+              ...(planMode ? [{ value: "plan", name: "Plan", description: "It thinks through the design with you and changes nothing." }] : []),
             ]}
           />
         )}

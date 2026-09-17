@@ -4,20 +4,33 @@
 import { useEffect, useState } from "react";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { AgentPane } from "@/screens/agent/AgentPane";
-import { agentSessionFor, laneKey, subscribeAgent } from "@/lib/agent-session";
+import { agentSessionFor, laneKey, refreshDesignOutside, subscribeAgent } from "@/lib/agent-session";
 import { designOutsideUndo } from "@/lib/ipc";
 import { limitsReading, subscribeLimits, fmtResetTime } from "@/lib/limits-store";
 import { designProjectFor, subscribeDesigns } from "@/lib/design-store";
 import { BtnSecondary } from "@/components/chrome/atoms";
 import { toastError } from "@/overlays/toasts";
 
-export function DesignThread({ dir, onConfirm }: { dir: string; onConfirm: (spec: ConfirmSpec) => void }) {
+export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
+  dir: string;
+  onConfirm: (spec: ConfirmSpec) => void;
+  /** AgentPane's sign-in terminal must be on screen */
+  onRevealTerminal: () => void;
+}) {
   const [, bump] = useState(0);
   useEffect(() => subscribeAgent(() => bump((n) => n + 1)), []);
   useEffect(() => subscribeLimits(() => bump((n) => n + 1)), []);
   useEffect(() => subscribeDesigns(() => bump((n) => n + 1)), []);
   const key = laneKey(dir, "design");
+  // the outside list survives an app restart in the ledger, not in memory
+  useEffect(() => { void refreshDesignOutside(key); }, [key]);
   const s = agentSessionFor(key);
+  // the ledger keys its undo by absolute path; the list shows the relative one.
+  // Re-read after every undo: one file put back leaves the others listed.
+  const undo = (f: string | null) =>
+    designOutsideUndo(dir, f == null ? null : (s.outsideAbs[f] ?? f))
+      .catch((e) => toastError(f == null ? "Couldn't undo them" : "Couldn't undo it", String(e).slice(0, 90)))
+      .finally(() => void refreshDesignOutside(key));
   const limits = limitsReading();
   const p = designProjectFor(dir);
   const latest = p.versions[0]?.n;
@@ -31,11 +44,11 @@ export function DesignThread({ dir, onConfirm }: { dir: string; onConfirm: (spec
               <li key={f} className="flex items-center gap-2">
                 <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-text-muted">{f}</span>
                 <button className="text-[11.5px] text-text-secondary hover:text-text-primary"
-                  onClick={() => void designOutsideUndo(dir, f).catch((e) => toastError("Couldn't undo it", String(e).slice(0, 90)))}>Undo</button>
+                  onClick={() => void undo(f)}>Undo</button>
               </li>
             ))}
           </ul>
-          <BtnSecondary size="sm" onClick={() => void designOutsideUndo(dir, null).catch((e) => toastError("Couldn't undo them", String(e).slice(0, 90)))}>Undo all</BtnSecondary>
+          <BtnSecondary size="sm" onClick={() => void undo(null)}>Undo all</BtnSecondary>
         </div>
       )}
       {limits?.status === "rejected" && (
@@ -48,7 +61,7 @@ export function DesignThread({ dir, onConfirm }: { dir: string; onConfirm: (spec
         </div>
       )}
       <div className="flex min-h-0 flex-1 flex-col">
-        <AgentPane dir={key} variant="design" onConfirm={onConfirm} onRevealTerminal={() => {}} onOpenReview={() => {}} />
+        <AgentPane dir={key} variant="design" onConfirm={onConfirm} onRevealTerminal={onRevealTerminal} onOpenReview={() => {}} />
       </div>
     </div>
   );

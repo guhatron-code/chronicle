@@ -600,15 +600,27 @@ export function AgentPane({
   const start = () => void startAgentSession(dir).catch((e) => toastError("Couldn't start the agent", String(e).slice(0, 110)));
   const signIn = () => {
     onRevealTerminal();
-    spawnTerm(dir, { title: "sign-in", agent: "claude", autoType: "claude /login" })
+    // terminals belong to the project, not to a session lane
+    const projectDir = splitLaneKey(dir).dir;
+    spawnTerm(projectDir, { title: "sign-in", agent: "claude", autoType: "claude /login" })
       .then((sess) => {
-        setActiveTermFor(dir, sess.id);
+        setActiveTermFor(projectDir, sess.id);
         setLoginTermId(sess.id);
       })
       .catch((e) => toastError("Couldn't open the sign-in terminal", String(e).slice(0, 90)));
   };
 
   const banner = (() => {
+    // the design lane starts or resumes its session when you send — nothing to press
+    if (variant === "design" && s.phase === "none") return null;
+    if (variant === "design" && s.phase === "ended")
+      return (
+        <div data-agent-banner="resting" className="mx-3 mb-2 rounded-md bg-fill-subtle px-[11px] py-[9px]">
+          <span className="text-[12.5px] leading-[1.5] text-text-muted">
+            The design session is resting. Send a message to pick up where you left off.
+          </span>
+        </div>
+      );
     if (s.phase === "none")
       return (
         <div data-agent-banner="disconnected" className="mx-3 mb-2 flex items-center gap-[9px] rounded-md bg-fill-subtle px-[11px] py-[9px]">
@@ -727,10 +739,18 @@ export function AgentPane({
       {empty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[9px] p-5 text-center">
           <span className="mb-1.5"><Chronigirl size={48} /></span>
-          <span className="text-[15px] font-semibold text-text-primary">Ask for anything.</span>
-          <span className="max-w-[34ch] text-[12.5px] leading-[1.55] text-text-muted [text-wrap:pretty]">
-            Chronicle asks before Chronigirl touches your project.
-          </span>
+          {variant === "design" ? (
+            <span className="max-w-[34ch] text-[13px] leading-[1.55] text-text-muted [text-wrap:pretty]">
+              Describe a change, or start a design.
+            </span>
+          ) : (
+            <>
+              <span className="text-[15px] font-semibold text-text-primary">Ask for anything.</span>
+              <span className="max-w-[34ch] text-[12.5px] leading-[1.55] text-text-muted [text-wrap:pretty]">
+                Chronicle asks before Chronigirl touches your project.
+              </span>
+            </>
+          )}
         </div>
       ) : (
         <div
@@ -771,7 +791,13 @@ export function AgentPane({
       {variant === "chat" && <QueuedMessages dir={dir} queue={s.queue} />}
       <Composer
         dir={dir}
-        disabled={s.phase !== "ready"}
+        // the design lane's send starts or resumes the session itself, so only a
+        // start already under way (or a sign-in) holds the input
+        disabled={
+          variant === "design"
+            ? s.phase === "installing" || s.phase === "starting" || s.phase === "needs-login"
+            : s.phase !== "ready"
+        }
         onConfirm={onConfirm}
         onSend={variant === "design" ? (t) => sendDesignMessage(splitLaneKey(dir).dir, t) : undefined}
       />

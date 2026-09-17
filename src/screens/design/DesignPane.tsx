@@ -10,7 +10,13 @@ import { DesignSidebar } from "./DesignSidebar";
 import { DesignThread } from "./DesignThread";
 import { NewDesign } from "./NewDesign";
 
-export function DesignPane({ dir, onScreen, onConfirm }: { dir: string; onScreen: boolean; onConfirm: (spec: ConfirmSpec) => void }) {
+export function DesignPane({ dir, onScreen, onConfirm, onRevealTerminal }: {
+  dir: string;
+  onScreen: boolean;
+  onConfirm: (spec: ConfirmSpec) => void;
+  /** the design session's sign-in runs in a terminal tab — bring the terminal on screen */
+  onRevealTerminal: () => void;
+}) {
   const [, bump] = useState(0);
   useEffect(() => subscribeDesigns(() => bump((n) => n + 1)), []);
   useEffect(() => { void loadDesigns(dir); }, [dir]);
@@ -39,7 +45,7 @@ export function DesignPane({ dir, onScreen, onConfirm }: { dir: string; onScreen
       ) : (
         <div className="flex-1" />
       )}
-      {!(empty || creating) && p.active && <DesignThread dir={dir} onConfirm={onConfirm} />}
+      {!(empty || creating) && p.active && <DesignThread dir={dir} onConfirm={onConfirm} onRevealTerminal={onRevealTerminal} />}
     </div>
   );
 }

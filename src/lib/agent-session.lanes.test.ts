@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const h = vi.hoisted(() => ({ onUpdate: null as ((u: unknown) => void) | null, agentPrompt: vi.fn(async (..._a: unknown[]) => {}) }));
+const h = vi.hoisted(() => ({
+  onUpdate: null as ((u: unknown) => void) | null,
+  agentPrompt: vi.fn(async (..._a: unknown[]) => {}),
+  outsideFiles: vi.fn(async (_dir: string) => [] as { path: string; abs: string }[]),
+}));
 const agentPrompt = h.agentPrompt;
 vi.mock("./ipc", async (orig) => ({
   ...(await orig<typeof import("./ipc")>()),
@@ -9,6 +13,7 @@ vi.mock("./ipc", async (orig) => ({
   agentSessionState: vi.fn(async () => ({ alive: false })),
   agentSessionStart: vi.fn(async () => ({ started: true })),
   agentEdits: vi.fn(async () => []),
+  designOutsideFiles: h.outsideFiles,
 }));
 vi.mock("./notes-store", () => ({}));
 vi.mock("./journal", () => ({ announce: vi.fn() }));
@@ -68,5 +73,25 @@ describe("lanes", () => {
     (ipc.agentEdits as unknown as { mockClear: () => void }).mockClear();
     await m.adoptAgentSession(m.laneKey(DIR, "design"));
     expect(ipc.agentEdits).not.toHaveBeenCalled();
+  });
+
+  it("undoing one outside file leaves the rest listed — the ledger decides", async () => {
+    const m = await import("./agent-session");
+    const key = m.laneKey(DIR, "design");
+    const file = (rel: string) => ({ path: rel, abs: `${DIR}/${rel}`, kind: "modified", viaCommand: false, plus: 1, minus: 0 });
+    h.outsideFiles.mockImplementation(async () => [file("src/a.ts"), file("src/b.ts")]);
+    h.onUpdate!({ dir: DIR, lane: "design", message: { method: "_chronicle/outside_changes", params: { paths: ["src/a.ts", "src/b.ts"] } } });
+    await vi.waitFor(() => expect(m.agentSessionFor(key).outsideAbs["src/b.ts"]).toBe(`${DIR}/src/b.ts`));
+    expect(h.outsideFiles).toHaveBeenCalledWith(DIR);
+
+    h.outsideFiles.mockImplementation(async () => [file("src/b.ts")]);
+    h.onUpdate!({ dir: DIR, lane: "design", message: { method: "_chronicle/outside_changes", params: { paths: [], reverted: 1 } } });
+    expect(m.agentSessionFor(key).outside).toEqual(["src/a.ts", "src/b.ts"]); // not blanked while the ledger is read
+    await vi.waitFor(() => expect(m.agentSessionFor(key).outside).toEqual(["src/b.ts"]));
+
+    h.outsideFiles.mockImplementation(async () => []);
+    await m.refreshDesignOutside(key);
+    expect(m.agentSessionFor(key).outside).toEqual([]);
+    expect(m.agentSessionFor(key).outsideAbs).toEqual({});
   });
 });
