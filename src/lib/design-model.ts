@@ -44,12 +44,13 @@ export function placeFrames(d: Design, positions: CanvasFile["positions"], heigh
     let x = 0, rowH = 0;
     for (const f of frames) {
       const h = heights[f.id] ?? f.height;
+      const moved = positions[f.id] != null;
       const p = positions[f.id] ?? { x, y: rowY };
       out[f.id] = { x: p.x, y: p.y, w: f.width, h };
       x += f.width + COL_GAP;
-      rowH = Math.max(rowH, h);
+      if (!moved) rowH = Math.max(rowH, h);
     }
-    rowY += rowH + ROW_GAP;
+    if (rowH > 0) rowY += rowH + ROW_GAP;
   }
   return out;
 }
