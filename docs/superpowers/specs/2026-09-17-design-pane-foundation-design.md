@@ -104,11 +104,11 @@ skills and review loop on without changing the plumbing.
   `.chronicle/designs/.threads/<session>/`. The session log under app data is named from the
   key, so the two lanes never share one.
 - **Lifetime.** The design session stops by itself after **15 minutes with no turn running**
-  (a clean stop) and resumes the same conversation (`session/load`) when the user next sends
-  a message or starts a design. Hiding the pane does not stop it, so a running turn finishes.
-  The idle timer is a single cancellable timeout reset on every turn start and end (the
-  `no-bare-timers` guard applies).
-- **Modes.** The design lane offers only the adapter's ask-first mode and plan mode. Auto
+  and resumes the same conversation (`session/load`) when the user next sends a message or
+  starts a design. Hiding the pane does not stop it, so a running turn finishes. The idle
+  watchdog lives in Rust, on the session (last activity stamped on every prompt and turn end,
+  checked every 30 seconds); it emits `ended` with `reason: "idle"`.
+- **Modes.** The design lane offers only the adapter's ask-first mode (`default`) and plan mode (`plan`). Auto
   and Unattended are never offered, because they approve every tool call and would defeat §3.
 
 ### 3 · What the design session may touch: three layers
@@ -120,10 +120,14 @@ skills and review loop on without changing the plumbing.
      resolves (canonicalised, symlinks followed) inside `.chronicle/designs/` is allowed
      without asking; any other path is refused with a one-sentence reason the thread shows.
      `fs/write_text_file` applies the same rule.
-  2. **A deny rule in the session options:** Write, Edit and MultiEdit on any path outside
-     `.chronicle/designs/` are denied at the source, passed through `session/new` `_meta`
-     (verified against the pinned adapter before build, §12).
-  3. **Turn-end check.** At turn end, anything that changed in the project outside
+  2. **An allow rule and a locked mode.** Claude Code's permission rules cannot express "any
+     path outside a folder" (and deny always beats allow), so the session options instead
+     allow `Edit` and `Write` on `//<absolute designs path>/**` (passed as
+     `_meta.claudeCode.options.settings.permissions.allow`), so writes inside never prompt,
+     and the lane is held in the ask-first mode (`default`): if the session reports any other
+     mode when ready, the app switches it back. Writes anywhere else therefore always reach
+     layer 1. (Verified against adapter 0.75.1, §12.)
+  3. **Turn-end check** (it also catches writes a user's own Claude settings auto-allow). At turn end, anything that changed in the project outside
      `.chronicle/designs/` since the turn's checkpoint (the chat lane's `reconcile_turn_end`
      machinery) is listed in the thread as "changed outside the designs folder" with Undo for
      each file and for all.
@@ -274,7 +278,10 @@ across the frame. Before the first report the frame uses its declared height.
   selected frame moves it (written to `canvas.json`).
 - Double-click makes one frame live (it takes pointer events; you scroll it and click its
   buttons). Esc returns it to a picture.
-- ⌘0 fits all frames, ⌘1 is 100%, ⌘= and ⌘− zoom. Zoom range 5–200%.
+- With the canvas focused, plain keys zoom, as in Figma: `0` fits all frames, `1` is 100%,
+  `=` and `-` zoom in and out. (⌘1–⌘9 already switch projects and ⌘=/⌘− are the app's own
+  zoom, so the canvas does not take them.) Zoom range 5–200%. The zoom readout is also a
+  button that cycles fit → 100%.
 - The minimap shows frame rectangles and the viewport; dragging it pans.
 
 **Keyboard.** The canvas is fully operable without a pointer:
@@ -311,10 +318,10 @@ cost with the pane open must stay within 1 ms/s of today's measured idle.
 ### 9 · Keyboard shortcuts and menu
 
 - Design joins `PANES` (⌘J cycle) after Web, and gets a `GO` row in `src-tauri/src/menu.rs`.
-- In the Design pane: ⌘N starts a new design (board 2's flow); ⌘0, ⌘1, ⌘=, ⌘− as §7; ⌘Z and
-  ⇧⌘Z as §7; Esc leaves live mode.
-- All new shortcuts are `GO` rows so they fire while focus is inside a frame or the native Web
-  view, and the existing menu tests (parseable, unique, ⌥ only on pane toggles) cover them.
+- In the Design pane: ⌘N starts a new design (board 2's flow), by widening the existing
+  `go-new-note` row's pane check; the canvas keys in §7 (`0`, `1`, `=`, `-`, arrows, Enter,
+  Esc) and ⌘Z / ⇧⌘Z apply only while the canvas has focus, and no frame ever holds focus
+  unless it is live, so none of them needs a new `GO` row. The menu tests are unchanged.
 
 ### 10 · Designs in Chronicle's agent API (read-only)
 
@@ -336,14 +343,13 @@ commit) through DP-8 (imagery), plain-language descriptions and steps in the man
 register. DP-1 is done when its live-test commit lands; each later phase gets its rule when its
 spec is approved.
 
-### 12 · Before building: verify the adapter
+### 12 · The adapter, verified
 
-The adapter source read during the gap review was a cached 0.59.0; Chronicle pins
-`@agentclientprotocol/claude-agent-acp@0.75.1`. The plan's first task confirms against 0.75.1:
-the `_meta.systemPrompt` object form appends; how a Write/Edit deny rule reaches the SDK
-through `_meta` (options or settings); that Write/Edit permission requests carry the target
-path; and that `session/load` works for the idle-stop resume. Any difference changes this
-spec before code is written.
+Checked against the pinned `@agentclientprotocol/claude-agent-acp@0.75.1` source on
+2026-09-17: `_meta.systemPrompt` as an object is spread into the `claude_code` preset (so
+`append` appends; a string replaces); `_meta.claudeCode.options` is spread into the SDK
+options, including `settings`; a permission request's `toolCall` carries `rawInput` (with
+`file_path`) and `locations`; `loadSession` is advertised and `session/load` is implemented.
 
 ### 13 · Testing
 
@@ -353,7 +359,7 @@ Rust:
 - The fence: a Write/Edit permission request inside `.chronicle/designs/` is allowed, outside
   is refused (including through a symlink and `..`); `fs/write_text_file` follows the same
   rule; a change outside at turn end is listed and undoable.
-- Idle stop after 15 minutes with no turn (on an injected clock) and resume on the next
+- Idle stop: the pure `idle_due` rule (15 minutes, never during a turn), and resume on the next
   message.
 - Versions: snapshot on change, skip when unchanged, restore records a new version, branch and
   duplicate create `<slug>-2` with v1.
