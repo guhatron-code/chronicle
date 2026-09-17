@@ -14,7 +14,7 @@
 //! then reaches `session/request_permission`, and Task 4's layer 1
 //! (`design_write_decision`) answers it automatically — allow_once inside
 //! the designs folder, reject_once/cancel outside or on a dot entry. The
-//! mode lock (`handshake`, ~acp.rs:1020) keeps the session in an ask-first
+//! mode lock (`handshake`, ~acp.rs:1056) keeps the session in an ask-first
 //! mode so those asks actually happen.
 use serde_json::{json, Map, Value};
 use std::path::Path;

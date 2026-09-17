@@ -83,7 +83,7 @@ impl AcpState {
             Err(_) => return,
         };
         for s in all {
-            s.shutdown(None);
+            s.shutdown(None, None);
         }
     }
 }
@@ -888,8 +888,7 @@ pub fn start(
                 w.turn_active.load(Ordering::SeqCst),
                 crate::designs::prompt::DESIGN_IDLE,
             ) {
-                w.emit_state(json!({ "state": "ended", "reason": "idle" }));
-                w.stop(false);
+                w.stop_idle();
                 break;
             }
         });
@@ -1081,7 +1080,7 @@ impl AcpSession {
                         .and_then(|g| g.get("authMethods").cloned())
                         .unwrap_or(Value::Null);
                     self.emit_state(json!({ "state": "needs-login", "authMethods": methods }));
-                    self.shutdown(None);
+                    self.shutdown(None, None);
                 } else {
                     self.fail_handshake(&e);
                 }
@@ -1091,13 +1090,18 @@ impl AcpSession {
 
     fn fail_handshake(self: &Arc<Self>, err: &str) {
         self.emit_state(json!({ "state": "error", "message": err }));
-        self.shutdown(None);
+        self.shutdown(None, None);
     }
 
     /// Resolve every outstanding permission oneshot as cancelled, kill the
     /// child (SIGTERM → grace → SIGKILL, whole process group), reap, remove
     /// this session from the map, emit ended. Idempotent.
-    fn shutdown(&self, exit_code: Option<i32>) {
+    ///
+    /// `reason`, when given, rides along on the ONE "ended" event this call
+    /// emits (transcript line and frontend event alike) — never a second
+    /// event. Every caller except the design lane's idle watchdog passes
+    /// `None`, so their "ended" shape is unchanged.
+    fn shutdown(&self, exit_code: Option<i32>, reason: Option<&str>) {
         self.cancel_all_perms();
         let child = self.child.lock().ok().and_then(|mut g| g.take());
         if let Ok(mut w) = self.writer.lock() { *w = None; }
@@ -1106,8 +1110,12 @@ impl AcpSession {
                 Ok(Some(status)) => status.code(),
                 _ => { crate::term_then_kill(&mut c); exit_code }
             };
-            self.append_transcript(&json!({ "method": "_chronicle/session_state", "params": { "state": "ended" } }));
-            self.emit_state(json!({ "state": "ended", "code": code }));
+            let mut state = json!({ "state": "ended" });
+            if let Some(r) = reason { state["reason"] = json!(r); }
+            self.append_transcript(&json!({ "method": "_chronicle/session_state", "params": state }));
+            let mut ended = json!({ "state": "ended", "code": code });
+            if let Some(r) = reason { ended["reason"] = json!(r); }
+            self.emit_state(ended);
         }
         if let Ok(mut g) = self.sessions.lock() {
             if g.get(&self.key).map(|s| std::ptr::eq(s.as_ref(), self)).unwrap_or(false) {
@@ -1151,7 +1159,7 @@ impl AcpSession {
         }
         // EOF: the adapter exited (or was killed) — settle everything
         self.turn_active.store(false, Ordering::SeqCst);
-        self.shutdown(None);
+        self.shutdown(None, None);
     }
 
     fn handle_response(&self, msg: &Value) {
@@ -1530,7 +1538,15 @@ impl AcpSession {
                 self.emit_msg(json!({ "method": "_chronicle/edits_changed", "params": {} }));
             }
         }
-        self.shutdown(None);
+        self.shutdown(None, None);
+    }
+
+    /// The design lane's idle watchdog stops the session the same way
+    /// `stop(false)` does — records kept, so `session/load` can resume it —
+    /// except the single "ended" event this emits carries `reason: "idle"`,
+    /// so the frontend can tell an idle rest apart from every other end.
+    pub fn stop_idle(&self) {
+        self.shutdown(None, Some("idle"));
     }
 
     /// Turn-end honesty: the agent's own SHELL COMMANDS also change files.
@@ -2413,6 +2429,35 @@ for line in sys.stdin:
         let answers: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".fence-answers.json")).unwrap()).unwrap();
         assert_eq!(answers["300"], "allow"); assert_eq!(answers["301"], "reject");
         state.drain();
+    }
+
+    #[test]
+    fn the_idle_stop_emits_exactly_one_ended_event_carrying_reason_idle() {
+        let Some(py) = python3() else { return };
+        let dir = tmp("idle-stop");
+        std::fs::create_dir_all(dir.join(".chronicle/designs")).unwrap();
+        let script = dir.join(".mock-agent.py");
+        std::fs::write(&script, MOCK_AGENT).unwrap();
+        let mut cmd = std::process::Command::new(py); cmd.arg(&script).arg(&dir);
+        let (tx, rx) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let state = AcpState::new();
+        let key = Lane::Design.key(&dir.to_string_lossy());
+        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), None, cmd).unwrap());
+        wait_for(&rx, 20, |v| state_is(v, "ready"));
+
+        // the real path waits DESIGN_IDLE — call the stop path directly instead
+        state.get(&key).unwrap().stop_idle();
+
+        let ended = wait_for(&rx, 20, |v| state_is(v, "ended"));
+        assert_eq!(ended.pointer("/message/params/reason").and_then(|v| v.as_str()), Some("idle"));
+
+        // give the reader thread (which also sees the killed child's EOF and
+        // calls shutdown again) a moment, then confirm no second "ended" event
+        // ever lands — shutdown must stay idempotent about the ONE it already sent
+        std::thread::sleep(Duration::from_millis(300));
+        let extra = rx.try_iter().filter(|v| state_is(v, "ended")).count();
+        assert_eq!(extra, 0, "the idle stop must emit exactly one ended event");
     }
 
     #[test]
