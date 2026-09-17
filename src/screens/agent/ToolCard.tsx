@@ -5,7 +5,7 @@
  * no card chrome at all.
  */
 import { useState } from "react";
-import type { AgentEntry } from "@/lib/agent-session";
+import { splitLaneKey, type AgentEntry } from "@/lib/agent-session";
 import { Spinner } from "@/components/chrome/atoms";
 import { ChevronDownGlyph, ChevronRightGlyph, ErrorGlyph } from "@/components/chrome/icons";
 import { agentEditDiff } from "@/lib/ipc";
@@ -70,6 +70,8 @@ export function ToolCard({ tool, dir, readOnly, onViewChanges }: { tool: Tool; d
   const [diffRows, setDiffRows] = useState<DiffPair[] | null>(null);
   const [diffState, setDiffState] = useState<"idle" | "loading" | "empty" | "error">("idle");
   const isEdit = ["edit", "delete", "move"].includes(tool.toolKind);
+  // both diff views read the chat's edit ledger; design files are versioned by History
+  const ledgerDiffs = splitLaneKey(dir).lane === "chat";
 
   const toggleDiff = () => {
     const next = !diffOpen;
@@ -144,12 +146,12 @@ export function ToolCard({ tool, dir, readOnly, onViewChanges }: { tool: Tool; d
           </span>
         )}
         <span className="flex-1" />
-        {tool.diff && onViewChanges && (
+        {tool.diff && onViewChanges && ledgerDiffs && (
           <button onClick={onViewChanges} className="shrink-0 text-[11.5px] text-text-secondary hover:text-text-primary">
             View the changes ›
           </button>
         )}
-        {isEdit && tool.diff && !running && !readOnly && (
+        {isEdit && tool.diff && !running && !readOnly && ledgerDiffs && (
           <button
             onClick={toggleDiff}
             className="inline-flex shrink-0 items-center gap-1 text-[11.5px] text-text-dim hover:text-text-secondary"

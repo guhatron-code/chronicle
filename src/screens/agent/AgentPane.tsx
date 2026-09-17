@@ -409,7 +409,11 @@ function Entry({
   if (entry.kind === "user")
     return (
       <>
-        <CheckpointRow dir={dir} checkpoint={entry.checkpoint} disabled={turnActive || !!readOnly} onConfirm={onConfirm} />
+        {/* the chat's git-checkpoint restore never runs from the design thread —
+            design files are versioned by History */}
+        {splitLaneKey(dir).lane === "chat" && (
+          <CheckpointRow dir={dir} checkpoint={entry.checkpoint} disabled={turnActive || !!readOnly} onConfirm={onConfirm} />
+        )}
         <UserMessage text={entry.text} />
       </>
     );
