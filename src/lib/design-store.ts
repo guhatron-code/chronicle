@@ -10,6 +10,7 @@ import { parseDesign, type CanvasFile, type Design, type DesignKind, type Design
 import {
   laneKey, agentSessionFor, subscribeAgent, sendAgentMessage, startAgentSession, resumeAgentSession, type AgentEntry,
 } from "./agent-session";
+import { every } from "@/lib/scheduler";
 
 export type FrameState = { kind: "placeholder" } | { kind: "rendering" } | { kind: "rendered"; height: number } | { kind: "failed"; message: string; line: number };
 export type UndoEntry = { label: string; undo: () => Promise<void>; redo: () => Promise<void> };
@@ -17,6 +18,12 @@ export interface DesignProject {
   rows: DesignRow[]; order: Record<string, string[]>; active: string | null; design: Design | null; canvas: CanvasFile;
   bad: boolean; frameStates: Record<string, FrameState>; base: string | null; versions: VersionMeta[]; reloadTick: number;
   undo: UndoEntry[]; redo: UndoEntry[]; seenTurnEnds: number;
+  /** the slug a `sendDesignMessage` turn was sent for — the turn-end snapshot
+   *  targets this, not whatever the user has since clicked over to */
+  turnSlug: string | null;
+  /** bumped on every non-reload `openDesign`; a slower, older call that lands
+   *  after a newer one started is dropped instead of clobbering it */
+  openToken: number;
 }
 
 const projects = new Map<string, DesignProject>();
@@ -29,7 +36,10 @@ export function designProjectFor(dir: string): DesignProject {
   ensure();
   let p = projects.get(dir);
   if (!p) {
-    p = { rows: [], order: {}, active: null, design: null, canvas: emptyCanvas(), bad: false, frameStates: {}, base: null, versions: [], reloadTick: 0, undo: [], redo: [], seenTurnEnds: 0 };
+    // Seed the counter from the design lane's OWN turnEnds — an already-running
+    // session's past turns are not new turns this store needs to version.
+    const seenTurnEnds = agentSessionFor(laneKey(dir, "design")).turnEnds;
+    p = { rows: [], order: {}, active: null, design: null, canvas: emptyCanvas(), bad: false, frameStates: {}, base: null, versions: [], reloadTick: 0, undo: [], redo: [], seenTurnEnds, turnSlug: null, openToken: 0 };
     projects.set(dir, p);
   }
   return p;
@@ -49,9 +59,18 @@ function ensure() {
   subscribeAgent(() => {
     for (const [dir, p] of projects) {
       const s = agentSessionFor(laneKey(dir, "design"));
+      // An idle-stop or a restart resets the session's own counter (blank());
+      // follow it down so the NEXT real turn still reads as new, instead of
+      // sitting forever above a seenTurnEnds that can no longer be reached.
+      if (s.turnEnds < p.seenTurnEnds) p.seenTurnEnds = s.turnEnds;
       if (s.turnEnds > p.seenTurnEnds) {
         p.seenTurnEnds = s.turnEnds;
-        if (p.active) void snapshotTurn(dir, p.active);
+        // The turn belongs to whichever design it was sent for; fall back to
+        // the open design only when no send recorded one (e.g. a turn kicked
+        // off outside sendDesignMessage).
+        const slug = p.turnSlug ?? p.active;
+        p.turnSlug = null;
+        if (slug) void snapshotTurn(dir, slug);
       }
     }
   });
@@ -86,7 +105,14 @@ export async function loadDesigns(dir: string): Promise<void> {
 export async function openDesign(dir: string, slug: string, reload = false): Promise<void> {
   const p = designProjectFor(dir);
   if (!p.base) p.base = await designFrameBase(dir);
+  const token = ++p.openToken;
   const r = await designRead(dir, slug);
+  // A watcher-driven reload for a design the user has since clicked away
+  // from would otherwise switch the pane back to it.
+  if (reload && p.active !== slug) return;
+  // A slower, older plain open() landing after a newer one started would
+  // otherwise clobber the newer design with stale data.
+  if (!reload && token !== p.openToken) return;
   p.active = slug;
   p.design = parseDesign(r.design);
   p.bad = r.bad || (!!r.design && !p.design);
@@ -177,16 +203,25 @@ export async function startDesign(dir: string, kind: DesignKind, brief: string):
   return slug;
 }
 
+/** Waits for the lane to reach "ready", with a real deadline: a store change
+ *  usually settles this immediately, but nothing else here guarantees the
+ *  store ever changes again, so `every()` (src/lib/scheduler.ts) re-checks
+ *  on its own cadence and both watchers are torn down together on settle —
+ *  no bare setTimeout, per the no-bare-timers rule. */
 function waitForReady(key: string, ms: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const started = Date.now();
+    let un: () => void = () => {};
+    let stopTicker: () => void = () => {};
+    const settle = (fn: () => void) => { un(); stopTicker(); fn(); };
     const check = () => {
       const s = agentSessionFor(key);
-      if (s.phase === "ready") { un(); resolve(); }
-      else if (s.phase === "error" || s.phase === "needs-login") { un(); reject(new Error(s.errorMessage ?? "The design session couldn't start.")); }
-      else if (Date.now() - started > ms) { un(); reject(new Error("The design session took too long to start.")); }
+      if (s.phase === "ready") settle(resolve);
+      else if (s.phase === "error" || s.phase === "needs-login") settle(() => reject(new Error(s.errorMessage ?? "The design session couldn't start.")));
+      else if (Date.now() - started > ms) settle(() => reject(new Error("The design session took too long to start.")));
     };
-    const un = subscribeAgent(check);
+    un = subscribeAgent(check);
+    stopTicker = every(1_000, check);
     check();
   });
 }
@@ -197,9 +232,13 @@ export async function sendDesignMessage(dir: string, text: string): Promise<void
   const key = laneKey(dir, "design");
   const s = agentSessionFor(key);
   if (s.phase !== "ready") {
-    if (s.phase === "ended" && s.sessionId) await resumeAgentSession(key, s.sessionId);
+    // Read these before anything (a start/resume) resets the session object.
+    const canResume = s.phase === "ended" && !!s.sessionId && s.loadSession;
+    const resumeId = s.sessionId;
+    if (canResume) await resumeAgentSession(key, resumeId!);
     else if (s.phase === "none" || s.phase === "ended" || s.phase === "error") await startAgentSession(key);
     await waitForReady(key, 90_000);
   }
+  p.turnSlug = slug;
   await sendAgentMessage(key, text, undefined, { prefix: designPrefix(slug) });
 }
