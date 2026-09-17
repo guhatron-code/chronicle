@@ -100,11 +100,10 @@ export function FrameView(props: {
             style={{ width: w, height: h }}
             onError={() => setThumbFailed((s) => (s.has(thumb) ? s : new Set(s).add(thumb)))}
           />
-        ) : thumb ? (
-          <div className="flex size-full items-center justify-center rounded-[2px] bg-fill-subtle text-center text-[11px] text-text-faint">
-            Not in this version
-          </div>
         ) : (
+          // Plain box, no text: on the live canvas a failed thumbnail almost always
+          // just hasn't rendered yet, not that the frame is missing from a version
+          // (that copy belongs to DesignCompare/HistoryPanel, comparing past versions).
           <div className="size-full bg-fill-subtle" />
         )}
         {rect.h > frame.height && (
