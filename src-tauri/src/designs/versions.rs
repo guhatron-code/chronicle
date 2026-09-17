@@ -188,14 +188,24 @@ pub fn restore(design_dir: &Path, n: u32, at: &str) -> Result<u32, String> {
     let hash = content_hash(design_dir);
     let next = next_version_number(design_dir);
     write_version(design_dir, &VersionMeta { n: next, at: at.into(), session: String::new(), prompt: String::new(), summary: format!("Restored v{n}"), hash })?;
+    // the restored content is v<n>'s, so its pictures are too (thumbnails are
+    // never part of the content hash — this is a plain copy)
+    copy_thumbs(&vd, &versions_dir(design_dir).join(format!("v{next}")))?;
     Ok(next)
+}
+
+/// Copies a version's `thumbs/` (if it has one) into another version directory.
+fn copy_thumbs(from_version: &Path, to_version: &Path) -> Result<(), String> {
+    let dst = to_version.join("thumbs");
+    if dst.exists() { return Ok(()); }
+    copy_tree(&from_version.join("thumbs"), &dst)
 }
 
 pub fn branch(project: &Path, slug: &str, n: Option<u32>, at: &str) -> Result<String, String> {
     let src_dir = crate::designs::design_dir(project, slug)?;
-    let (from, label) = match n.or_else(|| latest(&src_dir)) {
-        Some(v) => (versions_dir(&src_dir).join(format!("v{v}")), format!("Branched from {slug} v{v}")),
-        None => (src_dir.clone(), format!("Duplicated from {slug}")),
+    let (from, label, from_version) = match n.or_else(|| latest(&src_dir)) {
+        Some(v) => (versions_dir(&src_dir).join(format!("v{v}")), format!("Branched from {slug} v{v}"), true),
+        None => (src_dir.clone(), format!("Duplicated from {slug}"), false),
     };
     if !from.exists() { return Err("there's no such version".into()); }
     let root = crate::designs::ensure_root(project)?;
@@ -210,7 +220,11 @@ pub fn branch(project: &Path, slug: &str, n: Option<u32>, at: &str) -> Result<St
         std::fs::write(&design_json, serde_json::to_string_pretty(&v).unwrap()).map_err(|e| e.to_string())?;
     }
     std::fs::write(dst.join("canvas.json"), "{\"positions\":{},\"viewport\":null}").map_err(|e| e.to_string())?;
-    snapshot_if_changed(&dst, at, "", "", &label)?;
+    if let Some(first) = snapshot_if_changed(&dst, at, "", "", &label)? {
+        if from_version {
+            copy_thumbs(&from, &versions_dir(&dst).join(format!("v{first}")))?;
+        }
+    }
     Ok(new_slug)
 }
 
@@ -247,6 +261,32 @@ mod tests {
         assert_eq!(latest(&bd), Some(1));
         let dup = branch(&p, &slug, None, "t6").unwrap();
         assert_eq!(std::fs::read_to_string(designs_root(&p).join(&dup).join("frames/a.html")).unwrap(), "<h1>one</h1>");
+    }
+
+    #[test]
+    fn restore_and_branch_carry_the_source_versions_thumbnails() {
+        let p = proj("thumbs");
+        let slug = create(&p, "app", "Pics", "b", "t0").unwrap();
+        let dir = designs_root(&p).join(&slug);
+        std::fs::write(dir.join("frames/a.html"), "<h1>one</h1>").unwrap();
+        assert_eq!(snapshot_if_changed(&dir, "t1", "s", "p1", "v1").unwrap(), Some(1));
+        std::fs::create_dir_all(dir.join(".versions/v1/thumbs")).unwrap();
+        std::fs::write(dir.join(".versions/v1/thumbs/a.png"), b"png-one").unwrap();
+        let hash_v1 = list(&dir)[0].hash.clone();
+        std::fs::write(dir.join("frames/a.html"), "<h1>two</h1>").unwrap();
+        assert_eq!(snapshot_if_changed(&dir, "t2", "s", "p2", "v2").unwrap(), Some(2));
+
+        let n = restore(&dir, 1, "t3").unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(std::fs::read(dir.join(".versions/v3/thumbs/a.png")).unwrap(), b"png-one");
+        assert_eq!(list(&dir)[0].hash, hash_v1, "thumbnails are not part of the content hash");
+
+        let b = branch(&p, &slug, Some(1), "t4").unwrap();
+        let bd = designs_root(&p).join(&b);
+        assert_eq!(std::fs::read(bd.join(".versions/v1/thumbs/a.png")).unwrap(), b"png-one");
+        // a version with no pictures carries none
+        let b2 = branch(&p, &slug, Some(2), "t5").unwrap();
+        assert!(!designs_root(&p).join(&b2).join(".versions/v1/thumbs").exists());
     }
 
     #[test]

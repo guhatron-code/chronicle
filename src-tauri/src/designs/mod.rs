@@ -77,6 +77,22 @@ pub struct DesignRow {
     pub created: String, pub latest_version: Option<u32>, pub updated_ms: u64, pub bad: bool,
 }
 
+/// When a design's content last changed: design.json or any file in frames/.
+/// Never the design directory's own mtime, and never canvas.json — panning or
+/// zooming rewrites canvas.json and must not reorder the sidebar.
+fn content_updated_ms(design_dir: &Path, design_json: &Path) -> u64 {
+    let mut newest = modified_ms(design_json);
+    let mut stack = vec![design_dir.join("frames")];
+    while let Some(d) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        for e in rd.flatten() {
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_dir() { stack.push(e.path()); } else if ft.is_file() { newest = newest.max(modified_ms(&e.path())); }
+        }
+    }
+    newest
+}
+
 fn modified_ms(p: &Path) -> u64 {
     std::fs::metadata(p).and_then(|m| m.modified()).ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0)
@@ -103,7 +119,7 @@ pub fn list(project: &Path) -> Vec<DesignRow> {
                 frames: d["frames"].as_array().map(|a| a.len()).unwrap_or(0),
                 created: d["created"].as_str().unwrap_or("").to_string(),
                 latest_version: versions::latest(&e.path()),
-                updated_ms: modified_ms(&e.path()).max(modified_ms(&f)),
+                updated_ms: content_updated_ms(&e.path(), &f),
                 slug, bad,
             })
         })
@@ -290,6 +306,22 @@ mod tests {
         assert!(list(&p).is_empty());
         assert_eq!(untrash(&p, &t).unwrap(), "product-page");
         assert_eq!(list(&p).len(), 1);
+    }
+
+    #[test]
+    fn saving_the_canvas_does_not_change_updated_ms() {
+        let p = proj("updated");
+        let slug = create(&p, "app", "Dash", "", "t").unwrap();
+        let d = designs_root(&p).join(&slug);
+        std::fs::write(d.join("frames/a.html"), "<h1>a</h1>").unwrap();
+        let before = list(&p)[0].updated_ms;
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        std::fs::write(d.join("canvas.json"), "{\"positions\":{},\"viewport\":{\"x\":1,\"y\":2,\"zoom\":0.5}}").unwrap();
+        std::fs::create_dir_all(d.join(".versions/v9")).unwrap();
+        assert_eq!(list(&p)[0].updated_ms, before, "canvas.json and the folder's own mtime don't count");
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        std::fs::write(d.join("frames/a.html"), "<h1>b</h1>").unwrap();
+        assert!(list(&p)[0].updated_ms > before, "a frame write does");
     }
 
     #[test]
