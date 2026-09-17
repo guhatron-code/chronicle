@@ -579,6 +579,26 @@ export const agentEdits = (dir: string) =>
  *  saw change on disk without going through the agent. */
 export const designOutsideFiles = (dir: string) => invoke<AgentEditFile[]>("design_outside_files", { dir });
 export const designOutsideUndo = (dir: string, path: string | null) => invoke<number>("design_outside_undo", { dir, path });
+
+/* ---------- the Design pane's own commands (src-tauri/src/designs/*) ---------- */
+export interface VersionMeta { n: number; at: string; session: string; prompt: string; summary: string; hash: string }
+export interface DesignsChanged { dir: string; slug: string; paths: string[] }
+export const designsList = (dir: string) => invoke<{ rows: import("./design-model").DesignRow[]; order: Record<string, string[]> }>("designs_list", { dir });
+export const designCreate = (dir: string, kind: string, title: string, brief: string) => invoke<string>("design_create", { dir, kind, title, brief });
+export const designRead = (dir: string, slug: string) => invoke<{ design: unknown; canvas: unknown; bad: boolean }>("design_read", { dir, slug });
+export const designRename = (dir: string, slug: string, title: string) => invoke<void>("design_rename", { dir, slug, title });
+export const designSetKind = (dir: string, slug: string, kind: string) => invoke<void>("design_set_kind", { dir, slug, kind });
+export const designTrash = (dir: string, slug: string) => invoke<string>("design_trash", { dir, slug });
+export const designUntrash = (dir: string, trashRel: string) => invoke<string>("design_untrash", { dir, trashRel });
+export const designCanvasSave = (dir: string, slug: string, canvas: unknown) => invoke<void>("design_canvas_save", { dir, slug, canvas });
+export const designsOrderSave = (dir: string, order: unknown) => invoke<void>("designs_order_save", { dir, order });
+export const designSnapshot = (dir: string, slug: string, prompt: string, summary: string, session: string) => invoke<number | null>("design_snapshot", { dir, slug, prompt, summary, session });
+export const designVersions = (dir: string, slug: string) => invoke<VersionMeta[]>("design_versions", { dir, slug });
+export const designRestore = (dir: string, slug: string, n: number) => invoke<number>("design_restore", { dir, slug, n });
+export const designBranch = (dir: string, slug: string, n: number | null) => invoke<string>("design_branch", { dir, slug, n });
+export const designFrameBase = (dir: string) => invoke<string>("design_frame_base", { dir });
+export const designThumbnails = (dir: string, slug: string, n: number) => invoke<string[]>("design_thumbnails", { dir, slug, n });
+export const onDesignsChanged = (cb: (e: DesignsChanged) => void) => listen<DesignsChanged>("designs-changed", (e) => cb(e.payload));
 export const agentEditDiff = (dir: string, path: string) =>
   invoke<string>("agent_edit_diff", { dir, path });
 export const agentEditKeep = (dir: string, path: string | null) =>
