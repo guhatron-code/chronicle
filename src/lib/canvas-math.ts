@@ -39,3 +39,21 @@ export function liveFrames(rects: Record<string, Rect>, v: Viewport, w: number, 
     .slice(0, LIVE_MAX);
   return new Set(visible.map((f) => f.id));
 }
+
+/** The live set plus the frame the user made live, still at most LIVE_MAX: when it
+ *  isn't already in a full set, the farthest (last, since liveFrames sorts nearest
+ *  first) gives way. Returns a new set. */
+export function pinLive(live: Set<string>, pinned: string | null, max = LIVE_MAX): Set<string> {
+  if (!pinned || live.has(pinned)) return new Set(live);
+  const ids = [...live];
+  if (ids.length >= max) ids.length = max - 1;
+  return new Set([...ids, pinned]);
+}
+
+/** ⌘-scroll / pinch zoom factor. A trackpad pinch sends small deltas and zooms
+ *  smoothly; a mouse-wheel notch (~100 px, or 3 lines) is clamped to ±30 so one
+ *  notch is about 26%, not 63%. */
+export function wheelZoomFactor(deltaY: number, deltaMode: number): number {
+  const px = deltaMode === 1 ? deltaY * 16 : deltaMode === 2 ? deltaY * 800 : deltaY;
+  return Math.exp(-Math.max(-30, Math.min(30, px)) * 0.01);
+}

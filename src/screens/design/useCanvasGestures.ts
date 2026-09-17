@@ -6,8 +6,8 @@
    The viewport is saved when it has been still for a moment, without a timer: after
    a pointer gesture ends, on the next pointermove or keydown after a wheel burst,
    after a keyboard zoom, and when the canvas unmounts. */
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import { fit, worldToScreen, zoomAt, type Rect, type Viewport } from "@/lib/canvas-math";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { fit, wheelZoomFactor, worldToScreen, zoomAt, type Rect, type Viewport } from "@/lib/canvas-math";
 import { canvasKey } from "@/lib/canvas-keys";
 import { readingOrder, type CanvasFile } from "@/lib/design-model";
 import { designProjectFor, moveFrame, redoDesign, undoDesign } from "@/lib/design-store";
@@ -19,6 +19,10 @@ const REVEAL = 48, STRIP = 26;
 type Gesture =
   | { kind: "pan"; pointer: number; sx: number; sy: number; v0: Viewport }
   | { kind: "frame"; pointer: number; id: string; sx: number; sy: number; moved: boolean };
+
+/** The frame (if any) under a DOM event target. */
+const frameAt = (target: EventTarget | null) =>
+  (target instanceof Element ? target.closest<HTMLElement>("[data-frame]") : null)?.dataset.frame ?? null;
 
 export interface CanvasGestures {
   viewport: Viewport | null;
@@ -41,6 +45,7 @@ export interface CanvasGestures {
     onPointerMove: (e: ReactPointerEvent<HTMLDivElement>) => void;
     onPointerUp: (e: ReactPointerEvent<HTMLDivElement>) => void;
     onPointerCancel: (e: ReactPointerEvent<HTMLDivElement>) => void;
+    onDoubleClick: (e: ReactMouseEvent<HTMLDivElement>) => void;
     onKeyDown: (e: ReactKeyboardEvent<HTMLDivElement>) => void;
     onKeyUp: (e: ReactKeyboardEvent<HTMLDivElement>) => void;
     onBlur: () => void;
@@ -59,6 +64,8 @@ export function useCanvasGestures({ dir, slug, canvas, rects, size, canvasRef }:
 
   const vp = useRef(viewport);
   const gesture = useRef<Gesture | null>(null);
+  /** the press a frame already claimed, so the canvas's own handler leaves it alone */
+  const claimed = useRef<Event | null>(null);
   const space = useRef(false);
   const dirty = useRef(false);
   /** set while the viewport is the automatic fit of a design with no frames yet,
@@ -162,7 +169,7 @@ export function useCanvasGestures({ dir, slug, canvas, rects, size, canvasRef }:
       if (!v) return;
       if (e.ctrlKey || e.metaKey) {
         const box = el.getBoundingClientRect();
-        setView(zoomAt(v, Math.exp(-e.deltaY * 0.01), e.clientX - box.left, e.clientY - box.top));
+        setView(zoomAt(v, wheelZoomFactor(e.deltaY, e.deltaMode), e.clientX - box.left, e.clientY - box.top));
       } else setView({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY });
     };
     el.addEventListener("wheel", onWheel, { passive: false });
@@ -179,10 +186,11 @@ export function useCanvasGestures({ dir, slug, canvas, rects, size, canvasRef }:
   };
 
   const onFrameDragStart = (id: string, e: ReactPointerEvent) => {
-    if (gesture.current) return;
+    claimed.current = e.nativeEvent;
     if (space.current) { startPan(e); return; }
+    // No pointer capture yet: capturing on press would retarget the click and
+    // double-click to the canvas. It is taken once the drag threshold is crossed.
     gesture.current = { kind: "frame", pointer: e.pointerId, id, sx: e.clientX, sy: e.clientY, moved: false };
-    canvasRef.current?.setPointerCapture(e.pointerId);
   };
 
   const endGesture = (e: ReactPointerEvent<HTMLDivElement>, cancelled: boolean) => {
@@ -202,23 +210,31 @@ export function useCanvasGestures({ dir, slug, canvas, rects, size, canvasRef }:
 
   const canvasHandlers: CanvasGestures["canvasHandlers"] = {
     onPointerDown: (e) => {
-      if (gesture.current) return; // a frame already took this press
+      if (claimed.current === e.nativeEvent) return; // a frame already took this press
+      gesture.current = null; // a press whose release never reached the canvas
       if (e.button === 1 || (e.button === 0 && space.current)) { focusCanvas(); startPan(e); return; }
       if (e.button === 0 && e.target === e.currentTarget) select(null);
     },
     onPointerMove: (e) => {
-      commit(); // a wheel burst has ended
       const g = gesture.current;
+      if (!g) commit(); // a wheel burst has ended (a pan saves once, on release)
       if (!g || g.pointer !== e.pointerId) return;
       const dx = e.clientX - g.sx, dy = e.clientY - g.sy;
       if (g.kind === "pan") { setView({ ...g.v0, x: g.v0.x + dx, y: g.v0.y + dy }); return; }
-      if (!g.moved && Math.abs(dx) + Math.abs(dy) < 3) return;
-      g.moved = true;
+      if (!g.moved) {
+        // released somewhere the canvas never heard about: not a drag any more
+        if (e.buttons === 0) { gesture.current = null; return; }
+        if (Math.abs(dx) + Math.abs(dy) < 3) return;
+        g.moved = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
       const v = vp.current, r = live.current.rects[g.id];
       if (v && r) setDrag({ id: g.id, x: r.x + dx / v.zoom, y: r.y + dy / v.zoom });
     },
     onPointerUp: (e) => endGesture(e, false),
     onPointerCancel: (e) => endGesture(e, true),
+    // Hit-tested here rather than on the frame, so it works whatever holds the pointer.
+    onDoubleClick: (e) => { const id = frameAt(e.target); if (id) enterLive(id); },
     onKeyDown: (e) => {
       if ((e.target as HTMLElement).closest("button, input, textarea")) return;
       if (e.key === " ") { e.preventDefault(); space.current = true; return; }
@@ -232,7 +248,9 @@ export function useCanvasGestures({ dir, slug, canvas, rects, size, canvasRef }:
         case "actual": e.preventDefault(); { const v = vp.current; if (v) zoomBy(1 / v.zoom); } return;
         case "nudge": {
           e.preventDefault();
-          const r = sel ? rs[sel] : null;
+          // From the store's position, which moveFrame updates at once, so a held
+          // arrow key keeps adding up before the rendered rect catches up.
+          const r = sel ? designProjectFor(dir).canvas.positions[sel] ?? rs[sel] : null;
           if (sel && r) void moveFrame(dir, sel, r.x + a.dx, r.y + a.dy);
           return;
         }

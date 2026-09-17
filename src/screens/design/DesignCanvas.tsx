@@ -4,7 +4,7 @@
    the window is hidden; the rest show their latest thumbnail. Input handling lives
    in useCanvasGestures; this file draws and routes frame messages. */
 import { useEffect, useRef, useState } from "react";
-import { liveFrames, worldToScreen, type Rect } from "@/lib/canvas-math";
+import { liveFrames, pinLive, worldToScreen, type Rect } from "@/lib/canvas-math";
 import { placeFrames } from "@/lib/design-model";
 import { designProjectFor, frameMessage, subscribeDesigns } from "@/lib/design-store";
 import { getActivity, subscribeActivity } from "@/lib/scheduler";
@@ -79,8 +79,8 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
   }, [dir, exitLive]);
 
   const shown = onScreen && windowVisible;
-  const live = shown && v && size.w ? liveFrames(rects, v, size.w, size.h) : new Set<string>();
-  if (shown && g.liveId && rects[g.liveId]) live.add(g.liveId);
+  const nearest = shown && v && size.w ? liveFrames(rects, v, size.w, size.h) : new Set<string>();
+  const live = shown && g.liveId && rects[g.liveId] ? pinLive(nearest, g.liveId) : nearest;
 
   const row = p.rows.find((r) => r.slug === slug);
   const latest = row?.latestVersion ?? p.versions[0]?.n ?? null;
@@ -140,7 +140,6 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
                 reloadTick={p.reloadTick}
                 iframeRef={iframeRef(f.id)}
                 onSelect={() => g.select(f.id)}
-                onEnterLive={() => g.enterLive(f.id)}
                 onDragStart={(e) => g.onFrameDragStart(f.id, e)}
               />
             );

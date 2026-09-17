@@ -22,7 +22,7 @@ export function FrameView(props: {
   /** screen position of the frame's top-left corner (worldToScreen of rect, plus any drag offset) */
   at: { x: number; y: number };
   iframeRef: (el: HTMLIFrameElement | null) => void;
-  onSelect: () => void; onEnterLive: () => void; onDragStart: (e: ReactPointerEvent) => void;
+  onSelect: () => void; onDragStart: (e: ReactPointerEvent) => void;
 }) {
   const { dir, frame, rect, zoom, live, interactive, selected, base, slug, state, thumb, reloadTick, at } = props;
   const w = rect.w * zoom, h = rect.h * zoom;
@@ -46,7 +46,6 @@ export function FrameView(props: {
       data-frame={frame.id}
       className="absolute outline-none"
       style={{ left: at.x, top: at.y, width: w, height: h }}
-      onDoubleClick={props.onEnterLive}
       // Keep keyboard focus on the canvas: a press here must not move it to this group
       // (the canvas's live region announces the selection instead). Clicks still fire.
       onMouseDown={(e) => e.preventDefault()}
