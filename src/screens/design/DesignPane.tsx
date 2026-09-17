@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { designProjectFor, loadDesigns, subscribeDesigns } from "@/lib/design-store";
+import { DesignSidebar } from "./DesignSidebar";
 import { NewDesign } from "./NewDesign";
 
 export function DesignPane({ dir, onScreen: _onScreen, onConfirm: _onConfirm }: { dir: string; onScreen: boolean; onConfirm: (spec: ConfirmSpec) => void }) {
@@ -20,14 +21,7 @@ export function DesignPane({ dir, onScreen: _onScreen, onConfirm: _onConfirm }: 
   const empty = p.rows.length === 0;
   return (
     <div data-chrome className="flex h-full min-w-0 flex-1">
-      <aside className="flex w-[248px] shrink-0 flex-col border-r border-border-hairline">
-        <div className="flex h-10 items-center border-b border-border-hairline px-3.5 text-[10px] uppercase tracking-[0.09em] text-text-faint">Designs</div>
-        {empty && (
-          <p className="px-3.5 py-3.5 text-[11.5px] leading-relaxed text-text-faint">
-            No designs yet. Anything you make lands here, saved in <span className="font-mono text-[10.5px]">.chronicle/designs/</span>.
-          </p>
-        )}
-      </aside>
+      <DesignSidebar dir={dir} onNew={() => setCreating(true)} />
       {empty || creating ? <NewDesign dir={dir} onDone={() => setCreating(false)} /> : <div className="flex-1" />}
     </div>
   );
