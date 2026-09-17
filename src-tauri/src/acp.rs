@@ -36,6 +36,33 @@ const AUTH_REQUIRED_CODE: i64 = -32000;
 
 pub type Emit = Arc<dyn Fn(Value) + Send + Sync>;
 
+/// Which of a project's two agent sessions a key belongs to. The chat lane keeps
+/// the historic key (the canonical project path) and `.chronicle/agent/`; the
+/// design lane gets `<path>#design` and keeps its records beside the designs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lane { Chat, Design }
+
+impl Lane {
+    pub fn parse(s: Option<&str>) -> Result<Lane, String> {
+        match s {
+            None | Some("chat") => Ok(Lane::Chat),
+            Some("design") => Ok(Lane::Design),
+            Some(other) => Err(format!("there's no agent lane called {other}")),
+        }
+    }
+    pub fn as_str(self) -> &'static str { match self { Lane::Chat => "chat", Lane::Design => "design" } }
+    pub fn key(self, canon: &str) -> String {
+        match self { Lane::Chat => canon.to_string(), Lane::Design => format!("{canon}#design") }
+    }
+    /// Where this lane's transcripts, ledger and `current` pointer live.
+    pub fn store(self, project: &Path) -> PathBuf {
+        match self {
+            Lane::Chat => ledger::agent_dir(project),
+            Lane::Design => crate::designs::designs_root(project).join(".threads"),
+        }
+    }
+}
+
 pub struct AcpState {
     sessions: Arc<Mutex<HashMap<String, Arc<AcpSession>>>>,
 }
@@ -90,40 +117,40 @@ pub mod ledger {
     pub fn agent_dir(project: &Path) -> PathBuf {
         project.join(".chronicle/agent")
     }
-    fn current_file(project: &Path) -> PathBuf {
-        agent_dir(project).join("current")
+    fn current_file(store: &Path) -> PathBuf {
+        store.join("current")
     }
-    pub fn set_current_session(project: &Path, sid: &str) {
-        let _ = std::fs::create_dir_all(agent_dir(project));
-        let _ = std::fs::write(current_file(project), sid);
+    pub fn set_current_session(store: &Path, sid: &str) {
+        let _ = std::fs::create_dir_all(store);
+        let _ = std::fs::write(current_file(store), sid);
     }
-    pub fn clear_current_session(project: &Path) {
-        let _ = std::fs::remove_file(current_file(project));
+    pub fn clear_current_session(store: &Path) {
+        let _ = std::fs::remove_file(current_file(store));
     }
-    pub fn current_session(project: &Path) -> Option<String> {
-        let s = std::fs::read_to_string(current_file(project)).ok()?;
+    pub fn current_session(store: &Path) -> Option<String> {
+        let s = std::fs::read_to_string(current_file(store)).ok()?;
         let s = s.trim().to_string();
         if s.is_empty() { None } else { Some(s) }
     }
 
-    fn bases_dir(project: &Path, sid: &str) -> PathBuf {
-        agent_dir(project).join(sid).join("bases")
+    fn bases_dir(store: &Path, sid: &str) -> PathBuf {
+        store.join(sid).join("bases")
     }
-    fn index_path(project: &Path, sid: &str) -> PathBuf {
-        bases_dir(project, sid).join("index.json")
+    fn index_path(store: &Path, sid: &str) -> PathBuf {
+        bases_dir(store, sid).join("index.json")
     }
 
     /// abs path → { "base": "<file name>"|null, "via_command": bool }
-    fn load_index(project: &Path, sid: &str) -> BTreeMap<String, Value> {
-        std::fs::read_to_string(index_path(project, sid))
+    fn load_index(store: &Path, sid: &str) -> BTreeMap<String, Value> {
+        std::fs::read_to_string(index_path(store, sid))
             .ok()
             .and_then(|s| serde_json::from_str::<BTreeMap<String, Value>>(&s).ok())
             .unwrap_or_default()
     }
-    fn save_index(project: &Path, sid: &str, idx: &BTreeMap<String, Value>) -> Result<(), String> {
-        let dir = bases_dir(project, sid);
+    fn save_index(store: &Path, sid: &str, idx: &BTreeMap<String, Value>) -> Result<(), String> {
+        let dir = bases_dir(store, sid);
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        std::fs::write(index_path(project, sid), serde_json::to_string_pretty(idx).map_err(|e| e.to_string())?)
+        std::fs::write(index_path(store, sid), serde_json::to_string_pretty(idx).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())
     }
 
@@ -136,7 +163,7 @@ pub mod ledger {
     /// Record the pre-change bytes for a path (first touch only — later writes
     /// keep the ORIGINAL base). `base: None` = the file didn't exist.
     pub fn record_base(
-        project: &Path,
+        store: &Path,
         sid: &str,
         abs: &Path,
         via_command: bool,
@@ -144,14 +171,14 @@ pub mod ledger {
     ) -> Result<bool, String> {
         let _g = LOCK.lock().map_err(|e| e.to_string())?;
         let key = abs.to_string_lossy().to_string();
-        let mut idx = load_index(project, sid);
+        let mut idx = load_index(store, sid);
         if idx.contains_key(&key) {
             return Ok(false); // the original base wins
         }
         let name = match base {
             Some(bytes) => {
                 let n = base_name(&key);
-                let dir = bases_dir(project, sid);
+                let dir = bases_dir(store, sid);
                 std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                 std::fs::write(dir.join(&n), bytes).map_err(|e| e.to_string())?;
                 Some(n)
@@ -159,17 +186,17 @@ pub mod ledger {
             None => None,
         };
         idx.insert(key, json!({ "base": name, "via_command": via_command }));
-        save_index(project, sid, &idx)?;
+        save_index(store, sid, &idx)?;
         Ok(true)
     }
 
     /// The strip's list: every unresolved entry with an honest ± stat
     /// (real `git diff --no-index --numstat`, never a guess).
-    pub fn files(project: &Path, sid: &str, repo: &Path) -> Vec<Value> {
-        let idx = load_index(project, sid);
+    pub fn files(store: &Path, sid: &str, repo: &Path) -> Vec<Value> {
+        let idx = load_index(store, sid);
         let mut out = Vec::new();
         for (abs, meta) in idx {
-            let base = meta.get("base").and_then(|v| v.as_str()).map(|n| bases_dir(project, sid).join(n));
+            let base = meta.get("base").and_then(|v| v.as_str()).map(|n| bases_dir(store, sid).join(n));
             let via_command = meta.get("via_command").and_then(|v| v.as_bool()).unwrap_or(false);
             let target = PathBuf::from(&abs);
             let exists = target.exists();
@@ -212,10 +239,10 @@ pub mod ledger {
     }
 
     /// The reviewable diff for one entry — base vs disk, straight from git.
-    pub fn diff(project: &Path, sid: &str, repo: &Path, abs: &str) -> Result<String, String> {
-        let idx = load_index(project, sid);
+    pub fn diff(store: &Path, sid: &str, repo: &Path, abs: &str) -> Result<String, String> {
+        let idx = load_index(store, sid);
         let meta = idx.get(abs).ok_or("that file isn't in the agent's changes")?;
-        let base = meta.get("base").and_then(|v| v.as_str()).map(|n| bases_dir(project, sid).join(n));
+        let base = meta.get("base").and_then(|v| v.as_str()).map(|n| bases_dir(store, sid).join(n));
         let target = PathBuf::from(abs);
         let dev_null = PathBuf::from("/dev/null");
         let a = base.clone().unwrap_or_else(|| dev_null.clone());
@@ -234,9 +261,9 @@ pub mod ledger {
     }
 
     /// Keep = accept: drop the entry (and its base). `path: None` keeps all.
-    pub fn keep(project: &Path, sid: &str, path: Option<&str>) -> Result<(), String> {
+    pub fn keep(store: &Path, sid: &str, path: Option<&str>) -> Result<(), String> {
         let _g = LOCK.lock().map_err(|e| e.to_string())?;
-        let mut idx = load_index(project, sid);
+        let mut idx = load_index(store, sid);
         let victims: Vec<String> = match path {
             Some(p) => idx.keys().filter(|k| k.as_str() == p).cloned().collect(),
             None => idx.keys().cloned().collect(),
@@ -244,20 +271,20 @@ pub mod ledger {
         for k in victims {
             if let Some(meta) = idx.remove(&k) {
                 if let Some(n) = meta.get("base").and_then(|v| v.as_str()) {
-                    let _ = std::fs::remove_file(bases_dir(project, sid).join(n));
+                    let _ = std::fs::remove_file(bases_dir(store, sid).join(n));
                 }
             }
         }
-        save_index(project, sid, &idx)
+        save_index(store, sid, &idx)
     }
 
     /// Undo one DIRECT edit: write the base back (or delete a created file).
     /// Command-changed files are refused — only "Undo to here" covers those
     /// (the strip never claims per-file undo it can't do). `path: None`
     /// undoes every direct entry.
-    pub fn undo(project: &Path, sid: &str, path: Option<&str>, roots: &[PathBuf]) -> Result<usize, String> {
+    pub fn undo(store: &Path, sid: &str, path: Option<&str>, roots: &[PathBuf]) -> Result<usize, String> {
         let _g = LOCK.lock().map_err(|e| e.to_string())?;
-        let mut idx = load_index(project, sid);
+        let mut idx = load_index(store, sid);
         let targets: Vec<String> = match path {
             Some(p) => {
                 if !idx.contains_key(p) {
@@ -282,12 +309,12 @@ pub mod ledger {
             }
             match meta.get("base").and_then(|v| v.as_str()) {
                 Some(n) => {
-                    let bytes = std::fs::read(bases_dir(project, sid).join(n)).map_err(|e| e.to_string())?;
+                    let bytes = std::fs::read(bases_dir(store, sid).join(n)).map_err(|e| e.to_string())?;
                     if let Some(parent) = target.parent() {
                         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                     }
                     std::fs::write(&target, bytes).map_err(|e| e.to_string())?;
-                    let _ = std::fs::remove_file(bases_dir(project, sid).join(n));
+                    let _ = std::fs::remove_file(bases_dir(store, sid).join(n));
                 }
                 None => {
                     // created by the agent — undo = deletion
@@ -301,15 +328,15 @@ pub mod ledger {
             idx.remove(&key);
             undone += 1;
         }
-        save_index(project, sid, &idx)?;
+        save_index(store, sid, &idx)?;
         Ok(undone)
     }
 
     /// Wipe the ledger without touching any file (after a checkpoint restore
     /// put the tree back itself).
-    pub fn clear(project: &Path, sid: &str) {
+    pub fn clear(store: &Path, sid: &str) {
         let _g = LOCK.lock();
-        let _ = std::fs::remove_dir_all(bases_dir(project, sid));
+        let _ = std::fs::remove_dir_all(bases_dir(store, sid));
     }
 }
 
@@ -321,17 +348,16 @@ pub mod ledger {
    same frontend reducer that handles live events. */
 
 pub mod transcript {
-    use super::ledger::agent_dir;
     use serde_json::{json, Value};
     use std::io::Write;
     use std::path::{Path, PathBuf};
 
-    pub fn path(project: &Path, sid: &str) -> PathBuf {
-        agent_dir(project).join(sid).join("thread.jsonl")
+    pub fn path(store: &Path, sid: &str) -> PathBuf {
+        store.join(sid).join("thread.jsonl")
     }
 
-    pub fn append(project: &Path, sid: &str, msg: &Value) {
-        let p = path(project, sid);
+    pub fn append(store: &Path, sid: &str, msg: &Value) {
+        let p = path(store, sid);
         if let Some(parent) = p.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
@@ -342,15 +368,15 @@ pub mod transcript {
 
     /// The adapter's resume capability, persisted at handshake so the history
     /// list can gate "Resume" honestly with no live session around.
-    pub fn save_caps(project: &Path, load_session: bool) {
-        let _ = std::fs::create_dir_all(agent_dir(project));
+    pub fn save_caps(store: &Path, load_session: bool) {
+        let _ = std::fs::create_dir_all(store);
         let _ = std::fs::write(
-            agent_dir(project).join("caps.json"),
+            store.join("caps.json"),
             serde_json::to_string(&json!({ "loadSession": load_session })).unwrap_or_default(),
         );
     }
-    pub fn load_session_supported(project: &Path) -> bool {
-        std::fs::read_to_string(agent_dir(project).join("caps.json"))
+    pub fn load_session_supported(store: &Path) -> bool {
+        std::fs::read_to_string(store.join("caps.json"))
             .ok()
             .and_then(|s| serde_json::from_str::<Value>(&s).ok())
             .and_then(|v| v.get("loadSession").and_then(|b| b.as_bool()))
@@ -359,14 +385,14 @@ pub mod transcript {
 
     /// Previous sessions, newest first: id · first-message excerpt · user
     /// message count · last activity (epoch ms) · whether it's the live one.
-    pub fn sessions_list(project: &Path, live_sid: Option<&str>) -> Vec<Value> {
-        let resumable = load_session_supported(project);
+    pub fn sessions_list(store: &Path, live_sid: Option<&str>) -> Vec<Value> {
+        let resumable = load_session_supported(store);
         let mut out = Vec::new();
-        let Ok(rd) = std::fs::read_dir(agent_dir(project)) else { return out };
+        let Ok(rd) = std::fs::read_dir(store) else { return out };
         for e in rd.flatten() {
             if !e.path().is_dir() { continue; }
             let sid = e.file_name().to_string_lossy().to_string();
-            let tp = path(project, &sid);
+            let tp = path(store, &sid);
             let Ok(body) = std::fs::read_to_string(&tp) else { continue };
             let mut first = String::new();
             let mut users = 0usize;
@@ -399,9 +425,9 @@ pub mod transcript {
 
     /// The stored lines for one session (capped — a runaway transcript must
     /// not freeze the pane). The frontend replays them through its reducer.
-    pub fn read(project: &Path, sid: &str) -> Vec<Value> {
+    pub fn read(store: &Path, sid: &str) -> Vec<Value> {
         const CAP: usize = 5000;
-        let Ok(body) = std::fs::read_to_string(path(project, sid)) else { return Vec::new() };
+        let Ok(body) = std::fs::read_to_string(path(store, sid)) else { return Vec::new() };
         let lines: Vec<&str> = body.lines().collect();
         let start = lines.len().saturating_sub(CAP);
         lines[start..].iter().filter_map(|l| serde_json::from_str(l).ok()).collect()
@@ -433,18 +459,25 @@ pub mod checkpoint {
         }
     }
 
-    fn temp_index(repo: &Path) -> PathBuf {
+    /// Per repo, per process, per lane — two lanes snapshotting the same repo
+    /// at once must not share one index file.
+    fn temp_index(repo: &Path, tag: &str) -> PathBuf {
         use sha2::{Digest, Sha256};
         let mut h = Sha256::new();
         h.update(repo.to_string_lossy().as_bytes());
         let hex = format!("{:x}", h.finalize());
-        std::env::temp_dir().join(format!("chronicle-cpix-{}-{}", &hex[..16], std::process::id()))
+        std::env::temp_dir().join(format!("chronicle-cpix-{}-{}-{}", &hex[..16], std::process::id(), tag))
     }
 
     /// Snapshot the WORKING TREE (tracked + untracked, minus gitignored — the
     /// add -A semantics) into a tree object via a temp index.
     pub fn snapshot_tree(repo: &Path) -> Result<String, String> {
-        let ix = temp_index(repo);
+        snapshot_tree_as(repo, "chat")
+    }
+
+    /// `snapshot_tree` under a lane's own temp index.
+    pub fn snapshot_tree_as(repo: &Path, tag: &str) -> Result<String, String> {
+        let ix = temp_index(repo, tag);
         let _ = std::fs::remove_file(&ix);
         git(repo, Some(&ix), &["add", "-A"])?;
         let tree = git(repo, Some(&ix), &["write-tree"])?;
@@ -455,7 +488,12 @@ pub mod checkpoint {
     /// Before each user message: commit the snapshot onto the session's ref
     /// (never on a branch, never in the log UI). Returns the commit id.
     pub fn create(repo: &Path, sid: &str) -> Result<String, String> {
-        let tree = snapshot_tree(repo)?;
+        create_as(repo, sid, "chat")
+    }
+
+    /// `create` under a lane's own temp index.
+    pub fn create_as(repo: &Path, sid: &str, tag: &str) -> Result<String, String> {
+        let tree = snapshot_tree_as(repo, tag)?;
         let rname = ref_name(sid);
         let parent = git(repo, None, &["rev-parse", "--verify", "-q", &rname]).ok();
         let commit = match &parent {
@@ -474,7 +512,7 @@ pub mod checkpoint {
     /// covered (add -A semantics), stated honestly in the UI.
     pub fn restore(repo: &Path, commit: &str) -> Result<(), String> {
         let tree = git(repo, None, &["rev-parse", &format!("{commit}^{{tree}}")])?;
-        let ix = temp_index(repo);
+        let ix = temp_index(repo, "restore");
         let _ = std::fs::remove_file(&ix);
         git(repo, Some(&ix), &["add", "-A"])?;
         let res = git(repo, Some(&ix), &["read-tree", "--reset", "-u", &tree]);
@@ -562,12 +600,14 @@ pub fn path_in_roots(p: &Path, roots: &[PathBuf]) -> bool {
 
 pub struct AcpSession {
     key: String,
+    /// Which of the project's two sessions this is (chat or design).
+    lane: Lane,
+    /// The lane's record store — transcripts, ledger, `current` pointer.
+    store: PathBuf,
     /// The jail: fs/read + fs/write must resolve inside these roots.
     roots: Vec<PathBuf>,
     /// The git root — checkpoints and reconciliation live here.
     repo: PathBuf,
-    /// The project dir (holds .chronicle) — the ledger lives here.
-    project_dir: PathBuf,
     /// The latest pre-message snapshot (this session's ref carries them all).
     last_checkpoint: Mutex<Option<String>>,
     /// Set when this session resumes an earlier one via session/load.
@@ -654,6 +694,7 @@ pub fn start(
     state: &AcpState,
     emit: Emit,
     key: String,
+    lane: Lane,
     cwd: PathBuf,
     project_dir: PathBuf,
     roots: Vec<PathBuf>,
@@ -685,9 +726,10 @@ pub fn start(
 
     let session = Arc::new(AcpSession {
         key: key.clone(),
+        lane,
+        store: lane.store(&project_dir),
         roots,
         repo: cwd.clone(),
-        project_dir,
         last_checkpoint: Mutex::new(None),
         resume,
         suppress_updates: AtomicBool::new(false),
@@ -742,12 +784,13 @@ impl AcpSession {
     }
 
     fn emit_msg(&self, message: Value) {
-        (self.emit)(json!({ "dir": self.key, "message": message }));
+        let dir = self.key.strip_suffix("#design").unwrap_or(&self.key);
+        (self.emit)(json!({ "dir": dir, "lane": self.lane.as_str(), "message": message }));
     }
 
     fn append_transcript(&self, msg: &Value) {
         if let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) {
-            transcript::append(&self.project_dir, &sid, msg);
+            transcript::append(&self.store, &sid, msg);
         }
     }
 
@@ -828,7 +871,7 @@ impl AcpSession {
         };
         if let Ok(mut g) = self.agent_caps.lock() { *g = caps.clone(); }
         let can_load = caps.pointer("/agentCapabilities/loadSession").and_then(|v| v.as_bool()).unwrap_or(false);
-        transcript::save_caps(&self.project_dir, can_load);
+        transcript::save_caps(&self.store, can_load);
 
         self.emit_state(json!({ "state": "starting" }));
         // TRUE resume only when the adapter advertises loadSession — never assumed
@@ -861,7 +904,7 @@ impl AcpSession {
                 if let Ok(mut g) = self.session_id.lock() { *g = Some(sid.clone()); }
                 if let Ok(mut g) = self.modes.lock() { *g = resp.get("modes").cloned().unwrap_or(Value::Null); }
                 if let Ok(mut g) = self.config_options.lock() { *g = resp.get("configOptions").cloned().unwrap_or(Value::Null); }
-                ledger::set_current_session(&self.project_dir, &sid);
+                ledger::set_current_session(&self.store, &sid);
                 checkpoint::prune_old(&self.repo);
                 self.emit_state(json!({
                     "state": "ready",
@@ -1096,7 +1139,7 @@ impl AcpSession {
         let sid = self.session_id.lock().ok().and_then(|g| g.clone()).unwrap_or_else(|| "unknown".into());
         let base = std::fs::read(&full).ok();
         let created = base.is_none();
-        if let Err(e) = ledger::record_base(&self.project_dir, &sid, &full, false, base.as_deref()) {
+        if let Err(e) = ledger::record_base(&self.store, &sid, &full, false, base.as_deref()) {
             return self.respond_err(id, -32603, &e);
         }
         if let Some(parent) = full.parent() {
@@ -1132,7 +1175,7 @@ impl AcpSession {
         }
         // the checkpoint precedes every user message; a non-repo project just
         // doesn't get one (the row won't render — never a hang, never a lie)
-        match checkpoint::create(&self.repo, &sid) {
+        match checkpoint::create_as(&self.repo, &sid, self.lane.as_str()) {
             Ok(id) => {
                 if let Ok(mut g) = self.last_checkpoint.lock() { *g = Some(id.clone()); }
                 self.emit_msg(json!({ "method": "_chronicle/checkpoint", "params": { "id": id } }));
@@ -1293,10 +1336,10 @@ impl AcpSession {
     pub fn stop(&self, clean: bool) {
         if clean {
             if let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) {
-                let _ = ledger::keep(&self.project_dir, &sid, None);
-                ledger::clear(&self.project_dir, &sid);
+                let _ = ledger::keep(&self.store, &sid, None);
+                ledger::clear(&self.store, &sid);
                 checkpoint::delete_ref(&self.repo, &sid);
-                ledger::clear_current_session(&self.project_dir);
+                ledger::clear_current_session(&self.store);
                 self.emit_msg(json!({ "method": "_chronicle/edits_changed", "params": {} }));
             }
         }
@@ -1311,13 +1354,13 @@ impl AcpSession {
     fn reconcile_turn_end(&self) {
         let Some(cp) = self.last_checkpoint.lock().ok().and_then(|g| g.clone()) else { return };
         let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) else { return };
-        let Ok(now_tree) = checkpoint::snapshot_tree(&self.repo) else { return };
+        let Ok(now_tree) = checkpoint::snapshot_tree_as(&self.repo, self.lane.as_str()) else { return };
         let mut any = false;
         for (status, rel) in checkpoint::changed_since(&self.repo, &cp, &now_tree) {
             if rel.starts_with(".chronicle/") { continue; }
             let abs = self.repo.join(&rel);
             let base = if status == 'A' { None } else { checkpoint::bytes_at(&self.repo, &cp, &rel) };
-            if let Ok(true) = ledger::record_base(&self.project_dir, &sid, &abs, true, base.as_deref()) {
+            if let Ok(true) = ledger::record_base(&self.store, &sid, &abs, true, base.as_deref()) {
                 any = true;
             }
         }
@@ -1446,7 +1489,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        assert!(start(&state, emit, key.clone(), dir.clone(), dir.clone(), vec![dir.clone()], None, cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, cmd).unwrap());
         Some(Harness { state, rx, key, dir })
     }
 
@@ -1490,7 +1533,7 @@ for line in sys.stdin:
         wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/write"));
         assert_eq!(std::fs::read_to_string(h.dir.join("agent-made.txt")).unwrap(), "agent wrote this");
         {
-            let entries = ledger::files(&h.dir, "sess-1", &h.dir);
+            let entries = ledger::files(&ledger::agent_dir(&h.dir), "sess-1", &h.dir);
             assert!(entries.iter().any(|e| e["kind"] == "created"), "created file ledgered with an empty base: {entries:?}");
         }
         // the out-of-jail write must NOT land
@@ -1614,7 +1657,8 @@ for line in sys.stdin:
             key: "k".into(),
             roots: vec![dir.clone()],
             repo: dir.clone(),
-            project_dir: dir.clone(),
+            lane: Lane::Chat,
+            store: ledger::agent_dir(&dir),
             last_checkpoint: Mutex::new(None),
             child: Mutex::new(None),
             writer: Mutex::new(None),
@@ -1710,14 +1754,14 @@ for line in sys.stdin:
         // modified file: base recorded before the write
         std::fs::write(d.join("app.txt"), "line one\nline two\n").unwrap();
         let modified = d.join("app.txt");
-        ledger::record_base(&d, sid, &modified, false, Some(b"line one\nline two\n")).unwrap();
+        ledger::record_base(&ledger::agent_dir(&d), sid, &modified, false, Some(b"line one\nline two\n")).unwrap();
         std::fs::write(&modified, "line one\nline CHANGED\nline three\n").unwrap();
         // created file: no base
         let created = d.join("fresh.txt");
-        ledger::record_base(&d, sid, &created, false, None).unwrap();
+        ledger::record_base(&ledger::agent_dir(&d), sid, &created, false, None).unwrap();
         std::fs::write(&created, "made by the agent\n").unwrap();
 
-        let files = ledger::files(&d, sid, &d);
+        let files = ledger::files(&ledger::agent_dir(&d), sid, &d);
         assert_eq!(files.len(), 2);
         let modf = files.iter().find(|f| f["path"] == "app.txt").unwrap();
         assert_eq!(modf["kind"], "modified");
@@ -1728,42 +1772,42 @@ for line in sys.stdin:
         assert_eq!(newf["plus"], 1);
 
         // the diff derives from base vs disk
-        let diff = ledger::diff(&d, sid, &d, modified.to_string_lossy().as_ref()).unwrap();
+        let diff = ledger::diff(&ledger::agent_dir(&d), sid, &d, modified.to_string_lossy().as_ref()).unwrap();
         assert!(diff.contains("-line two") && diff.contains("+line CHANGED"), "{diff}");
 
         // a second write keeps the ORIGINAL base
-        assert!(!ledger::record_base(&d, sid, &modified, false, Some(b"not the base")).unwrap());
+        assert!(!ledger::record_base(&ledger::agent_dir(&d), sid, &modified, false, Some(b"not the base")).unwrap());
 
         // undo: modified restores bytes; created is DELETED
         let roots = vec![d.clone()];
-        ledger::undo(&d, sid, Some(modified.to_string_lossy().as_ref()), &roots).unwrap();
+        ledger::undo(&ledger::agent_dir(&d), sid, Some(modified.to_string_lossy().as_ref()), &roots).unwrap();
         assert_eq!(std::fs::read_to_string(&modified).unwrap(), "line one\nline two\n");
-        ledger::undo(&d, sid, Some(created.to_string_lossy().as_ref()), &roots).unwrap();
+        ledger::undo(&ledger::agent_dir(&d), sid, Some(created.to_string_lossy().as_ref()), &roots).unwrap();
         assert!(!created.exists(), "created-file undo must DELETE the file");
-        assert!(ledger::files(&d, sid, &d).is_empty());
+        assert!(ledger::files(&ledger::agent_dir(&d), sid, &d).is_empty());
     }
 
     #[test]
     fn ledger_bases_survive_a_restart_and_keep_resolves() {
         let d = repo("ledger-restart");
         let sid = "sess-r";
-        ledger::set_current_session(&d, sid);
+        ledger::set_current_session(&ledger::agent_dir(&d), sid);
         let target = d.join("kept.txt");
         std::fs::write(&target, "before").unwrap();
-        ledger::record_base(&d, sid, &target, false, Some(b"before")).unwrap();
+        ledger::record_base(&ledger::agent_dir(&d), sid, &target, false, Some(b"before")).unwrap();
         std::fs::write(&target, "after").unwrap();
         // "restart": nothing in memory — the current pointer + disk index carry it
-        assert_eq!(ledger::current_session(&d).as_deref(), Some(sid));
-        let files = ledger::files(&d, sid, &d);
+        assert_eq!(ledger::current_session(&ledger::agent_dir(&d)).as_deref(), Some(sid));
+        let files = ledger::files(&ledger::agent_dir(&d), sid, &d);
         assert_eq!(files.len(), 1);
         // undo still round-trips from the persisted base
-        ledger::undo(&d, sid, Some(target.to_string_lossy().as_ref()), &[d.clone()]).unwrap();
+        ledger::undo(&ledger::agent_dir(&d), sid, Some(target.to_string_lossy().as_ref()), &[d.clone()]).unwrap();
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "before");
         // keep-all clears the rest
         std::fs::write(&target, "after again").unwrap();
-        ledger::record_base(&d, sid, &target, false, Some(b"before")).unwrap();
-        ledger::keep(&d, sid, None).unwrap();
-        assert!(ledger::files(&d, sid, &d).is_empty(), "keep resolves everything");
+        ledger::record_base(&ledger::agent_dir(&d), sid, &target, false, Some(b"before")).unwrap();
+        ledger::keep(&ledger::agent_dir(&d), sid, None).unwrap();
+        assert!(ledger::files(&ledger::agent_dir(&d), sid, &d).is_empty(), "keep resolves everything");
     }
 
     #[test]
@@ -1780,7 +1824,8 @@ for line in sys.stdin:
             key: d.to_string_lossy().to_string(),
             roots: vec![d.clone()],
             repo: d.clone(),
-            project_dir: d.clone(),
+            lane: Lane::Chat,
+            store: ledger::agent_dir(&d),
             last_checkpoint: Mutex::new(None),
             child: Mutex::new(None),
             writer: Mutex::new(None),
@@ -1802,14 +1847,14 @@ for line in sys.stdin:
 
         // a DIRECT write (already ledgered) + a SHELL change + a shell creation
         let direct = d.join("direct.txt");
-        ledger::record_base(&d, sid, &direct, false, None).unwrap();
+        ledger::record_base(&ledger::agent_dir(&d), sid, &direct, false, None).unwrap();
         std::fs::write(&direct, "via fs/write_text_file").unwrap();
         std::fs::write(d.join("by-command.txt"), "shell mangled").unwrap();
         std::fs::write(d.join("command-made.txt"), "spawned by npm").unwrap();
 
         s.reconcile_turn_end();
 
-        let files = ledger::files(&d, sid, &d);
+        let files = ledger::files(&ledger::agent_dir(&d), sid, &d);
         let by = |p: &str| files.iter().find(|f| f["path"] == p).cloned().unwrap_or_else(|| panic!("{p} missing: {files:?}"));
         assert_eq!(by("direct.txt")["viaCommand"], false, "a direct write keeps its own entry");
         let cmd_mod = by("by-command.txt");
@@ -1819,13 +1864,13 @@ for line in sys.stdin:
         assert_eq!(cmd_new["viaCommand"], true);
         assert_eq!(cmd_new["kind"], "created");
         // the command-changed base came from the checkpoint — diff is reviewable
-        let diff = ledger::diff(&d, sid, &d, d.join("by-command.txt").to_string_lossy().as_ref()).unwrap();
+        let diff = ledger::diff(&ledger::agent_dir(&d), sid, &d, d.join("by-command.txt").to_string_lossy().as_ref()).unwrap();
         assert!(diff.contains("-shell original") && diff.contains("+shell mangled"), "{diff}");
         // …but per-file undo is refused: only Undo to here covers it
-        let err = ledger::undo(&d, sid, Some(d.join("by-command.txt").to_string_lossy().as_ref()), &[d.clone()]).unwrap_err();
+        let err = ledger::undo(&ledger::agent_dir(&d), sid, Some(d.join("by-command.txt").to_string_lossy().as_ref()), &[d.clone()]).unwrap_err();
         assert!(err.contains("Undo to here"), "{err}");
         // undo-all only touches direct entries
-        let n = ledger::undo(&d, sid, None, &[d.clone()]).unwrap();
+        let n = ledger::undo(&ledger::agent_dir(&d), sid, None, &[d.clone()]).unwrap();
         assert_eq!(n, 1);
         assert!(!direct.exists(), "the direct created file is undone (deleted)");
         assert_eq!(std::fs::read_to_string(d.join("by-command.txt")).unwrap(), "shell mangled");
@@ -1839,8 +1884,8 @@ for line in sys.stdin:
         let victim = outside.join("victim.txt");
         std::fs::write(&victim, "outside bytes").unwrap();
         // an entry that somehow names an outside path must still be refused at undo
-        ledger::record_base(&d, sid, &victim, false, Some(b"evil base")).unwrap();
-        let err = ledger::undo(&d, sid, Some(victim.to_string_lossy().as_ref()), &[d.clone()]).unwrap_err();
+        ledger::record_base(&ledger::agent_dir(&d), sid, &victim, false, Some(b"evil base")).unwrap();
+        let err = ledger::undo(&ledger::agent_dir(&d), sid, Some(victim.to_string_lossy().as_ref()), &[d.clone()]).unwrap_err();
         assert!(err.contains("outside"), "{err}");
         assert_eq!(std::fs::read_to_string(&victim).unwrap(), "outside bytes", "the outside file is untouched");
         assert!(!path_in_roots(&victim, &[d.clone()]));
@@ -1875,16 +1920,16 @@ for line in sys.stdin:
     #[test]
     fn transcript_store_lists_reads_and_gates_resume() {
         let d = tmp("transcript");
-        transcript::append(&d, "s1", &json!({"method":"_chronicle/user_message","params":{"text":"make the pricing cards align"}}));
-        transcript::append(&d, "s1", &json!({"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}}}));
-        transcript::append(&d, "s1", &json!({"method":"_chronicle/turn_end","params":{"stopReason":"end_turn"}}));
+        transcript::append(&ledger::agent_dir(&d), "s1", &json!({"method":"_chronicle/user_message","params":{"text":"make the pricing cards align"}}));
+        transcript::append(&ledger::agent_dir(&d), "s1", &json!({"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}}}));
+        transcript::append(&ledger::agent_dir(&d), "s1", &json!({"method":"_chronicle/turn_end","params":{"stopReason":"end_turn"}}));
         std::thread::sleep(std::time::Duration::from_millis(20));
-        transcript::append(&d, "s2", &json!({"method":"_chronicle/user_message","params":{"text":"round 5"}}));
+        transcript::append(&ledger::agent_dir(&d), "s2", &json!({"method":"_chronicle/user_message","params":{"text":"round 5"}}));
         // a dir with no user message is not history
         let _ = std::fs::create_dir_all(super::ledger::agent_dir(&d).join("empty"));
 
         // no caps file yet → resume is NEVER promised
-        let list = transcript::sessions_list(&d, None);
+        let list = transcript::sessions_list(&ledger::agent_dir(&d), None);
         assert_eq!(list.len(), 2, "{list:?}");
         assert!(list.iter().all(|s| s["resumable"] == false));
         assert_eq!(list[0]["id"], "s2", "newest first");
@@ -1892,8 +1937,8 @@ for line in sys.stdin:
         assert_eq!(list[1]["userMessages"], 1);
 
         // capability saved at handshake → resumable, except the live session
-        transcript::save_caps(&d, true);
-        let list = transcript::sessions_list(&d, Some("s2"));
+        transcript::save_caps(&ledger::agent_dir(&d), true);
+        let list = transcript::sessions_list(&ledger::agent_dir(&d), Some("s2"));
         let s2 = list.iter().find(|s| s["id"] == "s2").unwrap();
         assert_eq!(s2["active"], true);
         assert_eq!(s2["resumable"], false, "the live session doesn't offer Resume");
@@ -1901,7 +1946,7 @@ for line in sys.stdin:
         assert_eq!(s1["resumable"], true);
 
         // the read replays the stored lines in order
-        let lines = transcript::read(&d, "s1");
+        let lines = transcript::read(&ledger::agent_dir(&d), "s1");
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[0]["method"], "_chronicle/user_message");
         assert_eq!(lines[2]["method"], "_chronicle/turn_end");
@@ -1927,7 +1972,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        start(&state, emit, key.clone(), dir.clone(), dir.clone(), vec![dir.clone()], None, adapter_command(&npx)).unwrap();
+        start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, adapter_command(&npx)).unwrap();
 
         let ready = wait_for(&rx, 300, |v| state_is(v, "ready") || state_is(v, "needs-login") || state_is(v, "error"));
         if !state_is(&ready, "ready") {
@@ -1962,5 +2007,45 @@ for line in sys.stdin:
         s.stop(true);
         wait_for(&rx, 30, |v| state_is(v, "ended"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn lanes_parse_key_and_store() {
+        assert_eq!(Lane::parse(None).unwrap(), Lane::Chat);
+        assert_eq!(Lane::parse(Some("chat")).unwrap(), Lane::Chat);
+        assert_eq!(Lane::parse(Some("design")).unwrap(), Lane::Design);
+        assert!(Lane::parse(Some("other")).is_err());
+        assert_eq!(Lane::Chat.key("/p"), "/p");
+        assert_eq!(Lane::Design.key("/p"), "/p#design");
+        let d = tmp("lane-store");
+        assert_eq!(Lane::Chat.store(&d), d.join(".chronicle/agent"));
+        assert_eq!(Lane::Design.store(&d), d.join(".chronicle/designs/.threads"));
+    }
+
+    #[test]
+    fn two_lanes_live_at_once_and_events_carry_their_lane() {
+        let Some(h) = start_mock("two-lanes") else { return };
+        let py = python3().unwrap();
+        let script = h.dir.join(".mock-agent.py");
+        let mut cmd = std::process::Command::new(py);
+        cmd.arg(&script).arg(&h.dir);
+        let (tx, rx2) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let dkey = Lane::Design.key(&h.key);
+        assert!(start(&h.state, emit, dkey.clone(), Lane::Design, h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], None, cmd).unwrap());
+        let chat_ready = wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        let design_ready = wait_for(&rx2, 20, |v| state_is(v, "ready"));
+        assert_eq!(chat_ready["lane"], "chat");
+        assert_eq!(chat_ready["dir"], h.key.as_str());
+        assert_eq!(design_ready["lane"], "design");
+        assert_eq!(design_ready["dir"], h.key.as_str());
+        assert!(h.state.get(&h.key).is_some());
+        assert!(h.state.get(&dkey).is_some());
+        // separate `current` pointers
+        assert!(Lane::Chat.store(&h.dir).join("current").exists());
+        assert!(Lane::Design.store(&h.dir).join("current").exists());
+        h.state.get(&dkey).unwrap().stop(false);
+        assert!(h.state.get(&h.key).is_some(), "stopping the design lane leaves chat alive");
+        h.state.drain();
     }
 }

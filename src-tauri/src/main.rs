@@ -14,6 +14,7 @@ mod history;
 mod files;
 mod menu;
 mod notes;
+mod designs;
 mod ledger;
 mod agent_api;
 mod cli;
@@ -3207,7 +3208,7 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
         let app = app.clone();
         Arc::new(move |v| { let _ = app.emit("acp-update", v); })
     };
-    let started = acp::start(&agents, emit, key, p.repo.clone(), p.dir.clone(), jail_roots, None, acp::adapter_command(&npx))?;
+    let started = acp::start(&agents, emit, key, acp::Lane::Chat, p.repo.clone(), p.dir.clone(), jail_roots, None, acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
 
@@ -3225,7 +3226,7 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
         let app = app.clone();
         Arc::new(move |v| { let _ = app.emit("acp-update", v); })
     };
-    let started = acp::start(&agents, emit, key, p.repo.clone(), p.dir.clone(), jail_roots, Some(id), acp::adapter_command(&npx))?;
+    let started = acp::start(&agents, emit, key, acp::Lane::Chat, p.repo.clone(), p.dir.clone(), jail_roots, Some(id), acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
 
@@ -3237,7 +3238,7 @@ async fn agent_sessions_list(roots: State<'_, OpenRoots>, agents: State<'_, acp:
     let live = agents.get(&key)
         .filter(|s| s.current_state().get("alive").and_then(|v| v.as_bool()).unwrap_or(false))
         .and_then(|s| s.current_state().get("sessionId").and_then(|v| v.as_str()).map(String::from));
-    Ok(json!({ "sessions": acp::transcript::sessions_list(&p.dir, live.as_deref()) }))
+    Ok(json!({ "sessions": acp::transcript::sessions_list(&acp::ledger::agent_dir(&p.dir), live.as_deref()) }))
 }
 
 /// A stored session's transcript lines — the frontend replays them through
@@ -3246,7 +3247,7 @@ async fn agent_sessions_list(roots: State<'_, OpenRoots>, agents: State<'_, acp:
 async fn agent_history_read(roots: State<'_, OpenRoots>, dir: String, id: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
     if id.contains('/') || id.contains("..") { return Err("bad session id".into()); }
-    Ok(json!({ "lines": acp::transcript::read(&p.dir, &id) }))
+    Ok(json!({ "lines": acp::transcript::read(&acp::ledger::agent_dir(&p.dir), &id) }))
 }
 
 fn project_roots(p: &Project) -> Vec<PathBuf> {
@@ -3261,6 +3262,7 @@ fn emit_edits_changed(app: &tauri::AppHandle, dir: &str) {
     if let Ok((key, _)) = canon_key(dir) {
         let _ = app.emit("acp-update", json!({
             "dir": key,
+            "lane": "chat",
             "message": { "method": "_chronicle/edits_changed", "params": {} }
         }));
     }
@@ -3271,9 +3273,9 @@ fn emit_edits_changed(app: &tauri::AppHandle, dir: &str) {
 #[tauri::command]
 async fn agent_edits(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, String> {
     let p = project_for(&roots, &dir)?;
-    match acp::ledger::current_session(&p.dir) {
+    match acp::ledger::current_session(&acp::ledger::agent_dir(&p.dir)) {
         None => Ok(json!({ "files": [] })),
-        Some(sid) => Ok(json!({ "files": acp::ledger::files(&p.dir, &sid, &p.repo), "session": sid })),
+        Some(sid) => Ok(json!({ "files": acp::ledger::files(&acp::ledger::agent_dir(&p.dir), &sid, &p.repo), "session": sid })),
     }
 }
 
@@ -3285,16 +3287,16 @@ async fn agent_edit_diff(roots: State<'_, OpenRoots>, dir: String, path: String)
     if !acp::path_in_roots(Path::new(&path), &project_roots(&p)) {
         return Err("the path is outside this project — refused".into());
     }
-    let sid = acp::ledger::current_session(&p.dir).ok_or("there are no agent changes to review")?;
-    acp::ledger::diff(&p.dir, &sid, &p.repo, &path)
+    let sid = acp::ledger::current_session(&acp::ledger::agent_dir(&p.dir)).ok_or("there are no agent changes to review")?;
+    acp::ledger::diff(&acp::ledger::agent_dir(&p.dir), &sid, &p.repo, &path)
 }
 
 /// Keep = accept: drop the entry. `path: None` keeps everything.
 #[tauri::command]
 async fn agent_edit_keep(app: tauri::AppHandle, roots: State<'_, OpenRoots>, dir: String, path: Option<String>) -> Result<(), String> {
     let p = project_for(&roots, &dir)?;
-    let sid = acp::ledger::current_session(&p.dir).ok_or("there are no agent changes to review")?;
-    acp::ledger::keep(&p.dir, &sid, path.as_deref())?;
+    let sid = acp::ledger::current_session(&acp::ledger::agent_dir(&p.dir)).ok_or("there are no agent changes to review")?;
+    acp::ledger::keep(&acp::ledger::agent_dir(&p.dir), &sid, path.as_deref())?;
     emit_edits_changed(&app, &dir);
     Ok(())
 }
@@ -3305,8 +3307,8 @@ async fn agent_edit_keep(app: tauri::AppHandle, roots: State<'_, OpenRoots>, dir
 #[tauri::command]
 async fn agent_edit_undo(app: tauri::AppHandle, roots: State<'_, OpenRoots>, dir: String, path: Option<String>) -> Result<u64, String> {
     let p = project_for(&roots, &dir)?;
-    let sid = acp::ledger::current_session(&p.dir).ok_or("there are no agent changes to undo")?;
-    let n = acp::ledger::undo(&p.dir, &sid, path.as_deref(), &project_roots(&p))?;
+    let sid = acp::ledger::current_session(&acp::ledger::agent_dir(&p.dir)).ok_or("there are no agent changes to undo")?;
+    let n = acp::ledger::undo(&acp::ledger::agent_dir(&p.dir), &sid, path.as_deref(), &project_roots(&p))?;
     emit_edits_changed(&app, &dir);
     Ok(n as u64)
 }
@@ -3324,12 +3326,12 @@ async fn agent_restore_checkpoint(app: tauri::AppHandle, roots: State<'_, OpenRo
             return Err("the agent is still working — stop it first".into());
         }
     }
-    let sid = acp::ledger::current_session(&p.dir).ok_or("there's no session to undo")?;
+    let sid = acp::ledger::current_session(&acp::ledger::agent_dir(&p.dir)).ok_or("there's no session to undo")?;
     if !acp::checkpoint::contains(&p.repo, &sid, &id) {
         return Err("that snapshot isn't from this session".into());
     }
     acp::checkpoint::restore(&p.repo, &id)?;
-    acp::ledger::clear(&p.dir, &sid);
+    acp::ledger::clear(&acp::ledger::agent_dir(&p.dir), &sid);
     emit_edits_changed(&app, &dir);
     Ok(())
 }
