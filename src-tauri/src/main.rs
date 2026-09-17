@@ -2997,17 +2997,21 @@ pub(crate) fn project_for(roots: &OpenRoots, dir: &str) -> Result<Project, Strin
     Ok(load_project(&d))
 }
 
-/// The `chronicle-file://` base a design canvas mounts its frames under: the
-/// project's designs root, registered with the Web pane's protocol under the
-/// same hash `web_open_file` would use. The frontend joins a design's relative
-/// frame path onto this to build each iframe's `src`.
+/// The `chronicle-file://` base a design canvas mounts its frames under. This
+/// registers ONLY the project's `.chronicle/designs` directory itself — never
+/// the vault or checkout root above it — under its own hash in
+/// `WebState::design_roots`, so every response on this host goes through the
+/// design policy (`web::serve_project_file`) and nothing outside the designs
+/// folder is ever reachable through it. The frontend joins a design's relative
+/// frame path onto this (`${base}${slug}/${file}`), which is why the base
+/// still ends in a trailing slash even though it no longer spells out
+/// `.chronicle/designs/` — the host itself is now rooted there.
 #[tauri::command]
 fn design_frame_base(roots: State<OpenRoots>, web: State<web::WebState>, dir: String) -> Result<String, String> {
     let p = project_for(&roots, &dir)?;
-    let base = notes::index::vault_root(&p.dir);
-    designs::ensure_root(&p.dir)?;
-    let hash = web::register_root(&web, &base)?;
-    Ok(format!("chronicle-file://{hash}/.chronicle/designs/"))
+    let designs_dir = designs::ensure_root(&p.dir)?;
+    let hash = web::register_design_root(&web, &designs_dir)?;
+    Ok(format!("chronicle-file://{hash}/"))
 }
 
 fn allow_root(roots: &OpenRoots, dir: &Path) {

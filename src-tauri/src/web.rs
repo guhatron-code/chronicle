@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, State, Webview, WebviewBuilder, WebviewUrl};
 
@@ -95,6 +95,13 @@ impl From<SavedFile> for SavedTabs {
 pub struct WebState {
     /// project hash -> canonical root, for the chronicle-file protocol
     pub roots: Mutex<HashMap<String, PathBuf>>,
+    /// design hash -> canonical `.chronicle/designs` directory, for the SAME
+    /// protocol but a different host: a host registered here is served ONLY
+    /// under the design policy (see `serve_project_file`), and never holds
+    /// anything above its own designs folder — a vault or checkout root never
+    /// lands in this map, which is what keeps a design frame's request from
+    /// ever reaching the rest of the project.
+    pub design_roots: Mutex<HashMap<String, PathBuf>>,
     /// tab label -> live tab
     pub tabs: Mutex<HashMap<String, WebTab>>,
     pub next_id: std::sync::atomic::AtomicU32,
@@ -105,7 +112,7 @@ pub struct WebState {
 }
 impl WebState {
     pub fn new() -> Self {
-        Self { roots: Mutex::new(HashMap::new()), tabs: Mutex::new(HashMap::new()),
+        Self { roots: Mutex::new(HashMap::new()), design_roots: Mutex::new(HashMap::new()), tabs: Mutex::new(HashMap::new()),
                next_id: std::sync::atomic::AtomicU32::new(1), bounds: Mutex::new(None), shown: Mutex::new(None) }
     }
 }
@@ -129,6 +136,21 @@ pub fn register_root(web: &WebState, root: &Path) -> Result<String, String> {
     let root = root.canonicalize().map_err(|e| e.to_string())?;
     let hash = project_hash(&root);
     web.roots.lock().map_err(|e| e.to_string())?.insert(hash.clone(), root);
+    Ok(hash)
+}
+
+/// Registers `design_root` (canonicalised — normally a project's
+/// `.chronicle/designs` directory, nothing above it) under its own hash in
+/// `design_roots`, and returns that hash. A host registered here is served
+/// under the design policy for as long as what it resolves to actually looks
+/// like a design page (see `serve_project_file`) — never falls back to an
+/// ordinary file, and never shares a hash with anything in `roots`, since the
+/// hash is derived from the canonical path itself and a designs folder is
+/// never a project root.
+pub fn register_design_root(web: &WebState, design_root: &Path) -> Result<String, String> {
+    let root = design_root.canonicalize().map_err(|e| e.to_string())?;
+    let hash = project_hash(&root);
+    web.design_roots.lock().map_err(|e| e.to_string())?.insert(hash.clone(), root);
     Ok(hash)
 }
 
@@ -187,10 +209,17 @@ pub struct Served { pub status: u16, pub mime: &'static str, pub body: Vec<u8>, 
 fn plain(status: u16, msg: &[u8]) -> Served { Served { status, mime: "text/plain", body: msg.to_vec(), headers: vec![] } }
 
 /// The protocol handler body: `chronicle-file://<hash>/<rel>` → the file's bytes
-/// with a content type, or 404 for anything outside the jail. A file under
-/// `.chronicle/designs/…` (see `designs::frame::is_design_path`) gets the design
-/// CSP/CORS headers, and an HTML one gets the tiny reporter script injected —
-/// every other file is served byte-identical to before, with no new headers.
+/// with a content type, or 404 for anything outside the jail.
+///
+/// `hash` is looked up in `design_roots` FIRST. If it's a design host, the
+/// request is served — or refused — entirely under the design policy by
+/// `serve_design_file`, and `roots` is never even consulted for that hash. A
+/// host that isn't a design host is served exactly as before: the ordinary
+/// jailed file, no design treatment, EVEN when the relative path happens to
+/// spell `.chronicle/designs/…` — that string means nothing to this branch any
+/// more, since the design/ordinary distinction now lives in which map the host
+/// is registered under, decided once (`design_frame_base` vs. `web_open_file`)
+/// rather than re-derived from a request's own path on every hit.
 ///
 /// No range support: the whole file goes out as one 200, so `Range:` headers are
 /// ignored and seeking inside a long video won't work. Deferred — it needs the
@@ -199,6 +228,11 @@ pub fn serve_project_file(web: &WebState, url: &str) -> Served {
     let Ok(u) = url::Url::parse(url) else { return plain(404, b"not found") };
     let hash = u.host_str().unwrap_or("").to_string();
     let rel = percent_encoding::percent_decode_str(u.path().trim_start_matches('/')).decode_utf8_lossy().into_owned();
+
+    if let Some(design_root) = web.design_roots.lock().ok().and_then(|g| g.get(&hash).cloned()) {
+        return serve_design_file(&design_root, &hash, &rel);
+    }
+
     let root = web.roots.lock().ok().and_then(|g| g.get(&hash).cloned());
     match root.and_then(|r| resolve_project_file(&r, &rel)) {
         Some(file) => {
@@ -206,20 +240,42 @@ pub fn serve_project_file(web: &WebState, url: &str) -> Served {
                 return plain(413, b"file too large to show here");
             }
             match std::fs::read(&file) {
-                Ok(bytes) => {
-                    let mime = mime_for(&file);
-                    if crate::designs::frame::is_design_path(&rel) {
-                        let body = if mime.starts_with("text/html") { crate::designs::frame::inject_reporter(&bytes) } else { bytes };
-                        Served { status: 200, mime, body, headers: crate::designs::frame::design_headers() }
-                    } else {
-                        Served { status: 200, mime, body: bytes, headers: vec![] }
-                    }
-                }
+                Ok(bytes) => Served { status: 200, mime: mime_for(&file), body: bytes, headers: vec![] },
                 Err(_) => plain(404, b"not found"),
             }
         }
         None => plain(404, b"not found"),
     }
+}
+
+/// Serves one file on a design host. `resolve_project_file` does the jail
+/// (canonicalise, must stay under `design_root`, must be a real file) exactly
+/// as it does for an ordinary host; what's different here is what happens
+/// AFTER that: the file's path relative to the CANONICAL `design_root` — never
+/// the raw `rel` the request carried — must itself look like a design page
+/// (`designs::frame::is_design_file`), or this 404s even though the file is
+/// real and inside the jail. That's what stops `.threads/`, `.gitignore`, and
+/// a mixed-case spelling the filesystem case-folded into something else from
+/// ever getting served off this host at all.
+fn serve_design_file(design_root: &Path, hash: &str, rel: &str) -> Served {
+    let Some(file) = resolve_project_file(design_root, rel) else { return plain(404, b"not found") };
+    let Ok(canon_root) = design_root.canonicalize() else { return plain(404, b"not found") };
+    let Ok(rel_to_root) = file.strip_prefix(&canon_root) else { return plain(404, b"not found") };
+    if !crate::designs::frame::is_design_file(rel_to_root) { return plain(404, b"not found"); }
+
+    if std::fs::metadata(&file).map(|m| m.len() > MAX_SERVED_BYTES).unwrap_or(false) {
+        return plain(413, b"file too large to show here");
+    }
+    let Ok(bytes) = std::fs::read(&file) else { return plain(404, b"not found") };
+
+    let mime = mime_for(&file);
+    let ext = file.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase());
+    let body = if mime.starts_with("text/html") { crate::designs::frame::inject_reporter(&bytes) } else { bytes };
+    let slug = match rel_to_root.components().next() {
+        Some(Component::Normal(s)) => s.to_string_lossy().into_owned(),
+        _ => String::new(),
+    };
+    Served { status: 200, mime, body, headers: crate::designs::frame::design_headers(hash, &slug, ext.as_deref()) }
 }
 
 /* ================= tabs: native child webviews ================= */
@@ -626,22 +682,106 @@ mod tests {
         assert!(perms.contains(&"default"), "the app's own commands are not granted");
     }
 
-    #[test]
-    fn design_frames_are_served_with_their_policy_and_reporter_and_others_are_not() {
+    /// Sets up a project with a `.chronicle/designs/home/...` tree (a live
+    /// frame, a font, a `.threads` file, and a `.gitignore` sitting right at
+    /// the designs root) and registers it BOTH ways: as an ordinary project
+    /// root (what `web_open_file` would do) and as a design root (what
+    /// `design_frame_base` now does). Returns `(project_hash, design_hash,
+    /// WebState)`.
+    fn design_fixture() -> (WebState, String, String) {
         let d = std::env::temp_dir().join(format!("chronicle-serve-design-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join(".chronicle/designs/home/frames")).unwrap();
+        std::fs::create_dir_all(d.join(".chronicle/designs/home/assets/fonts")).unwrap();
+        std::fs::create_dir_all(d.join(".chronicle/designs/.threads/s")).unwrap();
+        std::fs::create_dir_all(d.join("src")).unwrap();
         std::fs::write(d.join(".chronicle/designs/home/frames/a.html"), "<html><head></head><body>x</body></html>").unwrap();
+        std::fs::write(d.join(".chronicle/designs/home/assets/fonts/x.woff2"), "font-bytes").unwrap();
+        std::fs::write(d.join(".chronicle/designs/.threads/s/thread.jsonl"), "{}").unwrap();
+        std::fs::write(d.join(".chronicle/designs/.gitignore"), "*\n").unwrap();
         std::fs::write(d.join("page.html"), "<html><head></head><body>y</body></html>").unwrap();
+        std::fs::write(d.join("src/main.rs"), "fn main() {}").unwrap();
         let web = WebState::new();
-        let hash = register_root(&web, &d).unwrap();
-        let s = serve_project_file(&web, &format!("chronicle-file://{hash}/.chronicle/designs/home/frames/a.html"));
+        let project_hash = register_root(&web, &d).unwrap();
+        let design_hash = register_design_root(&web, &d.join(".chronicle/designs")).unwrap();
+        (web, project_hash, design_hash)
+    }
+
+    #[test]
+    fn a_design_frame_gets_the_scoped_csp_and_the_reporter_and_no_acao() {
+        let (web, _project_hash, design_hash) = design_fixture();
+        let s = serve_project_file(&web, &format!("chronicle-file://{design_hash}/home/frames/a.html"));
         assert_eq!(s.status, 200);
         assert!(String::from_utf8(s.body).unwrap().contains("__chronicleFrame"));
+        let csp = s.headers.iter().find(|(k, _)| *k == "Content-Security-Policy").map(|(_, v)| v.clone());
+        assert!(csp.as_deref().is_some_and(|v| v.contains(&format!("chronicle-file://{design_hash}/home/"))), "{csp:?}");
+        assert!(!s.headers.iter().any(|(k, _)| *k == "Access-Control-Allow-Origin"), "an html frame gets no ACAO");
+    }
+
+    #[test]
+    fn a_design_font_gets_acao() {
+        let (web, _project_hash, design_hash) = design_fixture();
+        let s = serve_project_file(&web, &format!("chronicle-file://{design_hash}/home/assets/fonts/x.woff2"));
+        assert_eq!(s.status, 200);
+        assert!(s.headers.iter().any(|(k, v)| *k == "Access-Control-Allow-Origin" && v == "*"));
         assert!(s.headers.iter().any(|(k, _)| *k == "Content-Security-Policy"));
-        let o = serve_project_file(&web, &format!("chronicle-file://{hash}/page.html"));
+    }
+
+    #[test]
+    fn an_ordinary_project_host_never_gets_the_design_treatment_even_under_chronicle_designs() {
+        let (web, project_hash, _design_hash) = design_fixture();
+        let s = serve_project_file(&web, &format!("chronicle-file://{project_hash}/.chronicle/designs/home/frames/a.html"));
+        assert_eq!(s.status, 200, "the file is real and inside the jail — it still serves");
+        assert!(s.headers.is_empty(), "an ordinary host must never apply the design policy");
+        assert!(!String::from_utf8(s.body).unwrap().contains("__chronicleFrame"), "no reporter on an ordinary host");
+        // and an ordinary file on that same host is served exactly as ever
+        let o = serve_project_file(&web, &format!("chronicle-file://{project_hash}/page.html"));
         assert_eq!(o.status, 200);
-        assert!(!String::from_utf8(o.body).unwrap().contains("__chronicleFrame"));
         assert!(o.headers.is_empty());
+        assert!(!String::from_utf8(o.body).unwrap().contains("__chronicleFrame"));
+    }
+
+    #[test]
+    fn housekeeping_directly_under_the_design_root_404s_on_the_design_host() {
+        let (web, _project_hash, design_hash) = design_fixture();
+        let dotfile = serve_project_file(&web, &format!("chronicle-file://{design_hash}/.gitignore"));
+        assert_eq!(dotfile.status, 404);
+        // reached via a traversal that cancels back out to a housekeeping path
+        let threads = serve_project_file(&web, &format!("chronicle-file://{design_hash}/home/..%2F.threads/s/thread.jsonl"));
+        assert_eq!(threads.status, 404);
+    }
+
+    #[test]
+    fn a_traversal_that_escapes_the_design_root_404s_even_when_the_target_file_is_real() {
+        let (web, _project_hash, design_hash) = design_fixture();
+        // home/..%2F..%2F..%2Fsrc/main.rs decodes to home/../../../src/main.rs,
+        // which resolves outside .chronicle/designs entirely — to the project's
+        // own src/main.rs, a real file the design host must never reach
+        let s = serve_project_file(&web, &format!("chronicle-file://{design_hash}/home/..%2F..%2F..%2Fsrc/main.rs"));
+        assert_eq!(s.status, 404);
+        assert!(s.headers.is_empty());
+    }
+
+    #[test]
+    fn an_upper_case_designs_path_never_escapes_the_rules() {
+        let (web, project_hash, design_hash) = design_fixture();
+
+        // ordinary project host: never gets design treatment, whatever the case
+        let o = serve_project_file(&web, &format!("chronicle-file://{project_hash}/.CHRONICLE/DESIGNS/home/frames/a.html"));
+        assert!(o.headers.is_empty(), "an ordinary project host must never apply the design policy");
+        if o.status == 200 {
+            assert!(!String::from_utf8(o.body).unwrap().contains("__chronicleFrame"));
+        }
+
+        // design host: resolves or 404s depending on the filesystem's case
+        // sensitivity, but whenever it resolves it is still correctly treated
+        // as a design page — never served plain, never escaping the root
+        let s = serve_project_file(&web, &format!("chronicle-file://{design_hash}/HOME/FRAMES/A.HTML"));
+        if s.status == 200 {
+            assert!(s.headers.iter().any(|(k, _)| *k == "Content-Security-Policy"));
+        } else {
+            assert_eq!(s.status, 404);
+        }
     }
 
     #[test]
