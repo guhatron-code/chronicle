@@ -3197,9 +3197,10 @@ fn pty_kill(pty: State<PtyState>, id: u32) -> Result<(), String> {
 /// Start (or reuse) the project's one live agent session. Progress arrives as
 /// `acp-update` events (installing → starting → ready | needs-login | error).
 #[tauri::command]
-async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String) -> Result<Value, String> {
+async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, lane: Option<String>) -> Result<Value, String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
-    let (key, _) = canon_key(&dir)?;
+    let key = session_key(&dir, lane)?;
     let npx = find_tool("npx")
         .ok_or("the agent needs Node.js — install it from nodejs.org, then try again")?;
     let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
@@ -3208,16 +3209,17 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
         let app = app.clone();
         Arc::new(move |v| { let _ = app.emit("acp-update", v); })
     };
-    let started = acp::start(&agents, emit, key, acp::Lane::Chat, p.repo.clone(), p.dir.clone(), jail_roots, None, acp::adapter_command(&npx))?;
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, None, acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
 
 /// TRUE resume via the adapter's session/load — only offered when the
 /// initialize response advertised loadSession (the history list gates it).
 #[tauri::command]
-async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, id: String) -> Result<Value, String> {
+async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, id: String, lane: Option<String>) -> Result<Value, String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
-    let (key, _) = canon_key(&dir)?;
+    let key = session_key(&dir, lane)?;
     let npx = find_tool("npx")
         .ok_or("the agent needs Node.js — install it from nodejs.org, then try again")?;
     let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
@@ -3226,28 +3228,30 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
         let app = app.clone();
         Arc::new(move |v| { let _ = app.emit("acp-update", v); })
     };
-    let started = acp::start(&agents, emit, key, acp::Lane::Chat, p.repo.clone(), p.dir.clone(), jail_roots, Some(id), acp::adapter_command(&npx))?;
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, Some(id), acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
 
 /// Previous sessions from the transcript store, newest first.
 #[tauri::command]
-async fn agent_sessions_list(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String) -> Result<Value, String> {
+async fn agent_sessions_list(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, lane: Option<String>) -> Result<Value, String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
-    let (key, _) = canon_key(&dir)?;
+    let key = session_key(&dir, lane)?;
     let live = agents.get(&key)
         .filter(|s| s.current_state().get("alive").and_then(|v| v.as_bool()).unwrap_or(false))
         .and_then(|s| s.current_state().get("sessionId").and_then(|v| v.as_str()).map(String::from));
-    Ok(json!({ "sessions": acp::transcript::sessions_list(&acp::ledger::agent_dir(&p.dir), live.as_deref()) }))
+    Ok(json!({ "sessions": acp::transcript::sessions_list(&lane.store(&p.dir), live.as_deref()) }))
 }
 
 /// A stored session's transcript lines — the frontend replays them through
 /// the same reducer that handles live events.
 #[tauri::command]
-async fn agent_history_read(roots: State<'_, OpenRoots>, dir: String, id: String) -> Result<Value, String> {
+async fn agent_history_read(roots: State<'_, OpenRoots>, dir: String, id: String, lane: Option<String>) -> Result<Value, String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     if id.contains('/') || id.contains("..") { return Err("bad session id".into()); }
-    Ok(json!({ "lines": acp::transcript::read(&acp::ledger::agent_dir(&p.dir), &id) }))
+    Ok(json!({ "lines": acp::transcript::read(&lane.store(&p.dir), &id) }))
 }
 
 fn project_roots(p: &Project) -> Vec<PathBuf> {
@@ -3339,54 +3343,69 @@ async fn agent_restore_checkpoint(app: tauri::AppHandle, roots: State<'_, OpenRo
 /// The session's current snapshot — lets the pane re-sync after a reload
 /// without replaying events.
 #[tauri::command]
-async fn agent_session_state(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String) -> Result<Value, String> {
+async fn agent_session_state(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, lane: Option<String>) -> Result<Value, String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
     let _ = project_for(&roots, &dir)?;
-    let (key, _) = canon_key(&dir)?;
+    let key = session_key(&dir, lane)?;
     Ok(agents.get(&key).map(|s| s.current_state()).unwrap_or(json!({ "alive": false })))
 }
 
-fn agent_for(roots: &OpenRoots, agents: &acp::AcpState, dir: &str) -> Result<Arc<acp::AcpSession>, String> {
+fn session_key(dir: &str, lane: acp::Lane) -> Result<String, String> {
+    let (canon, _) = canon_key(dir)?;
+    Ok(lane.key(&canon))
+}
+
+fn agent_for(roots: &OpenRoots, agents: &acp::AcpState, dir: &str, lane: acp::Lane) -> Result<Arc<acp::AcpSession>, String> {
     let _ = project_for(roots, dir)?;
-    let (key, _) = canon_key(dir)?;
-    agents.get(&key).ok_or_else(|| "there's no agent session running for this project".into())
+    let key = session_key(dir, lane)?;
+    agents.get(&key).ok_or_else(|| match lane {
+        acp::Lane::Chat => "there's no agent session running for this project".to_string(),
+        acp::Lane::Design => "the design session isn't running".to_string(),
+    })
 }
 
 #[tauri::command]
-async fn agent_prompt(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, blocks: Vec<Value>, display: String) -> Result<(), String> {
+async fn agent_prompt(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, blocks: Vec<Value>, display: String, lane: Option<String>) -> Result<(), String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
     if blocks.is_empty() { return Err("write a message first".into()); }
-    agent_for(&roots, &agents, &dir)?.prompt(blocks, display)
+    agent_for(&roots, &agents, &dir, lane)?.prompt(blocks, display)
 }
 
 #[tauri::command]
-async fn agent_cancel(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String) -> Result<(), String> {
-    agent_for(&roots, &agents, &dir)?.cancel()
+async fn agent_cancel(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, lane: Option<String>) -> Result<(), String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
+    agent_for(&roots, &agents, &dir, lane)?.cancel()
 }
 
 #[tauri::command]
-async fn agent_set_mode(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, mode: String) -> Result<(), String> {
-    agent_for(&roots, &agents, &dir)?.set_mode(&mode)
+async fn agent_set_mode(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, mode: String, lane: Option<String>) -> Result<(), String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
+    agent_for(&roots, &agents, &dir, lane)?.set_mode(&mode)
 }
 
 /// Set a session config option (the model picker). `config_id`/`value` are the
 /// agent's own advertised ids.
 #[tauri::command]
-async fn agent_set_config_option(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, config_id: String, value: String) -> Result<(), String> {
-    agent_for(&roots, &agents, &dir)?.set_config_option(&config_id, &value)
+async fn agent_set_config_option(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, config_id: String, value: String, lane: Option<String>) -> Result<(), String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
+    agent_for(&roots, &agents, &dir, lane)?.set_config_option(&config_id, &value)
 }
 
 /// Answer a permission ask. `option` is one of the agent's own offered option
 /// ids; None answers "cancelled".
 #[tauri::command]
-async fn agent_respond_permission(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, request_id: String, option: Option<String>) -> Result<(), String> {
-    agent_for(&roots, &agents, &dir)?.respond_permission(&request_id, option)
+async fn agent_respond_permission(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, request_id: String, option: Option<String>, lane: Option<String>) -> Result<(), String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
+    agent_for(&roots, &agents, &dir, lane)?.respond_permission(&request_id, option)
 }
 
 /// `clean` (default true) = the explicit "End session" — unresolved edits
 /// auto-keep. Closing a project passes false: the child stops but the ledger
 /// stays reviewable on reopen.
 #[tauri::command]
-async fn agent_session_stop(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, clean: Option<bool>) -> Result<(), String> {
-    agent_for(&roots, &agents, &dir)?.stop(clean.unwrap_or(true));
+async fn agent_session_stop(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, clean: Option<bool>, lane: Option<String>) -> Result<(), String> {
+    let lane = acp::Lane::parse(lane.as_deref())?;
+    agent_for(&roots, &agents, &dir, lane)?.stop(clean.unwrap_or(true));
     Ok(())
 }
 
@@ -3917,6 +3936,15 @@ mod r1_tests {
         let (kb, lb) = canon_key(b.to_string_lossy().as_ref()).unwrap();
         assert_ne!(ka, kb, "same-named folders must not share a run key");
         assert_ne!(la, lb, "same-named folders must not share a log file");
+    }
+
+    #[test]
+    fn session_keys_follow_the_lane() {
+        let d = std::env::temp_dir().join(format!("chronicle-lane-key-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let canon = d.canonicalize().unwrap().to_string_lossy().to_string();
+        assert_eq!(session_key(d.to_str().unwrap(), acp::Lane::Chat).unwrap(), canon);
+        assert_eq!(session_key(d.to_str().unwrap(), acp::Lane::Design).unwrap(), format!("{canon}#design"));
     }
 
     #[test]
