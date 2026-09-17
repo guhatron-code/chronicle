@@ -83,8 +83,11 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
   const nearest = shown && v && size.w ? liveFrames(rects, v, size.w, size.h) : new Set<string>();
   const live = shown && g.liveId && rects[g.liveId] ? pinLive(nearest, g.liveId) : nearest;
 
-  const row = p.rows.find((r) => r.slug === slug);
-  const latest = row?.latestVersion ?? p.versions[0]?.n ?? null;
+  // the one derivation of "latest": p.versions is refreshed after a turn's
+  // thumbnails render, so the picture a frame asks for exists by then
+  const latest = p.versions[0]?.n ?? null;
+  // changes whenever versions refresh — a thumbnail that 404'd earlier is asked for again
+  const thumbToken = `${p.reloadTick}-${p.versions.length}`;
   const frames = design?.frames ?? [];
   const sel = frames.find((f) => f.id === g.selected);
   const announce = sel ? `${sel.label}, ${sel.width} wide, ${stateWordOf(p.frameStates[sel.id] ?? { kind: "placeholder" })}` : "";
@@ -125,7 +128,7 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
             ))}
           </div>
         ) : design && v && slug && p.base != null && comparing ? (
-          <DesignCompare frames={frames} rects={rects} v={v} base={p.base} slug={slug} compare={p.compare!} newest={latest!} />
+          <DesignCompare frames={frames} rects={rects} v={v} base={p.base} slug={slug} compare={p.compare!} newest={latest!} token={thumbToken} />
         ) : design && v && slug && p.base != null ? (
           frames.map((f) => {
             const r = rects[f.id];
@@ -140,7 +143,8 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
                 dir={dir} frame={f} rect={r} zoom={v.zoom} at={at}
                 live={live.has(f.id)} interactive={g.liveId === f.id} selected={g.selected === f.id}
                 base={p.base!} slug={slug} state={p.frameStates[f.id] ?? { kind: "placeholder" }}
-                thumb={p.base && latest ? `${p.base}${slug}/.versions/v${latest}/thumbs/${f.id}.png` : null}
+                thumb={p.base && latest ? `${p.base}${slug}/.versions/v${latest}/thumbs/${f.id}.png?t=${thumbToken}` : null}
+                thumbToken={thumbToken}
                 reloadTick={p.reloadTick}
                 iframeRef={iframeRef(f.id)}
                 onSelect={() => g.select(f.id)}

@@ -19,18 +19,22 @@ export const stateWordOf = (s: FrameState) =>
 export function FrameView(props: {
   dir: string; frame: Frame; rect: Rect; zoom: number; live: boolean; interactive: boolean; selected: boolean;
   base: string; slug: string; state: FrameState; thumb: string | null; reloadTick: number;
+  /** changes when the design's versions refresh; clears the failed thumbnails */
+  thumbToken: string;
   /** screen position of the frame's top-left corner (worldToScreen of rect, plus any drag offset) */
   at: { x: number; y: number };
   iframeRef: (el: HTMLIFrameElement | null) => void;
   onSelect: () => void; onDragStart: (e: ReactPointerEvent) => void;
 }) {
-  const { dir, frame, rect, zoom, live, interactive, selected, base, slug, state, thumb, reloadTick, at } = props;
+  const { dir, frame, rect, zoom, live, interactive, selected, base, slug, state, thumb, reloadTick, thumbToken, at } = props;
   const w = rect.w * zoom, h = rect.h * zoom;
   const word = stateWordOf(state);
-  // Keyed by URL, not a DOM mutation: a thumbnail can 404 (e.g. a version that
-  // predates this frame) without ever un-404ing for the same URL, so once a
-  // src fails it stays failed until a different thumb prop arrives.
-  const [thumbFailed, setThumbFailed] = useState<Set<string>>(() => new Set());
+  // Keyed by URL, not a DOM mutation. A thumbnail can 404 simply because it
+  // hasn't rendered yet, so the failed set belongs to one thumbToken: when the
+  // versions refresh the token (and the URL's ?t=) changes and every picture is
+  // asked for again.
+  const [failedFor, setFailedFor] = useState<{ token: string; urls: Set<string> }>(() => ({ token: thumbToken, urls: new Set() }));
+  const thumbFailed = failedFor.token === thumbToken ? failedFor.urls : new Set<string>();
   const grab = (e: ReactPointerEvent) => {
     if (e.button !== 0) return;
     props.onSelect();
@@ -98,7 +102,10 @@ export function FrameView(props: {
             draggable={false}
             className="block object-cover object-top select-none"
             style={{ width: w, height: h }}
-            onError={() => setThumbFailed((s) => (s.has(thumb) ? s : new Set(s).add(thumb)))}
+            onError={() => setFailedFor((f) => {
+              const urls = f.token === thumbToken ? f.urls : new Set<string>();
+              return urls.has(thumb) ? f : { token: thumbToken, urls: new Set(urls).add(thumb) };
+            })}
           />
         ) : (
           // Plain box, no text: on the live canvas a failed thumbnail almost always
