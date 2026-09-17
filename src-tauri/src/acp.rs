@@ -307,6 +307,19 @@ pub mod ledger {
                 .map(|(k, _)| k.clone())
                 .collect(),
         };
+        // a base name must be one plain file name inside bases/ — a forged
+        // `../..` must never pick the bytes that land on a target. Checked for
+        // every target BEFORE anything is touched.
+        for key in &targets {
+            if let Some(n) = idx.get(key).and_then(|m| m.get("base")).and_then(|v| v.as_str()) {
+                let mut comps = Path::new(n).components();
+                let plain = !n.contains('/') && !n.contains('\\')
+                    && matches!((comps.next(), comps.next()), (Some(std::path::Component::Normal(_)), None));
+                if !plain {
+                    return Err("the record for this change is damaged — refused".into());
+                }
+            }
+        }
         let mut undone = 0usize;
         for key in targets {
             let meta = idx.get(&key).cloned().unwrap_or(Value::Null);
@@ -609,7 +622,12 @@ pub fn path_in_roots(p: &Path, roots: &[PathBuf]) -> bool {
 }
 
 #[derive(Debug)]
-pub enum WriteDecision { Allow { option_id: String }, Refuse { option_id: String, path: String } }
+pub enum WriteDecision {
+    Allow { option_id: String },
+    Refuse { option_id: String, path: String },
+    /// No once-only option to answer with: the ask is cancelled, never shown.
+    Cancel { path: String },
+}
 
 const WRITE_TOOLS: [&str; 4] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 
@@ -631,18 +649,41 @@ fn has_dangling_link(p: &Path) -> bool {
     })
 }
 
-/// Strictly inside `root`: absolute, no `..`, no dangling link, and the
-/// canonical path sits under the canonical root.
+/// Strictly inside a design: absolute, no `..`, no dangling link, and the
+/// canonical path is `<designs root>/<slug>/…` where slug is a normal name that
+/// doesn't start with `.` — so `.threads` (the lane's own records, which undo
+/// trusts), `.gitignore` and any future dot entry are out of reach.
 fn strictly_inside(p: &Path, root: &Path) -> bool {
-    p.is_absolute()
-        && !p.components().any(|c| matches!(c, std::path::Component::ParentDir))
-        && !has_dangling_link(p)
-        && path_in_roots(p, &[root.to_path_buf()])
+    use std::path::Component;
+    if !p.is_absolute()
+        || p.components().any(|c| matches!(c, Component::ParentDir))
+        || has_dangling_link(p)
+        || !path_in_roots(p, &[root.to_path_buf()])
+    {
+        return false;
+    }
+    // canonicalize the deepest existing ancestor, as path_in_roots does
+    let mut existing = p.to_path_buf();
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    while !existing.exists() {
+        let Some(name) = existing.file_name().map(|n| n.to_os_string()) else { return false };
+        tail.push(name);
+        if !existing.pop() { return false; }
+    }
+    let (Ok(mut canon), Ok(croot)) = (existing.canonicalize(), root.canonicalize()) else { return false };
+    for part in tail.iter().rev() { canon.push(part); }
+    let Ok(rel) = canon.strip_prefix(&croot) else { return false };
+    let parts: Vec<Component> = rel.components().collect();
+    parts.len() >= 2
+        && parts.iter().all(|c| matches!(c, Component::Normal(_)))
+        && matches!(parts[0], Component::Normal(first) if !first.to_string_lossy().starts_with('.'))
 }
 
 /// Layer 1 of the design lane's fence: a permission request for a file-writing
-/// tool is answered here, never shown. Inside the designs folder → allow once;
-/// anywhere else (or a path that can't be proven inside) → reject once.
+/// tool is answered here, never shown. Inside a design → allow once; anywhere
+/// else (or a path that can't be proven inside) → reject once. Never the
+/// "always" options (they write durable rules to settings outside the folder):
+/// with no once-only option the ask is cancelled — it fails closed.
 pub fn design_write_decision(params: &Value, designs_root: &Path) -> Option<WriteDecision> {
     let call = params.get("toolCall")?;
     let name = call.get("name").and_then(|v| v.as_str())
@@ -652,11 +693,12 @@ pub fn design_write_decision(params: &Value, designs_root: &Path) -> Option<Writ
     let options = params.get("options").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let pick = |kind: &str| options.iter().find(|o| o["kind"] == kind).and_then(|o| o["optionId"].as_str()).map(String::from);
     let inside = !path.is_empty() && strictly_inside(Path::new(path), designs_root);
-    if inside {
-        pick("allow_once").or_else(|| pick("allow_always")).map(|option_id| WriteDecision::Allow { option_id })
-    } else {
-        pick("reject_once").or_else(|| pick("reject_always")).map(|option_id| WriteDecision::Refuse { option_id, path: path.to_string() })
-    }
+    let path = path.to_string();
+    Some(match (inside, pick("allow_once"), pick("reject_once")) {
+        (true, Some(option_id), _) => WriteDecision::Allow { option_id },
+        (false, _, Some(option_id)) => WriteDecision::Refuse { option_id, path },
+        _ => WriteDecision::Cancel { path },
+    })
 }
 
 pub struct AcpSession {
@@ -1112,15 +1154,18 @@ impl AcpSession {
                 if let Some(root) = &self.designs_root {
                     if let Some(decision) = design_write_decision(&params, root) {
                         let tool_call_id = params.pointer("/toolCall/toolCallId").cloned().unwrap_or(Value::Null);
-                        let (option_id, allowed, path, reason) = match decision {
+                        let refusal = "The design session can only change files in .chronicle/designs/.".to_string();
+                        let (outcome, allowed, path, reason) = match decision {
                             WriteDecision::Allow { option_id } => {
                                 let path = params.get("toolCall").map(write_target).unwrap_or("").to_string();
-                                (option_id, true, path, String::new())
+                                (json!({ "outcome": "selected", "optionId": option_id }), true, path, String::new())
                             }
-                            WriteDecision::Refuse { option_id, path } => (option_id, false, path,
-                                "The design session can only change files in .chronicle/designs/.".to_string()),
+                            WriteDecision::Refuse { option_id, path } =>
+                                (json!({ "outcome": "selected", "optionId": option_id }), false, path, refusal),
+                            WriteDecision::Cancel { path } =>
+                                (json!({ "outcome": "cancelled" }), false, path, refusal),
                         };
-                        self.respond_ok(&id, json!({ "outcome": { "outcome": "selected", "optionId": option_id } }));
+                        self.respond_ok(&id, json!({ "outcome": outcome }));
                         let guard = json!({ "method": "_chronicle/guard", "params": {
                             "toolCallId": tool_call_id, "allowed": allowed, "path": path, "reason": reason } });
                         self.append_transcript(&guard);
@@ -1472,10 +1517,12 @@ impl AcpSession {
         let Ok(now_tree) = checkpoint::snapshot_tree_as(&self.repo, self.lane.as_str()) else { return };
         let mut paths = Vec::new();
         for (status, rel) in checkpoint::changed_since(&self.repo, &cp, &now_tree) {
+            // the app itself writes under .chronicle/ mid-turn (notes, the chat ledger,
+            // journal, rounds) — an Undo there could revert the user's own work
             if rel.starts_with(".chronicle/") { continue; }
             let abs = self.repo.join(&rel);
             let base = if status == 'A' { None } else { checkpoint::bytes_at(&self.repo, &cp, &rel) };
-            if ledger::record_base(&self.store, &sid, &abs, true, base.as_deref()).is_ok() { paths.push(rel); }
+            if let Ok(true) = ledger::record_base(&self.store, &sid, &abs, true, base.as_deref()) { paths.push(rel); }
         }
         if !paths.is_empty() {
             let msg = json!({ "method": "_chronicle/outside_changes", "params": { "paths": paths } });
@@ -1983,6 +2030,9 @@ for line in sys.stdin:
         let out = d.join("src/escape.ts");
         s.handle_fs_write(&json!(1), json!({ "sessionId": sid, "path": out, "content": "x" }));
         assert!(!out.exists(), "a design write outside the folder must not land");
+        let records = root.join(".threads/sess-d/bases/index.json");
+        s.handle_fs_write(&json!(3), json!({ "sessionId": sid, "path": records, "content": "{}" }));
+        assert!(!records.exists(), "the design session can't write its own records");
         let inside = root.join("home/a.html");
         s.handle_fs_write(&json!(2), json!({ "sessionId": sid, "path": inside, "content": "<p>hi</p>" }));
         assert_eq!(std::fs::read_to_string(&inside).unwrap(), "<p>hi</p>");
@@ -2254,6 +2304,25 @@ for line in sys.stdin:
         }
         assert!(design_write_decision(&perm("Bash", "/tmp/x"), &root).is_none(), "non-write tools are not decided here");
         assert!(design_write_decision(&perm("Write", "relative/path.html"), &root).map(|w| matches!(w, WriteDecision::Refuse { .. })).unwrap_or(false));
+        // the lane's own records and any dot entry are out of reach
+        let forged = root.join(".threads/s/bases/index.json");
+        assert!(matches!(design_write_decision(&perm("Write", forged.to_str().unwrap()), &root), Some(WriteDecision::Refuse { .. })));
+        assert!(matches!(design_write_decision(&perm("Write", root.join(".gitignore").to_str().unwrap()), &root), Some(WriteDecision::Refuse { .. })));
+        #[cfg(unix)] {
+            // …also through a link inside a design
+            std::fs::create_dir_all(root.join(".threads")).unwrap();
+            std::os::unix::fs::symlink(root.join(".threads"), root.join("home/records")).unwrap();
+            let via = root.join("home/records/s/bases/index.json");
+            assert!(matches!(design_write_decision(&perm("Write", via.to_str().unwrap()), &root), Some(WriteDecision::Refuse { .. })));
+        }
+        // fail closed: never an "always" option, cancel when no once-only option exists
+        let mut always_only = perm("Write", inside.to_str().unwrap());
+        always_only["options"] = json!([{ "optionId": "always", "name": "Always", "kind": "allow_always" },
+                                        { "optionId": "never", "name": "Never", "kind": "reject_always" }]);
+        assert!(matches!(design_write_decision(&always_only, &root), Some(WriteDecision::Cancel { .. })));
+        always_only["toolCall"]["rawInput"]["file_path"] = json!(outside.to_str().unwrap());
+        always_only["toolCall"]["locations"] = json!([]);
+        assert!(matches!(design_write_decision(&always_only, &root), Some(WriteDecision::Cancel { .. })));
         // a write with no path at all can't be proven inside
         let mut no_path = perm("Write", "");
         no_path["toolCall"]["rawInput"] = json!({});
@@ -2311,6 +2380,18 @@ for line in sys.stdin:
         ledger::record_base(&store, "s1", &made, true, None).unwrap();
         assert_eq!(ledger::revert(&store, "s1", None, &[d.clone()]).unwrap(), 1);
         assert!(!made.exists());
+        // a forged base name that climbs out of bases/ is refused, target untouched
+        // planted where bases/../../x resolves, so only the name check stops it
+        std::fs::write(store.join("x"), "planted").unwrap();
+        let victim = d.join("victim.txt");
+        std::fs::write(&victim, "mine").unwrap();
+        let idx = store.join("s1/bases/index.json");
+        std::fs::write(&idx, serde_json::to_string(&json!({
+            victim.to_string_lossy(): { "base": "../../x", "via_command": true }
+        })).unwrap()).unwrap();
+        assert!(ledger::revert(&store, "s1", None, &[d.clone()]).is_err());
+        assert!(ledger::revert(&store, "s1", Some(&victim.to_string_lossy()), &[d.clone()]).is_err());
+        assert_eq!(std::fs::read_to_string(&victim).unwrap(), "mine");
     }
 
     #[test]
