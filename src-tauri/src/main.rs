@@ -73,6 +73,24 @@ pub(crate) fn epoch_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
+/// RFC 3339 UTC without pulling a date crate: seconds precision is enough here.
+pub(crate) fn iso8601_utc(secs: u64) -> String {
+    let days = secs / 86_400; let rem = secs % 86_400;
+    let (h, m, s) = (rem / 3600, rem % 3600 / 60, rem % 60);
+    // civil-from-days (Howard Hinnant)
+    let z = days as i64 + 719_468; let era = z.div_euclid(146_097); let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1; let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mo <= 2 { y + 1 } else { y };
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
+}
+#[test]
+fn iso8601_utc_known_dates() {
+    assert_eq!(iso8601_utc(0), "1970-01-01T00:00:00Z");
+    assert_eq!(iso8601_utc(1_789_560_000), "2026-09-16T12:00:00Z");
+}
+
 struct InitState {
     /// key -> (child, log path, spawn time as epoch ms)
     runs: Mutex<std::collections::HashMap<String, (std::process::Child, PathBuf, u64)>>,
@@ -3209,6 +3227,7 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
         let app = app.clone();
         Arc::new(move |v| { let _ = app.emit("acp-update", v); })
     };
+    if lane == acp::Lane::Design { designs::ensure_root(&p.dir)?; }
     let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, None, acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
@@ -3228,6 +3247,7 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
         let app = app.clone();
         Arc::new(move |v| { let _ = app.emit("acp-update", v); })
     };
+    if lane == acp::Lane::Design { designs::ensure_root(&p.dir)?; }
     let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, Some(id), acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
@@ -3810,7 +3830,11 @@ fn main() {
             web::web_open_file, web::web_tabs_load, web::web_tabs_save,
             web::web_tab_open, web::web_tab_close, web::web_tab_show, web::web_hide_all,
             web::web_set_bounds, web::web_tab_navigate, web::web_tab_back, web::web_tab_forward, web::web_tab_reload,
-            blocklists::web_blocklists_prepare, blocklists::web_blocklists_info
+            blocklists::web_blocklists_prepare, blocklists::web_blocklists_info,
+            designs::designs_list, designs::design_create, designs::design_read,
+            designs::design_rename, designs::design_set_kind,
+            designs::design_trash, designs::design_untrash,
+            designs::design_canvas_save, designs::designs_order_save
         ])
         .build(tauri::generate_context!())
         .expect("error while building Chronicle")
