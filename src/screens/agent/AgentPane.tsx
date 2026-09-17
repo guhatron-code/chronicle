@@ -468,6 +468,10 @@ function Entry({
         <SubagentCard group={entry} dir={dir} readOnly={readOnly} />
       </div>
     );
+  // "guard" is the design lane's own entry kind (a tool call the acp seam
+  // refused outside the design's folder) — this chat-lane thread never sees
+  // one; the Design pane renders it (a later slice of this same feature).
+  if (entry.kind === "guard") return null;
   return (
     <div className="px-3.5 py-1">
       <ToolCard tool={entry} dir={dir} readOnly={readOnly} />
