@@ -2254,6 +2254,9 @@ struct WatchState {
 
 fn fs_event_matters(path: &std::path::Path) -> bool {
     let s = path.to_string_lossy();
+    if s.contains("/.chronicle/designs/") {
+        return false;
+    }
     if s.contains("/node_modules/") || s.contains("/target/") || s.contains("/dist/")
         || s.ends_with(".DS_Store") || s.contains("/.chronicle/journal.jsonl")
         // the atomic-write temps: `.tmp` is the notes vault's, `.chronicle-tmp` is
@@ -2295,6 +2298,23 @@ fn watch_project(app: tauri::AppHandle, roots: State<OpenRoots>, watch: State<Wa
                     // a rounds-only change reports no paths but still moved the
                     // generation, so it is always worth announcing
                     if !changed.is_empty() || rounds_touched { notes::index::emit_changed(&app, &emit_dir, &changed, gen); }
+                }
+            }
+            // the design pane's own bursts: collapse to one `designs-changed` per
+            // design, 250ms after the first change of the burst, apart from the
+            // project-wide rescan and the notes index above
+            for pa in &ev.paths {
+                if let Some((slug, rel)) = designs::watch::design_event(pa) {
+                    if designs::watch::queue(&emit_dir, &slug, rel) {
+                        let app2 = app.clone();
+                        let d2 = emit_dir.clone();
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(250));
+                            let paths = designs::watch::drain(&d2, &slug);
+                            let _ = app2.emit_to(tauri::EventTarget::webview("main"), "designs-changed",
+                                serde_json::json!({ "dir": d2, "slug": slug, "paths": paths }));
+                        });
+                    }
                 }
             }
         }
@@ -5236,6 +5256,11 @@ mod history_tests {
         assert!(m("/p/.git/refs/heads/main"));
         // a real file that merely ends in those words is still the user's
         assert!(m("/p/docs/chronicle-tmp"));
+    }
+
+    #[test]
+    fn project_watching_ignores_the_designs_folder() {
+        assert!(!fs_event_matters(std::path::Path::new("/p/.chronicle/designs/home/frames/a.html")));
     }
 
     #[test]
