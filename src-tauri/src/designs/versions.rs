@@ -116,10 +116,13 @@ fn restore_tmp_path(design_dir: &Path, c: &str) -> PathBuf {
 }
 
 /// Removes any stray `<content>.restore-tmp` left beside the live design by
-/// a restore that crashed mid-copy. Safe to call any time — `content_hash`
-/// never looks at these paths, so a stray tmp can't be mistaken for a
-/// change, but it should still be cleared before a fresh restore starts so
-/// it doesn't collide with a new one.
+/// a restore that crashed mid-copy. Only `restore` calls this, at its own
+/// start, before it starts building its own tmp — never `snapshot_if_changed`,
+/// which can race a user-initiated restore and must not delete a tmp that
+/// restore is still mid-way through building. `content_hash` never looks at
+/// these paths, so a stray tmp can't be mistaken for a change either way;
+/// it just needs clearing before a *new* restore starts so it doesn't
+/// collide with one.
 fn clean_stray_restore_tmp(design_dir: &Path) {
     for c in CONTENT {
         let tmp = restore_tmp_path(design_dir, c);
@@ -138,8 +141,8 @@ fn clean_stray_restore_tmp(design_dir: &Path) {
 /// `frames`/`assets`), and only once that copy has fully succeeded is the
 /// live root removed and the tmp renamed into place. A crash during the
 /// copy — the long part — leaves the live content completely untouched,
-/// with at worst a stray `*.restore-tmp` beside it, which
-/// `clean_stray_restore_tmp` clears on the next restore or snapshot.
+/// with at worst a stray `*.restore-tmp` beside it, which the next
+/// `restore` clears via `clean_stray_restore_tmp` before it starts.
 fn swap_content_atomically(from: &Path, to: &Path) -> Result<(), String> {
     clean_stray_restore_tmp(to);
     for c in CONTENT {
@@ -164,7 +167,12 @@ fn write_version(design_dir: &Path, meta: &VersionMeta) -> Result<(), String> {
 }
 
 pub fn snapshot_if_changed(design_dir: &Path, at: &str, session: &str, prompt: &str, summary: &str) -> Result<Option<u32>, String> {
-    clean_stray_restore_tmp(design_dir);
+    // Deliberately does NOT call clean_stray_restore_tmp: a turn-end
+    // snapshot can race a user-initiated restore, and must never delete a
+    // `*.restore-tmp` that restore is still mid-way through building.
+    // content_hash already ignores those paths by name, so there's nothing
+    // for a snapshot to gain by cleaning them up — only restore does, at
+    // its own start, before it starts building its own tmp.
     let hash = content_hash(design_dir);
     let prev = list(design_dir);
     if prev.first().map(|m| m.hash == hash).unwrap_or(false) { return Ok(None); }
@@ -288,5 +296,36 @@ mod tests {
         // v2's directory, though unreadable, must be untouched — not
         // silently overwritten by the v3 snapshot.
         assert_eq!(std::fs::read_to_string(dir.join(".versions/v2/meta.json")).unwrap(), "{not json");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_in_frames_is_excluded_from_hash_and_restore() {
+        use std::os::unix::fs::symlink;
+        let p = proj("symlink");
+        let slug = create(&p, "app", "Linked", "b", "t0").unwrap();
+        let dir = designs_root(&p).join(&slug);
+        std::fs::write(dir.join("frames/a.html"), "<h1>one</h1>").unwrap();
+        assert_eq!(snapshot_if_changed(&dir, "t1", "s", "p1", "v1").unwrap(), Some(1));
+
+        let before = content_hash(&dir);
+
+        // A file outside the design directory, and a symlink inside
+        // frames/ pointing at it — what a hostile or buggy tool might
+        // plant to make content_hash/copy_tree read or copy content from
+        // outside the design.
+        let outside = p.join("outside-secret.txt");
+        std::fs::write(&outside, "must never leave the outside world").unwrap();
+        symlink(&outside, dir.join("frames/linked.html")).unwrap();
+        assert_eq!(content_hash(&dir), before, "a symlink inside frames/ must not affect content_hash");
+
+        // Even a symlink planted directly inside a version directory (as
+        // if it had somehow gotten in some other way) must not let
+        // restore copy it back out into the live design.
+        symlink(&outside, dir.join(".versions/v1/frames/linked.html")).unwrap();
+        let n = restore(&dir, 1, "t2").unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(std::fs::read_to_string(dir.join("frames/a.html")).unwrap(), "<h1>one</h1>");
+        assert!(!dir.join("frames/linked.html").exists(), "restore must not copy a symlink (or its target) out of a version directory");
     }
 }
