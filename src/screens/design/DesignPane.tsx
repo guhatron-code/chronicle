@@ -7,9 +7,10 @@ import { designProjectFor, loadDesigns, openDesign, subscribeDesigns } from "@/l
 import { CanvasToolbar } from "./CanvasToolbar";
 import { DesignCanvas } from "./DesignCanvas";
 import { DesignSidebar } from "./DesignSidebar";
+import { DesignThread } from "./DesignThread";
 import { NewDesign } from "./NewDesign";
 
-export function DesignPane({ dir, onScreen, onConfirm: _onConfirm }: { dir: string; onScreen: boolean; onConfirm: (spec: ConfirmSpec) => void }) {
+export function DesignPane({ dir, onScreen, onConfirm }: { dir: string; onScreen: boolean; onConfirm: (spec: ConfirmSpec) => void }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeDesigns(() => bump((n) => n + 1)), []);
   useEffect(() => { void loadDesigns(dir); }, [dir]);
@@ -38,6 +39,7 @@ export function DesignPane({ dir, onScreen, onConfirm: _onConfirm }: { dir: stri
       ) : (
         <div className="flex-1" />
       )}
+      {!(empty || creating) && p.active && <DesignThread dir={dir} onConfirm={onConfirm} />}
     </div>
   );
 }

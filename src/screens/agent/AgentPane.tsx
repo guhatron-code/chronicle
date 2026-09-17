@@ -15,12 +15,14 @@ import {
   closeAgentViewing,
   dequeueAgentMessage,
   groupEntries,
+  splitLaneKey,
   subscribeAgent,
   type AgentEntry,
   type AgentSessionState,
   type ThreadItem,
 } from "@/lib/agent-session";
 import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
+import { sendDesignMessage } from "@/lib/design-store";
 import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint, agentsAvailable } from "@/lib/ipc";
 import { CheckGlyph } from "@/components/chrome/icons";
 import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term-sessions";
@@ -469,12 +471,25 @@ function Entry({
       </div>
     );
   // "guard" is the design lane's own entry kind (a tool call the acp seam
-  // refused outside the design's folder) — this chat-lane thread never sees
-  // one; the Design pane renders it (a later slice of this same feature).
-  if (entry.kind === "guard") return null;
+  // judged against the designs folder) — only the refusals show
+  if (entry.kind === "guard") return <GuardRow entry={entry} />;
   return (
     <div className="px-3.5 py-1">
       <ToolCard tool={entry} dir={dir} readOnly={readOnly} />
+    </div>
+  );
+}
+
+/** A design-lane write the seam kept out of the project. Allowed writes inside
+ *  the designs folder are not shown; the frames appearing on the canvas show them. */
+function GuardRow({ entry }: { entry: { allowed: boolean; path: string; reason: string } }) {
+  if (entry.allowed) return null;
+  return (
+    <div className="mx-3.5 my-1 flex items-start gap-2 rounded-md border border-border-hairline bg-surface-card px-[11px] py-2">
+      <span className="mt-0.5 shrink-0 text-state-warn"><ErrorGlyph size={12} /></span>
+      <span className="min-w-0 text-xs leading-[1.55] text-text-muted">
+        Kept a change out of your project: <span className="font-mono text-[11px]">{entry.path}</span>. {entry.reason}
+      </span>
     </div>
   );
 }
@@ -513,9 +528,13 @@ export function AgentPane({
   onRevealTerminal,
   onOpenReview,
   onOpenNotes,
+  variant = "chat",
 }: {
   dir: string;
   onConfirm: (spec: ConfirmSpec) => void;
+  /** "design": the design lane's thread — no auto-start, no edit review, no
+   *  rounds, and sends go through the design store */
+  variant?: "chat" | "design";
   /** the sign-in flow runs in a terminal tab — the unit must be on screen */
   onRevealTerminal: () => void;
   /** F36 — Review opens the repo viewer on the ledger diff */
@@ -533,6 +552,7 @@ export function AgentPane({
     // tabs. Gated on Claude being present so an unconfigured machine doesn't
     // auto-launch into an error banner on every open; skipped after an explicit
     // End session (phase is then "ended", not "none").
+    if (variant === "design") { void adoptAgentSession(dir); return; } // the design store starts its own session
     let cancelled = false;
     void adoptAgentSession(dir).then(async () => {
       if (cancelled || autoStarted.has(dir)) return;
@@ -544,7 +564,7 @@ export function AgentPane({
       void startAgentSession(dir).catch(() => {});
     });
     return () => { cancelled = true; };
-  }, [dir]);
+  }, [dir, variant]);
   const s = agentSessionFor(dir);
 
   /* stick to the bottom while the thread grows, unless the user scrolled up.
@@ -722,7 +742,7 @@ export function AgentPane({
           }}
           className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-3"
         >
-          {(() => { const items = groupEntries(s.entries); const keys = rowKeys(items); return items.map((entry, i) => (
+          {(() => { const items = groupEntries(s.entries).filter((e) => variant === "chat" || (e.kind !== "round" && e.kind !== "round-plan")); const keys = rowKeys(items); return items.map((entry, i) => (
             <Appear key={keys[i]}>
               <Entry
                 dir={dir}
@@ -746,10 +766,15 @@ export function AgentPane({
           )}
         </div>
       )}
-      <ReviewStrip dir={dir} s={s} onOpenReview={onOpenReview} onConfirm={onConfirm} />
+      {variant === "chat" && <ReviewStrip dir={dir} s={s} onOpenReview={onOpenReview} onConfirm={onConfirm} />}
       {banner}
-      <QueuedMessages dir={dir} queue={s.queue} />
-      <Composer dir={dir} disabled={s.phase !== "ready"} onConfirm={onConfirm} />
+      {variant === "chat" && <QueuedMessages dir={dir} queue={s.queue} />}
+      <Composer
+        dir={dir}
+        disabled={s.phase !== "ready"}
+        onConfirm={onConfirm}
+        onSend={variant === "design" ? (t) => sendDesignMessage(splitLaneKey(dir).dir, t) : undefined}
+      />
     </div>
   );
 }

@@ -787,7 +787,7 @@ export async function startAgentSession(dir: string): Promise<void> {
 /** Re-sync after a reload: a live backend session re-adopts its state (the
  *  thread itself is rebuilt from the transcript store in Z-4). */
 export async function adoptAgentSession(dir: string): Promise<void> {
-  refreshAgentEdits(dir); // the ledger outlives sessions — a restart still reviews
+  if (splitKey(dir).lane === "chat") refreshAgentEdits(dir); // the ledger outlives sessions — a restart still reviews
   const s = agentSessionFor(dir);
   if (s.phase !== "none") return;
   try {

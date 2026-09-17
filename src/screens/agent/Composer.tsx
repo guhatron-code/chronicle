@@ -18,6 +18,7 @@ import {
   setAgentConfigOption,
   setAgentDraft,
   setAgentMode,
+  splitLaneKey,
 } from "@/lib/agent-session";
 import { XGlyph, PaperclipGlyph, ImageGlyph, ArrowRightGlyph } from "@/components/chrome/icons";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
@@ -149,13 +150,18 @@ export function Composer({
   dir,
   disabled,
   onConfirm,
+  onSend,
 }: {
   dir: string;
   /** true while the session isn't ready — the input dims and nothing sends */
   disabled: boolean;
   onConfirm: (spec: ConfirmSpec) => void;
+  /** set by a lane that sends its own way (design): gets the text with mentions
+   *  flattened, instead of the chat's blocks + sendAgentMessage */
+  onSend?: (text: string) => Promise<void>;
 }) {
   const s = agentSessionFor(dir);
+  const designLane = splitLaneKey(dir).lane === "design";
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -373,8 +379,10 @@ export function Composer({
     // files become links the agent follows itself; a note or phase rides along
     // inline — a note's text is read from the vault here, at send time
     setSending(true);
-    buildBlocks(withRefs, mentions.current, dir)
-      .then((blocks) => sendAgentMessage(dir, withRefs, blocks))
+    const job = onSend
+      ? onSend(flattenMentions(withRefs, mentions.current, splitLaneKey(dir).dir))
+      : buildBlocks(withRefs, mentions.current, dir).then((blocks) => sendAgentMessage(dir, withRefs, blocks));
+    job
       .then(() => {
         setText("");
         mirrorComposerText(dir, "");
@@ -554,8 +562,9 @@ export function Composer({
           // Enter sends; while a turn is active it queues; Shift+Enter / IME = newline
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
-            if (s.turnActive) queue();
-            else send();
+            if (s.turnActive) {
+              if (!designLane) queue(); // the design lane has no queue
+            } else send();
           }
         }}
         onPaste={(e) => {
@@ -585,7 +594,18 @@ export function Composer({
             </button>
           </Hint>
         )}
-        {asksFirst && worksFreely && (
+        {designLane && asksFirst && (
+          <ModeSelect
+            current={current ?? "default"}
+            disabled={disabled}
+            onPick={switchMode}
+            options={[
+              { value: "default", name: "Ask first", description: "The design session asks before running commands. It never changes files outside the designs folder." },
+              { value: "plan", name: "Plan", description: "It thinks through the design with you and changes nothing." },
+            ]}
+          />
+        )}
+        {!designLane && asksFirst && worksFreely && (
           <ModeSelect
             current={current ?? "default"}
             disabled={disabled}
@@ -626,7 +646,7 @@ export function Composer({
         <span className="flex-1" />
         {s.turnActive ? (
           <>
-            {text.trim() && (
+            {text.trim() && !designLane && (
               <button
                 data-agent-queue
                 onClick={queue}

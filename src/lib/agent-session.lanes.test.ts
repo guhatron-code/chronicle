@@ -61,4 +61,12 @@ describe("lanes", () => {
     const last = m.agentSessionFor(key).entries.at(-1)!;
     expect(last.kind === "user" && last.text).toBe("Make it bolder");
   });
+
+  it("adopting the design lane never touches the chat's edit review", async () => {
+    const ipc = await import("./ipc");
+    const m = await import("./agent-session");
+    (ipc.agentEdits as unknown as { mockClear: () => void }).mockClear();
+    await m.adoptAgentSession(m.laneKey(DIR, "design"));
+    expect(ipc.agentEdits).not.toHaveBeenCalled();
+  });
 });
