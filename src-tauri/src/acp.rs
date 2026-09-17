@@ -738,6 +738,9 @@ pub struct AcpSession {
     /// response — read, never assumed. The model picker renders from this.
     config_options: Mutex<Value>,
     turn_active: AtomicBool,
+    /// Stamped on every prompt sent and every turn end. The design lane's
+    /// idle watchdog reads this to decide whether to rest the session.
+    last_activity: Mutex<std::time::Instant>,
     emit: Emit,
     sessions: Arc<Mutex<HashMap<String, Arc<AcpSession>>>>,
 }
@@ -850,6 +853,7 @@ pub fn start(
         agent_caps: Mutex::new(Value::Null),
         config_options: Mutex::new(Value::Null),
         turn_active: AtomicBool::new(false),
+        last_activity: Mutex::new(std::time::Instant::now()),
         emit,
         sessions: state.sessions.clone(),
     });
@@ -868,6 +872,28 @@ pub fn start(
     let hs = session.clone();
     let hcwd = cwd;
     std::thread::spawn(move || hs.handshake(&hcwd));
+
+    // the design lane rests itself after DESIGN_IDLE with no turn running —
+    // the watchdog exits as soon as the session dies (is_alive() false), so
+    // it never outlives its session.
+    if session.designs_root.is_some() {
+        let w = session.clone();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            if !w.is_alive() { break; }
+            let last = w.last_activity.lock().map(|g| *g).unwrap_or_else(|_| std::time::Instant::now());
+            if crate::designs::prompt::idle_due(
+                last,
+                std::time::Instant::now(),
+                w.turn_active.load(Ordering::SeqCst),
+                crate::designs::prompt::DESIGN_IDLE,
+            ) {
+                w.emit_state(json!({ "state": "ended", "reason": "idle" }));
+                w.stop(false);
+                break;
+            }
+        });
+    }
     Ok(true)
 }
 
@@ -990,10 +1016,17 @@ impl AcpSession {
                 // the adapter replays history during load; our transcript is
                 // the UI's source, so the replay stays suppressed
                 self.suppress_updates.store(true, Ordering::SeqCst);
-                ("session/load", json!({ "sessionId": old_sid, "cwd": cwd, "mcpServers": [] }))
+                let mut load = json!({ "sessionId": old_sid, "cwd": cwd, "mcpServers": [] });
+                if let Some(root) = &self.designs_root {
+                    load["_meta"] = Value::Object(crate::designs::prompt::design_session_meta(root));
+                }
+                ("session/load", load)
             }
             None => {
-                let new_req = proto::NewSessionRequest::new(cwd);
+                let mut new_req = proto::NewSessionRequest::new(cwd);
+                if let Some(root) = &self.designs_root {
+                    new_req = new_req.meta(crate::designs::prompt::design_session_meta(root));
+                }
                 match serde_json::to_value(&new_req) {
                     Ok(v) => ("session/new", v),
                     Err(e) => return self.fail_handshake(&e.to_string()),
@@ -1021,6 +1054,19 @@ impl AcpSession {
                     "configOptions": resp.get("configOptions").cloned().unwrap_or(Value::Null),
                     "agentCaps": caps,
                 }));
+                // design lane mode lock: the fence in handle_fs_write and
+                // design_write_decision only holds while the session stays
+                // in an ask-first mode — an agent that starts (or resumes)
+                // in something else (e.g. bypassPermissions) is walked back
+                // to "default". set_mode blocks on a response, so it runs
+                // off this thread, after ready has already been emitted.
+                if self.designs_root.is_some() {
+                    let current = resp.pointer("/modes/currentModeId").and_then(|v| v.as_str());
+                    if !matches!(current, Some("default") | Some("plan")) {
+                        let ms = self.clone();
+                        std::thread::spawn(move || { let _ = ms.set_mode("default"); });
+                    }
+                }
             }
             Err(e) => {
                 self.suppress_updates.store(false, Ordering::SeqCst);
@@ -1120,6 +1166,7 @@ impl AcpSession {
             Some(Pending::Waiter(tx)) => { let _ = tx.send(outcome); }
             Some(Pending::TurnEnd) => {
                 self.turn_active.store(false, Ordering::SeqCst);
+                if let Ok(mut g) = self.last_activity.lock() { *g = std::time::Instant::now(); }
                 // a turn ending always resolves any ask still on screen
                 self.cancel_all_perms();
                 if self.designs_root.is_some() { self.reconcile_design_turn_end(); } else { self.reconcile_turn_end(); }
@@ -1303,6 +1350,7 @@ impl AcpSession {
     /// resource / image); `display` is the flat text the thread and transcript
     /// show, which is what the user typed rather than what the agent receives.
     pub fn prompt(&self, blocks: Vec<Value>, display: String) -> Result<(), String> {
+        if let Ok(mut g) = self.last_activity.lock() { *g = std::time::Instant::now(); }
         let sid = self.session_id.lock().map_err(|e| e.to_string())?
             .clone().ok_or("the session isn't ready yet")?;
         if blocks.is_empty() {
@@ -1833,6 +1881,15 @@ for line in sys.stdin:
     }
 
     #[test]
+    fn idle_is_due_only_after_the_limit_and_never_mid_turn() {
+        let t0 = std::time::Instant::now();
+        let lim = std::time::Duration::from_secs(900);
+        assert!(!crate::designs::prompt::idle_due(t0, t0 + std::time::Duration::from_secs(899), false, lim));
+        assert!(crate::designs::prompt::idle_due(t0, t0 + std::time::Duration::from_secs(900), false, lim));
+        assert!(!crate::designs::prompt::idle_due(t0, t0 + std::time::Duration::from_secs(5000), true, lim));
+    }
+
+    #[test]
     fn jail_refuses_relative_traversal_and_outside_paths() {
         let dir = tmp("jail");
         let s = AcpSession {
@@ -1853,6 +1910,7 @@ for line in sys.stdin:
             agent_caps: Mutex::new(Value::Null),
             config_options: Mutex::new(Value::Null),
             turn_active: AtomicBool::new(false),
+            last_activity: Mutex::new(std::time::Instant::now()),
             resume: None,
             suppress_updates: AtomicBool::new(false),
             emit: Arc::new(|_| {}),
@@ -2021,6 +2079,7 @@ for line in sys.stdin:
             agent_caps: Mutex::new(Value::Null),
             config_options: Mutex::new(Value::Null),
             turn_active: AtomicBool::new(false),
+            last_activity: Mutex::new(std::time::Instant::now()),
             resume: None,
             suppress_updates: AtomicBool::new(false),
             emit: Arc::new(move |v| { let _ = tx.send(v); }),
@@ -2078,6 +2137,7 @@ for line in sys.stdin:
             agent_caps: Mutex::new(Value::Null),
             config_options: Mutex::new(Value::Null),
             turn_active: AtomicBool::new(false),
+            last_activity: Mutex::new(std::time::Instant::now()),
             resume: None,
             suppress_updates: AtomicBool::new(false),
             emit: Arc::new(move |v| { let _ = tx.send(v); }),
