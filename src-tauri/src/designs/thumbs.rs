@@ -8,7 +8,7 @@
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{State, WebviewUrl, WebviewWindowBuilder};
 use crate::{project_for, OpenRoots};
@@ -17,6 +17,27 @@ use crate::{project_for, OpenRoots};
 const MAX_PAGE_HEIGHT: u32 = 16_000;
 const MAX_FRAME_WIDTH: u32 = 8_000;
 const READY_WAIT: Duration = Duration::from_secs(5);
+/// Thumbnails are captured at most this wide (points); the height follows the aspect ratio.
+const MAX_SNAPSHOT_WIDTH: u32 = 720;
+/// Captures are 2x on Retina; the captured pixel height stays under this (GPU texture limits).
+const MAX_SNAPSHOT_PIXELS_TALL: u32 = 16_000;
+const BACKING_SCALE: u32 = 2;
+
+/// One capture window at a time, app-wide, for the whole render of a version.
+static RENDER: Mutex<()> = Mutex::new(());
+
+/// (snapshot width in points, window height in points) for a frame `frame_w` wide
+/// whose page reports `page_h` tall. The snapshot is at most 720 wide; the window
+/// height is capped so the captured image, scaled to that width at 2x, stays under
+/// 16000 pixels tall (and never exceeds the reporter's own 16000 cap).
+pub fn capture_size(frame_w: u32, page_h: u32) -> (u32, u32) {
+    let frame_w = frame_w.clamp(1, MAX_FRAME_WIDTH);
+    let snap_w = frame_w.min(MAX_SNAPSHOT_WIDTH);
+    // pixel_h = win_h * snap_w / frame_w * 2 < 16000  ⇔  win_h < 8000 * frame_w / snap_w
+    let limit = ((MAX_SNAPSHOT_PIXELS_TALL / BACKING_SCALE) as u64 * frame_w as u64 / snap_w as u64).saturating_sub(1);
+    let win_h = (page_h as u64).clamp(1, limit.min(MAX_PAGE_HEIGHT as u64)) as u32;
+    (snap_w, win_h)
+}
 
 pub fn thumb_rel(slug: &str, n: u32, frame_id: &str) -> String { format!("{slug}/.versions/v{n}/thumbs/{frame_id}.png") }
 
@@ -59,13 +80,19 @@ fn title_of(win: &tauri::WebviewWindow) -> Option<String> {
     rx.recv_timeout(Duration::from_secs(2)).ok().flatten()
 }
 
-fn snapshot_png(win: &tauri::WebviewWindow) -> Result<Vec<u8>, String> {
+fn snapshot_png(win: &tauri::WebviewWindow, snapshot_width: u32) -> Result<Vec<u8>, String> {
     use block2::RcBlock;
+    use objc2::MainThreadMarker;
     use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSImage};
-    use objc2_foundation::{NSDictionary, NSError};
+    use objc2_foundation::{NSDictionary, NSError, NSNumber};
+    use objc2_web_kit::WKSnapshotConfiguration;
     let (tx, rx) = mpsc::channel::<Result<Vec<u8>, String>>();
     win.with_webview(move |pw| {
         let wk: &objc2_web_kit::WKWebView = unsafe { &*(pw.inner() as *const objc2_web_kit::WKWebView) };
+        // with_webview runs this on the main thread
+        let Some(mtm) = MainThreadMarker::new() else { let _ = tx.send(Err("the capture didn't run on the main thread".into())); return };
+        let config = unsafe { WKSnapshotConfiguration::new(mtm) };
+        unsafe { config.setSnapshotWidth(Some(&NSNumber::new_f64(snapshot_width as f64))) };
         let block = RcBlock::new(move |img: *mut NSImage, _err: *mut NSError| {
             let out = (|| {
                 let img = unsafe { img.as_ref() }.ok_or("the page couldn't be captured")?;
@@ -77,7 +104,7 @@ fn snapshot_png(win: &tauri::WebviewWindow) -> Result<Vec<u8>, String> {
             })().map_err(|e| e.to_string());
             let _ = tx.send(out);
         });
-        unsafe { wk.takeSnapshotWithConfiguration_completionHandler(None, &block) };
+        unsafe { wk.takeSnapshotWithConfiguration_completionHandler(Some(&config), &block) };
     }).map_err(|e| e.to_string())?;
     rx.recv_timeout(Duration::from_secs(10)).map_err(|_| "the capture timed out".to_string())?
 }
@@ -90,11 +117,14 @@ fn render_frame(app: &tauri::AppHandle, url: &str, width: u32, height: u32) -> R
     let parsed = url.parse().map_err(|_| "that frame's address couldn't be built".to_string())?;
     // label never "main": the IPC capability is scoped to "main", so this window gets none
     let label = format!("design-thumb-{}", THUMB_WINDOWS.fetch_add(1, Ordering::Relaxed));
-    let (width, height) = (width.min(MAX_FRAME_WIDTH), height.clamp(1, MAX_PAGE_HEIGHT));
+    let width = width.clamp(1, MAX_FRAME_WIDTH);
+    let (_, height) = capture_size(width, height);
     // if hidden windows don't paint (Task 20 live check), use .visible(true).position(-30000.0, -30000.0) instead
     let win = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(parsed))
         .visible(false).focused(false).skip_taskbar(true).decorations(false)
         .inner_size(width as f64, height as f64)
+        // the capture window stays on its own design page: no link or script can move it elsewhere
+        .on_navigation(|u| u.scheme() == "chronicle-file")
         .build().map_err(|e| e.to_string())?;
     let guard = CloseOnDrop(win);
     let win = &guard.0;
@@ -108,15 +138,17 @@ fn render_frame(app: &tauri::AppHandle, url: &str, width: u32, height: u32) -> R
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-    let page_h = page_h.clamp(1, MAX_PAGE_HEIGHT);
+    let (snap_w, page_h) = capture_size(width, page_h);
     let _ = win.set_size(tauri::LogicalSize::new(width as f64, page_h as f64));
     std::thread::sleep(Duration::from_millis(150));
-    snapshot_png(win)
+    snapshot_png(win, snap_w)
 }
 
 /// Renders every frame of one version; a frame that fails is skipped and the rest go on.
 /// Errors only when frames existed and not a single picture was written.
 fn render_version(app: &tauri::AppHandle, hash: &str, slug: &str, n: u32, vdir: &Path, frames: Vec<(String, String, u32, u32)>) -> Result<Vec<String>, String> {
+    // a poisoned lock only means an earlier render panicked; its window is already gone
+    let _one_at_a_time = RENDER.lock().unwrap_or_else(|e| e.into_inner());
     let thumbs = vdir.join("thumbs");
     std::fs::create_dir_all(&thumbs).map_err(|e| e.to_string())?;
     let total = frames.len();
@@ -163,6 +195,25 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         std::fs::write(d.join("design.json"), r#"{"frames":[{"id":"desktop","file":"frames/desktop.html","width":1440,"height":900},{"id":"bad"}]}"#).unwrap();
         assert_eq!(thumb_frames(&d), vec![("desktop".to_string(), "frames/desktop.html".to_string(), 1440, 900)]);
+    }
+
+    #[test]
+    fn captures_are_at_most_720_wide_and_never_too_tall_to_capture() {
+        // wide frame: shrunk to 720, so the window may be twice 8000 points tall (capped by the reporter's 16000)
+        assert_eq!(capture_size(1440, 900), (720, 900));
+        assert_eq!(capture_size(1440, 16_000), (720, 15_999));
+        assert_eq!(capture_size(1440, 50_000), (720, 15_999));
+        // narrow frame: captured at its own width, so at 2x the window stays under 8000 points
+        assert_eq!(capture_size(390, 20_000), (390, 7_999));
+        assert_eq!(capture_size(390, 844), (390, 844));
+        // very wide frame: the reporter's cap wins
+        assert_eq!(capture_size(2880, 40_000), (720, 16_000));
+        // degenerate input never divides by zero or makes an empty window
+        assert_eq!(capture_size(0, 0), (1, 1));
+        for (w, h) in [(1440, 16_000), (390, 20_000), (2880, 40_000), (721, 99_999)] {
+            let (sw, wh) = capture_size(w, h);
+            assert!((wh as u64 * sw as u64 * 2 / w as u64) < 16_000, "{w}x{h}");
+        }
     }
 
     #[test]
