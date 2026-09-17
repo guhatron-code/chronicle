@@ -64,6 +64,7 @@ import type { TerminalTab } from "@/components/chrome/TerminalColumn";
 import { TrafficLights } from "@/components/chrome/TitleBar";
 import { NotesPane } from "@/screens/notes/NotesPane";
 import { WebPane } from "@/screens/web/WebPane";
+import { DesignPane } from "@/screens/design/DesignPane";
 import { openInWeb, reloadProjectFiles } from "@/lib/web-store";
 import { isHtmlPath, isClaudeArtifactUrl } from "@/lib/web-url";
 import {
@@ -109,7 +110,7 @@ interface ProjectEntry {
   justSwitchedAt?: number; // the ~2s banner emphasis window
 }
 
-const PANES: Pane[] = ["road", "repo", "notes", "web"];
+const PANES: Pane[] = ["road", "repo", "notes", "web", "design"];
 const splitKey = (dir: string) => `chronicle.split.${dir}`;
 
 /* F31 — the three-unit layout (content · agent · terminal): visibility,
@@ -823,11 +824,12 @@ function AppShell() {
       }
       else if (mod && e.key === "o") { e.preventDefault(); openDialog(); }
       else if (mod && e.key === "/") { e.preventDefault(); setHelpOpen(true); }
-      // one chord, two meanings — the Go menu row says "New Note or File". On
-      // the other panes it means nothing, so it is not swallowed either
-      else if (mod && e.key === "n" && activeRef.current && (pane === "notes" || pane === "repo")) {
+      // one chord, three meanings — the Go menu row says "New Note, File or
+      // Design". On the other panes it means nothing, so it is not swallowed either
+      else if (mod && e.key === "n" && activeRef.current && (pane === "notes" || pane === "repo" || pane === "design")) {
         e.preventDefault();
         if (pane === "notes") void createNote(activeRef.current, "", "");
+        else if (pane === "design") window.dispatchEvent(new CustomEvent("chronicle:new-design"));
         else newFileInRepo(activeRef.current);
       }
       else if (mod && e.key === "s" && activeRef.current && (pane === "repo" || pane === "notes")) {
@@ -1280,8 +1282,10 @@ function AppShell() {
               );
             }}
           />
-        ) : (
+        ) : pane === "web" ? (
           <WebPane key={active.dir} dir={active.dir} onScreen={paneLayout.content && !overlayOpen} onConfirm={setConfirm} />
+        ) : (
+          <DesignPane key={active.dir} dir={active.dir} onScreen={paneLayout.content && !overlayOpen} onConfirm={setConfirm} />
         )}
       </Shell>
       {overlays}

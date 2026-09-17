@@ -94,6 +94,14 @@ export const WebGlyph = ({ size = 15, ...p }: P) => (
   </svg>
 );
 
+/** Crop marks around a small square — the Design pane. */
+export const DesignGlyph = ({ size = 15, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" {...p}>
+    <path d="M4.5 1.5v3h-3M11.5 1.5v3h3M4.5 14.5v-3h-3M11.5 14.5v-3h3" />
+    <rect x="6" y="6" width="4" height="4" rx=".6" />
+  </svg>
+);
+
 export const RefreshGlyph = ({ size = 14, ...p }: P) => (
   <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" {...p}>
     <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.8v3h-3" />

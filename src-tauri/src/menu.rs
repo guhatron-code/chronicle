@@ -70,7 +70,7 @@ const GO: &[Go] = &[
     Go { id: "go-help", text: "Keyboard Shortcuts", accel: "Cmd+Slash", key: "/", code: "Slash", alt: false, shift: false, group: 4 },
     // the Notes and Repo panes — ⌘N means "new note" on Notes and "new file" on
     // Repo, and App.tsx branches on the active pane; ⌘S saves the open file
-    Go { id: "go-new-note",  text: "New Note or File", accel: "Cmd+KeyN", key: "n", code: "KeyN", alt: false, shift: false, group: 5 },
+    Go { id: "go-new-note",  text: "New Note, File or Design", accel: "Cmd+KeyN", key: "n", code: "KeyN", alt: false, shift: false, group: 5 },
     Go { id: "go-jump-note", text: "Jump to Note",     accel: "Cmd+KeyP", key: "p", code: "KeyP", alt: false, shift: false, group: 5 },
     Go { id: "go-save",      text: "Save",             accel: "Cmd+KeyS", key: "s", code: "KeyS", alt: false, shift: false, group: 5 },
     // jump to an open project by position — plain ⌘, no ⌥

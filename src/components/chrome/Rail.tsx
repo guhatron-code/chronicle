@@ -6,6 +6,7 @@
 import type { ReactNode } from "react";
 import { Hint } from "@/components/ui/tooltip";
 import {
+  DesignGlyph,
   NotesGlyph,
   RefreshGlyph,
   RepoGlyph,
@@ -14,7 +15,7 @@ import {
 } from "./icons";
 import { cn } from "@/lib/utils";
 
-export type Pane = "road" | "repo" | "notes" | "web";
+export type Pane = "road" | "repo" | "notes" | "web" | "design";
 
 function RailButton({
   label,
@@ -95,6 +96,9 @@ export function Rail({
       </div>
       <RailButton label="Web" tooltip="Web" mono="⌘J to cycle" selected={pane === "web"} onClick={() => onPane("web")}>
         <WebGlyph />
+      </RailButton>
+      <RailButton label="Design" tooltip="Design" mono="⌘J to cycle" selected={pane === "design"} onClick={() => onPane("design")}>
+        <DesignGlyph />
       </RailButton>
       <span className="flex-1" />
       {onSetup && (
