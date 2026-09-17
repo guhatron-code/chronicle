@@ -68,6 +68,8 @@ export function HistoryPanel({ dir, onClose }: { dir: string; onClose: () => voi
   // `fixed` overlay owned here rather than drawn inside each row, since the
   // scrollable list below clips anything absolute that crosses its own edge.
   const [hover, setHover] = useState<{ top: number; left: number; src: string } | null>(null);
+  // Keyed by URL, not a DOM mutation — see DesignCompare's `failed` state for why.
+  const [thumbFailed, setThumbFailed] = useState<Set<string>>(() => new Set());
   const p = designProjectFor(dir);
   const slug = p.active;
   const versions = p.versions;
@@ -150,7 +152,18 @@ export function HistoryPanel({ dir, onClose }: { dir: string; onClose: () => voi
           className="pointer-events-none fixed z-50 w-[150px] -translate-x-full -translate-y-1/2 overflow-hidden rounded-md border border-border-strong bg-surface-overlay p-1 [box-shadow:var(--shadow-overlay)]"
           style={{ top: hover.top, left: hover.left - 8 }}
         >
-          <img src={hover.src} alt="" className="block h-[96px] w-full rounded-[2px] object-cover object-top" />
+          {thumbFailed.has(hover.src) ? (
+            <div className="flex h-[96px] w-full items-center justify-center rounded-[2px] bg-fill-subtle text-center text-[11px] text-text-faint">
+              Not in this version
+            </div>
+          ) : (
+            <img
+              src={hover.src}
+              alt=""
+              className="block h-[96px] w-full rounded-[2px] object-cover object-top"
+              onError={() => setThumbFailed((s) => (s.has(hover.src) ? s : new Set(s).add(hover.src)))}
+            />
+          )}
         </div>
       )}
     </div>

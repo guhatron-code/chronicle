@@ -2,7 +2,7 @@
    default — the latest thumbnail, or a live iframe when the canvas says so — with the
    name strip above it, the fold line at its declared height, and, when the page
    didn't render, a card that says where it stopped and sends that to the session. */
-import type { PointerEvent as ReactPointerEvent } from "react";
+import { useState, type PointerEvent as ReactPointerEvent } from "react";
 import { BtnPrimary } from "@/components/chrome/atoms";
 import type { Rect } from "@/lib/canvas-math";
 import type { Frame } from "@/lib/design-model";
@@ -27,6 +27,10 @@ export function FrameView(props: {
   const { dir, frame, rect, zoom, live, interactive, selected, base, slug, state, thumb, reloadTick, at } = props;
   const w = rect.w * zoom, h = rect.h * zoom;
   const word = stateWordOf(state);
+  // Keyed by URL, not a DOM mutation: a thumbnail can 404 (e.g. a version that
+  // predates this frame) without ever un-404ing for the same URL, so once a
+  // src fails it stays failed until a different thumb prop arrives.
+  const [thumbFailed, setThumbFailed] = useState<Set<string>>(() => new Set());
   const grab = (e: ReactPointerEvent) => {
     if (e.button !== 0) return;
     props.onSelect();
@@ -87,8 +91,19 @@ export function FrameView(props: {
             height={rect.h}
             style={{ transform: `scale(${zoom})`, transformOrigin: "0 0", border: 0, pointerEvents: interactive ? "auto" : "none", background: "white", display: "block" }}
           />
+        ) : thumb && !thumbFailed.has(thumb) ? (
+          <img
+            src={thumb}
+            alt=""
+            draggable={false}
+            className="block object-cover object-top select-none"
+            style={{ width: w, height: h }}
+            onError={() => setThumbFailed((s) => (s.has(thumb) ? s : new Set(s).add(thumb)))}
+          />
         ) : thumb ? (
-          <img src={thumb} alt="" draggable={false} className="block object-cover object-top select-none" style={{ width: w, height: h }} />
+          <div className="flex size-full items-center justify-center rounded-[2px] bg-fill-subtle text-center text-[11px] text-text-faint">
+            Not in this version
+          </div>
         ) : (
           <div className="size-full bg-fill-subtle" />
         )}
