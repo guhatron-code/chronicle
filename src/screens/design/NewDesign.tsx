@@ -93,7 +93,7 @@ export function NewDesign({ dir, onDone }: { dir: string; onDone: () => void }) 
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void start();
     } else if (e.key === "Escape") {
