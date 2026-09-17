@@ -5,6 +5,8 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { KIND_LABEL, type DesignKind } from "@/lib/design-model";
 import { designProjectFor, subscribeDesigns } from "@/lib/design-store";
+import { ClockGlyph } from "@/components/chrome/icons";
+import { cn } from "@/lib/utils";
 
 /* kind glyphs, transcribed from design/comps/design-pane/gen.py's G dict */
 const KIND_GLYPH: Record<DesignKind, ReactNode> = {
@@ -21,7 +23,12 @@ const Glyph = ({ size, children }: { size: number; children: ReactNode }) => (
   </svg>
 );
 
-export function CanvasToolbar({ dir }: { dir: string }) {
+export function CanvasToolbar({ dir, historyOpen, onToggleHistory }: {
+  dir: string;
+  /** Task 19: the History segmented toggle — omitted where no History panel exists yet */
+  historyOpen?: boolean;
+  onToggleHistory?: () => void;
+}) {
   const [, bump] = useState(0);
   useEffect(() => subscribeDesigns(() => bump((n) => n + 1)), []);
   const p = designProjectFor(dir);
@@ -37,6 +44,20 @@ export function CanvasToolbar({ dir }: { dir: string }) {
         </span>
       )}
       <span className="flex-1" />
+      {onToggleHistory && (
+        <button
+          type="button"
+          aria-pressed={!!historyOpen}
+          onClick={onToggleHistory}
+          className={cn(
+            "inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-md px-[9px] text-[11.5px] outline-none",
+            "focus-visible:[box-shadow:var(--focus-ring)]",
+            historyOpen ? "bg-fill-hover text-text-primary" : "text-text-muted hover:bg-fill-hover hover:text-text-primary",
+          )}
+        >
+          <ClockGlyph size={13} />History
+        </button>
+      )}
     </div>
   );
 }

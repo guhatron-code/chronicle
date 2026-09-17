@@ -32,7 +32,7 @@ vi.mock("./ipc", async (orig) => ({
   onDesignsChanged: vi.fn(async () => () => {}),
   designsList: vi.fn(async () => ({ rows: [{ slug: "home", title: "Home", kind: "app", frames: 1, created: "", latestVersion: 1, updatedMs: 1, bad: false }], order: {} })),
   designRead: vi.fn(async () => ({ design: { v: 1, title: "Home", kind: "app", brief: "", created: "", frames: [{ id: "d", file: "frames/d.html", label: "D", width: 1440, height: 900, group: "bp" }], groups: [{ id: "bp", label: "BP", kind: "breakpoints" }], chosen: null }, canvas: { positions: {}, viewport: null }, bad: false })),
-  designFrameBase: vi.fn(async () => "chronicle-file://h/.chronicle/designs/"),
+  designFrameBase: vi.fn(async () => "chronicle-file://h/"),
   designVersions: vi.fn(async () => []),
   designCanvasSave: vi.fn(async (_d: string, _s: string, c: unknown) => { h.calls.push(JSON.stringify(c)); }),
   designRename: vi.fn(async (_d: string, _s: string, t: string) => { h.calls.push(`rename:${t}`); }),
@@ -87,6 +87,17 @@ describe("design store", () => {
     const m = await import("./design-store");
     expect(m.designPrefix("home")).toBe("[design: home · .chronicle/designs/home/]");
     expect(m.summaryOf([{ kind: "assistant", text: "Added three frames. Then more." } as never])).toBe("Added three frames.");
+  });
+
+  it("restoring is undoable", async () => {
+    const restore = h.restore;
+    const m = await import("./design-store");
+    const p = m.designProjectFor(DIR);
+    p.versions = [{ n: 7, at: "", session: "", prompt: "", summary: "", hash: "" }];
+    await m.restoreVersion(DIR, 5);
+    expect(restore).toHaveBeenLastCalledWith(DIR, "home", 5);
+    await m.undoDesign(DIR);
+    expect(restore).toHaveBeenLastCalledWith(DIR, "home", 7);
   });
 
   it("keeps versioning across an idle-stop resume instead of stopping forever (finding 1)", async () => {

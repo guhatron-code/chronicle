@@ -8,6 +8,7 @@ import { liveFrames, pinLive, worldToScreen, type Rect } from "@/lib/canvas-math
 import { placeFrames } from "@/lib/design-model";
 import { designProjectFor, frameMessage, subscribeDesigns } from "@/lib/design-store";
 import { getActivity, subscribeActivity } from "@/lib/scheduler";
+import { DesignCompare } from "./DesignCompare";
 import { FrameView, STRIP, stateWordOf } from "./FrameView";
 import { Minimap } from "./Minimap";
 import { ZoomControls } from "./CanvasToolbar";
@@ -87,6 +88,7 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
   const frames = design?.frames ?? [];
   const sel = frames.find((f) => f.id === g.selected);
   const announce = sel ? `${sel.label}, ${sel.width} wide, ${stateWordOf(p.frameStates[sel.id] ?? { kind: "placeholder" })}` : "";
+  const comparing = p.compare != null && latest != null;
 
   return (
     <div ref={boxRef} className="relative min-h-0 flex-1 overflow-hidden bg-surface-app">
@@ -122,6 +124,8 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
               </div>
             ))}
           </div>
+        ) : design && v && slug && p.base != null && comparing ? (
+          <DesignCompare frames={frames} rects={rects} v={v} base={p.base} slug={slug} compare={p.compare!} newest={latest!} />
         ) : design && v && slug && p.base != null ? (
           frames.map((f) => {
             const r = rects[f.id];

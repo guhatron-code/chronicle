@@ -4,7 +4,7 @@
 import {
   designsList, designRead, designFrameBase, designVersions, designCanvasSave, designRename, designSetKind,
   designTrash, designUntrash, designsOrderSave, designCreate, designSnapshot, designThumbnails, onDesignsChanged,
-  type VersionMeta,
+  designRestore, designBranch, type VersionMeta,
 } from "./ipc";
 import { parseDesign, type CanvasFile, type Design, type DesignKind, type DesignRow } from "./design-model";
 import {
@@ -18,6 +18,10 @@ export interface DesignProject {
   rows: DesignRow[]; order: Record<string, string[]>; active: string | null; design: Design | null; canvas: CanvasFile;
   bad: boolean; frameStates: Record<string, FrameState>; base: string | null; versions: VersionMeta[]; reloadTick: number;
   undo: UndoEntry[]; redo: UndoEntry[]; seenTurnEnds: number;
+  /** the version History has selected to compare against the newest, or null
+   *  when the History panel isn't comparing anything — DesignCanvas splits
+   *  into two halves while this is set (Task 19) */
+  compare: number | null;
   /** the slug a `sendDesignMessage` turn was sent for — the turn-end snapshot
    *  targets this, not whatever the user has since clicked over to */
   turnSlug: string | null;
@@ -39,7 +43,7 @@ export function designProjectFor(dir: string): DesignProject {
     // Seed the counter from the design lane's OWN turnEnds — an already-running
     // session's past turns are not new turns this store needs to version.
     const seenTurnEnds = agentSessionFor(laneKey(dir, "design")).turnEnds;
-    p = { rows: [], order: {}, active: null, design: null, canvas: emptyCanvas(), bad: false, frameStates: {}, base: null, versions: [], reloadTick: 0, undo: [], redo: [], seenTurnEnds, turnSlug: null, openToken: 0 };
+    p = { rows: [], order: {}, active: null, design: null, canvas: emptyCanvas(), bad: false, frameStates: {}, base: null, versions: [], reloadTick: 0, undo: [], redo: [], seenTurnEnds, turnSlug: null, openToken: 0, compare: null };
     projects.set(dir, p);
   }
   return p;
@@ -152,6 +156,25 @@ export async function undoDesign(dir: string) {
 export async function redoDesign(dir: string) {
   const p = designProjectFor(dir); const e = p.redo.pop(); if (!e) return;
   await e.redo(); p.undo.push(e); notify();
+}
+
+export function setCompare(dir: string, n: number | null) { designProjectFor(dir).compare = n; notify(); }
+
+/** Undoable: redo restores v<n>; undo restores whatever version was newest
+ *  before this call, so undo/redo just walk back and forth between the two. */
+export function restoreVersion(dir: string, n: number): Promise<void> {
+  const p = designProjectFor(dir); const slug = p.active; if (!slug) return Promise.resolve();
+  const newestBefore = p.versions[0]?.n ?? n;
+  const to = (v: number) => async () => { await designRestore(dir, slug, v); await openDesign(dir, slug, true); };
+  return runUndoable(dir, { label: `Restore v${n}`, redo: to(n), undo: to(newestBefore) });
+}
+
+/** Branches from version `n` into a new design, opens it, and returns its slug. */
+export async function branchVersion(dir: string, n: number): Promise<string> {
+  const p = designProjectFor(dir); const slug = p.active; if (!slug) throw new Error("Pick a design first.");
+  const copy = await designBranch(dir, slug, n);
+  await loadDesigns(dir); await openDesign(dir, copy);
+  return copy;
 }
 
 export function moveFrame(dir: string, frameId: string, x: number, y: number): Promise<void> {
