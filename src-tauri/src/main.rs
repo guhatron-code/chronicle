@@ -3228,7 +3228,8 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
         Arc::new(move |v| { let _ = app.emit("acp-update", v); })
     };
     if lane == acp::Lane::Design { designs::ensure_root(&p.dir)?; }
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, None, acp::adapter_command(&npx))?;
+    let designs_root = if lane == acp::Lane::Design { Some(designs::designs_root(&p.dir)) } else { None };
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, None, acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
 
@@ -3248,7 +3249,8 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
         Arc::new(move |v| { let _ = app.emit("acp-update", v); })
     };
     if lane == acp::Lane::Design { designs::ensure_root(&p.dir)?; }
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, Some(id), acp::adapter_command(&npx))?;
+    let designs_root = if lane == acp::Lane::Design { Some(designs::designs_root(&p.dir)) } else { None };
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, Some(id), acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
 
@@ -3301,6 +3303,27 @@ async fn agent_edits(roots: State<'_, OpenRoots>, dir: String) -> Result<Value, 
         None => Ok(json!({ "files": [] })),
         Some(sid) => Ok(json!({ "files": acp::ledger::files(&acp::ledger::agent_dir(&p.dir), &sid, &p.repo), "session": sid })),
     }
+}
+
+/// What the design session changed OUTSIDE the designs folder (by a command, or
+/// a write the user's own settings auto-allowed) — same rows as `agent_edits`.
+#[tauri::command]
+async fn design_outside_files(roots: State<'_, OpenRoots>, dir: String) -> Result<Vec<Value>, String> {
+    let p = project_for(&roots, &dir)?;
+    let store = acp::Lane::Design.store(&p.dir);
+    Ok(match acp::ledger::current_session(&store) { Some(sid) => acp::ledger::files(&store, &sid, &p.repo), None => vec![] })
+}
+
+/// Put back one (or, with no path, every) outside change the design session made.
+#[tauri::command]
+async fn design_outside_undo(app: tauri::AppHandle, roots: State<'_, OpenRoots>, dir: String, path: Option<String>) -> Result<u64, String> {
+    let p = project_for(&roots, &dir)?;
+    let store = acp::Lane::Design.store(&p.dir);
+    let sid = acp::ledger::current_session(&store).ok_or("there's nothing to undo")?;
+    let n = acp::ledger::revert(&store, &sid, path.as_deref(), &project_roots(&p))?;
+    let key = canon_key(&dir)?.0;
+    let _ = app.emit("acp-update", json!({ "dir": key, "lane": "design", "message": { "method": "_chronicle/outside_changes", "params": { "paths": [], "reverted": n } } }));
+    Ok(n as u64)
 }
 
 /// The reviewable diff for one ledger entry (base vs disk). `path` is the
@@ -3818,6 +3841,7 @@ fn main() {
             agent_session_start, agent_session_state, agent_prompt, agent_cancel,
             agent_set_mode, agent_set_config_option, agent_respond_permission, agent_session_stop,
             agent_edits, agent_edit_diff, agent_edit_keep, agent_edit_undo, agent_restore_checkpoint,
+            design_outside_files, design_outside_undo,
             agent_session_resume, agent_sessions_list, agent_history_read,
             setup_status, setup_install, setup_fix_terminal_path, setup_cancel,
             setup_run_all, setup_open_login,

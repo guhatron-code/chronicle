@@ -283,6 +283,16 @@ pub mod ledger {
     /// (the strip never claims per-file undo it can't do). `path: None`
     /// undoes every direct entry.
     pub fn undo(store: &Path, sid: &str, path: Option<&str>, roots: &[PathBuf]) -> Result<usize, String> {
+        put_back(store, sid, path, roots, false)
+    }
+
+    /// Like `undo`, but also puts back files a command changed: the design lane's
+    /// outside changes are recorded with via_command and must still be undoable.
+    pub fn revert(store: &Path, sid: &str, path: Option<&str>, roots: &[PathBuf]) -> Result<usize, String> {
+        put_back(store, sid, path, roots, true)
+    }
+
+    fn put_back(store: &Path, sid: &str, path: Option<&str>, roots: &[PathBuf], include_commands: bool) -> Result<usize, String> {
         let _g = LOCK.lock().map_err(|e| e.to_string())?;
         let mut idx = load_index(store, sid);
         let targets: Vec<String> = match path {
@@ -293,14 +303,14 @@ pub mod ledger {
                 vec![p.to_string()]
             }
             None => idx.iter()
-                .filter(|(_, m)| !m.get("via_command").and_then(|v| v.as_bool()).unwrap_or(false))
+                .filter(|(_, m)| include_commands || !m.get("via_command").and_then(|v| v.as_bool()).unwrap_or(false))
                 .map(|(k, _)| k.clone())
                 .collect(),
         };
         let mut undone = 0usize;
         for key in targets {
             let meta = idx.get(&key).cloned().unwrap_or(Value::Null);
-            if meta.get("via_command").and_then(|v| v.as_bool()).unwrap_or(false) {
+            if !include_commands && meta.get("via_command").and_then(|v| v.as_bool()).unwrap_or(false) {
                 return Err("this file changed through commands — Undo to here covers it".into());
             }
             let target = PathBuf::from(&key);
@@ -598,8 +608,61 @@ pub fn path_in_roots(p: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|r| r.canonicalize().map(|cr| canon.starts_with(&cr)).unwrap_or(false))
 }
 
+#[derive(Debug)]
+pub enum WriteDecision { Allow { option_id: String }, Refuse { option_id: String, path: String } }
+
+const WRITE_TOOLS: [&str; 4] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
+
+/// The path a file-writing permission ask targets ("" when it names none).
+fn write_target(call: &Value) -> &str {
+    call.pointer("/rawInput/file_path").and_then(|v| v.as_str())
+        .or_else(|| call.pointer("/rawInput/notebook_path").and_then(|v| v.as_str()))
+        .or_else(|| call.pointer("/locations/0/path").and_then(|v| v.as_str()))
+        .unwrap_or("")
+}
+
+/// True when any component of `p` is a symlink whose target doesn't exist.
+/// `path_in_roots` pops non-existent components as literal names, so a
+/// dangling link inside a root would otherwise pass while a write through it
+/// lands wherever the link points.
+fn has_dangling_link(p: &Path) -> bool {
+    p.ancestors().any(|a| {
+        std::fs::symlink_metadata(a).map(|m| m.file_type().is_symlink()).unwrap_or(false) && !a.exists()
+    })
+}
+
+/// Strictly inside `root`: absolute, no `..`, no dangling link, and the
+/// canonical path sits under the canonical root.
+fn strictly_inside(p: &Path, root: &Path) -> bool {
+    p.is_absolute()
+        && !p.components().any(|c| matches!(c, std::path::Component::ParentDir))
+        && !has_dangling_link(p)
+        && path_in_roots(p, &[root.to_path_buf()])
+}
+
+/// Layer 1 of the design lane's fence: a permission request for a file-writing
+/// tool is answered here, never shown. Inside the designs folder → allow once;
+/// anywhere else (or a path that can't be proven inside) → reject once.
+pub fn design_write_decision(params: &Value, designs_root: &Path) -> Option<WriteDecision> {
+    let call = params.get("toolCall")?;
+    let name = call.get("name").and_then(|v| v.as_str())
+        .or_else(|| call.pointer("/_meta/claudeCode/toolName").and_then(|v| v.as_str()))?;
+    if !WRITE_TOOLS.contains(&name) { return None; }
+    let path = write_target(call);
+    let options = params.get("options").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let pick = |kind: &str| options.iter().find(|o| o["kind"] == kind).and_then(|o| o["optionId"].as_str()).map(String::from);
+    let inside = !path.is_empty() && strictly_inside(Path::new(path), designs_root);
+    if inside {
+        pick("allow_once").or_else(|| pick("allow_always")).map(|option_id| WriteDecision::Allow { option_id })
+    } else {
+        pick("reject_once").or_else(|| pick("reject_always")).map(|option_id| WriteDecision::Refuse { option_id, path: path.to_string() })
+    }
+}
+
 pub struct AcpSession {
     key: String,
+    /// `Some` exactly for the design lane: every write must land inside it.
+    designs_root: Option<PathBuf>,
     /// Which of the project's two sessions this is (chat or design).
     lane: Lane,
     /// The lane's record store — transcripts, ledger, `current` pointer.
@@ -698,6 +761,7 @@ pub fn start(
     cwd: PathBuf,
     project_dir: PathBuf,
     roots: Vec<PathBuf>,
+    designs_root: Option<PathBuf>,
     resume: Option<String>,
     mut cmd: std::process::Command,
 ) -> Result<bool, String> {
@@ -726,6 +790,7 @@ pub fn start(
 
     let session = Arc::new(AcpSession {
         key: key.clone(),
+        designs_root,
         lane,
         store: lane.store(&project_dir),
         roots,
@@ -1015,7 +1080,7 @@ impl AcpSession {
                 self.turn_active.store(false, Ordering::SeqCst);
                 // a turn ending always resolves any ask still on screen
                 self.cancel_all_perms();
-                self.reconcile_turn_end();
+                if self.designs_root.is_some() { self.reconcile_design_turn_end(); } else { self.reconcile_turn_end(); }
                 let end = match outcome {
                     Ok(result) => json!({
                         "method": "_chronicle/turn_end",
@@ -1044,6 +1109,25 @@ impl AcpSession {
             "fs/read_text_file" => self.handle_fs_read(&id, params),
             "fs/write_text_file" => self.handle_fs_write(&id, params),
             "session/request_permission" => {
+                if let Some(root) = &self.designs_root {
+                    if let Some(decision) = design_write_decision(&params, root) {
+                        let tool_call_id = params.pointer("/toolCall/toolCallId").cloned().unwrap_or(Value::Null);
+                        let (option_id, allowed, path, reason) = match decision {
+                            WriteDecision::Allow { option_id } => {
+                                let path = params.get("toolCall").map(write_target).unwrap_or("").to_string();
+                                (option_id, true, path, String::new())
+                            }
+                            WriteDecision::Refuse { option_id, path } => (option_id, false, path,
+                                "The design session can only change files in .chronicle/designs/.".to_string()),
+                        };
+                        self.respond_ok(&id, json!({ "outcome": { "outcome": "selected", "optionId": option_id } }));
+                        let guard = json!({ "method": "_chronicle/guard", "params": {
+                            "toolCallId": tool_call_id, "allowed": allowed, "path": path, "reason": reason } });
+                        self.append_transcript(&guard);
+                        self.emit_msg(guard);
+                        return;
+                    }
+                }
                 // register the oneshot BEFORE the frontend hears about it —
                 // an instant answer must find its entry
                 if let Ok(mut g) = self.perms.lock() {
@@ -1133,14 +1217,22 @@ impl AcpSession {
             Ok(f) => f,
             Err(e) => return self.respond_err(id, -32602, &e),
         };
+        if let Some(root) = &self.designs_root {
+            if !strictly_inside(&full, root) {
+                return self.respond_err(id, -32602, "the design session can only change files in .chronicle/designs/");
+            }
+        }
         let key = full.to_string_lossy().to_string();
         // jailed AND ledgered BEFORE the write lands — law 5. The base is the
         // file's bytes before the agent's FIRST write this session.
         let sid = self.session_id.lock().ok().and_then(|g| g.clone()).unwrap_or_else(|| "unknown".into());
         let base = std::fs::read(&full).ok();
         let created = base.is_none();
-        if let Err(e) = ledger::record_base(&self.store, &sid, &full, false, base.as_deref()) {
-            return self.respond_err(id, -32603, &e);
+        // the design lane's files are covered by design versions, not the ledger
+        if self.designs_root.is_none() {
+            if let Err(e) = ledger::record_base(&self.store, &sid, &full, false, base.as_deref()) {
+                return self.respond_err(id, -32603, &e);
+            }
         }
         if let Some(parent) = full.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
@@ -1155,7 +1247,9 @@ impl AcpSession {
             "method": "_chronicle/write",
             "params": { "path": key, "kind": if created { "created" } else { "modified" } }
         }));
-        self.emit_msg(json!({ "method": "_chronicle/edits_changed", "params": {} }));
+        if self.designs_root.is_none() {
+            self.emit_msg(json!({ "method": "_chronicle/edits_changed", "params": {} }));
+        }
     }
 
     /* ---------- client → agent operations ---------- */
@@ -1369,6 +1463,27 @@ impl AcpSession {
         }
     }
 
+    /// Layer 3: anything the design turn changed outside `.chronicle/` (a shell command,
+    /// or a write the user's own Claude settings auto-allowed) is recorded with its base
+    /// so it can be undone, and listed in the thread.
+    fn reconcile_design_turn_end(&self) {
+        let Some(cp) = self.last_checkpoint.lock().ok().and_then(|g| g.clone()) else { return };
+        let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) else { return };
+        let Ok(now_tree) = checkpoint::snapshot_tree_as(&self.repo, self.lane.as_str()) else { return };
+        let mut paths = Vec::new();
+        for (status, rel) in checkpoint::changed_since(&self.repo, &cp, &now_tree) {
+            if rel.starts_with(".chronicle/") { continue; }
+            let abs = self.repo.join(&rel);
+            let base = if status == 'A' { None } else { checkpoint::bytes_at(&self.repo, &cp, &rel) };
+            if ledger::record_base(&self.store, &sid, &abs, true, base.as_deref()).is_ok() { paths.push(rel); }
+        }
+        if !paths.is_empty() {
+            let msg = json!({ "method": "_chronicle/outside_changes", "params": { "paths": paths } });
+            self.append_transcript(&msg);
+            self.emit_msg(msg);
+        }
+    }
+
     pub fn current_state(&self) -> Value {
         json!({
             "alive": self.is_alive(),
@@ -1424,7 +1539,19 @@ for line in sys.stdin:
         turn += 1
         sid = msg["params"]["sessionId"]
         state["prompt_id"] = msg["id"]
-        if turn == 1:
+        text = " ".join(b.get("text", "") for b in msg["params"].get("prompt", []))
+        if "DESIGN-FENCE" in text:
+            turn -= 1
+            opts = [{"optionId":"allow","name":"Allow","kind":"allow_once"},
+                    {"optionId":"always","name":"Always","kind":"allow_always"},
+                    {"optionId":"reject","name":"Reject","kind":"reject_once"}]
+            for rid, p in (("300", "/.chronicle/designs/home/frames/a.html"), ("301", "/src/escape.ts")):
+                send({"jsonrpc":"2.0","id":int(rid),"method":"session/request_permission","params":{
+                    "sessionId":sid,"toolCall":{"toolCallId":"w" + rid,"name":"Write",
+                    "rawInput":{"file_path": project + p}},"options":opts}})
+            state["waiting"] = {"300","301"}
+            state["fence"] = {}
+        elif turn == 1:
             send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":sid,
                 "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hello "}}}})
             send({"jsonrpc":"2.0","id":100,"method":"fs/write_text_file","params":{
@@ -1449,6 +1576,14 @@ for line in sys.stdin:
         rid = str(msg["id"])
         w = state.get("waiting", set())
         if rid in w:
+            if rid in ("300", "301"):
+                state["fence"][rid] = msg.get("result", {}).get("outcome", {}).get("optionId")
+                w.discard(rid)
+                if not w:
+                    with open(project + "/.fence-answers.json", "w") as f:
+                        json.dump(state["fence"], f)
+                    send({"jsonrpc":"2.0","id":state["prompt_id"],"result":{"stopReason":"end_turn"}})
+                continue
             if rid == "102":
                 state["perm_outcome"] = msg.get("result", {}).get("outcome", {})
             if rid == "200":
@@ -1489,7 +1624,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        assert!(start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, None, cmd).unwrap());
         Some(Harness { state, rx, key, dir })
     }
 
@@ -1655,6 +1790,7 @@ for line in sys.stdin:
         let dir = tmp("jail");
         let s = AcpSession {
             key: "k".into(),
+            designs_root: None,
             roots: vec![dir.clone()],
             repo: dir.clone(),
             lane: Lane::Chat,
@@ -1811,6 +1947,60 @@ for line in sys.stdin:
     }
 
     #[test]
+    fn the_design_lane_writes_only_inside_its_folder_and_lists_outside_changes() {
+        let d = repo("design-fence-io");
+        std::fs::write(d.join("app.txt"), "original").unwrap();
+        git(&d, &["add", "-A"]);
+        git(&d, &["commit", "-q", "-m", "first"]);
+        let root = d.join(".chronicle/designs");
+        std::fs::create_dir_all(root.join("home")).unwrap();
+        let sid = "sess-d";
+        let (tx, rx) = mpsc::channel::<Value>();
+        let s = AcpSession {
+            key: Lane::Design.key(&d.to_string_lossy()),
+            designs_root: Some(root.clone()),
+            roots: vec![d.clone()],
+            repo: d.clone(),
+            lane: Lane::Design,
+            store: Lane::Design.store(&d),
+            last_checkpoint: Mutex::new(None),
+            child: Mutex::new(None),
+            writer: Mutex::new(None),
+            next_id: AtomicU64::new(1),
+            pending: Mutex::new(HashMap::new()),
+            perms: Mutex::new(HashMap::new()),
+            session_id: Mutex::new(Some(sid.into())),
+            modes: Mutex::new(Value::Null),
+            agent_caps: Mutex::new(Value::Null),
+            config_options: Mutex::new(Value::Null),
+            turn_active: AtomicBool::new(false),
+            resume: None,
+            suppress_updates: AtomicBool::new(false),
+            emit: Arc::new(move |v| { let _ = tx.send(v); }),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        };
+        // layer 2: fs/write_text_file outside the folder is refused, inside lands unledgered
+        let out = d.join("src/escape.ts");
+        s.handle_fs_write(&json!(1), json!({ "sessionId": sid, "path": out, "content": "x" }));
+        assert!(!out.exists(), "a design write outside the folder must not land");
+        let inside = root.join("home/a.html");
+        s.handle_fs_write(&json!(2), json!({ "sessionId": sid, "path": inside, "content": "<p>hi</p>" }));
+        assert_eq!(std::fs::read_to_string(&inside).unwrap(), "<p>hi</p>");
+        assert!(ledger::files(&s.store, sid, &d).is_empty(), "design files are versioned, not ledgered");
+        // layer 3: a shell change outside is recorded, listed, and revertable
+        let cp = checkpoint::create_as(&d, sid, "design").unwrap();
+        *s.last_checkpoint.lock().unwrap() = Some(cp);
+        std::fs::write(d.join("app.txt"), "mangled by a command").unwrap();
+        std::fs::write(root.join("home/b.html"), "design file").unwrap();
+        s.reconcile_design_turn_end();
+        let listed = rx.try_iter().find(|v| method_is(v, "_chronicle/outside_changes")).expect("outside changes listed");
+        assert_eq!(listed["message"]["params"]["paths"], json!(["app.txt"]));
+        let n = ledger::revert(&s.store, sid, None, &[d.clone()]).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(std::fs::read_to_string(d.join("app.txt")).unwrap(), "original");
+    }
+
+    #[test]
     fn turn_end_reconciliation_finds_command_changes_only() {
         let d = repo("reconcile");
         std::fs::write(d.join("by-command.txt"), "shell original").unwrap();
@@ -1822,6 +2012,7 @@ for line in sys.stdin:
         let (tx, _rx) = mpsc::channel::<Value>();
         let s = AcpSession {
             key: d.to_string_lossy().to_string(),
+            designs_root: None,
             roots: vec![d.clone()],
             repo: d.clone(),
             lane: Lane::Chat,
@@ -1972,7 +2163,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, adapter_command(&npx)).unwrap();
+        start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, None, adapter_command(&npx)).unwrap();
 
         let ready = wait_for(&rx, 300, |v| state_is(v, "ready") || state_is(v, "needs-login") || state_is(v, "error"));
         if !state_is(&ready, "ready") {
@@ -2022,6 +2213,106 @@ for line in sys.stdin:
         assert_eq!(Lane::Design.store(&d), d.join(".chronicle/designs/.threads"));
     }
 
+    fn perm(tool: &str, path: &str) -> Value {
+        json!({
+            "sessionId": "s",
+            "toolCall": { "toolCallId": "t1", "name": tool, "rawInput": { "file_path": path }, "locations": [{ "path": path }] },
+            "options": [
+                { "optionId": "allow", "name": "Allow", "kind": "allow_once" },
+                { "optionId": "always", "name": "Always", "kind": "allow_always" },
+                { "optionId": "reject", "name": "Reject", "kind": "reject_once" }
+            ]
+        })
+    }
+
+    #[test]
+    fn design_writes_inside_are_allowed_and_outside_refused() {
+        let d = tmp("fence");
+        let root = d.join(".chronicle/designs");
+        std::fs::create_dir_all(root.join("home/frames")).unwrap();
+        let inside = root.join("home/frames/desktop.html");
+        match design_write_decision(&perm("Write", inside.to_str().unwrap()), &root) {
+            Some(WriteDecision::Allow { option_id }) => assert_eq!(option_id, "allow"),
+            other => panic!("expected allow, got {other:?}"),
+        }
+        let outside = d.join("src/app.tsx");
+        match design_write_decision(&perm("Edit", outside.to_str().unwrap()), &root) {
+            Some(WriteDecision::Refuse { option_id, path }) => { assert_eq!(option_id, "reject"); assert!(path.ends_with("src/app.tsx")); }
+            other => panic!("expected refuse, got {other:?}"),
+        }
+        let climb = format!("{}/home/../../../src/x.ts", root.display());
+        assert!(matches!(design_write_decision(&perm("Write", &climb), &root), Some(WriteDecision::Refuse { .. })));
+        #[cfg(unix)] {
+            std::os::unix::fs::symlink(&d, root.join("home/escape")).unwrap();
+            let via_link = root.join("home/escape/src/y.ts");
+            assert!(matches!(design_write_decision(&perm("Write", via_link.to_str().unwrap()), &root), Some(WriteDecision::Refuse { .. })));
+            // a DANGLING link inside the folder would let a write create a file
+            // outside it — refused too
+            std::os::unix::fs::symlink(d.join("src/planted.ts"), root.join("home/frames/dangling.html")).unwrap();
+            let dangling = root.join("home/frames/dangling.html");
+            assert!(matches!(design_write_decision(&perm("Write", dangling.to_str().unwrap()), &root), Some(WriteDecision::Refuse { .. })));
+        }
+        assert!(design_write_decision(&perm("Bash", "/tmp/x"), &root).is_none(), "non-write tools are not decided here");
+        assert!(design_write_decision(&perm("Write", "relative/path.html"), &root).map(|w| matches!(w, WriteDecision::Refuse { .. })).unwrap_or(false));
+        // a write with no path at all can't be proven inside
+        let mut no_path = perm("Write", "");
+        no_path["toolCall"]["rawInput"] = json!({});
+        no_path["toolCall"]["locations"] = json!([]);
+        assert!(matches!(design_write_decision(&no_path, &root), Some(WriteDecision::Refuse { .. })));
+    }
+
+    #[test]
+    fn the_design_lane_answers_write_permissions_itself() {
+        let Some(py) = python3() else { return };
+        let dir = tmp("fence-live");
+        std::fs::create_dir_all(dir.join(".chronicle/designs/home/frames")).unwrap();
+        let script = dir.join(".mock-agent.py");
+        std::fs::write(&script, MOCK_AGENT).unwrap();
+        let mut cmd = std::process::Command::new(py); cmd.arg(&script).arg(&dir);
+        let (tx, rx) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let state = AcpState::new();
+        let key = Lane::Design.key(&dir.to_string_lossy());
+        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), None, cmd).unwrap());
+        wait_for(&rx, 20, |v| state_is(v, "ready"));
+        state.get(&key).unwrap().prompt(vec![json!({"type":"text","text":"DESIGN-FENCE"})], "DESIGN-FENCE".into()).unwrap();
+        let g1 = wait_for(&rx, 20, |v| method_is(v, "_chronicle/guard"));
+        let g2 = wait_for(&rx, 20, |v| method_is(v, "_chronicle/guard"));
+        let allowed: Vec<bool> = [g1, g2].iter().map(|g| g["message"]["params"]["allowed"].as_bool().unwrap()).collect();
+        assert!(allowed.contains(&true) && allowed.contains(&false));
+        wait_for(&rx, 20, |v| method_is(v, "_chronicle/turn_end"));
+        let answers: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".fence-answers.json")).unwrap()).unwrap();
+        assert_eq!(answers["300"], "allow"); assert_eq!(answers["301"], "reject");
+        state.drain();
+    }
+
+    #[test]
+    fn the_chat_lane_still_forwards_write_permissions() {
+        let Some(h) = start_mock("fence-chat") else { return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        h.state.get(&h.key).unwrap().prompt(vec![json!({"type":"text","text":"DESIGN-FENCE"})], "DESIGN-FENCE".into()).unwrap();
+        let ask = wait_for(&h.rx, 20, |v| method_is(v, "session/request_permission"));
+        assert_eq!(ask["message"]["params"]["toolCall"]["name"], "Write");
+        h.state.drain();
+    }
+
+    #[test]
+    fn revert_puts_back_command_changed_files_undo_refuses() {
+        let d = tmp("revert");
+        let store = d.join("store");
+        let f = d.join("cmd.txt");
+        std::fs::write(&f, "after").unwrap();
+        ledger::record_base(&store, "s1", &f, true, Some(b"before")).unwrap();
+        assert!(ledger::undo(&store, "s1", Some(&f.to_string_lossy()), &[d.clone()]).is_err());
+        assert_eq!(ledger::revert(&store, "s1", Some(&f.to_string_lossy()), &[d.clone()]).unwrap(), 1);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "before");
+        let made = d.join("made.txt");
+        std::fs::write(&made, "x").unwrap();
+        ledger::record_base(&store, "s1", &made, true, None).unwrap();
+        assert_eq!(ledger::revert(&store, "s1", None, &[d.clone()]).unwrap(), 1);
+        assert!(!made.exists());
+    }
+
     #[test]
     fn two_lanes_live_at_once_and_events_carry_their_lane() {
         let Some(h) = start_mock("two-lanes") else { return };
@@ -2032,7 +2323,7 @@ for line in sys.stdin:
         let (tx, rx2) = mpsc::channel::<Value>();
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let dkey = Lane::Design.key(&h.key);
-        assert!(start(&h.state, emit, dkey.clone(), Lane::Design, h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], None, cmd).unwrap());
+        assert!(start(&h.state, emit, dkey.clone(), Lane::Design, h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], Some(h.dir.join(".chronicle/designs")), None, cmd).unwrap());
         let chat_ready = wait_for(&h.rx, 20, |v| state_is(v, "ready"));
         let design_ready = wait_for(&rx2, 20, |v| state_is(v, "ready"));
         assert_eq!(chat_ready["lane"], "chat");
