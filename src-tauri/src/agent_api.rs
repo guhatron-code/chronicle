@@ -176,6 +176,28 @@ fn caps() -> Vec<Capability> {
             },
             run: terminal_read,
         },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.designs.list",
+                description: "List the project's designs from the Design pane: slug, title, kind, frame count, latest version.",
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            run: designs_list,
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.designs.read",
+                description: "Read one design: its brief, design.json, and absolute paths of its frame files and thumbnails for a version (latest by default). Read-only.",
+                input_schema: json!({
+                    "type": "object", "required": ["slug"],
+                    "properties": {
+                        "slug": { "type": "string", "description": "the design's folder name, from chronicle.designs.list" },
+                        "version": { "type": "integer", "description": "a version number; omit for the latest" }
+                    }
+                }),
+            },
+            run: designs_read,
+        },
     ]
 }
 
@@ -537,6 +559,46 @@ fn state_rounds(dir: &Path, _args: &Value) -> Result<Outcome, String> {
     let n = out.len();
     let summary = if n == 0 { "No rounds yet.".to_string() } else { format!("{n} round{} · {}.", if n == 1 { "" } else { "s" }, lines.join(" · ")) };
     Ok(Outcome { summary, data: json!({ "rounds": out }) })
+}
+
+/* ---------- designs: read-only, the Design pane never takes an agent's write ---------- */
+
+fn designs_list(dir: &Path, _args: &Value) -> Result<Outcome, String> {
+    let rows = crate::designs::list(dir);
+    let summary = format!("{} design{}.", rows.len(), if rows.len() == 1 { "" } else { "s" });
+    Ok(Outcome { summary, data: json!(rows) })
+}
+
+/// A frame's `file` in design.json is written by whatever produced that design and is
+/// never trusted as a path on its own: joined under the version's own folder, an absolute
+/// value or one carrying `..` could otherwise point outside it. Skipped, not escaped —
+/// `design_dir` already jails the slug; this jails the file.
+fn frame_file_is_safe(file: &str) -> bool {
+    !Path::new(file).is_absolute() && !file.contains("..")
+}
+
+fn designs_read(dir: &Path, args: &Value) -> Result<Outcome, String> {
+    let slug = required_str(args, "slug")?;
+    let design = crate::designs::design_dir(dir, slug)?;
+    let versions = crate::designs::versions::list(&design);
+    let want = arg_u64(args, "version")?.map(|v| v as u32).or_else(|| versions.first().map(|m| m.n));
+    let base = match want { Some(n) => design.join(format!(".versions/v{n}")), None => design.clone() };
+    if !base.join("design.json").is_file() { return Err(format!("{slug} has no version {}", want.unwrap_or(0))); }
+    let d: Value = serde_json::from_str(&std::fs::read_to_string(base.join("design.json")).map_err(|e| e.to_string())?).map_err(|_| "couldn't read this design".to_string())?;
+    let frames: Vec<Value> = d["frames"].as_array().cloned().unwrap_or_default();
+    let frame_files: Vec<String> = frames.iter()
+        .filter_map(|f| f["file"].as_str())
+        .filter(|f| frame_file_is_safe(f))
+        .map(|f| base.join(f).to_string_lossy().to_string())
+        .collect();
+    let thumbs: Vec<String> = match want {
+        Some(n) => frames.iter().filter_map(|f| f["id"].as_str())
+            .map(|id| crate::designs::designs_root(dir).join(crate::designs::thumbs::thumb_rel(slug, n, id)))
+            .filter(|p| p.is_file()).map(|p| p.to_string_lossy().to_string()).collect(),
+        None => vec![],
+    };
+    let summary = format!("{} · {} frame{}{}", d["title"].as_str().unwrap_or(slug), frames.len(), if frames.len() == 1 { "" } else { "s" }, want.map(|n| format!(" · v{n}")).unwrap_or_default());
+    Ok(Outcome { summary, data: json!({ "slug": slug, "title": d["title"], "kind": d["kind"], "brief": d["brief"], "design": d, "version": want, "frameFiles": frame_files, "thumbnails": thumbs }) })
 }
 
 /* ---------- actions: the four capabilities that need the app running ---------- */
@@ -985,6 +1047,53 @@ mod tests {
         // the override is a test seam, not a second home: unset, the paths are the app's
         assert_eq!(crate::bridge::socket_path(), crate::config_dir().join("app.sock"));
         assert_eq!(crate::bridge::token_path(), crate::config_dir().join("app.token"));
+    }
+
+    #[test]
+    fn designs_are_listed_and_read_but_never_written() {
+        let d = std::env::temp_dir().join(format!("chronicle-api-designs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = d.canonicalize().unwrap();
+        let slug = crate::designs::create(&d, "app", "Home", "the brief", "t").unwrap();
+        let dir = crate::designs::designs_root(&d).join(&slug);
+        std::fs::write(dir.join("frames/a.html"), "<p>a</p>").unwrap();
+        crate::designs::versions::snapshot_if_changed(&dir, "t1", "", "", "First.").unwrap();
+        let l = call(&d, "chronicle.designs.list", &json!({})).unwrap();
+        assert_eq!(l.data[0]["slug"], "home");
+        let r = call(&d, "chronicle.designs.read", &json!({ "slug": "home" })).unwrap();
+        assert_eq!(r.data["brief"], "the brief");
+        assert_eq!(r.data["version"], 1);
+        assert!(r.data["frameFiles"].as_array().unwrap().is_empty(), "design.json lists no frames yet");
+        assert_eq!(r.data["title"], "Home");
+        assert!(call(&d, "chronicle.designs.read", &json!({ "slug": "../x" })).is_err());
+        assert!(catalog().iter().all(|t| !t.name.starts_with("chronicle.designs.") || t.name.ends_with(".list") || t.name.ends_with(".read")));
+    }
+
+    /// `design.json`'s `frames[].file` is data an agent-facing tool must never trust as a
+    /// path: a value that is absolute or climbs out with `..` is skipped rather than
+    /// reported, so `chronicle.designs.read` can never point a caller outside the version.
+    #[test]
+    fn a_frame_file_that_would_escape_the_version_is_never_reported() {
+        let d = std::env::temp_dir().join(format!("chronicle-api-designs-escape-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = d.canonicalize().unwrap();
+        let slug = crate::designs::create(&d, "app", "Home", "the brief", "t").unwrap();
+        let dir = crate::designs::designs_root(&d).join(&slug);
+        std::fs::write(dir.join("frames/a.html"), "<p>a</p>").unwrap();
+        let design_json = dir.join("design.json");
+        let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&design_json).unwrap()).unwrap();
+        v["frames"] = json!([
+            { "id": "safe", "file": "frames/a.html", "width": 800, "height": 600 },
+            { "id": "relative-escape", "file": "../../etc/x", "width": 800, "height": 600 },
+            { "id": "absolute-escape", "file": "/etc/passwd", "width": 800, "height": 600 }
+        ]);
+        std::fs::write(&design_json, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+        crate::designs::versions::snapshot_if_changed(&dir, "t1", "", "", "First.").unwrap();
+
+        let r = call(&d, "chronicle.designs.read", &json!({ "slug": "home" })).unwrap();
+        let files = r.data["frameFiles"].as_array().unwrap();
+        assert_eq!(files.len(), 1, "only the safe frame file is reported: {files:?}");
+        assert!(files[0].as_str().unwrap().ends_with("frames/a.html"), "{files:?}");
     }
 
     #[test]

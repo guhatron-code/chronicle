@@ -7,8 +7,9 @@ description: Use when working in a project that Chronicle tracks: its notes, its
 
 Chronicle is the desktop app the user has open on this project. It keeps the project's
 notes (tasks, bugs, ideas) in a vault, derives a roadmap from git + the manifest, and runs
-work in rounds the user watches. Three groups of tools cover it; prefer them over reading
-`.chronicle/` files directly — the files are an implementation detail and can change shape.
+work in rounds the user watches, and holds the Design pane's designs. Four groups of tools
+cover it; prefer them over reading `.chronicle/` files directly — the files are an
+implementation detail and can change shape.
 
 ## 1 · notes — the task vault
 
@@ -41,6 +42,11 @@ first, or ask the user to.
 reading state is always safe; starting a round runs real work the user then watches, so it
 needs their ask, not just an opportunity.
 
+## 4 · designs — read-only
+
+- `chronicle.designs.list` — the Design pane's designs.
+- `chronicle.designs.read { slug, version? }` — a design's brief, its design.json, and the absolute paths of its frame HTML and thumbnails. Read the frame files to see exactly what was approved. Nothing here changes a design.
+
 ## CLI equivalents
 
 Every tool has a shell form, useful outside an MCP session or for a quick check:
@@ -52,6 +58,7 @@ chronicle round plan [dir]
 chronicle round start --n N [--where pane|terminal] [dir]
 chronicle project open <path>
 chronicle terminal read [--id <tab>] [--lines N] [dir]
+chronicle designs list|read [--slug s] [--version n] [dir]
 ```
 
 Add `--json` to any of them for the same JSON a tool call returns instead of the table/plain

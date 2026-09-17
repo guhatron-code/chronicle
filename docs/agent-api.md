@@ -46,6 +46,8 @@ roadmap rules, never from memory. Neither group needs the app running.
 | `state.phases` | none | every phase: id, name, state, label, proof, live; plus `new_plans`, `newer_release`, `ledger_set_aside`, `manifest_present`, warnings | `chronicle state phases` |
 | `state.needs_you` | none | the built-in rows the app would show, as plain sentences with their commands | `chronicle state needs_you` |
 | `state.rounds` | none | every round: n, kind, state, and per note path, its status | `chronicle state rounds` |
+| `designs.list` | none | each design's slug, title, kind, frame count, latest version | `chronicle designs list` |
+| `designs.read` | `slug`, optional `version` | brief, design.json, frame file and thumbnail paths | `chronicle designs read --slug home --version 3` |
 
 On `notes.attach`: in a linked worktree the attachment is stored beside the borrowed
 vault, in the main checkout; the app shows it when that checkout is open.

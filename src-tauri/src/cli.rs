@@ -10,18 +10,19 @@ pub(crate) struct Invocation { pub name: String, pub args: Value, pub dir: Optio
 #[derive(Debug)]
 pub(crate) struct Usage(pub String);
 
-const GROUPS: [(&str, &[&str]); 5] = [
+const GROUPS: [(&str, &[&str]); 6] = [
     ("notes", &["list", "read", "create", "update", "set_status", "attach"]),
     ("state", &["phases", "needs_you", "rounds"]),
     ("round", &["plan", "start"]),
     ("project", &["open"]),
     ("terminal", &["read"]),
+    ("designs", &["list", "read"]),
 ];
 /// Flags that repeat into a list, and flags whose value is `key=value` into an object.
 const LIST_FLAGS: [&str; 2] = ["tag", "unset"];
 const MAP_FLAGS: [&str; 1] = ["set"];
 const CSV_FLAGS: [&str; 1] = ["tags"];
-const INT_FLAGS: [&str; 5] = ["round", "limit", "n", "lines", "id"];
+const INT_FLAGS: [&str; 6] = ["round", "limit", "n", "lines", "id", "version"];
 
 fn usage(group: &str) -> Usage {
     match GROUPS.iter().find(|(g, _)| *g == group) {
@@ -223,7 +224,7 @@ mod tests {
         }
         let h = help_text();
         for line in ["chronicle --open <dir>", "chronicle --derive <dir>", "chronicle --state <dir>", "chronicle --mcp <dir>",
-                     "chronicle <notes|state|round|project|terminal> <verb> [--flag value] [--json] [dir]", "chronicle --version"] {
+                     "chronicle <notes|state|round|project|terminal|designs> <verb> [--flag value] [--json] [dir]", "chronicle --version"] {
             assert!(h.contains(line), "help text is missing {line:?}:\n{h}");
         }
         assert!(!h.contains('\u{2014}'), "no em dash in the help text");

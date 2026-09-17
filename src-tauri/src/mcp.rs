@@ -10,7 +10,7 @@ use crate::agent_api;
 pub(crate) struct Session { dir: PathBuf, initialized: bool }
 impl Session { pub(crate) fn new(dir: PathBuf) -> Self { Self { dir, initialized: false } } }
 
-const INSTRUCTIONS: &str = "Chronicle keeps this project's notes (tasks, bugs, ideas) and its build roadmap. Use chronicle.notes.* to list, read, create and update notes instead of grepping .chronicle/notes; use chronicle.state.* before saying what is done or what is next, because it answers from git and the roadmap rules, not from memory.";
+const INSTRUCTIONS: &str = "Chronicle keeps this project's notes (tasks, bugs, ideas) and its build roadmap. Use chronicle.notes.* to list, read, create and update notes instead of grepping .chronicle/notes; use chronicle.state.* before saying what is done or what is next, because it answers from git and the roadmap rules, not from memory. Use chronicle.designs.list and chronicle.designs.read to see the project's designs and their frame files; both are read-only, so a design never changes through them.";
 
 /// The version a person would recognise: the app's, from tauri.conf.json, not the
 /// crate's 0.1.0. Parsed once from the file compiled in beside this one.
