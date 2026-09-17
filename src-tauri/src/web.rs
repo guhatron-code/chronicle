@@ -313,7 +313,7 @@ fn plain_version(v: &str) -> bool {
 /// Safari's user agent, the same scheme gate. Popups a popup opens are popups too.
 /// No capability names a `web-popup-*` label, so the page reaches no app command.
 fn open_popup(app: &AppHandle, features: tauri::webview::NewWindowFeatures) -> tauri::webview::NewWindowResponse<tauri::Wry> {
-    install_popup_close();
+    install_popup_close(&features.opener().webview);
     let n = POPUP_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let app_child = app.clone();
     let built = tauri::WebviewWindowBuilder::new(app, format!("web-popup-{n}"), WebviewUrl::External("about:blank".parse().unwrap()))
@@ -335,10 +335,13 @@ static POPUP_ID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::ne
 
 /// wry's UI delegate doesn't answer `webViewDidClose:`, so a popup's own
 /// `window.close()` (how a sign-in popup ends) would leave an empty window up.
-/// Teach the delegate class once: close the web view's window the way its close
-/// button does. Only script-opened views ever send it, so the main window and
-/// the pane's tabs are never touched.
-fn install_popup_close() {
+/// Teach the delegate's class once — found through the opener's own delegate,
+/// since the class's runtime name is wry's business: close the web view's window
+/// the way its close button does. Only script-opened views ever send it, so the
+/// main window and the pane's tabs are never touched. WebKit reads which
+/// delegate methods exist when a delegate is set, so this runs before the popup
+/// view (and its delegate) is built.
+fn install_popup_close(opener: &WKWebView) {
     use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
     static ONCE: std::sync::Once = std::sync::Once::new();
     unsafe extern "C-unwind" fn did_close(_this: *mut AnyObject, _cmd: Sel, webview: *mut AnyObject) {
@@ -347,12 +350,13 @@ fn install_popup_close() {
         if window.is_null() { return; }
         let _: () = unsafe { objc2::msg_send![window, performClose: std::ptr::null::<AnyObject>()] };
     }
-    ONCE.call_once(|| {
-        let Some(cls) = AnyClass::get(c"WryWebViewUIDelegate") else { return };
-        unsafe {
-            let imp: Imp = std::mem::transmute(did_close as unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject));
-            objc2::ffi::class_addMethod(cls as *const AnyClass as *mut AnyClass, objc2::sel!(webViewDidClose:), imp, c"v@:@".as_ptr());
-        }
+    ONCE.call_once(|| unsafe {
+        let delegate: *mut AnyObject = objc2::msg_send![opener, UIDelegate];
+        if delegate.is_null() { return; }
+        let cls: *const AnyClass = objc2::ffi::object_getClass(delegate);
+        if cls.is_null() { return; }
+        let imp: Imp = std::mem::transmute(did_close as unsafe extern "C-unwind" fn(*mut AnyObject, Sel, *mut AnyObject));
+        objc2::ffi::class_addMethod(cls as *mut AnyClass, objc2::sel!(webViewDidClose:), imp, c"v@:@".as_ptr());
     });
 }
 

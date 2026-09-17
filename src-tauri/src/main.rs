@@ -3732,8 +3732,10 @@ fn main() {
         })
         .on_window_event(|window, event| {
             // the window is gone: no orphaned children, ever — kill + reap every PTY
-            // shell and every background roadmap session.
-            if matches!(event, tauri::WindowEvent::Destroyed) {
+            // shell and every background roadmap session. Only the main window
+            // counts: a Web pane sign-in popup closing must not take the terminals
+            // with it.
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 let app = window.app_handle();
                 // the window is closed: there is no buffer left to ask about, so the
                 // exit that follows must NOT be turned back
