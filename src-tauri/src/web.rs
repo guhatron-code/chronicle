@@ -120,6 +120,18 @@ pub struct WebTab {
 
 fn tabs_dir() -> PathBuf { crate::config_dir().join("web-tabs") }
 
+/// Registers `root` (canonicalised) under its project hash so the
+/// `chronicle-file://` protocol can serve files under it, and returns that
+/// hash. The same insert `web_open_file` has always done, now shared with
+/// anything else that needs a root registered ahead of a URL — the design
+/// frame base, for one.
+pub fn register_root(web: &WebState, root: &Path) -> Result<String, String> {
+    let root = root.canonicalize().map_err(|e| e.to_string())?;
+    let hash = project_hash(&root);
+    web.roots.lock().map_err(|e| e.to_string())?.insert(hash.clone(), root);
+    Ok(hash)
+}
+
 /// `dir` must be an opened project (same jail as every other command); registers
 /// the root for the protocol and returns the tab URL for a file inside it.
 #[tauri::command]
@@ -127,8 +139,7 @@ pub fn web_open_file(roots: State<crate::OpenRoots>, web: State<WebState>, dir: 
     let p = crate::project_for(&roots, &dir)?;
     let root = p.dir.canonicalize().map_err(|e| e.to_string())?;
     resolve_project_file(&root, &path).ok_or_else(|| "that file isn't inside this project".to_string())?;
-    let hash = project_hash(&root);
-    web.roots.lock().map_err(|e| e.to_string())?.insert(hash.clone(), root);
+    let hash = register_root(web.inner(), &root)?;
     let rel = path.trim_start_matches("./");
     let enc = percent_encoding::utf8_percent_encode(rel, percent_encoding::NON_ALPHANUMERIC).to_string().replace("%2F", "/").replace("%2E", ".").replace("%2D", "-").replace("%5F", "_");
     Ok(format!("chronicle-file://{hash}/{enc}"))
@@ -167,28 +178,47 @@ pub fn web_tabs_save(roots: State<crate::OpenRoots>, dir: String, tabs: SavedTab
 /// 2 GB allocation.
 pub const MAX_SERVED_BYTES: u64 = 64 * 1024 * 1024;
 
+/// What the protocol handler answers with: not just status/mime/body but any
+/// extra headers a served file needs — a design frame's CSP and CORS, chiefly.
+/// Every other file gets an empty `headers`, so the handler's own
+/// `Content-Type`/`Cache-Control` are the only headers it ever carried before.
+pub struct Served { pub status: u16, pub mime: &'static str, pub body: Vec<u8>, pub headers: Vec<(&'static str, String)> }
+
+fn plain(status: u16, msg: &[u8]) -> Served { Served { status, mime: "text/plain", body: msg.to_vec(), headers: vec![] } }
+
 /// The protocol handler body: `chronicle-file://<hash>/<rel>` → the file's bytes
-/// with a content type, or 404 for anything outside the jail.
+/// with a content type, or 404 for anything outside the jail. A file under
+/// `.chronicle/designs/…` (see `designs::frame::is_design_path`) gets the design
+/// CSP/CORS headers, and an HTML one gets the tiny reporter script injected —
+/// every other file is served byte-identical to before, with no new headers.
 ///
 /// No range support: the whole file goes out as one 200, so `Range:` headers are
 /// ignored and seeking inside a long video won't work. Deferred — it needs the
 /// handler to parse the request headers and answer 206 with a slice.
-pub fn serve_project_file(web: &WebState, url: &str) -> (u16, &'static str, Vec<u8>) {
-    let Ok(u) = url::Url::parse(url) else { return (404, "text/plain", b"not found".to_vec()) };
+pub fn serve_project_file(web: &WebState, url: &str) -> Served {
+    let Ok(u) = url::Url::parse(url) else { return plain(404, b"not found") };
     let hash = u.host_str().unwrap_or("").to_string();
     let rel = percent_encoding::percent_decode_str(u.path().trim_start_matches('/')).decode_utf8_lossy().into_owned();
     let root = web.roots.lock().ok().and_then(|g| g.get(&hash).cloned());
     match root.and_then(|r| resolve_project_file(&r, &rel)) {
         Some(file) => {
             if std::fs::metadata(&file).map(|m| m.len() > MAX_SERVED_BYTES).unwrap_or(false) {
-                return (413, "text/plain", b"file too large to show here".to_vec());
+                return plain(413, b"file too large to show here");
             }
             match std::fs::read(&file) {
-                Ok(bytes) => (200, mime_for(&file), bytes),
-                Err(_) => (404, "text/plain", b"not found".to_vec()),
+                Ok(bytes) => {
+                    let mime = mime_for(&file);
+                    if crate::designs::frame::is_design_path(&rel) {
+                        let body = if mime.starts_with("text/html") { crate::designs::frame::inject_reporter(&bytes) } else { bytes };
+                        Served { status: 200, mime, body, headers: crate::designs::frame::design_headers() }
+                    } else {
+                        Served { status: 200, mime, body: bytes, headers: vec![] }
+                    }
+                }
+                Err(_) => plain(404, b"not found"),
             }
         }
-        None => (404, "text/plain", b"not found".to_vec()),
+        None => plain(404, b"not found"),
     }
 }
 
@@ -594,6 +624,24 @@ mod tests {
         assert_eq!(cap["webviews"], serde_json::json!(["main"]));
         let perms: Vec<&str> = cap["permissions"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
         assert!(perms.contains(&"default"), "the app's own commands are not granted");
+    }
+
+    #[test]
+    fn design_frames_are_served_with_their_policy_and_reporter_and_others_are_not() {
+        let d = std::env::temp_dir().join(format!("chronicle-serve-design-{}", std::process::id()));
+        std::fs::create_dir_all(d.join(".chronicle/designs/home/frames")).unwrap();
+        std::fs::write(d.join(".chronicle/designs/home/frames/a.html"), "<html><head></head><body>x</body></html>").unwrap();
+        std::fs::write(d.join("page.html"), "<html><head></head><body>y</body></html>").unwrap();
+        let web = WebState::new();
+        let hash = register_root(&web, &d).unwrap();
+        let s = serve_project_file(&web, &format!("chronicle-file://{hash}/.chronicle/designs/home/frames/a.html"));
+        assert_eq!(s.status, 200);
+        assert!(String::from_utf8(s.body).unwrap().contains("__chronicleFrame"));
+        assert!(s.headers.iter().any(|(k, _)| *k == "Content-Security-Policy"));
+        let o = serve_project_file(&web, &format!("chronicle-file://{hash}/page.html"));
+        assert_eq!(o.status, 200);
+        assert!(!String::from_utf8(o.body).unwrap().contains("__chronicleFrame"));
+        assert!(o.headers.is_empty());
     }
 
     #[test]

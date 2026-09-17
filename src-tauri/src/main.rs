@@ -2977,6 +2977,19 @@ pub(crate) fn project_for(roots: &OpenRoots, dir: &str) -> Result<Project, Strin
     Ok(load_project(&d))
 }
 
+/// The `chronicle-file://` base a design canvas mounts its frames under: the
+/// project's designs root, registered with the Web pane's protocol under the
+/// same hash `web_open_file` would use. The frontend joins a design's relative
+/// frame path onto this to build each iframe's `src`.
+#[tauri::command]
+fn design_frame_base(roots: State<OpenRoots>, web: State<web::WebState>, dir: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    let base = notes::index::vault_root(&p.dir);
+    designs::ensure_root(&p.dir)?;
+    let hash = web::register_root(&web, &base)?;
+    Ok(format!("chronicle-file://{hash}/.chronicle/designs/"))
+}
+
 fn allow_root(roots: &OpenRoots, dir: &Path) {
     if let Ok(mut g) = roots.0.lock() {
         g.insert(dir.to_path_buf());
@@ -3663,15 +3676,13 @@ fn main() {
             let uri = request.uri().to_string();
             std::thread::spawn(move || {
                 let web = app.state::<web::WebState>();
-                let (status, mime, body) = web::serve_project_file(&web, &uri);
-                responder.respond(
-                    tauri::http::Response::builder()
-                        .status(status)
-                        .header("Content-Type", mime)
-                        .header("Cache-Control", "no-store")
-                        .body(body)
-                        .unwrap(),
-                );
+                let served = web::serve_project_file(&web, &uri);
+                let mut b = tauri::http::Response::builder()
+                    .status(served.status)
+                    .header("Content-Type", served.mime)
+                    .header("Cache-Control", "no-store");
+                for (k, v) in served.headers { b = b.header(k, v); }
+                responder.respond(b.body(served.body).unwrap());
             });
         })
         .setup(|app| {
@@ -3853,6 +3864,7 @@ fn main() {
             power::get_power_source, power::set_ui_visible,
             web::web_open_file, web::web_tabs_load, web::web_tabs_save,
             web::web_tab_open, web::web_tab_close, web::web_tab_show, web::web_hide_all,
+            design_frame_base,
             web::web_set_bounds, web::web_tab_navigate, web::web_tab_back, web::web_tab_forward, web::web_tab_reload,
             blocklists::web_blocklists_prepare, blocklists::web_blocklists_info,
             designs::designs_list, designs::design_create, designs::design_read,
