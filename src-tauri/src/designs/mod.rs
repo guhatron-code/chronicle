@@ -222,6 +222,26 @@ pub fn designs_order_save(roots: State<OpenRoots>, dir: String, order: Value) ->
     if !order.is_object() { return Err("that order isn't valid".into()); }
     write_json(&ensure_root(&p.dir)?.join("order.json"), &order)
 }
+#[tauri::command]
+pub fn design_snapshot(roots: State<OpenRoots>, dir: String, slug: String, prompt: String, summary: String, session: String) -> Result<Option<u32>, String> {
+    let p = project_for(&roots, &dir)?;
+    versions::snapshot_if_changed(&design_dir(&p.dir, &slug)?, &now_iso(), &session, &prompt, &summary)
+}
+#[tauri::command]
+pub fn design_versions(roots: State<OpenRoots>, dir: String, slug: String) -> Result<Vec<versions::VersionMeta>, String> {
+    let p = project_for(&roots, &dir)?;
+    Ok(versions::list(&design_dir(&p.dir, &slug)?))
+}
+#[tauri::command]
+pub fn design_restore(roots: State<OpenRoots>, dir: String, slug: String, n: u32) -> Result<u32, String> {
+    let p = project_for(&roots, &dir)?;
+    versions::restore(&design_dir(&p.dir, &slug)?, n, &now_iso())
+}
+#[tauri::command]
+pub fn design_branch(roots: State<OpenRoots>, dir: String, slug: String, n: Option<u32>) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    versions::branch(&p.dir, &slug, n, &now_iso())
+}
 
 #[cfg(test)]
 mod tests {

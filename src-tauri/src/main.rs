@@ -3858,7 +3858,8 @@ fn main() {
             designs::designs_list, designs::design_create, designs::design_read,
             designs::design_rename, designs::design_set_kind,
             designs::design_trash, designs::design_untrash,
-            designs::design_canvas_save, designs::designs_order_save
+            designs::design_canvas_save, designs::designs_order_save,
+            designs::design_snapshot, designs::design_versions, designs::design_restore, designs::design_branch
         ])
         .build(tauri::generate_context!())
         .expect("error while building Chronicle")
