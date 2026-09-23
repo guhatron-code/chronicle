@@ -179,6 +179,9 @@ function NameInput({ initial, onDone }: { initial: string; onDone: (name: string
       <input
         ref={ref}
         autoFocus
+        // renaming starts with the old name selected, the way the Finder does
+        // it: the first keystroke replaces it instead of running off its end
+        onFocus={(e) => e.currentTarget.select()}
         defaultValue={initial}
         placeholder="Design name"
         // the pane's ⌘-shortcuts listen on window in capture; a name being

@@ -69,7 +69,7 @@ function ConfigSelect({ dir, optionId, title }: { dir: string; optionId: string;
         <DropdownMenuTrigger asChild>
           <button
             data-config-select={optionId}
-            className="inline-flex h-[26px] min-w-0 shrink items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
+            className="inline-flex h-[26px] shrink-0 items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
           >
             {/* a long model name shortens rather than wrapping the whole row
                 apart in a narrow column (the design thread is 320px at its
@@ -126,7 +126,7 @@ function ModeSelect({
             data-config-select="mode"
             data-mode-control
             disabled={disabled}
-            className="inline-flex h-[26px] min-w-0 shrink items-center gap-1 whitespace-nowrap rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
+            className="inline-flex h-[26px] shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
           >
             <span className="max-w-[110px] truncate">{cur?.name ?? "Plan"}</span>
             <svg className="shrink-0" width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -591,7 +591,9 @@ export function Composer({
         )}
       />
       </div>
-      <div data-chrome className="flex items-center gap-[9px]">
+      {/* narrow columns (the design thread) wrap this row instead of
+          shaving the chips down to their chevrons */}
+      <div data-chrome className="flex flex-wrap items-center gap-[9px]">
         {!disabled && (
           <Hint label="Attach a file">
             <button
