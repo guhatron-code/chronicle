@@ -33,7 +33,7 @@ import {
   type HistoryFacts,
   type PickerRecent,
 } from "@/lib/ipc";
-import { keydownInit, reclaimsFocus } from "@/lib/menu-keys";
+import { keydownInit, needsEditingCommand, reclaimsFocus, type MenuKey } from "@/lib/menu-keys";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { markFor, toPaletteProject, toRecentProject } from "@/lib/picker-data";
 import { RoadmapPane, dropCheckError } from "@/screens/roadmap/RoadmapPane";
@@ -152,6 +152,27 @@ function loadPaneLayout(dir: string): PaneLayout {
 /* One tooltip provider for the whole app — every Tooltip anywhere under it
    shares the same 400ms delay and the same skip-delay grace period, which is
    what makes a row of icon buttons feel like a row rather than 20 timers. */
+
+/* ⌘Z / ⇧⌘Z arrive through the menu like every other chord (src-tauri/src/menu.rs).
+   They go to whoever has focus — the code editor and the design canvas both listen
+   on their own element — then to the body, where the design pane's own listener
+   waits, and only a plain text control that nobody handled falls back to WebKit's
+   editing command. */
+function undoChord(k: MenuKey) {
+  const el = (document.activeElement as HTMLElement | null) ?? null;
+  const focused = el && el !== document.body ? el : null;
+  if (focused) {
+    const first = new KeyboardEvent("keydown", keydownInit(k));
+    focused.dispatchEvent(first);
+    if (first.defaultPrevented) return;
+    // A plain text control has no handler of its own — WebKit's editing command is
+    // its undo, and the chord stops here: a pane listening on the window must not
+    // undo its own work while the user is typing.
+    if (needsEditingCommand(focused)) { document.execCommand(k.shift ? "redo" : "undo"); return; }
+  }
+  document.body.dispatchEvent(new KeyboardEvent("keydown", keydownInit(k)));
+}
+
 export default function App() {
   return (
     <TooltipProvider delayDuration={400}>
@@ -940,6 +961,10 @@ function AppShell() {
       // the handlers look at activeElement.
       const fromPage = !document.hasFocus();
       if (fromPage) (document.activeElement as HTMLElement | null)?.blur?.();
+      // Undo and redo go to whoever has focus, not to the body: the code editor
+      // and the design canvas both listen on their own element, and a plain text
+      // field has no listener at all — it needs the editing command instead.
+      if (k.code === "KeyZ") { undoChord(k); return; }
       document.body.dispatchEvent(new KeyboardEvent("keydown", keydownInit(k)));
       if (fromPage && reclaimsFocus(k)) void focusMainWebview();
     }).then((u) => { if (dead) u(); else un = u; });

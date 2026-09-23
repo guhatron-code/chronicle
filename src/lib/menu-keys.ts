@@ -32,3 +32,11 @@ export function keydownInit(k: MenuKey): KeyboardEventInit {
 export function reclaimsFocus(k: MenuKey): boolean {
   return k.key !== "r" && k.key !== "[" && k.key !== "]";
 }
+
+/** A plain text control answers ⌘Z through WebKit's editing command, not through
+ *  a keydown handler: nothing in this app listens for it, so after a chord no
+ *  editor claimed, the command is the only undo left. A code editor or the design
+ *  canvas handles its own keydown and is excluded — they claim the chord first. */
+export function needsEditingCommand(el: { tagName: string } | null): boolean {
+  return el?.tagName === "INPUT" || el?.tagName === "TEXTAREA";
+}

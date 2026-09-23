@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { keydownInit, reclaimsFocus, type MenuKey } from "./menu-keys";
+import { keydownInit, needsEditingCommand, reclaimsFocus, type MenuKey } from "./menu-keys";
 
 const cmd = (key: string, code: string): MenuKey => ({ key, code, meta: true, alt: false, shift: false });
 const altCmd = (key: string, code: string): MenuKey => ({ key, code, meta: true, alt: true, shift: false });
@@ -45,5 +45,15 @@ describe("reclaimsFocus", () => {
     expect(reclaimsFocus(cmd("r", "KeyR"))).toBe(false);
     expect(reclaimsFocus(cmd("[", "BracketLeft"))).toBe(false);
     expect(reclaimsFocus(cmd("]", "BracketRight"))).toBe(false);
+  });
+});
+
+describe("needsEditingCommand", () => {
+  it("is the fallback for plain text controls only", () => {
+    expect(needsEditingCommand({ tagName: "TEXTAREA" })).toBe(true);
+    expect(needsEditingCommand({ tagName: "INPUT" })).toBe(true);
+    // the code editor and the design canvas claim ⌘Z themselves
+    expect(needsEditingCommand({ tagName: "DIV" })).toBe(false);
+    expect(needsEditingCommand(null)).toBe(false);
   });
 });

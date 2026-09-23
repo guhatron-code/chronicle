@@ -3,7 +3,7 @@
    (board 2) takes the canvas and thread's place. */
 import { useEffect, useState } from "react";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
-import { designProjectFor, loadDesigns, openDesign, setCompare, subscribeDesigns } from "@/lib/design-store";
+import { designProjectFor, loadDesigns, openDesign, redoDesign, setCompare, subscribeDesigns, undoDesign } from "@/lib/design-store";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { DesignCanvas } from "./DesignCanvas";
 import { DesignSidebar } from "./DesignSidebar";
@@ -40,6 +40,22 @@ export function DesignPane({ dir, onScreen, onConfirm, onRevealTerminal }: {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyOpen, dir]);
+  // ⌘Z anywhere in the pane, not only on the canvas: a restore starts from the
+  // History panel, and the undo that follows it has to work with the focus still
+  // on that button. The canvas's own handler claims the chord first (it calls
+  // preventDefault), so this never doubles it.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (e.key.toLowerCase() !== "z") return;
+      const el = e.target as HTMLElement | null;
+      if (el?.tagName === "INPUT" || el?.tagName === "TEXTAREA" || el?.isContentEditable) return;
+      e.preventDefault();
+      void (e.shiftKey ? redoDesign(dir) : undoDesign(dir));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dir]);
   const empty = p.rows.length === 0;
   // Nothing open yet: open the first design in the list.
   const first = p.rows[0]?.slug;

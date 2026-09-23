@@ -99,9 +99,20 @@ const APP: &[Go] = &[
     Go { id: "go-quit", text: "Quit Chronicle", accel: "Cmd+KeyQ", key: "q", code: "KeyQ", alt: false, shift: false, group: 0 },
 ];
 
+/// Edit's own two rows. They cannot be `PredefinedMenuItem::undo`/`redo`: a
+/// predefined item answers ⌘Z itself through the responder chain, so the chord
+/// never reaches the document and the Design canvas's own undo (spec §7) never
+/// ran. As table rows the chord goes out as a `menu-key` like every other one,
+/// and App.tsx decides who undoes: the focused editor, a text field, or the
+/// canvas's own stack.
+const EDIT: &[Go] = &[
+    Go { id: "edit-undo", text: "Undo", accel: "Cmd+KeyZ",       key: "z", code: "KeyZ", alt: false, shift: false, group: 0 },
+    Go { id: "edit-redo", text: "Redo", accel: "Shift+Cmd+KeyZ", key: "Z", code: "KeyZ", alt: false, shift: true,  group: 0 },
+];
+
 /// Every row in both tables — what `key_for` searches and what the tests pin.
 fn rows() -> impl Iterator<Item = &'static Go> {
-    GO.iter().chain(APP.iter())
+    GO.iter().chain(APP.iter()).chain(EDIT.iter())
 }
 
 /// Menu id → the chord it replays. Predefined items (copy, paste, …) are not in a
@@ -142,13 +153,16 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 
     // Edit is what makes ⌘C/⌘V/⌘Z work in both webviews — WebKit only gets them
     // through the responder chain these items drive.
+    let edit_rows: Vec<MenuItem<R>> = EDIT.iter()
+        .map(|g| MenuItem::with_id(app, g.id, g.text, true, Some(g.accel)))
+        .collect::<tauri::Result<_>>()?;
     let edit_menu = Submenu::with_items(
         app,
         "Edit",
         true,
         &[
-            &PredefinedMenuItem::undo(app, None)?,
-            &PredefinedMenuItem::redo(app, None)?,
+            &edit_rows[0],
+            &edit_rows[1],
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::cut(app, None)?,
             &PredefinedMenuItem::copy(app, None)?,
@@ -253,13 +267,27 @@ mod tests {
         assert_eq!(key_for("go-project-1").unwrap().code, key_for("go-content").unwrap().code);
     }
 
+    /// Search and Redo are the only chords that carry Shift, and both report the
+    /// shifted letter — macOS rewrites `key` when Shift is down.
     #[test]
-    fn search_is_the_only_shift_chord() {
+    fn only_search_and_redo_carry_shift() {
         for g in rows() {
-            assert_eq!(key_for(g.id).unwrap().shift, g.id == "go-search", "{} shift", g.id);
+            let shifted = g.id == "go-search" || g.id == "edit-redo";
+            assert_eq!(key_for(g.id).unwrap().shift, shifted, "{} shift", g.id);
         }
         // App.tsx accepts "f" or "F"; macOS reports the shifted form
         assert_eq!(key_for("go-search").unwrap().key, "F");
+        assert_eq!(key_for("edit-redo").unwrap().key, "Z");
+    }
+
+    /// Undo and redo must reach the frontend as a chord, not be answered natively:
+    /// App.tsx routes `KeyZ` to the focused editor, the design pane, then the text
+    /// control's own editing command.
+    #[test]
+    fn undo_and_redo_are_routed_not_predefined() {
+        assert_eq!(key_for("edit-undo").unwrap().code, "KeyZ");
+        assert_eq!(key_for("edit-redo").unwrap().code, "KeyZ");
+        assert!(!key_for("edit-undo").unwrap().shift);
     }
 
     #[test]
