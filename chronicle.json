@@ -35,7 +35,7 @@
     { "path": "docs/superpowers/specs/2026-09-16-agent-access-and-visible-rounds-design.md", "sha256": "297f96b8134ce5c5162c59f48c09bff5ce517027c79cdf0209a70b024867e868" },
     { "path": "fixes/phase_8_fixes_plan.md", "sha256": "5848f014bf3bd3e120d43078241cb8d1b463b8283f97ec2ef9c315618dc43d9a" },
     { "path": "fixes/phase_9_fixes_plan.md", "sha256": "c6d918161447511cfa1507b00f01866cd0a867de3fd6531e22bf37b95ecd4f01" },
-    { "path": "docs/superpowers/specs/2026-09-17-design-pane-foundation-design.md", "sha256": "a18c29b3633c0397f6728eff0d1b1027b28e1900c66b5caf075a076cc793b85f" }
+    { "path": "docs/superpowers/specs/2026-09-17-design-pane-foundation-design.md", "sha256": "9790a875b0086d30cc3af96e35edf1a53f0807164f3fab26672735e8cc441c56" }
   ],
   "spine": [
     { "path": "PRODUCT.md" },

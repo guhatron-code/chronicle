@@ -447,3 +447,54 @@ ledger; the sections above are already amended.
 - History compare uses the current frame list; a frame missing from an older version shows a
   placeholder (reading a version's own frame list is a follow-up).
 - The design thread never offers the chat's checkpoint restore or edit diffs.
+
+
+## Live test results (2026-09-23)
+
+The release build (`--features tauri/custom-protocol`) was driven on a throwaway copy of this
+project: a design started from the brief, a real design session, then every promise in DP-1.
+
+What held, live:
+
+- **Starting a design.** Pick a kind, write a brief, and the folder, `design.json` and the
+  session's first turn all follow. The session reads the project, asks before each command,
+  and writes only inside the design's folder; the fence answered all nine writes of the first
+  turn automatically.
+- **Fonts are local.** Asked for two typefaces, the session downloaded them into
+  `assets/fonts/` and loaded them with `@font-face`. Nothing links a font service.
+- **The canvas.** Both frames draw as live pages in their sandboxed iframes over the designs
+  host — fonts, images and stylesheets included. Below the live threshold they stay
+  placeholders; at 24% they render. Double-click makes a frame live and the page's own
+  JavaScript answers clicks inside it (a quantity stepper stepped). Escape leaves live.
+- **Energy.** Leaving the pane unmounts the frames: coming back re-renders them from scratch.
+- **Versions.** Every turn that changed a file wrote a snapshot with its prompt, summary and
+  content hash, plus full-page thumbnails rendered by the hidden capture window
+  (780×8080 for the phone frame, 1440×3120 for the desktop one).
+- **History.** One snapshot per turn; selecting an older one splits the canvas old | current;
+  Restore writes a new version with the old content and its thumbnails; Branch opens a new
+  design from that version.
+- **Changes outside the folder.** A file written into the project while a turn ran was
+  listed in the thread, and its Undo moved the current file to the macOS Trash before
+  putting the old bytes back.
+- **Writing outside, asked for directly.** Twice told to write outside the design folder, the
+  session refused and wrote nothing. Layer 1's automatic refusal could not be reached live
+  because the session never attempts the write; it stays covered by the Rust tests.
+- **The list.** Rename, duplicate, move to another kind, reorder by dragging, and delete with
+  undo (both the toast's Undo and ⌘Z) all behave.
+- **Idle and resume.** The session stopped by itself 15 minutes after its last turn, the
+  thread said so, and the next message resumed the same session id with its transcript intact.
+- **The agent API.** `chronicle designs list` and `designs read` answer from disk, read-only.
+
+Four defects were found and fixed:
+
+1. Starting a design never sent its brief. The pane's "open the first design" effect raced
+   the open inside `startDesign`, so the send found nothing open and threw. An open now claims
+   the design before it reads it, and the send names the design it is for.
+2. With the terminal column open, the canvas was squeezed to nothing: the pane now asks for
+   the width its three columns need, and the list and thread shrink to a floor instead.
+3. ⌘Z never reached the pane. The Edit menu's predefined Undo answered the chord itself, so
+   the canvas's undo — restore included — was dead in the built app. Undo and redo are routed
+   chords now; a plain text field still gets WebKit's own editing command.
+4. Smaller: the new-design screen and the composer's chips fell apart in a narrow column, a
+   design's name was cut mid-word, and renaming appended to the old name instead of replacing
+   it.
