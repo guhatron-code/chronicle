@@ -318,7 +318,7 @@ export function DesignSidebar({ dir, onNew }: { dir: string; onNew: () => void }
   const visibleKinds = KINDS.filter((k) => grouped[k].length > 0);
 
   return (
-    <aside data-chrome className="flex w-[248px] shrink-0 flex-col border-r border-border-hairline">
+    <aside data-chrome className="flex w-[248px] min-w-[180px] shrink flex-col border-r border-border-hairline">
       <TreeHeader label={total > 0 ? `Designs · ${total}` : "Designs"} className="h-10 flex-none border-b border-border-hairline">
         <TreeIconButton aria-label="New design" onClick={onNew}>
           <PlusGlyph size={13} />

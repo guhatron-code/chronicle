@@ -36,7 +36,7 @@ export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
   const p = designProjectFor(dir);
   const latest = p.versions[0]?.n;
   return (
-    <div className="flex w-[392px] shrink-0 flex-col border-l border-border-hairline bg-surface-panel">
+    <div className="flex w-[392px] min-w-[320px] shrink flex-col border-l border-border-hairline bg-surface-panel">
       {s.outside.length > 0 && (
         <div className="mx-3 mt-3 flex flex-col gap-2 rounded-md border border-border-hairline bg-surface-card px-3 py-2.5">
           <span className="text-[12.5px] text-text-primary">Changed while the design session worked</span>

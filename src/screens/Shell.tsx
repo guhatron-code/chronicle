@@ -204,7 +204,9 @@ export function Shell({
    * never grows past what the content can use, and never shrinks below the
    * width where the cards start to distort */
   const ROAD_MAX_W = 956;
-  const paneMinW = pane === "road" ? 560 : 520;
+  // The design pane is three columns (list · canvas · thread), so it needs more
+  // room than a one-column pane before the canvas is squeezed to nothing.
+  const paneMinW = pane === "road" ? 560 : pane === "design" ? 760 : 520;
 
   const onSplitterDown = useCallback(
     (down: React.PointerEvent<HTMLDivElement>) => {

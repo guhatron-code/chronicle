@@ -120,8 +120,18 @@ export async function loadDesigns(dir: string): Promise<void> {
 
 export async function openDesign(dir: string, slug: string, reload = false): Promise<void> {
   const p = designProjectFor(dir);
-  if (!p.base) p.base = await designFrameBase(dir);
   const token = ++p.openToken;
+  // Claim the design before the first await: the pane opens the first row
+  // whenever nothing is open, so a read that took a moment would otherwise
+  // let that auto-open start, bump the token, and drop this open on the floor
+  // — leaving `active` unset for whatever was waiting on it (a brief to send).
+  if (!reload && p.active !== slug) {
+    p.active = slug;
+    p.design = null; p.bad = false; p.canvas = emptyCanvas();
+    p.frameStates = {}; p.versions = []; p.compare = null;
+    notify();
+  }
+  if (!p.base) p.base = await designFrameBase(dir);
   const r = await designRead(dir, slug);
   // A watcher-driven reload for a design the user has since clicked away
   // from would otherwise switch the pane back to it.
@@ -229,12 +239,24 @@ export function reorderDesigns(dir: string, kind: DesignKind, slugs: string[]): 
   return runUndoable(dir, { label: "Reorder", undo: apply(before), redo: apply(after) });
 }
 
+/** The design's name: the brief's first clause, cut at a word so a title never
+ *  ends mid-word ("…Ethiopia Guji single o"). The folder is named after it. */
+export function titleFromBrief(brief: string): string {
+  const clause = brief.split(/[.,;\n]/)[0].trim().replace(/\s+/g, " ");
+  if (!clause) return "Untitled design";
+  if (clause.length <= 48) return clause;
+  const cut = clause.slice(0, 48);
+  const space = cut.lastIndexOf(" ");
+  return (space > 16 ? cut.slice(0, space) : cut).replace(/[\s-]+$/, "");
+}
+
 export async function startDesign(dir: string, kind: DesignKind, brief: string): Promise<string> {
-  const title = brief.split(/[.,;\n]/)[0].trim().slice(0, 60) || "Untitled design";
-  const slug = await designCreate(dir, kind, title, brief);
+  const slug = await designCreate(dir, kind, titleFromBrief(brief), brief);
   await loadDesigns(dir);
   await openDesign(dir, slug);
-  await sendDesignMessage(dir, brief);
+  // the brief belongs to the design just created, whichever one the pane has
+  // managed to open by now
+  await sendDesignMessage(dir, brief, slug);
   return slug;
 }
 
@@ -261,8 +283,10 @@ function waitForReady(key: string, ms: number): Promise<void> {
   });
 }
 
-export async function sendDesignMessage(dir: string, text: string): Promise<void> {
-  const p = designProjectFor(dir); const slug = p.active;
+/** `forSlug` names the design the message belongs to when the caller already
+ *  knows it (a brand-new design), instead of trusting whatever is open. */
+export async function sendDesignMessage(dir: string, text: string, forSlug?: string): Promise<void> {
+  const p = designProjectFor(dir); const slug = forSlug ?? p.active;
   if (!slug) throw new Error("Pick a design first.");
   const key = laneKey(dir, "design");
   const s = agentSessionFor(key);

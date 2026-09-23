@@ -69,10 +69,13 @@ function ConfigSelect({ dir, optionId, title }: { dir: string; optionId: string;
         <DropdownMenuTrigger asChild>
           <button
             data-config-select={optionId}
-            className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
+            className="inline-flex h-[26px] min-w-0 shrink items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary"
           >
-            {current?.name ?? opt.name}
-            <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+            {/* a long model name shortens rather than wrapping the whole row
+                apart in a narrow column (the design thread is 320px at its
+                floor) */}
+            <span className="max-w-[120px] truncate">{current?.name ?? opt.name}</span>
+            <svg className="shrink-0" width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="m3 4.5 3 3 3-3" />
             </svg>
           </button>
@@ -123,10 +126,10 @@ function ModeSelect({
             data-config-select="mode"
             data-mode-control
             disabled={disabled}
-            className="inline-flex h-[26px] items-center gap-1 rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
+            className="inline-flex h-[26px] min-w-0 shrink items-center gap-1 whitespace-nowrap rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
           >
-            {cur?.name ?? "Plan"}
-            <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <span className="max-w-[110px] truncate">{cur?.name ?? "Plan"}</span>
+            <svg className="shrink-0" width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="m3 4.5 3 3 3-3" />
             </svg>
           </button>
@@ -647,7 +650,7 @@ export function Composer({
           </span>
         )}
         {s.usage && (
-          <span data-usage-meter className="font-mono text-[10.5px] text-text-dim tabular-nums">
+          <span data-usage-meter className="shrink-0 whitespace-nowrap font-mono text-[10.5px] text-text-dim tabular-nums">
             {fmtTokens(s.usage.used)} of {fmtTokens(s.usage.size)}
           </span>
         )}

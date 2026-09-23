@@ -40,6 +40,7 @@ vi.mock("./ipc", async (orig) => ({
   designRename: vi.fn(async (_d: string, _s: string, t: string) => { h.calls.push(`rename:${t}`); }),
   designRestore: h.restore,
   designBranch: vi.fn(async () => "home-2"),
+  designCreate: vi.fn(async (_d: string, _k: string, title: string) => { h.calls.push(`create:${title}`); return "brand-new"; }),
   designSnapshot: vi.fn(async () => null),
   designThumbnails: vi.fn(async () => []),
 }));
@@ -194,6 +195,48 @@ describe("design store", () => {
     m.evictDesignProject("/closing");
     expect(m.designProjectFor("/closing")).not.toBe(p);
     expect(m.designProjectFor("/closing").active).toBeNull();
+  });
+
+
+  it("names a design by the brief's first clause, cut at a word", async () => {
+    const m = await import("./design-store");
+    expect(m.titleFromBrief("A product page. Mostly phones.")).toBe("A product page");
+    expect(m.titleFromBrief("   ")).toBe("Untitled design");
+    const long = m.titleFromBrief("A product page for a coffee roaster's Ethiopia Guji single origin");
+    expect(long.length).toBeLessThanOrEqual(48);
+    expect(long).toBe("A product page for a coffee roaster's Ethiopia");
+    // never cut mid-word
+    expect(long.endsWith("o")).toBe(false);
+  });
+
+  it("sends the brief for the design it just created, even when the pane opens another one first", async () => {
+    const m = await import("./design-store");
+    const agentMod = await import("./agent-session");
+    const ipc = await import("./ipc");
+    const send = agentMod.sendAgentMessage as unknown as ReturnType<typeof vi.fn>;
+    const dir = "/p4";
+    const key = "/p4#design";
+    h.sessionFor(key); // ready, so the send runs straight through
+    send.mockClear();
+    // The pane's "nothing open yet" effect races every create: it opens the
+    // first row the moment the list reloads.
+    (ipc.designRead as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(async () => {
+      void m.openDesign(dir, "home"); // the racing open, started mid-read
+      return { design: { v: 1, title: "New", kind: "app", brief: "", created: "", frames: [], groups: [], chosen: null }, canvas: { positions: {}, viewport: null }, bad: false };
+    });
+    const slug = await m.startDesign(dir, "ecommerce", "A product page for a roaster. Mostly phones.");
+    expect(slug).toBe("brand-new");
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][3]).toEqual({ prefix: "[design: brand-new \u00b7 /Users/me/main-checkout/.chronicle/designs/brand-new/]" });
+    expect(h.calls.at(-1)).toBe("create:A product page for a roaster");
+  });
+
+  it("an open claims the design before it reads it, so nothing can steal the slot", async () => {
+    const m = await import("./design-store");
+    const p = m.designProjectFor("/p5");
+    const pending = m.openDesign("/p5", "home");
+    expect(p.active).toBe("home"); // claimed synchronously, before the read resolves
+    await pending;
   });
 
   it("resumes only when the session says it can reload; otherwise starts fresh (finding 5)", async () => {

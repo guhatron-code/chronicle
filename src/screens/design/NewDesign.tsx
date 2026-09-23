@@ -106,7 +106,7 @@ export function NewDesign({ dir, onDone }: { dir: string; onDone: () => void }) 
       className="flex min-w-0 flex-1 items-center justify-center overflow-auto bg-surface-app"
       style={{ backgroundImage: "radial-gradient(var(--border-hairline) 1px, transparent 1px)", backgroundSize: "20px 20px" }}
     >
-      <div className="flex w-[720px] flex-col gap-[22px] py-10">
+      <div className="flex w-full max-w-[720px] flex-col gap-[22px] px-6 py-10">
         <div className="flex flex-col gap-2">
           <Eyebrow className="text-text-faint">Design</Eyebrow>
           <div className="text-2xl font-semibold tracking-[-0.01em] text-text-primary">What should we design?</div>
@@ -114,7 +114,9 @@ export function NewDesign({ dir, onDone }: { dir: string; onDone: () => void }) 
             Describe it the way you would to a design lead. The design session reads this project’s code for your colors and type, and draws real pages you can open, compare and restore.
           </div>
         </div>
-        <div className="grid grid-cols-5 gap-2">
+        {/* the column narrows with the pane — the kinds rewrap instead of
+            squeezing five cards into a strip of shredded words */}
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(128px,1fr))] gap-2">
           {KIND_ROWS.map(({ kind: k, desc }) => {
             const selected = kind === k;
             return (
@@ -145,7 +147,7 @@ export function NewDesign({ dir, onDone }: { dir: string; onDone: () => void }) 
             placeholder="A product page for our single origin. Lots of gift buyers, mostly on phones."
             className="min-h-[72px] w-full resize-none bg-transparent px-4 py-3.5 text-sm leading-[1.6] text-text-primary outline-none placeholder:text-text-faint"
           />
-          <div className="flex items-center gap-2 px-2.5 pb-2.5">
+          <div className="flex flex-wrap items-center gap-2 px-2.5 pb-2.5">
             <button
               type="button"
               disabled

@@ -56,7 +56,7 @@ export function DesignPane({ dir, onScreen, onConfirm, onRevealTerminal }: {
       {empty || creating ? (
         <NewDesign dir={dir} onDone={() => setCreating(false)} />
       ) : p.active ? (
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex min-w-[240px] flex-1 flex-col">
           <CanvasToolbar dir={dir} historyOpen={historyOpen} onToggleHistory={() => (historyOpen ? closeHistory() : setHistoryOpen(true))} />
           {/* keyed by design: each design starts with its own viewport, selection and live frame */}
           <DesignCanvas key={p.active} dir={dir} onScreen={onScreen} />
