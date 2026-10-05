@@ -139,11 +139,16 @@ const PICTURES: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
 /// Copy pictures into `<design>/refs/<side>/` under neutral names `1.<ext>`, `2.<ext>`, …,
 /// emptying that side first, so a judge never learns where a picture came from.
 /// → the design-relative paths.
-pub fn stage_side(design: &Path, side: &str, paths: &[PathBuf]) -> Result<Vec<String>, String> {
+/// Every picture must sit (canonically) inside `jail`, the benchmark projects' folder:
+/// the judge's design never takes a copy of anything else on the disk.
+pub fn stage_side(design: &Path, side: &str, paths: &[PathBuf], jail: &Path) -> Result<Vec<String>, String> {
     if side != "A" && side != "B" { return Err("The side must be A or B.".into()) }
+    let jail = jail.canonicalize().map_err(|_| "There are no benchmark projects to take pictures from.".to_string())?;
     let mut checked = Vec::new();
     for p in paths {
         let md = p.symlink_metadata().map_err(|_| format!("{} isn't there.", p.display()))?;
+        let inside = p.canonicalize().map(|c| c.starts_with(&jail)).unwrap_or(false);
+        if !inside { return Err(format!("{} isn't a benchmark picture.", p.display())) }
         let ext = p.extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
         if !md.is_file() || !PICTURES.contains(&ext.as_str()) { return Err(format!("{} isn't a picture Chronicle stages.", p.display())) }
         checked.push((p, ext));
@@ -228,14 +233,30 @@ mod tests {
         let t = std::env::temp_dir().join(format!("chronicle-stageside-{}", std::process::id())); let _ = std::fs::remove_dir_all(&t);
         let design = t.join("design"); std::fs::create_dir_all(&design).unwrap();
         std::fs::write(t.join("home.png"), "a").unwrap(); std::fs::write(t.join("cart.JPG"), "b").unwrap(); std::fs::write(t.join("x.html"), "c").unwrap();
-        assert_eq!(stage_side(&design, "A", &[t.join("home.png"), t.join("cart.JPG")]).unwrap(), vec!["refs/A/1.png", "refs/A/2.jpg"]);
+        assert_eq!(stage_side(&design, "A", &[t.join("home.png"), t.join("cart.JPG")], &t).unwrap(), vec!["refs/A/1.png", "refs/A/2.jpg"]);
         assert_eq!(std::fs::read_to_string(design.join("refs/A/2.jpg")).unwrap(), "b");
-        assert_eq!(stage_side(&design, "A", &[t.join("cart.JPG")]).unwrap(), vec!["refs/A/1.jpg"]);
+        assert_eq!(stage_side(&design, "A", &[t.join("cart.JPG")], &t).unwrap(), vec!["refs/A/1.jpg"]);
         assert!(!design.join("refs/A/2.jpg").exists() && !design.join("refs/A/1.png").exists());
-        assert!(stage_side(&design, "C", &[]).is_err());
-        assert!(stage_side(&design, "B", &[t.join("x.html")]).is_err());
-        assert!(stage_side(&design, "B", &[t.join("nope.png")]).is_err());
-        assert!(stage_side(&design, "B", &[t.clone()]).is_err());
+        assert!(stage_side(&design, "C", &[], &t).is_err());
+        assert!(stage_side(&design, "B", &[t.join("x.html")], &t).is_err());
+        assert!(stage_side(&design, "B", &[t.join("nope.png")], &t).is_err());
+        assert!(stage_side(&design, "B", &[t.clone()], &t).is_err());
+    }
+    #[test]
+    fn only_pictures_inside_the_bench_folder_are_staged() {
+        let t = std::env::temp_dir().join(format!("chronicle-stagejail-{}", std::process::id())); let _ = std::fs::remove_dir_all(&t);
+        let (jail, outside) = (t.join("bench"), t.join("elsewhere"));
+        let design = jail.join("p/.chronicle/designs/judge"); std::fs::create_dir_all(&design).unwrap(); std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(jail.join("p/ours.png"), "a").unwrap(); std::fs::write(outside.join("private.png"), "secret").unwrap();
+        assert_eq!(stage_side(&design, "A", &[jail.join("p/ours.png")], &jail).unwrap(), vec!["refs/A/1.png"]);
+        // outside, through a `..`, and through a symlink: all refused, nothing copied
+        assert!(stage_side(&design, "B", &[outside.join("private.png")], &jail).is_err());
+        assert!(stage_side(&design, "B", &[jail.join("../elsewhere/private.png")], &jail).is_err());
+        std::os::unix::fs::symlink(outside.join("private.png"), jail.join("p/link.png")).unwrap();
+        assert!(stage_side(&design, "B", &[jail.join("p/link.png")], &jail).is_err());
+        assert!(!design.join("refs/B").exists());
+        // no bench folder yet: nothing can be staged
+        assert!(stage_side(&design, "A", &[jail.join("p/ours.png")], &t.join("missing")).is_err());
     }
     #[test]
     fn only_a_folder_directly_inside_the_repos_reference_folder_is_a_reference() {

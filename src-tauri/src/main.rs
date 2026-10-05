@@ -3137,7 +3137,8 @@ fn design_bench_stage_reference(roots: State<OpenRoots>, dir: String, slug: Stri
 fn design_bench_stage(roots: State<OpenRoots>, dir: String, slug: String, side: String, paths: Vec<String>) -> Result<Vec<String>, String> {
     let p = project_for(&roots, &dir)?;
     let design = designs::design_dir(&p.dir, &slug)?;
-    designs::bench::stage_side(&design, &side, &paths.iter().map(PathBuf::from).collect::<Vec<_>>())
+    // only pictures the benchmark itself made: everything it renders lives under the bench folder
+    designs::bench::stage_side(&design, &side, &paths.iter().map(PathBuf::from).collect::<Vec<_>>(), &config_dir().join("bench"))
 }
 
 #[tauri::command]
