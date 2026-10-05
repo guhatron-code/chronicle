@@ -21,6 +21,7 @@
     return (bodyc&&bodyc[3]>0)?bodyc:(root&&root[3]>0)?root:[255,255,255,1];
   }
   function sel(el){
+    if(!window.CSS||!CSS.escape)return el.tagName.toLowerCase();
     if(el.id)return '#'+CSS.escape(el.id);
     var parts=[];var cur=el;
     while(cur&&cur!==document.body&&parts.length<4){var s=cur.tagName.toLowerCase();var cls=(cur.className&&typeof cur.className==='string')?cur.className.trim().split(/\s+/).filter(Boolean).slice(0,2).map(function(c){return '.'+CSS.escape(c)}).join(''):'';if(cls)s+=cls;var p=cur.parentElement;if(p){var same=Array.prototype.filter.call(p.children,function(x){return x.tagName===cur.tagName});if(same.length>1)s+=':nth-of-type('+(same.indexOf(cur)+1)+')'}parts.unshift(s);cur=p}
@@ -29,50 +30,69 @@
   function visible(el){var r=el.getBoundingClientRect();if(r.width===0||r.height===0)return false;var cs=getComputedStyle(el);return cs.visibility!=='hidden'&&cs.display!=='none'&&parseFloat(cs.opacity)>0}
   function textOf(el){return Array.prototype.filter.call(el.childNodes,function(n){return n.nodeType===3}).map(function(n){return n.textContent}).join('').trim()}
   var INTERACTIVE='a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],[tabindex]:not([tabindex="-1"])';
+  function walk(rules,fn){for(var i=0;i<rules.length;i++){var r=rules[i];if(r.selectorText)fn(r);if(r.cssRules)walk(r.cssRules,fn)}}
+  function isPrimary(b){
+    var t=b.tagName;
+    if(t==='BUTTON'||b.getAttribute('role')==='button'||(t==='INPUT'&&/submit|button/i.test(b.type||'')))return true;
+    if(t!=='A')return false;
+    var cn=typeof b.className==='string'?b.className:'';if(/btn|button|cta/i.test(cn))return true;
+    var cs=getComputedStyle(b);var bg=parseColor(cs.backgroundColor);
+    return !!(bg&&bg[3]>0&&parseFloat(cs.paddingTop)>0&&parseFloat(cs.paddingBottom)>0&&parseFloat(cs.paddingLeft)>0&&parseFloat(cs.paddingRight)>0);
+  }
   window.__chronicleAudit=function(opts){
-    opts=opts||{};var width=opts.width||innerWidth;var fold=opts.fold||innerHeight;var kind=opts.kind||'app';
-    var out=[];var seen=0;
-    function add(rule,severity,text,el){out.push({rule:rule,severity:severity,text:text,selector:el?sel(el):undefined})}
-    // 1 · contrast, every element with its own text
-    var all=document.body.querySelectorAll('*');
-    for(var i=0;i<all.length&&seen<4000;i++){var el=all[i];var t=textOf(el);if(!t||t.length<2||!visible(el))continue;seen++;
-      var cs=getComputedStyle(el);var fg=parseColor(cs.color);var bg=bgOf(el);if(!fg||!bg)continue;if(fg[3]<1)fg=over(fg,bg);
-      var ratio=contrast(fg,bg);var px=parseFloat(cs.fontSize);var w=parseInt(cs.fontWeight,10)||400;var need=isLarge(px,w)?3:4.5;
-      if(ratio<need)add('contrast',ratio<need-1?'severe':'minor','Text at '+ratio.toFixed(1)+':1 needs '+need+':1: “'+t.slice(0,40)+'”',el)}
-    // 2 · targets and focus
-    var floor=minTarget(width);var inter=document.querySelectorAll(INTERACTIVE);
-    for(var j=0;j<inter.length;j++){var it=inter[j];if(!visible(it))continue;var r=it.getBoundingClientRect();
-      if(r.width<floor||r.height<floor)add('target','minor','A control is '+Math.round(r.width)+'×'+Math.round(r.height)+' px; the floor at this width is '+floor+' px',it);
-      var f=getComputedStyle(it);if(f.outlineStyle==='none'){try{it.classList.add('__chronicle-focus');}catch(e){}}
-    }
-    // outline:none without a focus-visible replacement: report once per page when any control has outline none and no sheet mentions focus
-    var sheetsMention=false;try{for(var s=0;s<document.styleSheets.length;s++){var rules=document.styleSheets[s].cssRules;for(var k=0;k<rules.length;k++){if(/focus-visible|:focus/.test(rules[k].cssText)){sheetsMention=true;break}}if(sheetsMention)break}}catch(e){sheetsMention=true}
-    if(!sheetsMention&&document.querySelector('.__chronicle-focus'))add('focus','minor','Controls remove the outline and no style gives keyboard focus another look',document.querySelector('.__chronicle-focus'));
-    Array.prototype.forEach.call(document.querySelectorAll('.__chronicle-focus'),function(x){x.classList.remove('__chronicle-focus')});
-    // 3 · images, headings, viewport
-    Array.prototype.forEach.call(document.images,function(img){if(!img.hasAttribute('alt'))add('alt','minor','An image has no alt text',img)});
-    var last=0;Array.prototype.forEach.call(document.querySelectorAll('h1,h2,h3,h4,h5,h6'),function(h){var n=+h.tagName[1];if(last&&n>last+1)add('headings','minor','Heading order jumps from h'+last+' to h'+n,h);last=n});
-    if(!document.querySelector('meta[name=viewport]'))add('viewport','minor','The page has no viewport meta');
-    // 4 · overflow and fonts
-    if(document.documentElement.scrollWidth>width+1)add('overflow','severe','The page is wider than its frame ('+document.documentElement.scrollWidth+' px for '+width+')');
-    try{var res=performance.getEntriesByType('resource');res.forEach(function(e){if(/\.(woff2?|ttf|otf)(\?|$)/i.test(e.name)&&!/^chronicle-file:/.test(e.name))add('fonts','severe','A font loads from outside the design: '+e.name.slice(0,80))});
-      Array.prototype.forEach.call(document.querySelectorAll('link[href]'),function(l){if(/fonts\.googleapis|fonts\.gstatic|typekit|fonts\.bunny/i.test(l.href))add('fonts','severe','A font service is linked: '+l.href.slice(0,80),l)})}catch(e){}
-    // 5 · raw colours without a custom property (minor, counted per value)
-    var counts={};for(var q=0;q<all.length&&q<4000;q++){var st=all[q].getAttribute('style')||'';var mm=st.match(/#[0-9a-f]{3,8}\b|rgba?\([^)]*\)/gi);if(mm)mm.forEach(function(c){counts[c]=(counts[c]||0)+1})}
-    Object.keys(counts).forEach(function(c){if(counts[c]>3)add('tokens','minor','The colour '+c+' is written '+counts[c]+' times without a custom property')});
-    // 6 · kind rules
-    var foldTop=function(el){return el.getBoundingClientRect().top+scrollY<fold};
-    var primary=Array.prototype.filter.call(inter,function(b){return /button|submit/i.test(b.tagName+' '+(b.getAttribute('type')||''))||b.getAttribute('role')==='button'}).filter(visible);
-    if(!primary.some(foldTop))add('primary-above-fold','minor','No primary action sits in the first screen');
-    if(kind==='ecommerce'){
+    opts=opts||{};var width=opts.width||window.innerWidth;var fold=opts.fold||window.innerHeight;var kind=opts.kind||'app';
+    var out=[];var counts={};var all=[];var inter=[];
+    function add(rule,severity,text,el){
+      counts[rule]=(counts[rule]||0)+1;if(counts[rule]>20)return;
+      var s;if(el){try{s=sel(el)}catch(e){}}
+      out.push({rule:rule,severity:severity,text:text,selector:s})}
+    function section(name,fn){try{fn()}catch(e){out.push({rule:'audit-error',severity:'minor',text:'Part of the audit could not run: '+name})}}
+    var foldTop=function(el){return el.getBoundingClientRect().top+window.scrollY<fold};
+    section('contrast',function(){
+      all=document.body.querySelectorAll('*');
+      for(var i=0;i<all.length&&i<4000;i++){var el=all[i];var t=textOf(el);if(!t||t.length<2||!visible(el))continue;
+        var cs=getComputedStyle(el);var fg=parseColor(cs.color);var bg=bgOf(el);if(!fg||!bg)continue;if(fg[3]<1)fg=over(fg,bg);
+        var ratio=contrast(fg,bg);var px=parseFloat(cs.fontSize);var w=parseInt(cs.fontWeight,10)||400;var need=isLarge(px,w)?3:4.5;
+        if(ratio<need)add('contrast',ratio<need-1?'severe':'minor','Text at '+ratio.toFixed(1)+':1 needs '+need+':1: “'+t.slice(0,40)+'”',el)}});
+    section('targets',function(){
+      var floor=minTarget(width);inter=document.querySelectorAll(INTERACTIVE);
+      for(var j=0;j<inter.length&&j<4000;j++){var it=inter[j];if(!visible(it))continue;var r=it.getBoundingClientRect();
+        if(r.width>=floor&&r.height>=floor)continue;
+        // WCAG 2.5.8: an inline text link inside a sentence is exempt
+        if(it.tagName==='A'&&getComputedStyle(it).display==='inline'&&it.parentElement&&textOf(it.parentElement))continue;
+        add('target','minor','A control is '+Math.round(r.width)+'×'+Math.round(r.height)+' px; the floor at this width is '+floor+' px',it)}});
+    section('focus',function(){
+      // outline removed by a stylesheet rule, with no :focus / :focus-visible rule anywhere to replace it
+      var bad=null,hasFocus=false;
+      for(var s=0;s<document.styleSheets.length;s++){try{walk(document.styleSheets[s].cssRules,function(r){
+        if(/:focus/.test(r.selectorText)){hasFocus=true;return}
+        if(!bad&&/outline(-style)?\s*:\s*none|outline(-width)?\s*:\s*0(?![.\d])/i.test(r.style?r.style.cssText:r.cssText))bad=r})}catch(e){}}
+      if(bad&&!hasFocus){var el=null;try{el=document.querySelector(bad.selectorText)}catch(e){}
+        add('focus','minor','A style removes the focus outline and no :focus or :focus-visible style replaces it',el)}});
+    section('images and headings',function(){
+      Array.prototype.forEach.call(document.images,function(img){if(!img.hasAttribute('alt'))add('alt','minor','An image has no alt text',img)});
+      var last=0;Array.prototype.forEach.call(document.querySelectorAll('h1,h2,h3,h4,h5,h6'),function(h){var n=+h.tagName[1];if(last&&n>last+1)add('headings','minor','Heading order jumps from h'+last+' to h'+n,h);last=n});
+      if(!document.querySelector('meta[name=viewport]'))add('viewport','minor','The page has no viewport meta')});
+    section('overflow',function(){
+      if(document.documentElement.scrollWidth>width+1)add('overflow','severe','The page is wider than its frame ('+document.documentElement.scrollWidth+' px for '+width+')')});
+    section('fonts',function(){
+      window.performance.getEntriesByType('resource').forEach(function(e){if(/\.(woff2?|ttf|otf)(\?|$)/i.test(e.name)&&!/^chronicle-file:/.test(e.name))add('fonts','severe','A font loads from outside the design: '+e.name.slice(0,80))});
+      Array.prototype.forEach.call(document.querySelectorAll('link[href]'),function(l){if(/fonts\.googleapis|fonts\.gstatic|typekit|fonts\.bunny/i.test(l.href))add('fonts','severe','A font service is linked: '+l.href.slice(0,80),l)})});
+    section('tokens',function(){
+      var counts2={};for(var q=0;q<all.length&&q<4000;q++){var st=all[q].getAttribute('style')||'';var mm=st.match(/#[0-9a-f]{3,8}\b|rgba?\([^)]*\)/gi);if(mm)mm.forEach(function(c){counts2[c]=(counts2[c]||0)+1})}
+      Object.keys(counts2).forEach(function(c){if(counts2[c]>3)add('tokens','minor','The colour '+c+' is written '+counts2[c]+' times without a custom property')})});
+    var primary=[];
+    section('primary action',function(){
+      primary=Array.prototype.filter.call(inter,isPrimary).filter(visible);
+      if(!primary.some(foldTop))add('primary-above-fold','minor','No primary action sits in the first screen')});
+    if(kind==='ecommerce')section('e-commerce',function(){
       var text=document.body.innerText||'';
       var priceEl=Array.prototype.find.call(all,function(e){return /[$€£]\s?\d|\d\s?(USD|EUR|GBP)/.test(textOf(e))&&visible(e)});
       if(!priceEl||!foldTop(priceEl))add('ecom-price','severe','The price is not in the first screen',priceEl);
       if(!/deliver|shipping|arrives|dispatch/i.test(text))add('ecom-delivery','severe','Delivery or shipping information is missing');
       if(!/return/i.test(text))add('ecom-returns','minor','The returns policy is not named');
       var cart=Array.prototype.find.call(primary,function(b){return /add to (cart|bag|basket)|buy/i.test(b.textContent||'')});
-      if(cart&&!foldTop(cart))add('ecom-cta','severe','Add to cart is below the first screen on this width',cart);
-    }
+      if(cart&&!foldTop(cart))add('ecom-cta','severe','Add to cart is below the first screen on this width',cart)});
     return JSON.stringify(out);
   };
   window.__chronicleAuditLib={contrast:contrast,parseColor:parseColor,luminance:luminance,isLarge:isLarge,minTarget:minTarget};
