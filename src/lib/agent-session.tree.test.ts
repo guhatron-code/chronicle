@@ -92,6 +92,18 @@ describe("the reducer reads the linkage the adapter puts in _meta", () => {
     expect("subagent" in tools[1]).toBe(false);
   });
 
+  it("ignores a parent id equal to the call's own id (a Task's progress update)", () => {
+    const s = reduceLines("/p", [
+      call("T3", { toolName: "Agent", subagent: true }, { kind: "think", title: "Task" }),
+      update({ sessionUpdate: "tool_call_update", toolCallId: "T3", _meta: { claudeCode: { toolName: "Agent", parentToolUseId: "T3" } } }),
+    ]);
+    expect(s.entries[0]).toMatchObject({ toolCallId: "T3", subagent: true });
+    expect("parentId" in s.entries[0]).toBe(false);
+    const grouped = groupEntries(s.entries);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]).toMatchObject({ kind: "subagent" });
+  });
+
   it("treats a Task by tool name as a subagent even without the flag", () => {
     const s = reduceLines("/p", [call("T2", { toolName: "Task" }, { kind: "think", title: "Task" })]);
     expect(s.entries[0]).toMatchObject({ subagent: true });

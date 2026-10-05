@@ -80,15 +80,10 @@ describe("a recorded director session replays through the reducer", () => {
     }
   });
 
-  // FAILS TODAY, on purpose (it.fails): claude-agent-acp 0.75.1 sends a Task's
-  // progress update ({"toolResponse":{"elapsedTimeSeconds":30}}) with
-  // _meta.claudeCode.parentToolUseId set to the Task's OWN id. applyLinkage
-  // copies it into parentId, so groupEntries folds each reviewer card into its
-  // own children list and the card (with everything under it) drops out of the
-  // grouped thread. Seen live in all twelve reviewer Tasks (three rounds) of the 2026-10-05
-  // run. When the reducer ignores a self-parent, this flips and it.fails must
-  // become it.
-  it.fails("groups the four reviewers as subagent cards with their calls under them", () => {
+  // claude-agent-acp 0.75.1 sends a Task's progress update with
+  // _meta.claudeCode.parentToolUseId set to the Task's OWN id; the reducer
+  // ignores a self-parent, so every reviewer card stays in the grouped thread.
+  it("groups the four reviewers as subagent cards with their calls under them", () => {
     const subs = groupEntries(s.entries).filter((e) => e.kind === "subagent") as {
       tool: { title: string };
       children: unknown[];

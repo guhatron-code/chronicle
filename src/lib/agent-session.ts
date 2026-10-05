@@ -414,7 +414,9 @@ function applyLinkage(entry: Extract<AgentEntry, { kind: "tool" }>, tc: Raw) {
   const meta = (tc._meta ?? {}) as Raw;
   const cc = (meta.claudeCode ?? {}) as Raw;
   const parent = str(cc.parentToolUseId);
-  if (parent) entry.parentId = parent;
+  // the adapter stamps a Task's own progress updates with the Task's own id;
+  // a card is never its own parent
+  if (parent && parent !== entry.toolCallId) entry.parentId = parent;
   const name = str(cc.toolName);
   if (cc.subagent === true || name === "Agent" || name === "Task") entry.subagent = true;
 }
