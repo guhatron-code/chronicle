@@ -48,6 +48,9 @@ roadmap rules, never from memory. Neither group needs the app running.
 | `state.rounds` | none | every round: n, kind, state, and per note path, its status | `chronicle state rounds` |
 | `designs.list` | none | each design's slug, title, kind, frame count, latest version | `chronicle designs list` |
 | `designs.read` | `slug`, optional `version` | brief, design.json, frame file and thumbnail paths | `chronicle designs read --slug home --version 3` |
+| `designs.capture` | `slug`, optional `frame` | screenshots of the design's frames, taken by the running app (needs Chronicle open) | `chronicle designs capture --slug home --frame desktop` |
+| `designs.lint` | `slug` | the design checks' findings, run by the running app (needs Chronicle open) | `chronicle designs lint --slug home` |
+| `designs.bench` | optional `brief`, `kind`, `quick` | the benchmark's scores; results are saved under `bench/design/results/` (needs Chronicle open; can take hours) | `chronicle designs bench --quick --kind app` |
 
 On `notes.attach`: in a linked worktree the attachment is stored beside the borrowed
 vault, in the main checkout; the app shows it when that checkout is open.

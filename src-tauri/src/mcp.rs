@@ -7,8 +7,13 @@ use std::path::PathBuf;
 
 use crate::agent_api;
 
-pub(crate) struct Session { dir: PathBuf, initialized: bool }
-impl Session { pub(crate) fn new(dir: PathBuf) -> Self { Self { dir, initialized: false } } }
+pub(crate) struct Session { dir: PathBuf, initialized: bool, designs_only: bool }
+impl Session {
+    pub(crate) fn new(dir: PathBuf) -> Self { Self { dir, initialized: false, designs_only: false } }
+    /// The design session's server (`--designs-only`): only `chronicle.designs.*` is visible or callable.
+    pub(crate) fn designs_only(mut self, on: bool) -> Self { self.designs_only = on; self }
+    fn visible(&self, name: &str) -> bool { !self.designs_only || name.starts_with("chronicle.designs.") }
+}
 
 const INSTRUCTIONS: &str = "Chronicle keeps this project's notes (tasks, bugs, ideas) and its build roadmap. Use chronicle.notes.* to list, read, create and update notes instead of grepping .chronicle/notes; use chronicle.state.* before saying what is done or what is next, because it answers from git and the roadmap rules, not from memory. Use chronicle.designs.list and chronicle.designs.read to see the project's designs and their frame files; both are read-only, so a design never changes through them.";
 
@@ -57,12 +62,13 @@ pub(crate) fn handle_line(s: &mut Session, line: &str) -> Option<String> {
             "instructions": INSTRUCTIONS,
         })),
         "ping" => reply(id, json!({})),
-        "tools/list" => reply(id, json!({ "tools": agent_api::catalog().iter().map(|t| json!({
+        "tools/list" => reply(id, json!({ "tools": agent_api::catalog().iter().filter(|t| s.visible(t.name)).map(|t| json!({
             "name": t.name, "description": t.description, "inputSchema": t.input_schema })).collect::<Vec<_>>() })),
         "tools/call" => {
             let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
-            match agent_api::call(&s.dir, name, &args) {
+            let result = if s.visible(name) { agent_api::call(&s.dir, name, &args) } else { agent_api::call(&s.dir, "chronicle.nope", &args) };
+            match result {
                 Ok(out) => reply(id, tool_text(format!("{}\n{}", out.summary, serde_json::to_string_pretty(&out.data).unwrap_or_default()), false)),
                 Err(e) => reply(id, tool_text(e, true)),
             }
@@ -72,9 +78,9 @@ pub(crate) fn handle_line(s: &mut Session, line: &str) -> Option<String> {
 }
 
 /// Serve until stdin closes. Every reply is one line, flushed at once.
-pub(crate) fn serve(dir: PathBuf) -> i32 {
+pub(crate) fn serve(dir: PathBuf, designs_only: bool) -> i32 {
     use std::io::{BufRead, Write};
-    let mut s = Session::new(dir);
+    let mut s = Session::new(dir).designs_only(designs_only);
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -153,5 +159,18 @@ mod tests {
         let e = rpc(&mut s, r#"{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"chronicle.nope.x","arguments":{}}}"#);
         assert_eq!(e["result"]["isError"], true, "an unknown tool is a tool error, not a protocol error");
         assert_eq!(handle_line(&mut s, ""), None, "blank lines are ignored");
+    }
+
+    #[test]
+    fn designs_only_shows_and_allows_only_the_design_tools() {
+        let (d, _) = session("designs-only");
+        let mut s = Session::new(d).designs_only(true);
+        let list = rpc(&mut s, r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#);
+        let tools = list["result"]["tools"].as_array().unwrap();
+        assert!(!tools.is_empty() && tools.iter().all(|t| t["name"].as_str().unwrap().starts_with("chronicle.designs.")));
+        let e = rpc(&mut s, r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"chronicle.notes.list","arguments":{}}}"#);
+        assert_eq!(e["result"]["isError"], true, "refused like any unknown tool");
+        let ok = rpc(&mut s, r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"chronicle.designs.list","arguments":{}}}"#);
+        assert!(ok["result"].get("isError").is_none());
     }
 }

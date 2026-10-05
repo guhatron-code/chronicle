@@ -12,6 +12,7 @@ pub mod watch;
 pub mod plugin;
 pub mod lint;
 pub mod review;
+pub mod bench;
 
 pub const KINDS: [&str; 5] = ["app", "marketing", "deck", "brand", "ecommerce"];
 

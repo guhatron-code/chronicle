@@ -198,6 +198,50 @@ fn caps() -> Vec<Capability> {
             },
             run: designs_read,
         },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.designs.capture",
+                description: "Capture a design's frames as screenshots in the running Chronicle app, so you can see what the design looks like. Needs Chronicle open on this project.",
+                input_schema: json!({
+                    "type": "object", "required": ["slug"],
+                    "properties": {
+                        "slug": { "type": "string", "description": "the design's folder name, from chronicle.designs.list" },
+                        "frame": { "type": "string", "description": "one frame by name; omit for all of them" }
+                    }
+                }),
+            },
+            run: |dir, a| { designs_args(a, true)?; action(dir, "designs.capture", a.clone(), "capture a design") },
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.designs.lint",
+                description: "Run Chronicle's design checks on a design in the running app and report what they find. Needs Chronicle open on this project.",
+                input_schema: json!({
+                    "type": "object", "required": ["slug"],
+                    "properties": { "slug": { "type": "string", "description": "the design's folder name, from chronicle.designs.list" } }
+                }),
+            },
+            run: |dir, a| { designs_args(a, false)?; action(dir, "designs.lint", a.clone(), "lint a design") },
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.designs.bench",
+                description: "Run the design benchmark in the running app: each brief is designed in a throwaway project and scored, and the results are saved under bench/design/results. Can take a long time. Needs Chronicle open.",
+                input_schema: json!({
+                    "type": "object",
+                    "properties": {
+                        "brief": { "type": "string", "description": "one brief by id; omit for all" },
+                        "kind": { "type": "string", "description": "only briefs of this kind, such as app or ecommerce" },
+                        "quick": { "type": "boolean", "description": "only the briefs marked quick" }
+                    }
+                }),
+            },
+            run: |dir, a| {
+                arg_str(a, "brief")?; arg_str(a, "kind")?;
+                if !matches!(a.get("quick"), None | Some(Value::Null) | Some(Value::Bool(_))) { return Err("quick must be true or false.".into()) }
+                action(dir, "designs.bench", a.clone(), "run the design benchmark")
+            },
+        },
     ]
 }
 
@@ -607,6 +651,13 @@ fn designs_read(dir: &Path, args: &Value) -> Result<Outcome, String> {
 /// its own buttons do, over the bridge, and hand back the sentence it answered with —
 /// so an agent and a click leave the same trace. With no app listening, the failure is
 /// one sentence naming what could not be done.
+fn designs_args(a: &Value, frame: bool) -> Result<(), String> {
+    let slug = required_str(a, "slug")?;
+    if !crate::designs::valid_slug(slug) { return Err("that isn't a design name Chronicle made".into()) }
+    if frame { arg_str(a, "frame")?; }
+    Ok(())
+}
+
 fn action(dir: &Path, name: &str, args: Value, verb: &str) -> Result<Outcome, String> {
     let r = crate::bridge::call(dir, name, args, verb)?;
     Ok(Outcome { summary: r.summary, data: r.data.unwrap_or_else(|| json!({})) })
@@ -1066,7 +1117,9 @@ mod tests {
         assert!(r.data["frameFiles"].as_array().unwrap().is_empty(), "design.json lists no frames yet");
         assert_eq!(r.data["title"], "Home");
         assert!(call(&d, "chronicle.designs.read", &json!({ "slug": "../x" })).is_err());
-        assert!(catalog().iter().all(|t| !t.name.starts_with("chronicle.designs.") || t.name.ends_with(".list") || t.name.ends_with(".read")));
+        let names: Vec<_> = catalog().iter().map(|t| t.name).collect();
+        for n in ["chronicle.designs.capture", "chronicle.designs.lint", "chronicle.designs.bench"] { assert!(names.contains(&n), "{n}"); }
+        assert!(catalog().iter().all(|t| !t.name.starts_with("chronicle.designs.") || ["list", "read", "capture", "lint", "bench"].iter().any(|v| t.name.ends_with(v))));
     }
 
     /// `design.json`'s `frames[].file` is data an agent-facing tool must never trust as a

@@ -16,12 +16,13 @@ const GROUPS: [(&str, &[&str]); 6] = [
     ("round", &["plan", "start"]),
     ("project", &["open"]),
     ("terminal", &["read"]),
-    ("designs", &["list", "read"]),
+    ("designs", &["list", "read", "capture", "lint", "bench"]),
 ];
 /// Flags that repeat into a list, and flags whose value is `key=value` into an object.
 const LIST_FLAGS: [&str; 2] = ["tag", "unset"];
 const MAP_FLAGS: [&str; 1] = ["set"];
 const CSV_FLAGS: [&str; 1] = ["tags"];
+const BOOL_FLAGS: [&str; 1] = ["quick"];
 const INT_FLAGS: [&str; 6] = ["round", "limit", "n", "lines", "id", "version"];
 
 fn usage(group: &str) -> Usage {
@@ -51,6 +52,7 @@ pub(crate) fn parse(args: &[String]) -> Result<Invocation, Usage> {
         let a = &args[i];
         if a == "--json" { json = true; i += 1; continue }
         if let Some(flag) = a.strip_prefix("--") {
+            if BOOL_FLAGS.contains(&flag) { obj.insert(flag.into(), json!(true)); i += 1; continue }
             let val = args.get(i + 1).filter(|v| !v.starts_with("--")).ok_or_else(|| Usage(format!("--{flag} needs a value.")))?;
             if LIST_FLAGS.contains(&flag) {
                 obj.entry(flag).or_insert_with(|| json!([])).as_array_mut().unwrap().push(json!(val));
@@ -334,5 +336,16 @@ mod tests {
         assert_eq!(t, "T-001  done         1  ui   Tasks/T-001 A.md\n·      ·            ·  ·    Ideas/B.md\n2 notes.\n");
         let out = Outcome { summary: "A done.".into(), data: json!({"x": 1}) };
         assert_eq!(render_table("chronicle.other", &out), "A done.\n");
+    }
+
+    #[test]
+    fn designs_bench_and_capture_parse_with_a_bare_quick_flag() {
+        let a = |s: &str| s.split_whitespace().map(String::from).collect::<Vec<_>>();
+        let i = parse(&a("designs bench --quick --kind app")).unwrap();
+        assert_eq!(i.name, "chronicle.designs.bench");
+        assert_eq!(i.args, json!({ "quick": true, "kind": "app" }));
+        let i = parse(&a("designs capture --slug home --frame desktop")).unwrap();
+        assert_eq!(i.args, json!({ "slug": "home", "frame": "desktop" }));
+        assert_eq!(parse(&a("designs lint --slug home")).unwrap().name, "chronicle.designs.lint");
     }
 }

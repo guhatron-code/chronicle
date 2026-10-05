@@ -3098,6 +3098,23 @@ fn design_version_mark(roots: State<OpenRoots>, dir: String, slug: String, n: u3
 }
 
 #[tauri::command]
+fn design_bench_briefs(dir: String) -> Result<Vec<designs::bench::Brief>, String> {
+    designs::bench::read_briefs(Path::new(&dir))
+}
+
+#[tauri::command]
+fn design_bench_project() -> Result<String, String> {
+    let stamp = designs::now_iso().replace(':', "-");
+    designs::bench::bench_project(&config_dir(), &stamp).map(|p| p.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn design_bench_write(dir: String, name: String, json: Value, md: String) -> Result<(String, String), String> {
+    designs::bench::write_results(Path::new(&dir), &name, &json, &md)
+        .map(|(j, m)| (j.to_string_lossy().into_owned(), m.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
 fn design_lint_read(roots: State<OpenRoots>, dir: String, slug: String, name: String) -> Result<Option<designs::lint::LintReport>, String> {
     let p = project_for(&roots, &dir)?;
     let ok = name == "current" || (name.len() > 1 && name.starts_with('v') && name[1..].chars().all(|c| c.is_ascii_digit()));
@@ -3730,7 +3747,7 @@ fn main() {
     if let Some(i) = args.iter().position(|a| a == "--mcp") {
         let start = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
         match agent_api::resolve_project_dir(&start) {
-            Some(dir) => std::process::exit(mcp::serve(dir)),
+            Some(dir) => std::process::exit(mcp::serve(dir, args.iter().any(|a| a == "--designs-only"))),
             None => { eprintln!("No Chronicle project at {}.", start.display()); std::process::exit(1) }
         }
     }
@@ -3948,7 +3965,7 @@ fn main() {
                         let (tx, rx) = std::sync::mpsc::channel();
                         if let Ok(mut p) = st.pending.lock() { p.insert(id, tx); }
                         let _ = h.emit("agent-action", json!({ "id": id, "dir": req.dir, "action": req.action, "args": req.args }));
-                        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                        match rx.recv_timeout(bridge::timeout_for(&req.action)) {
                             Ok(r) => r,
                             Err(_) => {
                                 // nothing is coming: drop the slot so a late reply is
@@ -4035,7 +4052,8 @@ fn main() {
             designs::thumbs::design_capture, designs::thumbs::design_lint_current,
             design_review_settings, design_review_settings_set, design_review_state, design_review_state_set,
             design_questions_answer, design_critique_read, design_reminders, design_reminders_set,
-            design_file_read, design_version_mark, design_lint_read, design_ref_attach
+            design_file_read, design_version_mark, design_lint_read, design_ref_attach,
+            design_bench_briefs, design_bench_project, design_bench_write
         ])
         .build(tauri::generate_context!())
         .expect("error while building Chronicle")

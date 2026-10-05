@@ -42,10 +42,13 @@ first, or ask the user to.
 reading state is always safe; starting a round runs real work the user then watches, so it
 needs their ask, not just an opportunity.
 
-## 4 · designs — read-only
+## 4 · designs — read, capture, lint, bench
 
 - `chronicle.designs.list` — the Design pane's designs.
 - `chronicle.designs.read { slug, version? }` — a design's brief, its design.json, and the absolute paths of its frame HTML and thumbnails. Read the frame files to see exactly what was approved. Nothing here changes a design.
+- `chronicle.designs.capture { slug, frame? }` — screenshots a design's frames in the running app so you can look at them. Needs Chronicle open.
+- `chronicle.designs.lint { slug }` — runs Chronicle's design checks on a design and reports what they find. Needs Chronicle open.
+- `chronicle.designs.bench { brief?, kind?, quick? }` — runs the design benchmark; only when the user asked for it, since it can take hours. Needs Chronicle open.
 
 ## CLI equivalents
 
@@ -58,7 +61,7 @@ chronicle round plan [dir]
 chronicle round start --n N [--where pane|terminal] [dir]
 chronicle project open <path>
 chronicle terminal read [--id <tab>] [--lines N] [dir]
-chronicle designs list|read [--slug s] [--version n] [dir]
+chronicle designs list|read|capture|lint|bench [--slug s] [--version n] [--frame f] [--brief id] [--kind k] [--quick] [dir]
 ```
 
 Add `--json` to any of them for the same JSON a tool call returns instead of the table/plain

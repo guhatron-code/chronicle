@@ -28,7 +28,7 @@ pub(crate) fn token_path() -> PathBuf {
 
 /// The four actions the app performs for an agent, and how to say each one in a
 /// sentence. An action outside this list never reaches the frontend.
-pub(crate) const ACTIONS: [&str; 4] = ["round.plan", "round.start", "project.open", "terminal.read"];
+pub(crate) const ACTIONS: [&str; 7] = ["round.plan", "round.start", "project.open", "terminal.read", "designs.capture", "designs.lint", "designs.bench"];
 
 pub(crate) fn known_action(name: &str) -> bool { ACTIONS.contains(&name) }
 
@@ -39,8 +39,17 @@ pub(crate) fn verb_for(action: &str) -> &'static str {
         "round.start" => "start a round",
         "project.open" => "open a project",
         "terminal.read" => "read a terminal",
+        "designs.capture" => "capture a design",
+        "designs.lint" => "lint a design",
+        "designs.bench" => "run the design benchmark",
         _ => "do that",
     }
+}
+
+/// How long the app waits for the frontend to answer one action. The benchmark runs
+/// whole design sessions, so it gets hours; everything else answers in seconds.
+pub(crate) fn timeout_for(action: &str) -> std::time::Duration {
+    std::time::Duration::from_secs(if action == "designs.bench" { 3 * 60 * 60 } else { 30 })
 }
 
 /// The gate on `project.open`, and the only one: every other action runs on a project
@@ -185,9 +194,9 @@ pub(crate) fn call_at(sock: &Path, token_file: &Path, dir: &Path, action: &str, 
     let not_open = || format!("Chronicle isn't open on this project, so it can't {verb}. Open it and try again.");
     let token = std::fs::read_to_string(token_file).map_err(|_| not_open())?;
     let mut stream = UnixStream::connect(sock).map_err(|_| not_open())?;
-    // longer than the app's own 30 s wait on the frontend, so a slow action surfaces
+    // longer than the app's own wait on the frontend, so a slow action surfaces
     // as the app's own sentence rather than as a client-side cut-off
-    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(35)));
+    let _ = stream.set_read_timeout(Some(timeout_for(action) + std::time::Duration::from_secs(5)));
     let req = Request { token: token.trim().to_string(), dir: dir.to_string_lossy().into_owned(), action: action.into(), args };
     writeln!(stream, "{}", serde_json::to_string(&req).map_err(|e| e.to_string())?).map_err(|_| not_open())?;
     let mut line = String::new();
@@ -450,5 +459,17 @@ mod tests {
         let reply: Reply = serde_json::from_str(line.trim()).unwrap();
         assert!(!reply.ok);
         assert_eq!(reply.summary, "That request isn't one line of JSON with token, dir, action and args.");
+    }
+
+    #[test]
+    fn the_design_actions_are_known_and_the_benchmark_may_take_hours() {
+        assert_eq!(verb_for("designs.bench"), "run the design benchmark");
+        assert_eq!(verb_for("designs.capture"), "capture a design");
+        assert_eq!(verb_for("designs.lint"), "lint a design");
+        assert!(known_action("designs.capture") && known_action("designs.lint") && known_action("designs.bench"));
+        assert_eq!(ACTIONS.len(), 7);
+        assert_eq!(timeout_for("designs.bench"), std::time::Duration::from_secs(3 * 60 * 60));
+        assert_eq!(timeout_for("round.plan"), std::time::Duration::from_secs(30));
+        assert_eq!(timeout_for("designs.capture"), std::time::Duration::from_secs(30));
     }
 }
