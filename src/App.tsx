@@ -99,7 +99,7 @@ import { runDesignBench, type BenchArgs, type BenchDeps, type Brief, type Verdic
 import { questionsPending, type ReviewState } from "@/lib/design-review-model";
 import {
   designBenchBriefs, designBenchProject, designBenchWrite, designCapture, designCreate, designFileRead, designLintCurrent,
-  designBenchStage, designBenchStageReference, designReviewSettingsSet, designRootPath, listDir,
+  designBenchStage, designBenchStageReference, designTrash, designReviewSettingsSet, designRootPath, listDir,
 } from "@/lib/ipc";
 import { getVersion } from "@tauri-apps/api/app";
 import { continuePrompt } from "@/lib/design-prompts";
@@ -255,7 +255,7 @@ async function makeJudge(open: (dir: string) => Promise<void>): Promise<Judge> {
 
 /** The brief's Claude Design export, rendered by Chronicle's capture window: null when the
  *  brief has none, [] when it didn't render. */
-async function referenceCaptures(repo: string, id: string, judge: () => Promise<Judge>): Promise<string[] | null> {
+async function referenceCaptures(repo: string, id: string, judge: () => Promise<Judge>, staged: string[]): Promise<string[] | null> {
   const rel = `bench/design/reference/${id}`;
   const files = await listDir(repo, rel).catch(() => []);
   if (!files.some((f) => !f.name.startsWith("."))) return null;
@@ -263,6 +263,7 @@ async function referenceCaptures(repo: string, id: string, judge: () => Promise<
   const prefix = id.split("-")[0];
   const kind = DESIGN_KINDS.find((k) => k === prefix) ?? "app";
   const slug = await designCreate(j.dir, kind, `Reference ${id}`, "");
+  staged.push(slug);
   const frames = await designBenchStageReference(j.dir, slug, `${repo.replace(/\/+$/, "")}/${rel}`);
   return frames === 0 ? [] : designCapture(j.dir, slug);
 }
@@ -279,9 +280,16 @@ function judgePrompt(b: Brief, a: string[], bb: string[], out: string): string {
   ].join("\n");
 }
 
-async function judgeBlind(j: Judge, b: Brief, a: string[], bb: string[]): Promise<Verdict> {
+/** Trash the staged reference designs: their captures are byte-identical to one side, and
+ *  the judge must find nothing in its project but refs/A and refs/B. */
+async function trashStaged(j: Judge, staged: string[]): Promise<void> {
+  for (const slug of staged.splice(0)) await designTrash(j.dir, slug);
+}
+
+async function judgeBlind(j: Judge, b: Brief, a: string[], bb: string[], staged: string[]): Promise<Verdict> {
   const ra = await designBenchStage(j.dir, j.slug, "A", a);
   const rb = await designBenchStage(j.dir, j.slug, "B", bb);
+  await trashStaged(j, staged);
   const rel = `verdict-${b.id}.json`;
   await sendDesignMessage(j.dir, judgePrompt(b, ra, rb, `${j.root}/${j.slug}/${rel}`), j.slug);
   const key = laneKey(j.dir, "design");
@@ -304,6 +312,7 @@ async function runBench(repo: string, args: BenchArgs, host: BenchHost) {
   const opened: string[] = [];
   const open = async (dir: string) => { await host.open(dir); opened.push(dir); };
   let judge: Promise<Judge> | null = null;
+  const staged: string[] = [];
   const judgeOnce = () => {
     if (!judge) { judge = makeJudge(open); judge.catch(() => { judge = null; }); }
     return judge;
@@ -317,8 +326,12 @@ async function runBench(repo: string, args: BenchArgs, host: BenchHost) {
     waitSettled,
     state: designProjectFor,
     setSettings: (dir, patch) => designReviewSettingsSet(dir, "project", null, patch),
-    judge: async (_dir, b, a, bb) => judgeBlind(await judgeOnce(), b, a, bb),
-    referenceCaptures: (r, id) => referenceCaptures(r, id, judgeOnce),
+    judge: async (_dir, b, a, bb) => judgeBlind(await judgeOnce(), b, a, bb, staged),
+    referenceCaptures: async (r, id) => {
+      // a reference staged for a brief that never reached the judge goes before the next one
+      if (staged.length) await trashStaged(await judgeOnce(), staged);
+      return referenceCaptures(r, id, judgeOnce, staged);
+    },
     write: async (r, name, json, md) => { await designBenchWrite(r, name, json, md); },
     version: await getVersion(),
     now: Date.now,
@@ -651,9 +664,8 @@ function AppShell() {
   const doOpenProject = useCallback((path: string, opts?: { transient?: boolean }): Promise<void> => {
     if (opts?.transient) {
       if (projectsRef.current.has(path)) return Promise.resolve();
-      return openProject(path).then(async (p) => {
+      return openProject(path, true).then((p) => {
         const dir = (p as { dir?: string } | null)?.dir ?? path;
-        await removeRecent(dir).catch(() => {});
         setProjects((prev) => {
           if (prev.has(dir)) return prev;
           const next = new Map(prev);

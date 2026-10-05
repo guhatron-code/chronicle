@@ -79,17 +79,26 @@ pub fn write_results(repo: &Path, name: &str, json: &Value, md: &str) -> Result<
     Ok((j, m))
 }
 
-/// Copy a Claude Design export (`src`, a folder) into a design so Chronicle's capture window
-/// renders it like any design: top-level `.html` files go to `frames/`, everything else to
-/// `assets/` under its own relative path. No file is rewritten. `design.json`'s frames become
-/// one 1440 × 900 frame per HTML file. Both folders are emptied first. → the frame count.
+/// The reference export `from` names, if it is a folder directly inside `repo`'s
+/// `bench/design/reference/` once every link is resolved — anything else is refused.
+pub fn reference_dir(repo: &Path, from: &Path) -> Result<PathBuf, String> {
+    let refused = || "That isn't a benchmark reference.".to_string();
+    let root = repo.join("bench/design/reference").canonicalize().map_err(|_| refused())?;
+    let src = from.canonicalize().map_err(|_| refused())?;
+    if src.parent() != Some(root.as_path()) || !src.is_dir() { return Err(refused()) }
+    Ok(src)
+}
+
+/// Copy a Claude Design export (`src`, a folder) into a design's `frames/` exactly as it is —
+/// the whole tree, nothing rewritten, so its HTML finds its own CSS and images — and make
+/// `design.json`'s frames one 1440 × 900 frame per top-level `.html` file. `frames/` is
+/// emptied first; links, dot-files and anything that isn't a regular file are skipped.
+/// → the frame count.
 pub fn stage_reference(src: &Path, design: &Path) -> Result<u32, String> {
     if !src.is_dir() { return Err("That reference isn't a folder.".into()) }
-    let (frames, assets) = (design.join("frames"), design.join("assets"));
-    for d in [&frames, &assets] {
-        let _ = std::fs::remove_dir_all(d);
-        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
-    }
+    let frames = design.join("frames");
+    let _ = std::fs::remove_dir_all(&frames);
+    std::fs::create_dir_all(&frames).map_err(|e| e.to_string())?;
     let mut html: Vec<String> = Vec::new();
     let mut stack = vec![PathBuf::new()];
     while let Some(rel) = stack.pop() {
@@ -99,11 +108,11 @@ pub fn stage_reference(src: &Path, design: &Path) -> Result<u32, String> {
             if md.file_type().is_symlink() || name.starts_with('.') { continue }
             let r = rel.join(&name);
             if md.is_dir() { stack.push(r); continue }
-            let top_html = rel.as_os_str().is_empty() && name.to_ascii_lowercase().ends_with(".html");
-            let to = if top_html { frames.join(&name) } else { assets.join(&r) };
+            if !md.is_file() { continue }
+            let to = frames.join(&r);
             if let Some(parent) = to.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
             std::fs::copy(e.path(), &to).map_err(|e| format!("{name} couldn't be copied: {e}."))?;
-            if top_html { html.push(name); }
+            if rel.as_os_str().is_empty() && name.to_ascii_lowercase().ends_with(".html") { html.push(name); }
         }
     }
     html.sort();
@@ -188,7 +197,7 @@ mod tests {
         assert_ne!(a, b); assert!(b.ends_with("2026-10-01T10-00-00-2"));
     }
     #[test]
-    fn a_reference_export_is_staged_as_frames_and_assets_without_rewriting() {
+    fn a_reference_export_is_staged_whole_under_frames_without_rewriting() {
         let t = std::env::temp_dir().join(format!("chronicle-stageref-{}", std::process::id())); let _ = std::fs::remove_dir_all(&t);
         let (src, design) = (t.join("ref"), t.join("design"));
         std::fs::create_dir_all(src.join("img")).unwrap(); std::fs::create_dir_all(design.join("frames")).unwrap();
@@ -197,12 +206,15 @@ mod tests {
         std::fs::write(src.join("style.css"), "body{}").unwrap();
         std::fs::write(src.join("img/a.png"), "png").unwrap();
         std::fs::write(src.join("img/deep.html"), "not a frame").unwrap();
+        std::fs::write(src.join(".hidden"), "x").unwrap();
+        std::os::unix::fs::symlink("/etc/hosts", src.join("link.css")).unwrap();
         std::fs::write(design.join("frames/old.html"), "old").unwrap();
         std::fs::write(design.join("design.json"), r#"{"v":1,"title":"Ref","kind":"app","frames":[{"id":"old"}]}"#).unwrap();
         assert_eq!(stage_reference(&src, &design).unwrap(), 2);
-        assert_eq!(std::fs::read_to_string(design.join("frames/Home Page.html")).unwrap(), "<img src=img/a.png>");
+        assert_eq!(std::fs::read(design.join("frames/Home Page.html")).unwrap(), std::fs::read(src.join("Home Page.html")).unwrap());
         assert!(!design.join("frames/old.html").exists());
-        assert!(design.join("assets/style.css").is_file() && design.join("assets/img/a.png").is_file() && design.join("assets/img/deep.html").is_file());
+        assert!(design.join("frames/style.css").is_file() && design.join("frames/img/a.png").is_file() && design.join("frames/img/deep.html").is_file());
+        assert!(!design.join("frames/.hidden").exists() && !design.join("frames/link.css").exists() && !design.join("assets/style.css").exists());
         let d: Value = serde_json::from_str(&std::fs::read_to_string(design.join("design.json")).unwrap()).unwrap();
         assert_eq!(d["title"], "Ref");
         assert_eq!(d["frames"], serde_json::json!([
@@ -224,5 +236,22 @@ mod tests {
         assert!(stage_side(&design, "B", &[t.join("x.html")]).is_err());
         assert!(stage_side(&design, "B", &[t.join("nope.png")]).is_err());
         assert!(stage_side(&design, "B", &[t.clone()]).is_err());
+    }
+    #[test]
+    fn only_a_folder_directly_inside_the_repos_reference_folder_is_a_reference() {
+        let t = std::env::temp_dir().join(format!("chronicle-refdir-{}", std::process::id())); let _ = std::fs::remove_dir_all(&t);
+        let (repo, outside) = (t.join("repo"), t.join("outside"));
+        std::fs::create_dir_all(repo.join("bench/design/reference/app-1/img")).unwrap(); std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, repo.join("bench/design/reference/sneaky")).unwrap();
+        std::fs::write(repo.join("bench/design/reference/file.html"), "x").unwrap();
+        let r = repo.join("bench/design/reference");
+        assert_eq!(reference_dir(&repo, &r.join("app-1")).unwrap(), r.join("app-1").canonicalize().unwrap());
+        assert!(reference_dir(&repo, &outside).is_err());
+        assert!(reference_dir(&repo, &r.join("sneaky")).is_err());
+        assert!(reference_dir(&repo, &r.join("app-1/img")).is_err());
+        assert!(reference_dir(&repo, &r.join("app-1/../../reference/app-1/../..")).is_err());
+        assert!(reference_dir(&repo, &r).is_err());
+        assert!(reference_dir(&repo, &r.join("file.html")).is_err());
+        assert!(reference_dir(&repo, &r.join("missing")).is_err());
     }
 }

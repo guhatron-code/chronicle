@@ -1464,7 +1464,7 @@ fn remove_recent(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn open_project(roots: State<'_, OpenRoots>, path: String) -> Result<Value, String> {
+async fn open_project(roots: State<'_, OpenRoots>, path: String, transient: Option<bool>) -> Result<Value, String> {
     let dir = PathBuf::from(&path).canonicalize().map_err(|e| e.to_string())?;
     if !dir.is_dir() { return Err("not a folder".into()); }
     allow_root(&roots, &dir); // the USER opened it — this is the trust anchor
@@ -1475,15 +1475,18 @@ async fn open_project(roots: State<'_, OpenRoots>, path: String) -> Result<Value
         .and_then(|m| m.get("name")).and_then(|v| v.as_str())
         .map(String::from)
         .unwrap_or_else(|| dir.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default());
-    let mut recents = load_recents();
-    recents.retain(|r| r.get("path").and_then(|v| v.as_str()) != Some(dir.to_string_lossy().as_ref()));
-    if part_of.is_null() {
-        // a folder that's really part of another project is not itself a recent
-        recents.insert(0, json!({"name": name, "path": dir.to_string_lossy(),
-            "opened_at": (epoch_ms() / 1000).to_string()}));
-        recents.truncate(10);
+    // the design benchmark's throwaway projects (`transient`) never touch the recents list
+    if transient != Some(true) {
+        let mut recents = load_recents();
+        recents.retain(|r| r.get("path").and_then(|v| v.as_str()) != Some(dir.to_string_lossy().as_ref()));
+        if part_of.is_null() {
+            // a folder that's really part of another project is not itself a recent
+            recents.insert(0, json!({"name": name, "path": dir.to_string_lossy(),
+                "opened_at": (epoch_ms() / 1000).to_string()}));
+            recents.truncate(10);
+        }
+        save_recents(&recents);
     }
-    save_recents(&recents);
     Ok(json!({
         "dir": dir.to_string_lossy(), "repo": p.repo.to_string_lossy(),
         "manifest": p.manifest, "manifest_error": p.manifest_error, "part_of": part_of,
@@ -3123,11 +3126,9 @@ fn design_bench_write(roots: State<OpenRoots>, dir: String, name: String, json: 
 fn design_bench_stage_reference(roots: State<OpenRoots>, dir: String, slug: String, from: String) -> Result<u32, String> {
     let p = project_for(&roots, &dir)?;
     let design = designs::design_dir(&p.dir, &slug)?;
-    let src = PathBuf::from(&from).canonicalize().map_err(|_| "That reference isn't there.".to_string())?;
-    let parent = src.parent().map(Path::to_path_buf).unwrap_or_default();
     let open: Vec<PathBuf> = roots.0.lock().map_err(|e| e.to_string())?.iter().cloned().collect();
-    let inside_a_repo = open.iter().any(|d| load_project(d).repo.join("bench/design/reference").canonicalize().ok().as_ref() == Some(&parent));
-    if !inside_a_repo { return Err("That isn't a benchmark reference.".into()); }
+    let src = open.iter().find_map(|d| designs::bench::reference_dir(&load_project(d).repo, Path::new(&from)).ok())
+        .ok_or("That isn't a benchmark reference.")?;
     designs::bench::stage_reference(&src, &design)
 }
 

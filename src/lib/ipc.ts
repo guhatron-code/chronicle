@@ -175,8 +175,9 @@ export const removeRecent = (path: string) =>
   invoke<void>("remove_recent", { path });
 /** `chronicle --open <dir>` — the project to open on launch, handed over once. */
 export const launchOpenDir = () => invoke<string | null>("launch_open_dir");
-export const openProject = (path: string) =>
-  invoke<ProjectData>("open_project", { path });
+/** `transient`: the design benchmark's throwaway projects, kept out of the recents list. */
+export const openProject = (path: string, transient = false) =>
+  invoke<ProjectData>("open_project", { path, transient });
 export const getState = (dir: string) => invoke<StateData>("get_state", { dir });
 export const initStart = (dir: string, agent: string | null, fresh = false, note?: string) =>
   invoke<void>("init_start", { dir, agent, fresh, note: note ?? null });

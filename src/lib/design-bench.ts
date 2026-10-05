@@ -115,7 +115,8 @@ export function renderMarkdown(r: BenchResults): string {
   return [
     `# Design benchmark · ${r.version} · ${r.at}`, "",
     `Chronicle ${summaryLine(r)} (bar ${r.bar.toFixed(1)}).`, "",
-    "Method: both sides were rendered by Chronicle's capture window and compared blind under neutral names (A and B, assigned at random per brief); the judge never saw where a picture came from.", "",
+    "Method: both sides were rendered by Chronicle's capture window and compared blind under neutral names (A and B, assigned at random per brief); the judge never saw where a picture came from.",
+    "A reference export is rendered from its own folder as it was exported; root-absolute links in it (`/style.css`) don't resolve.", "",
     "| Brief | Kind | Score | Passed | Rounds | Lint severe / minor | Time | Cost | vs Claude Design |",
     "|---|---|---|---|---|---|---|---|---|",
     ...rows,
