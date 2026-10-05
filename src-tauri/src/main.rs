@@ -3021,6 +3021,98 @@ fn design_context_files(roots: State<OpenRoots>, dir: String) -> Result<Vec<Stri
     Ok(designs::prompt::context_files(&p.repo))
 }
 
+// ---- the design director's review loop (see designs::review) ----
+
+#[tauri::command]
+fn design_review_settings(roots: State<OpenRoots>, dir: String, slug: Option<String>) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let root = designs::designs_root(&p.dir);
+    let (design, eff) = match slug {
+        Some(s) => { let d = designs::design_dir(&p.dir, &s)?; (Some(designs::review::design_patch(&d)), designs::review::effective(&root, &d)) }
+        None => (None, designs::review::project_settings(&root)),
+    };
+    Ok(json!({ "project": designs::review::project_settings(&root), "design": design, "effective": eff }))
+}
+
+#[tauri::command]
+fn design_review_settings_set(roots: State<OpenRoots>, dir: String, scope: String, slug: Option<String>, patch: designs::review::SettingsPatch) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    match scope.as_str() {
+        "project" => { designs::ensure_root(&p.dir)?; designs::review::set_project(&designs::designs_root(&p.dir), patch).map(|_| ()) }
+        "design" => {
+            let s = slug.ok_or("pick a design to change its review settings")?;
+            designs::review::set_design(&designs::design_dir(&p.dir, &s)?, patch).map(|_| ())
+        }
+        _ => Err("review settings are either for the project or for one design".into()),
+    }
+}
+
+#[tauri::command]
+fn design_review_state(roots: State<OpenRoots>, dir: String, slug: String) -> Result<Option<Value>, String> {
+    let p = project_for(&roots, &dir)?;
+    Ok(designs::review::read_state(&designs::design_dir(&p.dir, &slug)?))
+}
+
+#[tauri::command]
+fn design_review_state_set(roots: State<OpenRoots>, dir: String, slug: String, state: Value) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    designs::review::write_state(&designs::design_dir(&p.dir, &slug)?, &state)
+}
+
+#[tauri::command]
+fn design_questions_answer(roots: State<OpenRoots>, dir: String, slug: String, answers: Value, skipped: bool) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    designs::review::answer_questions(&designs::design_dir(&p.dir, &slug)?, &answers, skipped)
+}
+
+#[tauri::command]
+fn design_critique_read(roots: State<OpenRoots>, dir: String, slug: String, round: u32) -> Result<Value, String> {
+    let p = project_for(&roots, &dir)?;
+    let d = designs::design_dir(&p.dir, &slug)?;
+    let bar = designs::review::effective(&designs::designs_root(&p.dir), &d).bar;
+    designs::review::read_critique(&d, round, bar)
+}
+
+#[tauri::command]
+fn design_reminders(roots: State<OpenRoots>, dir: String) -> Result<Vec<Value>, String> {
+    let p = project_for(&roots, &dir)?;
+    Ok(designs::review::reminders(&designs::designs_root(&p.dir)))
+}
+
+#[tauri::command]
+fn design_reminders_set(roots: State<OpenRoots>, dir: String, list: Vec<Value>) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    designs::review::set_reminders(&designs::ensure_root(&p.dir)?, &list)
+}
+
+#[tauri::command]
+fn design_file_read(roots: State<OpenRoots>, dir: String, slug: String, rel: String) -> Result<Option<String>, String> {
+    let p = project_for(&roots, &dir)?;
+    designs::review::read_design_file(&designs::design_dir(&p.dir, &slug)?, &rel)
+}
+
+#[tauri::command]
+fn design_version_mark(roots: State<OpenRoots>, dir: String, slug: String, n: u32, score: Option<f64>, round: Option<u32>) -> Result<(), String> {
+    let p = project_for(&roots, &dir)?;
+    designs::versions::mark(&designs::design_dir(&p.dir, &slug)?, n, None, score, round)
+}
+
+#[tauri::command]
+fn design_lint_read(roots: State<OpenRoots>, dir: String, slug: String, name: String) -> Result<Option<designs::lint::LintReport>, String> {
+    let p = project_for(&roots, &dir)?;
+    let ok = name == "current" || (name.len() > 1 && name.starts_with('v') && name[1..].chars().all(|c| c.is_ascii_digit()));
+    if !ok { return Err("that isn't a lint report Chronicle keeps".into()); }
+    Ok(designs::lint::read_report(&designs::design_dir(&p.dir, &slug)?, &name))
+}
+
+#[tauri::command]
+fn design_ref_attach(roots: State<OpenRoots>, dir: String, slug: String, name: String, b64: String) -> Result<String, String> {
+    let p = project_for(&roots, &dir)?;
+    let d = designs::design_dir(&p.dir, &slug)?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|_| "that file couldn't be read".to_string())?;
+    designs::review::attach_ref(&d, &name, &bytes)
+}
+
 /// The designs folder as an absolute, canonical path. The design lane's message
 /// prefix names a design's folder with it: in a linked worktree the folder lives
 /// in the main checkout, so a cwd-relative `.chronicle/designs/` would point the
@@ -3930,7 +4022,10 @@ fn main() {
             designs::design_canvas_save, designs::designs_order_save,
             designs::design_snapshot, designs::design_versions, designs::design_restore, designs::design_branch,
             designs::thumbs::design_thumbnails, designs::thumbs::design_review_version,
-            designs::thumbs::design_capture, designs::thumbs::design_lint_current
+            designs::thumbs::design_capture, designs::thumbs::design_lint_current,
+            design_review_settings, design_review_settings_set, design_review_state, design_review_state_set,
+            design_questions_answer, design_critique_read, design_reminders, design_reminders_set,
+            design_file_read, design_version_mark, design_lint_read, design_ref_attach
         ])
         .build(tauri::generate_context!())
         .expect("error while building Chronicle")

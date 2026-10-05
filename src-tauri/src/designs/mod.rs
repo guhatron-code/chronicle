@@ -11,6 +11,7 @@ pub mod thumbs;
 pub mod watch;
 pub mod plugin;
 pub mod lint;
+pub mod review;
 
 pub const KINDS: [&str; 5] = ["app", "marketing", "deck", "brand", "ecommerce"];
 
