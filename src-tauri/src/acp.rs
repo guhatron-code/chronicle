@@ -684,13 +684,18 @@ pub struct LaneExtras {
 /// tools write outside the designs folder, so they always ask.
 const AUTO_MCP_PREFIXES: [&str; 3] = ["mcp__playwright__", "mcp__shadcn__", "mcp__chronicle-designs__"];
 
+/// The tool a permission ask is for: the call's `name`, or the adapter's `_meta` tool name.
+fn permission_tool_name(params: &Value) -> Option<&str> {
+    let call = params.get("toolCall")?;
+    call.get("name").and_then(|v| v.as_str())
+        .or_else(|| call.pointer("/_meta/claudeCode/toolName").and_then(|v| v.as_str()))
+}
+
 /// The `allow_once` option id for a permission ask from one of the design
 /// session's own MCP servers; `None` for any other tool, or when no once-only
 /// option exists (the ask then reaches the user as usual).
 pub fn design_mcp_decision(params: &Value) -> Option<String> {
-    let call = params.get("toolCall")?;
-    let name = call.get("name").and_then(|v| v.as_str())
-        .or_else(|| call.pointer("/_meta/claudeCode/toolName").and_then(|v| v.as_str()))?;
+    let name = permission_tool_name(params)?;
     if !AUTO_MCP_PREFIXES.iter().any(|p| name.starts_with(p)) { return None; }
     let options = params.get("options").and_then(|v| v.as_array())?;
     options.iter().find(|o| o["kind"] == "allow_once").and_then(|o| o["optionId"].as_str()).map(String::from)
@@ -1370,6 +1375,13 @@ impl AcpSession {
                     // the session's own MCP servers read; they never write the project
                     if let Some(option_id) = design_mcp_decision(&params) {
                         self.respond_ok(&id, json!({ "outcome": { "outcome": "selected", "optionId": option_id } }));
+                        // the same record a write the lane allowed leaves, so the transcript shows it
+                        let tool_call_id = params.pointer("/toolCall/toolCallId").cloned().unwrap_or(Value::Null);
+                        let tool = permission_tool_name(&params).unwrap_or("").to_string();
+                        let guard = json!({ "method": "_chronicle/guard", "params": {
+                            "toolCallId": tool_call_id, "allowed": true, "path": tool, "reason": "" } });
+                        self.append_transcript(&guard);
+                        self.emit_msg(guard);
                         return;
                     }
                 }
@@ -1851,7 +1863,9 @@ for line in sys.stdin:
                 send({"jsonrpc":"2.0","id":int(rid),"method":"session/request_permission","params":{
                     "sessionId":sid,"toolCall":{"toolCallId":"w" + rid,"name":"Write",
                     "rawInput":{"file_path": project + p}},"options":opts}})
-            state["waiting"] = {"300","301"}
+            send({"jsonrpc":"2.0","id":302,"method":"session/request_permission","params":{
+                "sessionId":sid,"toolCall":{"toolCallId":"w302","name":"mcp__playwright__browser_navigate"},"options":opts}})
+            state["waiting"] = {"300","301","302"}
             state["fence"] = {}
         elif turn == 1:
             send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":sid,
@@ -1886,7 +1900,7 @@ for line in sys.stdin:
                 w.discard(rid)
                 send({"jsonrpc":"2.0","id":state["prompt_id"],"result":{"stopReason":"end_turn"}})
                 continue
-            if rid in ("300", "301"):
+            if rid in ("300", "301", "302"):
                 state["fence"][rid] = msg.get("result", {}).get("outcome", {}).get("optionId")
                 w.discard(rid)
                 if not w:
@@ -2652,13 +2666,14 @@ for line in sys.stdin:
         assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
         wait_for(&rx, 20, |v| state_is(v, "ready"));
         state.get(&key).unwrap().prompt(vec![json!({"type":"text","text":"DESIGN-FENCE"})], "DESIGN-FENCE".into()).unwrap();
-        let g1 = wait_for(&rx, 20, |v| method_is(v, "_chronicle/guard"));
-        let g2 = wait_for(&rx, 20, |v| method_is(v, "_chronicle/guard"));
-        let allowed: Vec<bool> = [g1, g2].iter().map(|g| g["message"]["params"]["allowed"].as_bool().unwrap()).collect();
-        assert!(allowed.contains(&true) && allowed.contains(&false));
+        let guards: Vec<Value> = (0..3).map(|_| wait_for(&rx, 20, |v| method_is(v, "_chronicle/guard"))["message"]["params"].clone()).collect();
+        let by_call = |id: &str| guards.iter().find(|g| g["toolCallId"] == id).unwrap_or_else(|| panic!("no guard for {id}")).clone();
+        assert_eq!(by_call("w300")["allowed"], true); assert_eq!(by_call("w301")["allowed"], false);
+        // an MCP tool the lane allows on its own leaves the same record, named by the tool
+        assert_eq!(by_call("w302"), json!({ "toolCallId": "w302", "allowed": true, "path": "mcp__playwright__browser_navigate", "reason": "" }));
         wait_for(&rx, 20, |v| method_is(v, "_chronicle/turn_end"));
         let answers: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".fence-answers.json")).unwrap()).unwrap();
-        assert_eq!(answers["300"], "allow"); assert_eq!(answers["301"], "reject");
+        assert_eq!(answers["300"], "allow"); assert_eq!(answers["301"], "reject"); assert_eq!(answers["302"], "allow");
         state.drain();
     }
 
