@@ -286,6 +286,24 @@ describe("design store", () => {
     expect(p.frameStates.d).toEqual({ kind: "rendered", height: 2400 });
   });
 
+  it("reviewBusy is the guard the scorecard reads: a turn, or a loop still running", async () => {
+    const m = await import("./design-store");
+    const p = m.designProjectFor("/busy");
+    const s = h.sessionFor("/busy#design");
+    s.turnActive = false;
+    p.review = { ...p.review, phase: "idle" }; p.critiqueMissing = false;
+    expect(m.reviewBusy("/busy")).toBe(false);
+    s.turnActive = true;
+    expect(m.reviewBusy("/busy")).toBe(true);
+    s.turnActive = false;
+    p.review = { ...p.review, phase: "gate" };
+    expect(m.reviewBusy("/busy")).toBe(true);
+    // a critique that never came back leaves "Ask again" open
+    p.review = { ...p.review, phase: "critique" }; p.critiqueMissing = true;
+    expect(m.reviewBusy("/busy")).toBe(false);
+    m.evictDesignProject("/busy");
+  });
+
   it("closing a project forgets its design state", async () => {
     const m = await import("./design-store");
     const p = m.designProjectFor("/closing");

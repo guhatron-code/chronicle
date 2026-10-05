@@ -5,8 +5,8 @@
 import { useEffect, useState } from "react";
 import { BtnSecondary } from "@/components/chrome/atoms";
 import { XGlyph } from "@/components/chrome/icons";
-import { agentSessionFor, laneKey, subscribeAgent } from "@/lib/agent-session";
-import { askAnotherRound, designProjectFor, fixAllMinor, fixFinding, setPin, subscribeDesigns } from "@/lib/design-store";
+import { subscribeAgent } from "@/lib/agent-session";
+import { askAnotherRound, designProjectFor, fixAllMinor, fixFinding, reviewBusy, setPin, subscribeDesigns } from "@/lib/design-store";
 import { fmtScore, REVIEWERS, type Finding } from "@/lib/design-review-model";
 import { toastError } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
@@ -41,8 +41,8 @@ export function Scorecard({ dir, onClose }: { dir: string; onClose: () => void }
   const roundsLine = !last ? null
     : p.critiques.length === 1 ? "1 round"
     : `${fmtScore(first.weighted)} → ${fmtScore(last.weighted)} in ${p.critiques.length} rounds${took ? ` · ${took}` : ""}`;
-  // the same state the store's guard reads
-  const busy = agentSessionFor(laneKey(dir, "design")).turnActive || (["building", "gate", "fixing", "critique"].includes(p.review.phase) && !p.critiqueMissing);
+  // the store's own guard
+  const busy = reviewBusy(dir);
 
   const pick = (f: Finding) => {
     setPin(dir, f.selector ? { frame: f.frame, selector: f.selector, text: f.text } : null);

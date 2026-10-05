@@ -693,7 +693,7 @@ export async function stopReview(dir: string): Promise<void> {
 /** The review is mid-loop or the design session is mid-turn. A critique that never came
  *  back (`critiqueMissing`) leaves the phase on "critique" with no turn behind it, so
  *  "Ask again" stays open then. */
-function reviewBusy(dir: string): boolean {
+export function reviewBusy(dir: string): boolean {
   const p = designProjectFor(dir);
   return agentSessionFor(laneKey(dir, "design")).turnActive || (LOOPING.has(p.review.phase) && !p.critiqueMissing);
 }
