@@ -1,8 +1,8 @@
 //! One PNG per frame per version, rendered by a hidden native web view that loads
 //! the frame through `chronicle-file://` (the design host, never the project
 //! host), waits for the reporter's ready title (fonts included, at most five
-//! seconds; a frame that never says it's ready fails there and the next one goes
-//! on), grows to the page height, runs Chronicle's own audit in the page,
+//! seconds; a frame still loading then is captured anyway and its audit says it
+//! hadn't finished), grows to the page height, runs Chronicle's own audit in the page,
 //! and snapshots. The same window serves the review at turn end (thumbs, audit,
 //! detector, lint report) and the director's mid-turn capture and lint.
 //!
@@ -184,6 +184,15 @@ fn wait_ready(wait: Duration, fallback: u32, mut title: impl FnMut() -> Option<S
     }
 }
 
+/// The minor finding a frame gets when its ready title never arrived; None when it did.
+pub fn not_ready_finding(ready: bool, frame_id: &str, file: &str) -> Option<Finding> {
+    (!ready).then(|| Finding {
+        rule: "audit:not-ready".into(), severity: "minor".into(),
+        text: "The frame hadn't finished loading when it was checked".into(),
+        frame: frame_id.into(), file: file.into(), line: None, selector: None,
+    })
+}
+
 /// The only place a capture window may go: `chronicle-file://<that design host's hash>/…`.
 fn stays_on_design_host(u: &url::Url, hash: &str) -> bool {
     u.scheme() == "chronicle-file" && u.host_str() == Some(hash)
@@ -211,19 +220,21 @@ fn render_frame(app: &tauri::AppHandle, hash: &str, url: &str, frame_id: &str, f
     let guard = CloseOnDrop(win);
     let win = &guard.0;
 
-    // a frame that never reports ready (blank, or a script that never lets it load)
-    // fails here, at READY_WAIT: no audit, no snapshot, the next frame goes on
-    let page_h = wait_ready(READY_WAIT, height, || title_of(win))
-        .ok_or_else(|| format!("the frame didn't finish loading within {} seconds (it may be blank)", READY_WAIT.as_secs()))?;
-    let (snap_w, page_h) = capture_size(width, page_h);
+    // a frame that never reports ready (slow, blank, or a script that never lets it
+    // load) is still captured at its declared height after READY_WAIT, and audited
+    let ready = wait_ready(READY_WAIT, height, || title_of(win));
+    let (snap_w, page_h) = capture_size(width, ready.unwrap_or(height));
     let _ = win.set_size(tauri::LogicalSize::new(width as f64, page_h as f64));
     std::thread::sleep(Duration::from_millis(150));
     // the first screen is the frame's own height, not the grown window's
-    let audit = match audit_script(audit, kind, width, height).map(|js| evaluate(win, &js)) {
+    let mut findings = match audit_script(audit, kind, width, height).map(|js| evaluate(win, &js)) {
         None => vec![],
         Some(Ok(s)) => super::lint::from_audit(frame_id, file, &s),
         Some(Err(e)) => { eprintln!("design audit skipped for frame {frame_id}: {e}"); vec![] }
     };
+    // so the gate never reads clean over a frame it saw half-loaded
+    if audit { findings.extend(not_ready_finding(ready.is_some(), frame_id, file)); }
+    let audit = findings;
     Ok(Capture { png: snapshot_png(win, snap_w)?, audit })
 }
 
@@ -445,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn a_frame_that_never_reports_ready_fails_at_the_ready_wait() {
+    fn a_frame_that_never_reports_ready_is_captured_anyway_and_flagged() {
         let wait = Duration::from_millis(300);
         let started = Instant::now();
         assert_eq!(wait_ready(wait, 900, || Some("Untitled".into())), None);
@@ -455,6 +466,13 @@ mod tests {
         assert_eq!(wait_ready(wait, 900, || Some("chronicle-ready:x".into())), Some(900));
         let mut polls = 0;
         assert_eq!(wait_ready(wait, 900, || { polls += 1; (polls > 1).then(|| "chronicle-ready:10".into()) }), Some(10));
+        // never ready: the capture proceeds at the declared height, and the audit says so
+        assert_eq!(capture_size(1440, wait_ready(Duration::ZERO, 900, || None).unwrap_or(900)), capture_size(1440, 900));
+        let f = not_ready_finding(false, "desktop", "frames/desktop.html").unwrap();
+        assert_eq!(f, Finding { rule: "audit:not-ready".into(), severity: "minor".into(),
+            text: "The frame hadn't finished loading when it was checked".into(),
+            frame: "desktop".into(), file: "frames/desktop.html".into(), line: None, selector: None });
+        assert!(not_ready_finding(true, "desktop", "frames/desktop.html").is_none());
     }
     #[test]
     fn the_capture_window_only_goes_to_its_own_design_host() {
