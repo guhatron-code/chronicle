@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const h = vi.hoisted(() => {
   const sessions = new Map<string, {
@@ -90,7 +90,24 @@ vi.mock("@/overlays/toasts", () => ({ toastError: vi.fn(), toastSuccess: vi.fn()
 
 const DIR = "/p";
 
+/** A promise the test settles by hand — holds a loop step mid-await. */
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+const cleanLint = (version: number) => ({ v: 1, version, at: "t", ran: true, problem: null, severe: [], minor: [] });
+const severeLint = (version: number) => ({ ...cleanLint(version), severe: [{ rule: "audit:overflow", severity: "severe", text: "wide", frame: "d", file: "frames/d.html" }] });
+const finding = (text: string, severity = "minor") => ({ rule: "critique:ux", severity, text, frame: "d", file: "" });
+const round = (n: number, findings: ReturnType<typeof finding>[], blocker: string | null = null) =>
+  ({ round: n, version: n + 1, at: "t", bar: 8, weighted: 7, passed: false, reviewers: [{ id: "ux", score: 7, notes: [], findings }], missing: [], blocker });
+
 describe("design store", () => {
+  beforeEach(() => {
+    h.files.clear();
+    h.sent.length = 0;
+    sess.turnActive = false; sess.lastStopReason = null;
+  });
   it("loads, opens, tracks frame reports and ignores foreign messages", async () => {
     const m = await import("./design-store");
     await m.loadDesigns(DIR);
@@ -382,5 +399,161 @@ describe("design store", () => {
     const p = m.designProjectFor(DIR);
     await vi.waitFor(() => expect(h.review).toHaveBeenCalledWith(DIR, "home", 3));
     await vi.waitFor(() => expect(p.review.phase).toBe("critique"));
+  });
+
+  /** Opens DIR/home fresh and starts a loop with the user's message; returns the project. */
+  async function looping() {
+    const m = await import("./design-store");
+    await m.loadDesigns(DIR); await m.openDesign(DIR, "home");
+    await m.sendDesignMessage(DIR, "A product page", "home");
+    return { m, p: m.designProjectFor(DIR) };
+  }
+
+  it("a gate that couldn't run says so instead of passing the version clean", async () => {
+    const { p } = await looping();
+    h.snapshot.mockResolvedValueOnce(4);
+    h.review.mockRejectedValueOnce(new Error("the browser isn't ready"));
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(p.lint).toMatchObject({ ran: false, problem: "the browser isn't ready", version: 4, severe: [] }));
+  });
+
+  it("a user's send during the gate takes over: the stale step sends nothing", async () => {
+    const { m, p } = await looping();
+    const gate = deferred<{ thumbs: string[]; lint: unknown }>();
+    h.snapshot.mockResolvedValueOnce(5);
+    h.review.mockReturnValueOnce(gate.promise);
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(p.review.phase).toBe("gate"));
+    await m.sendDesignMessage(DIR, "make the hero bigger", "home");
+    gate.resolve({ thumbs: [], lint: severeLint(5) });
+    await vi.waitFor(() => expect(p.review.version).toBe(5));
+    await new Promise((r) => setImmediate(r));
+    expect(h.sent.at(-1)).toMatch(/make the hero bigger$/);
+    expect(p.review).toMatchObject({ phase: "building", lastPrompt: "user", fixPass: 0 });
+  });
+
+  it("a Stop between the decision and its send wins", async () => {
+    const { m, p } = await looping();
+    const ipc = await import("./ipc");
+    const versions = ipc.designVersions as unknown as ReturnType<typeof vi.fn>;
+    const held = deferred<never[]>();
+    let reached = false;
+    versions.mockImplementationOnce(() => { reached = true; return held.promise; });
+    h.snapshot.mockResolvedValueOnce(6);
+    h.review.mockResolvedValueOnce({ thumbs: [], lint: cleanLint(6) });
+    const sentBefore = h.sent.length;
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(reached).toBe(true));
+    expect(p.review.phase).toBe("critique"); // decided and committed, not yet sent
+    await m.stopReview(DIR);
+    held.resolve([]);
+    await new Promise((r) => setImmediate(r));
+    expect(p.review.phase).toBe("stopped");
+    expect(h.sent.length).toBe(sentBefore);
+  });
+
+  it("a Stop during the gate wins", async () => {
+    const { m, p } = await looping();
+    const gate = deferred<{ thumbs: string[]; lint: unknown }>();
+    h.snapshot.mockResolvedValueOnce(7);
+    h.review.mockReturnValueOnce(gate.promise);
+    const sentBefore = h.sent.length;
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(p.review.phase).toBe("gate"));
+    await m.stopReview(DIR);
+    gate.resolve({ thumbs: [], lint: severeLint(7) });
+    await vi.waitFor(() => expect(p.review.version).toBe(7));
+    await new Promise((r) => setImmediate(r));
+    expect(p.review.phase).toBe("stopped");
+    expect(h.sent.length).toBe(sentBefore);
+  });
+
+  it("a loop send that fails leaves the review stopped, as the toast says", async () => {
+    const { p } = await looping();
+    const agentMod = await import("./agent-session");
+    (agentMod.sendAgentMessage as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("busy"));
+    h.snapshot.mockResolvedValueOnce(8);
+    h.review.mockResolvedValueOnce({ thumbs: [], lint: cleanLint(8) });
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(p.review.phase).toBe("stopped"));
+  });
+
+  it("a user message after done starts a fresh attempt", async () => {
+    const { m, p } = await looping();
+    p.review = { ...p.review, phase: "done", round: 2, best: { round: 2, score: 8.4 }, accepted: true };
+    await m.sendDesignMessage(DIR, "now a dark version", "home");
+    expect(p.review).toMatchObject({ phase: "building", round: 0, best: null, accepted: false });
+  });
+
+  it("the pill's clock reads m:ss since the attempt started", async () => {
+    const m = await import("./design-store");
+    const p = m.designProjectFor("/clock");
+    expect(m.reviewElapsed(p, 5_000)).toBe("0:00");
+    p.review = { ...p.review, startedAt: 1_000 };
+    expect(m.reviewElapsed(p, 1_000 + 125_000)).toBe("2:05");
+  });
+
+  it("resolving sends the blocker, else a finding both rounds share, else the first severe one", async () => {
+    const { m, p } = await looping();
+    p.critiques = [round(1, [finding("cramped")]), round(2, [finding("cramped")], "The brief asks for two heroes")] as never;
+    await m.resolveBlocker(DIR);
+    expect(h.sent.at(-1)).toContain("stalling on this: The brief asks for two heroes.");
+    p.critiques = [round(1, [finding("cramped")]), round(2, [finding("loud", "severe"), finding("cramped")])] as never;
+    await m.resolveBlocker(DIR);
+    expect(h.sent.at(-1)).toContain("stalling on this: cramped.");
+    p.critiques = [round(1, [finding("cramped")]), round(2, [finding("quiet"), finding("loud", "severe")])] as never;
+    await m.resolveBlocker(DIR);
+    expect(h.sent.at(-1)).toContain("stalling on this: loud.");
+  });
+
+  it("accepting below the bar marks the best round's version, or the current one when that round is gone", async () => {
+    const { m, p } = await looping();
+    h.mark.mockClear();
+    p.critiques = [round(1, []), round(2, [])] as never; // versions 2 and 3
+    p.review = { ...p.review, phase: "below-bar", version: 9, best: { round: 2, score: 7.7 } };
+    await m.acceptBelowBar(DIR);
+    expect(p.review).toMatchObject({ phase: "done", accepted: true });
+    expect(h.mark).toHaveBeenLastCalledWith(DIR, "home", 3, 7.7, 2);
+    p.critiques = [];
+    p.review = { ...p.review, phase: "below-bar", best: { round: 2, score: 7.7 } };
+    await m.acceptBelowBar(DIR);
+    expect(h.mark).toHaveBeenLastCalledWith(DIR, "home", 9, 7.7, 2);
+  });
+
+  it("asking for another round sends the next round's critique", async () => {
+    const { m, p } = await looping();
+    p.review = { ...p.review, phase: "done", round: 2, version: 4 };
+    await m.askAnotherRound(DIR);
+    expect(p.review).toMatchObject({ phase: "critique", round: 3 });
+    expect(h.sent.at(-1)).toContain("critique/round-3.json");
+  });
+
+  it("settings change at the scope asked for and reload", async () => {
+    const { m, p } = await looping();
+    const ipc = await import("./ipc");
+    const get = ipc.designReviewSettings as unknown as ReturnType<typeof vi.fn>;
+    get.mockResolvedValueOnce({ project: { critique: true, bar: 8, rounds: 3, lint: true }, design: { bar: 7 }, effective: { critique: true, bar: 7, rounds: 3, lint: true } });
+    await m.setReviewSettings(DIR, "design", { bar: 7 });
+    expect(ipc.designReviewSettingsSet).toHaveBeenLastCalledWith(DIR, "design", "home", { bar: 7 });
+    expect(p.settings.bar).toBe(7);
+    expect(p.settingsScope.design).toEqual({ bar: 7 });
+  });
+
+  it("skipping the questions records it and tells the director to decide", async () => {
+    const { m } = await looping();
+    await m.skipQuestions(DIR);
+    expect(h.answered).toHaveBeenLastCalledWith(DIR, "home", {}, true);
+    expect(h.sent.at(-1)).toMatch(/Skip the questions\. Decide, and say what you assumed\.$/);
+  });
+
+  it("fix all minor sends the newest version's minor lint findings, and nothing when there are none", async () => {
+    const { m, p } = await looping();
+    p.lint = { ...cleanLint(3), minor: [{ rule: "r", severity: "minor", text: "tight leading", frame: "d", file: "frames/d.html" }] } as never;
+    await m.fixAllMinor(DIR);
+    expect(h.sent.at(-1)).toContain("- d · frames/d.html — tight leading");
+    const count = h.sent.length;
+    p.lint = cleanLint(3) as never;
+    await m.fixAllMinor(DIR);
+    expect(h.sent.length).toBe(count);
   });
 });

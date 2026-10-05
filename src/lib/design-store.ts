@@ -214,6 +214,11 @@ async function reloadDirectorFiles(dir: string, slug: string, paths: string[]): 
 /** The designs a loop step is running for right now — a reopen never regates under it. */
 const inFlight = new Set<string>();
 const flightKey = (dir: string, slug: string) => `${dir}\0${slug}`;
+/** Every committed step bumps its design's counter. A loop step remembers the count it
+ *  started (or decided) on and gives up when it moved: a user's send or a Stop landed
+ *  while it was awaiting, and the step it was about to take is no longer the user's. */
+const steps = new Map<string, number>();
+const stepOf = (k: string) => steps.get(k) ?? 0;
 
 /** The loop's state and settings for `slug`: the open design's from memory, any other's from disk. */
 async function reviewOf(dir: string, slug: string): Promise<{ review: ReviewState; settings: ReviewSettings }> {
@@ -229,6 +234,8 @@ async function reviewOf(dir: string, slug: string): Promise<{ review: ReviewStat
 /** Keeps a step: in memory when the design is open, and on disk always (a restart resumes from it). */
 async function commitReview(dir: string, slug: string, st: ReviewState): Promise<void> {
   const p = designProjectFor(dir);
+  const k = flightKey(dir, slug);
+  steps.set(k, stepOf(k) + 1);
   if (p.active === slug) { p.review = st; notify(); }
   await designReviewStateSet(dir, slug, st).catch(() => {});
 }
@@ -241,12 +248,17 @@ const LOOPING = new Set<ReviewState["phase"]>(["building", "gate", "fixing", "cr
 const thumbsOf = new Map<string, string[]>();
 const thumbKey = (dir: string, slug: string, n: number) => `${dir}\0${slug}\0${n}`;
 
-/** Renders version `n`'s thumbnails and lints it; null when the gate couldn't run at all. */
+/** Renders version `n`'s thumbnails and lints it. A gate that couldn't run comes back as a
+ *  report that says so (`ran: false` + the problem), never as a silent clean pass. */
 async function reviewVersion(dir: string, slug: string, n: number): Promise<LintReport | null> {
-  const r = await designReviewVersion(dir, slug, n).catch(() => null);
-  if (!r) return null;
-  thumbsOf.set(thumbKey(dir, slug, n), r.thumbs);
-  return parseLint(r.lint);
+  try {
+    const r = await designReviewVersion(dir, slug, n);
+    thumbsOf.set(thumbKey(dir, slug, n), r.thumbs);
+    return parseLint(r.lint);
+  } catch (e) {
+    const problem = e instanceof Error ? e.message : String(e);
+    return { v: 1, version: n, at: new Date().toISOString(), ran: false, problem, severe: [], minor: [] };
+  }
 }
 
 /** A design turn ended: version it, gate it, read what the director wrote, and take the loop's next step. */
@@ -262,7 +274,9 @@ async function snapshotTurn(dir: string, slug: string) {
 async function advance(dir: string, slug: string, n: number | null, cancelled: boolean, regate: boolean): Promise<void> {
   const p = designProjectFor(dir);
   const k = flightKey(dir, slug);
+  const held = inFlight.has(k);
   inFlight.add(k);
+  const startStep = stepOf(k);
   try {
     const before = await reviewOf(dir, slug);
     const looping = LOOPING.has(before.review.phase);
@@ -275,11 +289,13 @@ async function advance(dir: string, slug: string, n: number | null, cancelled: b
     const critique = before.review.phase === "critique" && !cancelled
       ? await readCritique(dir, slug, before.review.round, before.settings.bar) : null;
 
-    // decide on the state as it is NOW: a Stop pressed during the gate wins
+    // decide on the state as it is NOW: a Stop or a user's send that landed while
+    // this step was gating has already taken the next step — only the version is kept
     const { review: now, settings } = await reviewOf(dir, slug);
+    const moved = stepOf(k) !== startStep;
     let next: ReturnType<typeof afterTurn>["next"] = { kind: "wait" };
     let state: ReviewState;
-    if (LOOPING.has(now.phase)) {
+    if (!moved && LOOPING.has(now.phase)) {
       ({ state, next } = afterTurn(now, settings, {
         version: regate ? now.version : n, questionsPending: questionsPending(questions), lint, critique, cancelled,
       }));
@@ -287,6 +303,7 @@ async function advance(dir: string, slug: string, n: number | null, cancelled: b
       state = { ...now, version: n ?? now.version };
     }
     await commitReview(dir, slug, state);
+    const decided = stepOf(k);
     const marked = critique ? critique.version ?? state.version : null;
     if (critique && marked != null) await designVersionMark(dir, slug, marked, critique.weighted, critique.round).catch(() => {});
 
@@ -299,9 +316,17 @@ async function advance(dir: string, slug: string, n: number | null, cancelled: b
     }
     await loadDesigns(dir).catch(() => {});
     notify();
-    if (next.kind === "send") await sendLoopPrompt(dir, slug, next.prompt, { review: state, settings, lint: lint ?? (p.active === slug ? p.lint : null), critique });
+    if (next.kind === "send") {
+      try {
+        await sendLoopPrompt(dir, slug, next.prompt, { review: state, settings, lint: lint ?? (p.active === slug ? p.lint : null), critique }, decided);
+      } catch (e) {
+        // the toast says the review stopped; so does the state
+        await commitReview(dir, slug, onStop((await reviewOf(dir, slug)).review));
+        throw e;
+      }
+    }
   } finally {
-    inFlight.delete(k);
+    if (!held) inFlight.delete(k);
   }
 }
 
@@ -329,8 +354,9 @@ function blockerOf(critiques: CritiqueRound[]): string | null {
   return (all.find((f) => prev.has(f.text)) ?? all.find((f) => f.severity === "severe") ?? all[0])?.text ?? null;
 }
 
-/** Builds a loop prompt's body and sends it for `slug`. */
-async function sendLoopPrompt(dir: string, slug: string, kind: PromptKind, ctx: LoopCtx): Promise<void> {
+/** Builds a loop prompt's body and sends it for `slug`; `step` (the count the loop decided
+ *  on) makes the send give up if anything committed since. */
+async function sendLoopPrompt(dir: string, slug: string, kind: PromptKind, ctx: LoopCtx, step?: number): Promise<void> {
   const p = designProjectFor(dir);
   await ensurePrefixInputs(dir);
   const { review, settings } = ctx;
@@ -340,7 +366,7 @@ async function sendLoopPrompt(dir: string, slug: string, kind: PromptKind, ctx: 
   else if (kind === "critiqueFix" && ctx.critique) body = critiqueFixPrompt(ctx.critique);
   else if (kind === "resolve") body = resolveBlockerPrompt(blockerOf(p.active === slug ? p.critiques : ctx.critique ? [ctx.critique] : []) ?? "the last round's findings");
   else body = continuePrompt();
-  await sendPrefixed(dir, slug, body, kind, review);
+  await sendPrefixed(dir, slug, body, kind, review, step);
 }
 
 export async function loadDesigns(dir: string): Promise<void> {
@@ -572,7 +598,7 @@ async function ensurePrefixInputs(dir: string): Promise<void> {
 /** Every design-lane send: starts the lane if it has to, records the send as a loop step
  *  (`onSend`, persisted), and sends `body` behind the design prefix. A send that fails
  *  puts the step back — no turn started, so no turn end will ever take it. */
-async function sendPrefixed(dir: string, slug: string, body: string, kind: PromptKind, from?: ReviewState): Promise<void> {
+async function sendPrefixed(dir: string, slug: string, body: string, kind: PromptKind, from?: ReviewState, step?: number): Promise<void> {
   const p = designProjectFor(dir);
   const key = laneKey(dir, "design");
   const s = agentSessionFor(key);
@@ -587,15 +613,14 @@ async function sendPrefixed(dir: string, slug: string, body: string, kind: Promp
   }
   await ensurePrefixInputs(dir);
   const k = flightKey(dir, slug);
+  // a loop step whose decision went stale while the lane started is dropped, not sent
+  if (step != null && stepOf(k) !== step) return;
   const held = inFlight.has(k);
   inFlight.add(k);
   try {
     const prev = from ?? (await reviewOf(dir, slug)).review;
-    let step = onSend(prev, kind, Date.now());
-    // a lint fix pass reads as "fixing" while it runs (the pill and the gate card say so)
-    if (kind === "lintFix") step = { ...step, phase: "fixing" };
     if (p.active === slug) p.critiqueMissing = false;
-    await commitReview(dir, slug, step);
+    await commitReview(dir, slug, onSend(prev, kind, Date.now()));
     p.turnSlug = slug;
     try {
       await sendAgentMessage(key, body, undefined, { prefix: designPrefix(slug, p.rootPath!, p.context ?? []) });

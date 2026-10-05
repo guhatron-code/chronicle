@@ -57,6 +57,11 @@ describe("the review loop", () => {
     const r = afterTurn(st, S, turn({ version: null, lint: null }));
     expect(r.next).toEqual({ kind: "send", prompt: "critique" }); expect(r.state.version).toBe(4);
   });
+  it("a lint fix pass runs in the fixing phase and keeps its pass count", () => {
+    const st = onSend({ ...initialReviewState(), phase: "fixing", fixPass: 1, version: 1 }, "lintFix", 0);
+    expect(st).toMatchObject({ phase: "fixing", fixPass: 1, lastPrompt: "lintFix" });
+    expect(onSend(st, "critiqueFix", 0).phase).toBe("building");
+  });
   it("a user message during done starts a fresh attempt", () => {
     const st = onSend({ ...initialReviewState(), phase: "done", round: 3, best: { round: 3, score: 8.2 }, accepted: true }, "user", 9);
     expect(st).toMatchObject({ phase: "building", round: 0, fixPass: 0, best: null, accepted: false, startedAt: 9 });

@@ -18,7 +18,7 @@ const NEW_ATTEMPT: PromptKind[] = ["brief", "user", "answers", "continue"];
 const FIX_PROMPTS: PromptKind[] = ["lintFix", "critiqueFix", "fixFinding", "resolve"];
 
 export function onSend(st: ReviewState, prompt: PromptKind, now: number): ReviewState {
-  const base: ReviewState = { ...st, phase: prompt === "critique" ? "critique" : "building", lastPrompt: prompt };
+  const base: ReviewState = { ...st, phase: prompt === "critique" ? "critique" : prompt === "lintFix" ? "fixing" : "building", lastPrompt: prompt };
   if (NEW_ATTEMPT.includes(prompt)) return { ...base, round: 0, fixPass: 0, best: null, accepted: false, startedAt: now };
   if (prompt === "resolve") return { ...base, accepted: false };
   return base;
