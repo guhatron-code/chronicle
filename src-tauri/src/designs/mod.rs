@@ -188,7 +188,7 @@ pub fn untrash(project: &Path, trash_rel: &str) -> Result<String, String> {
 use tauri::State;
 use crate::{project_for, OpenRoots};
 
-fn now_iso() -> String {
+pub(crate) fn now_iso() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     crate::iso8601_utc(secs)
 }

@@ -52,6 +52,21 @@ fn gh_arch() -> &'static str {
     }
 }
 
+/* ================= bundled resources ================= */
+
+/// The app's resource dir, recorded once by `main`'s setup hook so code without an
+/// `AppHandle` (the design lint, the design plugin) can find bundled files.
+static RESOURCE_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+pub fn set_resource_dir(p: PathBuf) { let _ = RESOURCE_DIR.set(p); }
+
+pub fn resource_dir() -> Option<PathBuf> { RESOURCE_DIR.get().cloned() }
+
+/// The bundled design skills (impeccable and ours), when this build carries them.
+pub fn design_plugin_dir() -> Option<PathBuf> {
+    resource_dir().map(|r| crate::designs::plugin::plugin_dir(&r)).filter(|p| p.is_dir())
+}
+
 /* ================= tool resolution ================= */
 
 /// The Chronicle ladder, extended with the managed dir: does Chronicle itself

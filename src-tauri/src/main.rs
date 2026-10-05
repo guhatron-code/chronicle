@@ -3741,6 +3741,8 @@ fn main() {
             });
         })
         .setup(|app| {
+            // bundled files (the design skills) are found from code with no AppHandle
+            if let Ok(res) = app.path().resource_dir() { setup::set_resource_dir(res); }
             power::install(app.handle().clone()); // main thread: the run-loop source lands on the main loop
             // the menu carries every ⌘ shortcut as a key equivalent, so a chord still
             // reaches us while the Web pane's native page is first responder (menu.rs)
@@ -3927,7 +3929,8 @@ fn main() {
             designs::design_trash, designs::design_untrash,
             designs::design_canvas_save, designs::designs_order_save,
             designs::design_snapshot, designs::design_versions, designs::design_restore, designs::design_branch,
-            designs::thumbs::design_thumbnails
+            designs::thumbs::design_thumbnails, designs::thumbs::design_review_version,
+            designs::thumbs::design_capture, designs::thumbs::design_lint_current
         ])
         .build(tauri::generate_context!())
         .expect("error while building Chronicle")
