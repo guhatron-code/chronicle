@@ -20,7 +20,11 @@ fn parse_brief(name: &str, text: &str) -> Result<Brief, String> {
     if !closed { return Err(bad("the front matter never closes.")) }
     let field = |k: &str| front.get(k).filter(|v| !v.is_empty()).cloned().ok_or_else(|| bad(&format!("front matter has no {k}.")));
     let (id, kind, title) = (field("id")?, field("kind")?, field("title")?);
-    let quick = front.get("quick").map(|v| v == "true").unwrap_or(false);
+    let quick = match front.get("quick").map(String::as_str) {
+        None | Some("false") => false,
+        Some("true") => true,
+        Some(_) => return Err(bad("quick must be true or false.")),
+    };
     let (mut brief, mut answers, mut section) = (Vec::new(), Vec::new(), "");
     for l in lines {
         if let Some(h) = l.strip_prefix("## ") { section = match h.trim() { "Brief" => "brief", "Answers" => "answers", _ => "" }; continue }
@@ -87,6 +91,9 @@ mod tests {
         assert!(b[1].quick && !b[0].quick);
         std::fs::write(d.join("bench/design/briefs/bad.md"), "no front matter").unwrap();
         assert!(read_briefs(&d).unwrap_err().contains("bad.md"));
+        std::fs::remove_file(d.join("bench/design/briefs/bad.md")).unwrap();
+        std::fs::write(d.join("bench/design/briefs/odd.md"), "---\nid: odd\nkind: app\ntitle: T\nquick: yes\n---\n\n## Brief\n\nx\n").unwrap();
+        let e = read_briefs(&d).unwrap_err(); assert!(e.contains("odd.md") && e.contains("quick"));
     }
     #[test]
     fn a_bench_project_is_a_chronicle_project_under_the_config_dir_and_results_land_in_the_repo() {

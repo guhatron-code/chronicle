@@ -12,7 +12,7 @@ impl Session {
     pub(crate) fn new(dir: PathBuf) -> Self { Self { dir, initialized: false, designs_only: false } }
     /// The design session's server (`--designs-only`): only `chronicle.designs.*` is visible or callable.
     pub(crate) fn designs_only(mut self, on: bool) -> Self { self.designs_only = on; self }
-    fn visible(&self, name: &str) -> bool { !self.designs_only || name.starts_with("chronicle.designs.") }
+    fn visible(&self, name: &str) -> bool { !self.designs_only || ["list", "read", "capture", "lint"].iter().any(|v| name == format!("chronicle.designs.{v}")) }
 }
 
 const INSTRUCTIONS: &str = "Chronicle keeps this project's notes (tasks, bugs, ideas) and its build roadmap. Use chronicle.notes.* to list, read, create and update notes instead of grepping .chronicle/notes; use chronicle.state.* before saying what is done or what is next, because it answers from git and the roadmap rules, not from memory. Use chronicle.designs.list and chronicle.designs.read to see the project's designs and their frame files; both are read-only, so a design never changes through them.";
@@ -67,7 +67,7 @@ pub(crate) fn handle_line(s: &mut Session, line: &str) -> Option<String> {
         "tools/call" => {
             let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
-            let result = if s.visible(name) { agent_api::call(&s.dir, name, &args) } else { agent_api::call(&s.dir, "chronicle.nope", &args) };
+            let result = if s.visible(name) { agent_api::call(&s.dir, name, &args) } else { Err(format!("{name} isn't available to the design session.")) };
             match result {
                 Ok(out) => reply(id, tool_text(format!("{}\n{}", out.summary, serde_json::to_string_pretty(&out.data).unwrap_or_default()), false)),
                 Err(e) => reply(id, tool_text(e, true)),
@@ -170,6 +170,10 @@ mod tests {
         assert!(!tools.is_empty() && tools.iter().all(|t| t["name"].as_str().unwrap().starts_with("chronicle.designs.")));
         let e = rpc(&mut s, r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"chronicle.notes.list","arguments":{}}}"#);
         assert_eq!(e["result"]["isError"], true, "refused like any unknown tool");
+        assert_eq!(e["result"]["content"][0]["text"], "chronicle.notes.list isn't available to the design session.");
+        assert!(!tools.iter().any(|t| t["name"] == "chronicle.designs.bench"), "no nested benchmarks");
+        let b = rpc(&mut s, r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"chronicle.designs.bench","arguments":{}}}"#);
+        assert_eq!(b["result"]["isError"], true);
         let ok = rpc(&mut s, r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"chronicle.designs.list","arguments":{}}}"#);
         assert!(ok["result"].get("isError").is_none());
     }

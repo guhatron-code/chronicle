@@ -3098,8 +3098,9 @@ fn design_version_mark(roots: State<OpenRoots>, dir: String, slug: String, n: u3
 }
 
 #[tauri::command]
-fn design_bench_briefs(dir: String) -> Result<Vec<designs::bench::Brief>, String> {
-    designs::bench::read_briefs(Path::new(&dir))
+fn design_bench_briefs(roots: State<OpenRoots>, dir: String) -> Result<Vec<designs::bench::Brief>, String> {
+    let p = project_for(&roots, &dir)?;
+    designs::bench::read_briefs(&p.repo)
 }
 
 #[tauri::command]
@@ -3109,8 +3110,9 @@ fn design_bench_project() -> Result<String, String> {
 }
 
 #[tauri::command]
-fn design_bench_write(dir: String, name: String, json: Value, md: String) -> Result<(String, String), String> {
-    designs::bench::write_results(Path::new(&dir), &name, &json, &md)
+fn design_bench_write(roots: State<OpenRoots>, dir: String, name: String, json: Value, md: String) -> Result<(String, String), String> {
+    let p = project_for(&roots, &dir)?;
+    designs::bench::write_results(&p.repo, &name, &json, &md)
         .map(|(j, m)| (j.to_string_lossy().into_owned(), m.to_string_lossy().into_owned()))
 }
 
@@ -3745,9 +3747,9 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(code) = cli::run(&args[1..]) { std::process::exit(code); }
     if let Some(i) = args.iter().position(|a| a == "--mcp") {
-        let start = args.get(i + 1).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+        let start = args.get(i + 1).filter(|a| *a != "--designs-only").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
         match agent_api::resolve_project_dir(&start) {
-            Some(dir) => std::process::exit(mcp::serve(dir, args.iter().any(|a| a == "--designs-only"))),
+            Some(dir) => std::process::exit(mcp::serve(dir, args[i + 1..].iter().any(|a| a == "--designs-only"))),
             None => { eprintln!("No Chronicle project at {}.", start.display()); std::process::exit(1) }
         }
     }
