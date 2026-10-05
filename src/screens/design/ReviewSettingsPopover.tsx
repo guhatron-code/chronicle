@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { computePosition, flip, offset, shift } from "@floating-ui/dom";
 import { designProjectFor, setReviewSettings, subscribeDesigns } from "@/lib/design-store";
-import type { ReviewSettings } from "@/lib/design-review-model";
+import { DEFAULT_SETTINGS, type ReviewSettings } from "@/lib/design-review-model";
 import { toastError } from "@/overlays/toasts";
 
 type Scope = "project" | "design";
@@ -40,8 +40,8 @@ function Line({ label, sub, project, children }: { label: string; sub: string; p
         <span className="text-[12.5px] text-text-primary">{label}</span>
         <span className="text-[11px] leading-[1.45] text-text-faint">{sub}</span>
       </div>
-      {project && <span className="text-[11px] text-text-muted">(project)</span>}
-      <span className={project ? "opacity-60" : ""}>{children}</span>
+      {project && <span className="text-[11px] text-text-muted opacity-70">(project)</span>}
+      {children}
     </div>
   );
 }
@@ -77,9 +77,10 @@ export function ReviewSettingsPopover({ dir, anchor, scope: initial, onClose }: 
     return () => { window.removeEventListener("keydown", key, true); window.removeEventListener("mousedown", down); };
   }, [anchor, onClose]);
 
-  const over = scope === "design" ? p.settingsScope.design ?? {} : {};
-  const val = <K extends keyof ReviewSettings>(k: K): ReviewSettings[K] => (over as Partial<ReviewSettings>)[k] ?? p.settings[k];
-  const inherited = (k: keyof ReviewSettings) => scope === "design" && (over as Partial<ReviewSettings>)[k] === undefined;
+  const over: Partial<ReviewSettings> = (scope === "design" ? p.settingsScope.design : p.settingsScope.project) ?? {};
+  const val = <K extends keyof ReviewSettings>(k: K): ReviewSettings[K] =>
+    over[k] ?? (scope === "design" ? p.settings[k] : DEFAULT_SETTINGS[k]);
+  const inherited = (k: keyof ReviewSettings) => scope === "design" && over[k] === undefined;
   const change = (patch: Partial<ReviewSettings>) =>
     void setReviewSettings(dir, scope, patch).catch((e) => toastError("Couldn't save that", String(e).slice(0, 90)));
 
@@ -131,12 +132,12 @@ export function ReviewChip({ dir }: { dir: string }) {
   const close = useCallback(() => { setOpen(false); btn.current?.focus(); }, []);
   useEffect(() => {
     const on = (e: Event) => {
-      setScope((e as CustomEvent).detail?.scope === "project" ? "project" : "design");
+      setScope((e as CustomEvent).detail?.scope === "project" || !designProjectFor(dir).active ? "project" : "design");
       setOpen(true);
     };
     window.addEventListener("chronicle:review-settings", on);
     return () => window.removeEventListener("chronicle:review-settings", on);
-  }, []);
+  }, [dir]);
   const text = (s.critique ? `Critique on · pass ${s.bar.toFixed(1)}` : "Critique off") + (s.lint ? "" : " · lint off");
   return (
     <>

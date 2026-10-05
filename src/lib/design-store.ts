@@ -50,7 +50,7 @@ export interface DesignProject {
   /** the effective review settings for the open design (project, then its override) */
   settings: ReviewSettings;
   /** the open design's own override, null when it follows the project */
-  settingsScope: { design: Partial<ReviewSettings> | null };
+  settingsScope: { project: Partial<ReviewSettings> | null; design: Partial<ReviewSettings> | null };
   /** the director's files: its questions form and its token plan */
   questions: Questions | null;
   tokens: TokensPlan | null;
@@ -72,7 +72,7 @@ export interface DesignProject {
 
 /** The review fields a freshly opened design starts from, before its files are read. */
 const blankReview = () => ({
-  review: initialReviewState(), settings: DEFAULT_SETTINGS, settingsScope: { design: null }, questions: null, tokens: null,
+  review: initialReviewState(), settings: DEFAULT_SETTINGS, settingsScope: { project: null, design: null }, questions: null, tokens: null,
   critiques: [] as CritiqueRound[], lint: null, scoreOpen: false, pin: null, critiqueMissing: false,
 });
 
@@ -424,7 +424,7 @@ async function loadReview(dir: string, slug: string, reload: boolean, token: num
   ]);
   if (stale()) return;
   if (!reload) { p.review = parseReviewState(raw); p.critiqueMissing = false; }
-  if (set) { p.settings = parseSettings(set.effective); p.settingsScope = { design: set.design ?? null }; }
+  if (set) { p.settings = parseSettings(set.effective); p.settingsScope = { project: set.project ?? null, design: set.design ?? null }; }
   const [questions, tokens, lint, critiques] = await Promise.all([
     readQuestions(dir, slug), readTokens(dir, slug), readLint(dir, slug, p.versions[0]?.n),
     readCritiques(dir, slug, p.review.round, p.settings.bar),
@@ -713,7 +713,7 @@ export async function setReviewSettings(dir: string, scope: "project" | "design"
   await designReviewSettingsSet(dir, scope, scope === "design" ? slug : null, patch);
   const set = await designReviewSettings(dir, slug);
   if (p.active !== slug) return;
-  p.settings = parseSettings(set.effective); p.settingsScope = { design: set.design ?? null };
+  p.settings = parseSettings(set.effective); p.settingsScope = { project: set.project ?? null, design: set.design ?? null };
   notify();
 }
 

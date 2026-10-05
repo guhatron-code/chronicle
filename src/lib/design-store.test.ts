@@ -122,6 +122,18 @@ describe("design store", () => {
     m.frameMessage(DIR, "d", { __chronicleFrame: 1, type: "error", message: "Unexpected token", line: 214 });
     expect(p.frameStates.d).toEqual({ kind: "failed", message: "Unexpected token", line: 214 });
   });
+  it("keeps the project's own settings apart from the effective ones", async () => {
+    const m = await import("./design-store");
+    const ipc = await import("./ipc");
+    await m.loadDesigns(DIR);
+    await m.openDesign(DIR, "home");
+    const eff = { critique: true, bar: 9, rounds: 3, lint: true };
+    vi.mocked(ipc.designReviewSettings).mockResolvedValueOnce({ project: { ...eff, bar: 7 }, design: { bar: 9 }, effective: eff });
+    await m.setReviewSettings(DIR, "design", { bar: 9 });
+    const p = m.designProjectFor(DIR);
+    expect(p.settingsScope.project?.bar).toBe(7);
+    expect(p.settings.bar).toBe(9);
+  });
   it("undoes and redoes a move and a rename", async () => {
     const m = await import("./design-store");
     calls.length = 0;
