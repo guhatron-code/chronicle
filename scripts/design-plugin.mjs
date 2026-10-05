@@ -12,5 +12,7 @@ rmSync(ICONS, { recursive: true, force: true });
 mkdirSync(ICONS, { recursive: true });
 let n = 0;
 for (const f of readdirSync(SRC)) if (f.endsWith(".svg")) { cpSync(path.join(SRC, f), path.join(ICONS, f)); n++; }
+// ISC requires the licence text to travel with the icons; committed (outside the ignored icons/ dir)
+cpSync(path.resolve("node_modules/lucide-static/LICENSE"), path.join(ICONS, "..", "LICENSE"));
 writeFileSync(path.join(ICONS, "..", "ICONS.txt"), readdirSync(ICONS).map((f) => f.replace(/\.svg$/, "")).join("\n") + "\n");
 console.log(`design-plugin: ${n} icons`);

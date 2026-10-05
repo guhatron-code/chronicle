@@ -20,7 +20,7 @@ Score from 0 to 10 in half points. 10 means there is nothing to change. 8 or mor
 
 - **Heuristics**: Nielsen's ten, especially visibility of status, match with the real world, recognition over recall, error prevention.
 - **Task flow**: the primary task is reachable in the fewest steps, one primary action per screen, no dead ends, clear way back.
-- **The kind's rules**: for an `ecommerce` kind apply the `chronicle-ecommerce` skill's twelve rules and cite the rule number; for `app`, `marketing`, `deck` and `brand` apply the matching impeccable register reference.
+- **The kind's rules**: Read the rules for the kind before scoring: for `ecommerce`, Read `${CLAUDE_PLUGIN_ROOT}/skills/chronicle-ecommerce/SKILL.md` (twelve rules; cite the rule number) and both `${CLAUDE_PLUGIN_ROOT}/skills/impeccable/reference/product.md` and `${CLAUDE_PLUGIN_ROOT}/skills/impeccable/reference/brand.md`; for `app`, Read `${CLAUDE_PLUGIN_ROOT}/skills/impeccable/reference/product.md`; for `marketing`, `deck` and `brand`, Read `${CLAUDE_PLUGIN_ROOT}/skills/impeccable/reference/brand.md`.
 - **Breakpoints**: the narrowest and widest frames both work; targets and the primary action survive the phone; nothing depends on hover.
 - **States**: empty, loading, error, disabled and filled states exist and are designed, not implied.
 

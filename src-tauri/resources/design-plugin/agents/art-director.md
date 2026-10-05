@@ -22,7 +22,7 @@ Score from 0 to 10 in half points. 10 means there is nothing to change. 8 or mor
 - **Hierarchy**: one obvious first read per frame, then a second; size, weight, colour and space each doing a distinct job.
 - **Brand fit**: the frame matches the brief, answers and design system (tokens, radii, spacing); it would not pass for any other brand.
 - **Colour discipline**: a seed plus few roles used deliberately, OKLCH-minded neutrals, no stray hues, text on fills passes contrast.
-- **"AI default" tells**: use the impeccable skill's anti-pattern list: gradient text, eyebrow labels over every heading, identical card grids, side-stripe borders, glassmorphism by default, purple-on-white, cream-and-brown, emoji as icons.
+- **"AI default" tells**: Read `${CLAUDE_PLUGIN_ROOT}/skills/impeccable/SKILL.md` (its anti-pattern rules) and, by kind, `${CLAUDE_PLUGIN_ROOT}/skills/impeccable/reference/product.md` for `app` or `${CLAUDE_PLUGIN_ROOT}/skills/impeccable/reference/brand.md` for `marketing`, `deck`, `brand` and `ecommerce`; look for: gradient text, eyebrow labels over every heading, identical card grids, side-stripe borders, glassmorphism by default, purple-on-white, cream-and-brown, emoji as icons.
 
 ## What to return
 
