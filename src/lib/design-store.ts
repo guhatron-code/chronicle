@@ -266,22 +266,23 @@ async function snapshotTurn(dir: string, slug: string) {
   const s = agentSessionFor(laneKey(dir, "design"));
   // read before any await: the next turn end overwrites it
   const cancelled = s.lastStopReason === "cancelled";
+  // stamped before the snapshot's await: a user's send landing during it voids this step
+  const startStep = stepOf(flightKey(dir, slug));
   const n = await designSnapshot(dir, slug, s.lastPrompt, summaryOf(s.entries), s.sessionId ?? "").catch(() => null);
-  await advance(dir, slug, n, cancelled, false);
+  await advance(dir, slug, n, cancelled, false, startStep);
 }
 
 /** One loop step after a turn end (`n` = the new version, if any) or a restart's regate. */
-async function advance(dir: string, slug: string, n: number | null, cancelled: boolean, regate: boolean): Promise<void> {
+async function advance(dir: string, slug: string, n: number | null, cancelled: boolean, regate: boolean, startStep: number): Promise<void> {
   const p = designProjectFor(dir);
   const k = flightKey(dir, slug);
   const held = inFlight.has(k);
   inFlight.add(k);
-  const startStep = stepOf(k);
   try {
     const before = await reviewOf(dir, slug);
     const looping = LOOPING.has(before.review.phase);
     const gateOn = n ?? (regate ? before.review.version : null);
-    if (looping && !cancelled && gateOn != null && before.review.phase !== "critique" && p.active === slug) {
+    if (looping && !cancelled && gateOn != null && before.review.phase !== "critique" && p.active === slug && stepOf(k) === startStep) {
       p.review = { ...p.review, phase: "gate" }; notify();
     }
     const lint = gateOn != null ? await reviewVersion(dir, slug, gateOn) : null;
@@ -320,8 +321,9 @@ async function advance(dir: string, slug: string, n: number | null, cancelled: b
       try {
         await sendLoopPrompt(dir, slug, next.prompt, { review: state, settings, lint: lint ?? (p.active === slug ? p.lint : null), critique }, decided);
       } catch (e) {
-        // the toast says the review stopped; so does the state
-        await commitReview(dir, slug, onStop((await reviewOf(dir, slug)).review));
+        // the toast says the review stopped; so does the state — unless a newer step
+        // (the user's) committed since, which this failure must not stop
+        if (stepOf(k) === decided) await commitReview(dir, slug, onStop((await reviewOf(dir, slug)).review));
         throw e;
       }
     }
@@ -440,8 +442,10 @@ async function resumeLoop(dir: string, slug: string): Promise<void> {
   if (["idle", "done", "stopped", "below-bar"].includes(p.review.phase) || inFlight.has(flightKey(dir, slug))) return;
   const { state, next } = resumeAfterRestart(p.review, agentSessionFor(laneKey(dir, "design")).turnActive);
   if (next.kind === "regate") {
-    await commitReview(dir, slug, state);
-    await advance(dir, slug, null, false, true);
+    const committed = commitReview(dir, slug, state); // bumps the step synchronously
+    const startStep = stepOf(flightKey(dir, slug));
+    await committed;
+    await advance(dir, slug, null, false, true, startStep);
   } else if (next.kind === "critiqueMissing") {
     p.critiqueMissing = true; notify();
   }
@@ -627,7 +631,8 @@ async function sendPrefixed(dir: string, slug: string, body: string, kind: Promp
     } catch (e) {
       // no turn started, so no turn end will ever claim this slug
       if (p.turnSlug === slug) p.turnSlug = null;
-      await commitReview(dir, slug, prev);
+      // put the step back — but a loop phase with no turn behind it reads as stopped
+      await commitReview(dir, slug, LOOPING.has(prev.phase) ? onStop(prev) : prev);
       throw e;
     }
   } finally {

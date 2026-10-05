@@ -432,6 +432,34 @@ describe("design store", () => {
     expect(p.review).toMatchObject({ phase: "building", lastPrompt: "user", fixPass: 0 });
   });
 
+  it("a user's send during the turn-end snapshot wins: the step stamped before it sends nothing", async () => {
+    const { m, p } = await looping();
+    const snap = deferred<number | null>();
+    h.snapshot.mockReturnValueOnce(snap.promise);
+    sess.turnEnds += 1; h.fireAgent();
+    await m.sendDesignMessage(DIR, "tighten the grid", "home");
+    h.review.mockResolvedValueOnce({ thumbs: [], lint: severeLint(9) });
+    snap.resolve(9);
+    await vi.waitFor(() => expect(p.review.version).toBe(9));
+    await new Promise((r) => setImmediate(r));
+    expect(h.sent.at(-1)).toMatch(/tighten the grid$/);
+    expect(p.review).toMatchObject({ phase: "building", lastPrompt: "user" });
+  });
+
+  it("a failed send never leaves a loop phase that no turn backs", async () => {
+    const { m, p } = await looping();
+    const agentMod = await import("./agent-session");
+    const send = agentMod.sendAgentMessage as unknown as ReturnType<typeof vi.fn>;
+    p.review = { ...p.review, phase: "gate" };
+    send.mockRejectedValueOnce(new Error("busy"));
+    await expect(m.sendDesignMessage(DIR, "again", "home")).rejects.toThrow("busy");
+    expect(p.review.phase).toBe("stopped");
+    p.review = { ...p.review, phase: "done" };
+    send.mockRejectedValueOnce(new Error("busy"));
+    await expect(m.sendDesignMessage(DIR, "again", "home")).rejects.toThrow("busy");
+    expect(p.review.phase).toBe("done");
+  });
+
   it("a Stop between the decision and its send wins", async () => {
     const { m, p } = await looping();
     const ipc = await import("./ipc");
