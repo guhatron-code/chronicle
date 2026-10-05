@@ -676,10 +676,13 @@ pub struct LaneExtras {
 }
 
 /// Tool names the design lane answers "allow once" for without asking: the
-/// session's own MCP servers (a headless review browser with no profile, the
-/// component registry, Chronicle's read-only design tools). They read pages
-/// and files; none of them writes into the project.
-const AUTO_MCP_PREFIXES: [&str; 3] = ["mcp__playwright__", "mcp__shadcn__", "mcp__chronicle__"];
+/// session's own MCP servers — `playwright` (a headless review browser with
+/// no profile), `shadcn` (the component registry) and `chronicle-designs`
+/// (Chronicle's read-only design tools, `chronicle.designs.*` only). They
+/// read pages and files; none of them writes into the project. The full
+/// `chronicle` server (notes, rounds, terminal) is NEVER auto-answered: its
+/// tools write outside the designs folder, so they always ask.
+const AUTO_MCP_PREFIXES: [&str; 3] = ["mcp__playwright__", "mcp__shadcn__", "mcp__chronicle-designs__"];
 
 /// The `allow_once` option id for a permission ask from one of the design
 /// session's own MCP servers; `None` for any other tool, or when no once-only
@@ -2941,7 +2944,9 @@ for line in sys.stdin:
             "options": [ { "optionId": "yes", "kind": "allow_once" }, { "optionId": "no", "kind": "reject_once" } ] });
         assert_eq!(design_mcp_decision(&ask("mcp__playwright__browser_navigate")).as_deref(), Some("yes"));
         assert_eq!(design_mcp_decision(&ask("mcp__shadcn__search_items_in_registries")).as_deref(), Some("yes"));
-        assert_eq!(design_mcp_decision(&ask("mcp__chronicle__chronicle_designs_capture")).as_deref(), Some("yes"));
+        assert_eq!(design_mcp_decision(&ask("mcp__chronicle-designs__chronicle_designs_capture")).as_deref(), Some("yes"));
+        assert!(design_mcp_decision(&ask("mcp__chronicle__chronicle_notes_create")).is_none(), "the full chronicle server always asks");
+        assert!(design_mcp_decision(&ask("mcp__chronicle__chronicle_round_start")).is_none(), "the full chronicle server always asks");
         assert!(design_mcp_decision(&ask("mcp__figma__get_design_context")).is_none(), "unknown servers still ask");
         assert!(design_mcp_decision(&ask("Bash")).is_none());
         let via_meta = json!({ "toolCall": { "toolCallId": "m2", "_meta": { "claudeCode": { "toolName": "mcp__playwright__browser_snapshot" } } },
