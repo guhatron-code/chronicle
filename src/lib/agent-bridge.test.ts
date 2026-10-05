@@ -202,3 +202,31 @@ describe("mounting the bridge", () => {
     });
   });
 });
+
+describe("the Design pane's actions", () => {
+  const base = {
+    planRound: vi.fn(async () => {}), startRound: vi.fn(async () => {}), openProject: vi.fn(async () => {}),
+    activate: vi.fn(), revealPane: vi.fn(), revealTerminal: vi.fn(), roundTotal: vi.fn(() => 0), termTail: vi.fn(() => null),
+  };
+  it("captures, lints and benchmarks, each with its own sentence", async () => {
+    const d = {
+      ...base,
+      designCapture: vi.fn(async () => ["/d/.review/captures/a.png", "/d/.review/captures/b.png"]),
+      designLint: vi.fn(async () => ({ v: 1 as const, version: null, at: "", ran: true, problem: null, severe: [{ rule: "r", severity: "severe" as const, text: "t", frame: "f", file: "x" }], minor: [] })),
+      designBench: vi.fn(async () => ({ summary: { total: 3, passed: 2, mean: 8.06, compared: 1, beat: 1 } }) as never),
+    };
+    const c = await handleAgentAction({ id: 1, dir: "/p", action: "designs.capture", args: { slug: "s", frame: "home" } }, d);
+    expect(d.designCapture).toHaveBeenCalledWith("/p", "s", "home");
+    expect(c).toEqual({ ok: true, summary: "2 pictures under .review/captures/", data: { paths: ["/d/.review/captures/a.png", "/d/.review/captures/b.png"] } });
+    const l = await handleAgentAction({ id: 2, dir: "/p", action: "designs.lint", args: { slug: "s" } }, d);
+    expect(l.summary).toBe("1 severe · 0 minor");
+    const b = await handleAgentAction({ id: 3, dir: "/p", action: "designs.bench", args: { quick: true, kind: "app" } }, d);
+    expect(d.designBench).toHaveBeenCalledWith("/p", { quick: true, kind: "app" });
+    expect(b.summary).toBe("2 of 3 passed the bar · mean 8.1");
+    expect(describeAction("designs.bench", {})).toBe("Run the design benchmark");
+  });
+  it("refuses a capture with no design named", async () => {
+    const r = await handleAgentAction({ id: 4, dir: "/p", action: "designs.capture", args: {} }, { ...base, designCapture: vi.fn() });
+    expect(r.ok).toBe(false);
+  });
+});

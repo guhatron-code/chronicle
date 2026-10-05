@@ -19,6 +19,9 @@ for p in ['package.json', 'src-tauri/tauri.conf.json']:
     open(p, 'w').write(s)
 PYEOF
 
+# the design benchmark should have been run on this version before it ships
+if ! ls bench/design/results/${VERSION}-*.json >/dev/null 2>&1; then echo "No design benchmark results for $VERSION (run: chronicle designs bench --quick). Continue? [y/N]"; read -r a; [ "$a" = "y" ] || exit 1; fi
+
 # 2 · signed + notarized build with updater artifacts
 source .sign.env
 PATH="$HOME/.cargo/bin:$PATH" npm run tauri:build

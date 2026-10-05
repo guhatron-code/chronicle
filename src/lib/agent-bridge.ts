@@ -20,6 +20,8 @@
 import { agentActionReply, onAgentAction, type AgentAction } from "./ipc";
 import { announce } from "./journal";
 import { toastError, toastSuccess } from "@/overlays/toasts";
+import type { BenchArgs, BenchResults } from "./design-bench";
+import type { LintReport } from "./design-review-model";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 
 /** Where a round runs: the agent pane, or a terminal tab you can watch. */
@@ -57,6 +59,12 @@ export interface BridgeDeps {
    *  promise below has resolved — never before, or an action arriving in that
    *  window would be emitted into the socket with nobody home to hear it. */
   bridgeReady?(): void | Promise<void>;
+  /** The Design pane's actions: pictures of a design's current frames (absolute paths), */
+  designCapture?(dir: string, slug: string, frame?: string): Promise<string[]>;
+  /** its lint over the current files, */
+  designLint?(dir: string, slug: string): Promise<LintReport>;
+  /** and the benchmark — which resolves only when the whole run has finished. */
+  designBench?(dir: string, args: BenchArgs): Promise<BenchResults>;
 }
 
 /** What `handleAgentAction` hands back to Rust, and to the user. */
@@ -124,6 +132,16 @@ export function describeAction(action: string, args: Record<string, unknown>): s
         ? `Read the terminal's last ${lines} lines`
         : `Read terminal ${id}'s last ${lines} lines`;
     }
+    case "designs.capture": {
+      const slug = textArg(args.slug);
+      return slug ? `Capture the design ${slug}` : null;
+    }
+    case "designs.lint": {
+      const slug = textArg(args.slug);
+      return slug ? `Lint the design ${slug}` : null;
+    }
+    case "designs.bench":
+      return "Run the design benchmark";
     default:
       return null;
   }
@@ -208,6 +226,46 @@ export async function handleAgentAction(a: AgentAction, deps: BridgeDeps): Promi
         summary: `${got} lines from ${named == null ? "the terminal" : `terminal ${named}`}.`,
         data: { text, lines: got },
       };
+    }
+
+    case "designs.capture": {
+      const slug = textArg(args.slug);
+      if (slug == null) return refusal("capture a design", "no design named");
+      if (!deps.designCapture) return refusal("capture a design", "the Design pane isn't available");
+      try {
+        const paths = await deps.designCapture(a.dir, slug, textArg(args.frame) ?? undefined);
+        return { ok: true, summary: `${paths.length} pictures under .review/captures/`, data: { paths } };
+      } catch (e) {
+        return refusal(`capture ${slug}`, e);
+      }
+    }
+
+    case "designs.lint": {
+      const slug = textArg(args.slug);
+      if (slug == null) return refusal("lint a design", "no design named");
+      if (!deps.designLint) return refusal("lint a design", "the Design pane isn't available");
+      try {
+        const report = await deps.designLint(a.dir, slug);
+        return { ok: true, summary: `${report.severe.length} severe · ${report.minor.length} minor`, data: report };
+      } catch (e) {
+        return refusal(`lint ${slug}`, e);
+      }
+    }
+
+    case "designs.bench": {
+      if (!deps.designBench) return refusal("run the design benchmark", "the Design pane isn't available");
+      const benchArgs: BenchArgs = {};
+      const brief = textArg(args.brief), kind = textArg(args.kind);
+      if (brief) benchArgs.brief = brief;
+      if (kind) benchArgs.kind = kind;
+      if (args.quick === true) benchArgs.quick = true;
+      try {
+        const r = await deps.designBench(a.dir, benchArgs);
+        const mean = r.summary.mean == null ? "—" : r.summary.mean.toFixed(1);
+        return { ok: true, summary: `${r.summary.passed} of ${r.summary.total} passed the bar · mean ${mean}`, data: r };
+      } catch (e) {
+        return refusal("run the design benchmark", e);
+      }
     }
 
     default:

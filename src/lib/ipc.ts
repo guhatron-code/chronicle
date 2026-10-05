@@ -605,6 +605,11 @@ export const designContextFiles = (dir: string) => invoke<string[]>("design_cont
 export const designReviewVersion = (dir: string, slug: string, n: number) => invoke<{ thumbs: string[]; lint: LintReport }>("design_review_version", { dir, slug, n });
 export const designCapture = (dir: string, slug: string, frame?: string) => invoke<string[]>("design_capture", { dir, slug, frame: frame ?? null });
 export const designLintCurrent = (dir: string, slug: string) => invoke<LintReport>("design_lint_current", { dir, slug });
+/** The design benchmark (src-tauri/src/designs/bench.rs): the repo's briefs, a fresh throwaway
+ *  project under the config dir, and `bench/design/results/<name>.json` + `.md` → their paths. */
+export const designBenchBriefs = (dir: string) => invoke<import("./design-bench").Brief[]>("design_bench_briefs", { dir });
+export const designBenchProject = () => invoke<string>("design_bench_project");
+export const designBenchWrite = (dir: string, name: string, json: unknown, md: string) => invoke<[string, string]>("design_bench_write", { dir, name, json, md });
 export const designLintRead = (dir: string, slug: string, name: string) => invoke<LintReport | null>("design_lint_read", { dir, slug, name });
 export const designReviewSettings = (dir: string, slug?: string) => invoke<{ project: ReviewSettings; design: Partial<ReviewSettings> | null; effective: ReviewSettings }>("design_review_settings", { dir, slug: slug ?? null });
 export const designReviewSettingsSet = (dir: string, scope: "project" | "design", slug: string | null, patch: Partial<ReviewSettings>) => invoke<void>("design_review_settings_set", { dir, scope, slug, patch });
