@@ -12,7 +12,7 @@ function Toggle({ on, label, onChange }: { on: boolean; label: string; onChange:
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)}
       className={`relative inline-block h-[18px] w-[30px] shrink-0 rounded-[9px] ${on ? "bg-primary" : "bg-fill-hover"}`}>
-      <span className={`absolute top-[2px] h-[14px] w-[14px] rounded-full ${on ? "right-[2px] bg-primary-fg" : "left-[2px] bg-text-dim"}`} />
+      <span className={`absolute top-[2px] h-[14px] w-[14px] rounded-full ${on ? "right-[2px] bg-primary-foreground" : "left-[2px] bg-text-dim"}`} />
     </button>
   );
 }
@@ -86,7 +86,7 @@ export function ReviewSettingsPopover({ dir, anchor, scope: initial, onClose }: 
   return (
     <div ref={ref} role="dialog" aria-label="Review settings" tabIndex={-1}
       style={{ position: "fixed", left: pos?.left ?? 0, top: pos?.top ?? 0, width: 340, visibility: pos ? "visible" : "hidden" }}
-      className="z-50 rounded-[10px] border border-border-strong bg-surface-overlay text-text-primary shadow-overlay outline-none">
+      className="z-50 rounded-[10px] border border-border-strong bg-surface-overlay text-text-primary shadow-[var(--shadow-overlay)] outline-none">
       <div className="flex flex-col gap-2 px-3.5 py-3">
         <span className="text-[12.5px] font-semibold">Review before you see it</span>
         <div role="group" aria-label="Applies to" className="flex gap-0.5 rounded-lg border border-border-hairline p-0.5">
