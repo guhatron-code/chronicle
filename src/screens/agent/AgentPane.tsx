@@ -535,6 +535,8 @@ export function AgentPane({
   onOpenReview,
   onOpenNotes,
   variant = "chat",
+  trailing,
+  composerChips,
 }: {
   dir: string;
   onConfirm: (spec: ConfirmSpec) => void;
@@ -547,6 +549,11 @@ export function AgentPane({
   onOpenReview: () => void;
   /** F39 — the round card's "Open Notes" */
   onOpenNotes?: () => void;
+  /** rendered after the thread's entries, inside the scroll (the design lane's cards);
+   *  a thread with no entries still shows it */
+  trailing?: ReactNode;
+  /** a row of chips above the composer's input */
+  composerChips?: ReactNode;
 }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeAgent(() => bump((n) => n + 1)), []);
@@ -738,7 +745,7 @@ export function AgentPane({
     );
   }
 
-  const empty = s.entries.length === 0;
+  const empty = s.entries.length === 0 && !trailing;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -782,6 +789,7 @@ export function AgentPane({
               />
             </Appear>
           )); })()}
+          {trailing}
           {/* the "thinking" beat before the first token, so a turn never
               looks stalled — the classic chat typing signal */}
           {s.turnActive && s.entries.at(-1)?.kind !== "assistant" && (
@@ -806,6 +814,7 @@ export function AgentPane({
         }
         onConfirm={onConfirm}
         onSend={variant === "design" ? (t) => sendDesignMessage(splitLaneKey(dir).dir, t) : undefined}
+        chips={composerChips}
       />
     </div>
   );

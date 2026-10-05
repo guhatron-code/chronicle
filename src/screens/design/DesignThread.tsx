@@ -11,6 +11,13 @@ import { designProjectFor, subscribeDesigns } from "@/lib/design-store";
 import { toastError } from "@/overlays/toasts";
 import { addReminder, remindersFor, subscribeReminders } from "@/lib/reminders";
 import { newTab } from "@/lib/web-store";
+import { checkFor, subscribeDoctor } from "@/lib/setup-store";
+import { TokenPlanCard } from "./cards/TokenPlanCard";
+import { QuestionsCard } from "./cards/QuestionsCard";
+import { LintCard } from "./cards/LintCard";
+import { CritiqueCard } from "./cards/CritiqueCard";
+import { BelowBarCard } from "./cards/BelowBarCard";
+import { ReviewToolsCard } from "./cards/ReviewToolsCard";
 
 export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
   dir: string;
@@ -39,6 +46,19 @@ export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
   const latest = p.versions[0]?.n;
   useEffect(() => subscribeReminders(() => bump((n) => n + 1)), []);
   const reminded = !!p.active && remindersFor(dir).some((r) => r.slug === p.active);
+  useEffect(() => subscribeDoctor(() => bump((n) => n + 1)), []);
+  // the director's cards, after the thread's entries (boards 3, 4, 6, 9)
+  const phase = p.review.phase;
+  const cards = p.active ? [
+    p.tokens && <TokenPlanCard key="tokens" tokens={p.tokens} />,
+    p.questions && p.questions.questions.length > 0 && <QuestionsCard key={`questions-${p.active}`} dir={dir} />,
+    (p.lint || phase === "gate" || phase === "fixing") && (
+      <LintCard key="lint" lint={p.lint} review={p.review} settings={p.settings} kind={p.design?.kind ?? null} />
+    ),
+    (p.critiques.length > 0 || phase === "critique" || p.critiqueMissing) && <CritiqueCard key="critique" dir={dir} />,
+    phase === "below-bar" && <BelowBarCard key="below" dir={dir} />,
+    checkFor("design_browser").state === "installing" && <ReviewToolsCard key="tools" />,
+  ].filter(Boolean) : [];
   return (
     <div className="flex w-[392px] min-w-[320px] shrink flex-col border-l border-border-hairline bg-surface-panel">
       {s.outside.length > 0 && (
@@ -83,7 +103,8 @@ export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
         </div>
       )}
       <div className="flex min-h-0 flex-1 flex-col">
-        <AgentPane dir={key} variant="design" onConfirm={onConfirm} onRevealTerminal={onRevealTerminal} onOpenReview={() => {}} />
+        <AgentPane dir={key} variant="design" onConfirm={onConfirm} onRevealTerminal={onRevealTerminal} onOpenReview={() => {}}
+          trailing={cards.length > 0 ? cards : undefined} />
       </div>
     </div>
   );

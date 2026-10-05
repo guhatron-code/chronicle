@@ -8,7 +8,7 @@
  * Works freely or Full auto is confirmed once per session, with copy that
  * states exactly what it covers.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   agentSessionFor,
   cancelAgentTurn,
@@ -154,6 +154,7 @@ export function Composer({
   disabled,
   onConfirm,
   onSend,
+  chips,
 }: {
   dir: string;
   /** true while the session isn't ready — the input dims and nothing sends */
@@ -162,6 +163,8 @@ export function Composer({
   /** set by a lane that sends its own way (design): gets the text with mentions
    *  flattened, instead of the chat's blocks + sendAgentMessage */
   onSend?: (text: string) => Promise<void>;
+  /** a lane's own chips, as a row above the input (the design lane's system and critique chips) */
+  chips?: ReactNode;
 }) {
   const s = agentSessionFor(dir);
   // `dir` is the session's lane key; files, notes, phases and attachments
@@ -477,6 +480,7 @@ export function Composer({
         if (e.dataTransfer.types.includes("application/x-chronicle-path")) e.preventDefault();
       }}
     >
+      {chips && <div data-chrome className="flex flex-wrap items-center gap-1.5 px-2.5 pt-2">{chips}</div>}
       {s.draft && text === s.draft.text && (
         <div data-chrome className="flex flex-wrap items-center gap-2">
           <span data-draft-chip className="inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full bg-fill-subtle px-2.5 text-[11px] text-text-subtle">
