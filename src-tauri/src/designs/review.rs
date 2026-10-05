@@ -20,7 +20,7 @@ impl Default for ReviewSettings {
 
 impl ReviewSettings {
     pub fn clamp(self) -> Self {
-        let bar = if self.bar.is_finite() { ((self.bar * 2.0).round_ties_even() / 2.0).clamp(5.0, 9.5) } else { 8.0 };
+        let bar = if self.bar.is_finite() { ((self.bar * 2.0).floor() / 2.0).clamp(5.0, 9.5) } else { 8.0 };
         ReviewSettings { bar, rounds: self.rounds.clamp(1, 5), ..self }
     }
 }
@@ -46,9 +46,13 @@ fn read_json(path: &Path) -> Option<Value> {
 }
 
 fn write_json_atomic(path: &Path, v: &Value) -> Result<(), String> {
+    write_text_atomic(path, &serde_json::to_string_pretty(v).map_err(|e| e.to_string())?)
+}
+
+fn write_text_atomic(path: &Path, text: &str) -> Result<(), String> {
     if let Some(p) = path.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(v).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
@@ -97,9 +101,9 @@ pub fn set_design(design_dir: &Path, patch: SettingsPatch) -> Result<SettingsPat
 pub fn read_state(design_dir: &Path) -> Option<Value> { read_json(&review_dir(design_dir).join("state.json")) }
 
 pub fn write_state(design_dir: &Path, state: &Value) -> Result<(), String> {
-    let text = serde_json::to_string(state).map_err(|e| e.to_string())?;
+    let text = serde_json::to_string_pretty(state).map_err(|e| e.to_string())?;
     if text.len() > STATE_CAP { return Err("that review state is too big to keep".into()); }
-    write_json_atomic(&review_dir(design_dir).join("state.json"), state)
+    write_text_atomic(&review_dir(design_dir).join("state.json"), &text)
 }
 
 pub fn answer_questions(design_dir: &Path, answers: &Value, skipped: bool) -> Result<Value, String> {
@@ -123,7 +127,7 @@ pub fn weighted(scores: &[(String, f64)]) -> (f64, Vec<String>) {
             None => missing.push(id.to_string()),
         }
     }
-    (total, missing)
+    ((total * 100.0 + 1e-6).round() / 100.0, missing)
 }
 
 pub fn read_critique(design_dir: &Path, round: u32, bar: f64) -> Result<Value, String> {
@@ -133,7 +137,6 @@ pub fn read_critique(design_dir: &Path, round: u32, bar: f64) -> Result<Value, S
     let scores: Vec<(String, f64)> = reviewers.iter()
         .filter_map(|r| Some((r["id"].as_str()?.to_string(), r["score"].as_f64()?))).collect();
     let (w, missing) = weighted(&scores);
-    let bar = c["bar"].as_f64().unwrap_or(bar);
     c["weighted"] = json!(w); c["passed"] = json!(w >= bar); c["bar"] = json!(bar);
     c["missing"] = json!(missing); c["round"] = json!(round);
     Ok(c)
@@ -181,6 +184,7 @@ pub fn attach_ref(design_dir: &Path, name: &str, bytes: &[u8]) -> Result<String,
     if last.is_empty() || last.starts_with('.') || last.contains('\0') {
         return Err("that file name can't be used for a reference".into());
     }
+    if last.len() > 200 { return Err("That file's name is too long.".into()); }
     if bytes.len() > REF_CAP { return Err("a reference can be at most 10 MB".into()); }
     let refs = design_dir.join("refs");
     std::fs::create_dir_all(&refs).map_err(|e| e.to_string())?;
@@ -208,6 +212,11 @@ mod tests {
         assert_eq!(effective(&root, &d).bar, 9.5, "unset keys fall through to the project");
         set_design(&d, SettingsPatch { bar: Some(7.25), ..Default::default() }).unwrap();
         assert_eq!(effective(&root, &d).bar, 7.0, "bars land on the half");
+        set_design(&d, SettingsPatch { bar: Some(7.3), ..Default::default() }).unwrap();
+        assert_eq!(effective(&root, &d).bar, 7.0);
+        set_design(&d, SettingsPatch { bar: Some(7.75), ..Default::default() }).unwrap();
+        assert_eq!(effective(&root, &d).bar, 7.5);
+        set_design(&d, SettingsPatch { bar: Some(7.25), ..Default::default() }).unwrap();
         assert_eq!(design_patch(&d).critique, Some(false), "earlier keys survive a later patch");
         std::fs::write(root.join("review.json"), "{nope").unwrap();
         assert_eq!(project_settings(&root), ReviewSettings::default(), "a bad file reads as defaults");
@@ -228,6 +237,18 @@ mod tests {
         let c2 = read_critique(&d, 2, 8.0).unwrap();
         assert_eq!(c2["missing"], json!(["a11y", "copy"])); assert!((c2["weighted"].as_f64().unwrap() - 5.85).abs() < 1e-9);
         assert!(read_critique(&d, 3, 8.0).is_err());
+    }
+    #[test]
+    fn the_gate_rounds_its_score_and_trusts_only_the_effective_bar() {
+        let d = tmp("gate"); std::fs::create_dir_all(d.join("critique")).unwrap();
+        let w = |r: &str| std::fs::write(d.join("critique/round-1.json"), r).unwrap();
+        w(r#"{"reviewers":[{"id":"ux","score":8},{"id":"art","score":8},{"id":"a11y","score":8},{"id":"copy","score":8}]}"#);
+        assert_eq!(read_critique(&d, 1, 8.0).unwrap()["passed"], true);
+        w(r#"{"reviewers":[{"id":"ux","score":6},{"id":"art","score":7},{"id":"a11y","score":9},{"id":"copy","score":10}]}"#);
+        assert_eq!(read_critique(&d, 1, 7.5).unwrap()["passed"], true);
+        w(r#"{"bar":0,"reviewers":[{"id":"ux","score":6},{"id":"art","score":6},{"id":"a11y","score":6},{"id":"copy","score":6}]}"#);
+        let c = read_critique(&d, 1, 8.0).unwrap();
+        assert_eq!(c["passed"], false); assert_eq!(c["bar"], 8.0);
     }
     #[test]
     fn state_reminders_and_design_files_are_jailed_and_bounded() {
@@ -251,6 +272,7 @@ mod tests {
         assert!(attach_ref(&d, "a/..", b"x").is_err());
         assert!(attach_ref(&d, ".hidden", b"x").is_err());
         assert!(attach_ref(&d, "", b"x").is_err());
+        assert_eq!(attach_ref(&d, &"a".repeat(300), b"x").unwrap_err(), "That file's name is too long.");
         assert_eq!(attach_ref(&d, "shelf.png", b"1").unwrap(), "refs/shelf.png");
         assert_eq!(attach_ref(&d, "shelf.png", b"2").unwrap(), "refs/shelf 2.png");
         assert_eq!(attach_ref(&d, "../../etc/shelf.png", b"3").unwrap(), "refs/shelf 3.png");
