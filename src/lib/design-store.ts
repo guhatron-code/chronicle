@@ -62,6 +62,9 @@ export interface DesignProject {
   scoreOpen: boolean;
   /** the finding the canvas outlines, picked from the scorecard */
   pin: { frame: string; selector: string; text: string } | null;
+  /** where a frame found a pinned element, keyed `frame:selector`, in page px; null when
+   *  the page has no such element (the reporter's `located` reply) */
+  located: Record<string, { x: number; y: number; w: number; h: number } | null>;
   /** the "getting the review tools ready" card shows (Task 15 decides when) */
   toolsCard: boolean;
   /** a critique turn ended without its round file */
@@ -74,6 +77,7 @@ export interface DesignProject {
 const blankReview = () => ({
   review: initialReviewState(), settings: DEFAULT_SETTINGS, settingsScope: { project: null, design: null }, questions: null, tokens: null,
   critiques: [] as CritiqueRound[], lint: null, scoreOpen: false, pin: null, critiqueMissing: false,
+  located: {} as DesignProject["located"],
 });
 
 const projects = new Map<string, DesignProject>();
@@ -462,6 +466,16 @@ export function frameMessage(dir: string, frameId: string, data: unknown): void 
     p.frameStates[frameId] = { kind: "failed", message: String(d.message ?? "The page hit an error"), line: Number(d.line) || 0 };
   } else if (d.type === "blank") {
     p.frameStates[frameId] = { kind: "failed", message: "The page came out empty", line: 0 };
+  } else if (d.type === "located") {
+    // only an answer about this frame's own element: ids are `frame:selector`
+    if (typeof d.id !== "string" || !d.id.startsWith(`${frameId}:`)) return;
+    const r = d.rect as Record<string, unknown> | null;
+    if (r === null) p.located[d.id] = null;
+    else {
+      const [x, y, w, h] = [r?.x, r?.y, r?.w, r?.h].map(Number);
+      if (![x, y, w, h].every(Number.isFinite)) return;
+      p.located[d.id] = { x, y, w, h };
+    }
   } else return;
   notify();
 }

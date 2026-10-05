@@ -3,7 +3,7 @@
    screen at 15% or more are live iframes, at most six, and none while the pane or
    the window is hidden; the rest show their latest thumbnail. Input handling lives
    in useCanvasGestures; this file draws and routes frame messages. */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { liveFrames, pinLive, worldToScreen, type Rect } from "@/lib/canvas-math";
 import { placeFrames } from "@/lib/design-model";
 import { designProjectFor, frameMessage, subscribeDesigns } from "@/lib/design-store";
@@ -11,8 +11,13 @@ import { getActivity, subscribeActivity } from "@/lib/scheduler";
 import { DesignCompare } from "./DesignCompare";
 import { FrameView, STRIP, stateWordOf } from "./FrameView";
 import { Minimap } from "./Minimap";
+import { PinLayer } from "./PinLayer";
+import { ReviewPill } from "./ReviewPill";
 import { ZoomControls } from "./CanvasToolbar";
 import { useCanvasGestures } from "./useCanvasGestures";
+
+/** Room kept around a frame the scorecard brings on screen (useCanvasGestures' REVEAL). */
+const REVEAL = 48;
 
 const PLACEHOLDERS = [
   { label: "Desktop", width: 1440, w: 317, h: 260 },
@@ -63,6 +68,19 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
     return cb;
   };
   const exitLive = g.exitLive;
+
+  // The pinned finding: ask the pinned frame's page where its element is. Only ever
+  // posted to an iframe this canvas mounted; the page's origin is opaque, hence "*".
+  const pin = p.pin;
+  const pinRef = useRef(pin);
+  pinRef.current = pin;
+  const locate = useCallback((frameId: string) => {
+    const pn = pinRef.current;
+    if (!pn || pn.frame !== frameId) return;
+    iframes.current.get(frameId)?.contentWindow?.postMessage(
+      { __chronicleCanvas: 1, type: "locate", id: `${pn.frame}:${pn.selector}`, selector: pn.selector }, "*");
+  }, []);
+
   useEffect(() => {
     const on = (e: MessageEvent) => {
       if (!e.source) return;
@@ -71,17 +89,52 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
         const d = e.data as Record<string, unknown> | null;
         // A live page holds the keyboard, so Esc can only come back as a message.
         if (d && d.__chronicleFrame === 1 && d.type === "escape") exitLive();
-        else frameMessage(dir, id, e.data);
+        else {
+          frameMessage(dir, id, e.data);
+          // a (re)loaded or reflowed page: its element may have moved, ask again
+          if (d && d.__chronicleFrame === 1 && (d.type === "ready" || d.type === "height")) locate(id);
+        }
         return;
       }
     };
     window.addEventListener("message", on);
     return () => window.removeEventListener("message", on);
-  }, [dir, exitLive]);
+  }, [dir, exitLive, locate]);
 
   const shown = onScreen && windowVisible;
   const nearest = shown && v && size.w ? liveFrames(rects, v, size.w, size.h) : new Set<string>();
   const live = shown && g.liveId && rects[g.liveId] ? pinLive(nearest, g.liveId) : nearest;
+
+  // A new pin, or its frame going live: ask now (a frame still loading answers on "ready").
+  const pinLiveNow = pin != null && live.has(pin.frame);
+  useEffect(() => { if (pin && pinLiveNow) locate(pin.frame); }, [pin, pinLiveNow, locate]);
+
+  // The scorecard picked a finding: select its frame and bring it on screen.
+  const reach = useRef({ rects, v, size });
+  reach.current = { rects, v, size };
+  const { select, panTo, commit } = g;
+  useEffect(() => {
+    const on = (e: Event) => {
+      const id = (e as CustomEvent<unknown>).detail;
+      if (typeof id !== "string") return;
+      const { rects: rs, v: vw, size: sz } = reach.current;
+      const r = rs[id];
+      if (!r) return;
+      select(id);
+      if (!vw) return;
+      // the gestures' reveal: pan just enough to show the frame and its name strip
+      const a = worldToScreen(vw, r.x, r.y), b = worldToScreen(vw, r.x + r.w, r.y + r.h);
+      let dx = 0, dy = 0;
+      if (a.x < REVEAL || b.x - a.x > sz.w - REVEAL * 2) dx = REVEAL - a.x;
+      else if (b.x > sz.w - REVEAL) dx = sz.w - REVEAL - b.x;
+      const top = REVEAL + STRIP;
+      if (a.y < top || b.y - a.y > sz.h - top - REVEAL) dy = top - a.y;
+      else if (b.y > sz.h - REVEAL) dy = sz.h - REVEAL - b.y;
+      if (dx || dy) { panTo({ ...vw, x: vw.x + dx, y: vw.y + dy }); commit(); }
+    };
+    window.addEventListener("chronicle:select-frame", on);
+    return () => window.removeEventListener("chronicle:select-frame", on);
+  }, [select, panTo, commit]);
 
   // the one derivation of "latest": p.versions is refreshed after a turn's
   // thumbnails render, so the picture a frame asks for exists by then
@@ -92,6 +145,11 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
   const sel = frames.find((f) => f.id === g.selected);
   const announce = sel ? `${sel.label}, ${sel.width} wide, ${stateWordOf(p.frameStates[sel.id] ?? { kind: "placeholder" })}` : "";
   const comparing = p.compare != null && latest != null;
+  const inReview = p.review.phase === "critique" && !p.critiqueMissing;
+  const pinsOn: Record<string, number> = {};
+  for (const r of p.critiques.at(-1)?.reviewers ?? []) for (const f of r.findings) if (f.frame) pinsOn[f.frame] = (pinsOn[f.frame] ?? 0) + 1;
+  // the pin follows a frame being dragged
+  const drawn = g.drag && rects[g.drag.id] ? { ...rects, [g.drag.id]: { ...rects[g.drag.id], x: g.drag.x, y: g.drag.y } } : rects;
 
   return (
     <div ref={boxRef} className="relative min-h-0 flex-1 overflow-hidden bg-surface-app">
@@ -145,6 +203,7 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
                 base={p.base!} slug={slug} state={p.frameStates[f.id] ?? { kind: "placeholder" }}
                 thumb={p.base && latest ? `${p.base}${slug}/.versions/v${latest}/thumbs/${f.id}.png?t=${thumbToken}` : null}
                 thumbToken={thumbToken}
+                inReview={inReview} pins={pinsOn[f.id] ?? 0}
                 reloadTick={p.reloadTick}
                 iframeRef={iframeRef(f.id)}
                 onSelect={() => g.select(f.id)}
@@ -153,6 +212,7 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
             );
           })
         ) : null}
+        {design && v && !comparing && !p.bad && pin && <PinLayer v={v} rects={drawn} pin={pin} located={p.located} />}
       </div>
 
       {v && frames.length > 0 && !p.bad && (
@@ -161,6 +221,7 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
           <Minimap rects={Object.values(rects)} viewport={v} size={size} onPan={g.panTo} onPanEnd={g.commit} />
         </>
       )}
+      <ReviewPill dir={dir} />
       <div aria-live="polite" className="sr-only">{announce}</div>
     </div>
   );

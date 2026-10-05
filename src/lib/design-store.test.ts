@@ -122,6 +122,17 @@ describe("design store", () => {
     m.frameMessage(DIR, "d", { __chronicleFrame: 1, type: "error", message: "Unexpected token", line: 214 });
     expect(p.frameStates.d).toEqual({ kind: "failed", message: "Unexpected token", line: 214 });
   });
+  it("stores located rects from frames and ignores foreign locate replies", async () => {
+    const m = await import("./design-store");
+    await m.loadDesigns(DIR); await m.openDesign(DIR, "home");
+    const p = m.designProjectFor(DIR);
+    m.frameMessage(DIR, "d", { __chronicleFrame: 1, type: "located", id: "d:.buy", rect: { x: 10, y: 20, w: 30, h: 40 } });
+    expect(p.located["d:.buy"]).toEqual({ x: 10, y: 20, w: 30, h: 40 });
+    m.frameMessage(DIR, "d", { __chronicleFrame: 1, type: "located", id: "d:.nope", rect: null });
+    expect(p.located["d:.nope"]).toBeNull();
+    m.frameMessage(DIR, "d", { type: "located", id: "d:.x", rect: { x: 1, y: 1, w: 1, h: 1 } });
+    expect(p.located["d:.x"]).toBeUndefined();
+  });
   it("keeps the project's own settings apart from the effective ones", async () => {
     const m = await import("./design-store");
     const ipc = await import("./ipc");

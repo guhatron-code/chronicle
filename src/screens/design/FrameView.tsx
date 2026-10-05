@@ -21,12 +21,16 @@ export function FrameView(props: {
   base: string; slug: string; state: FrameState; thumb: string | null; reloadTick: number;
   /** changes when the design's versions refresh; clears the failed thumbnails */
   thumbToken: string;
+  /** a critique round is out: the strip says "in review" */
+  inReview: boolean;
+  /** the last critique's findings on this frame, counted after the width when any */
+  pins: number;
   /** screen position of the frame's top-left corner (worldToScreen of rect, plus any drag offset) */
   at: { x: number; y: number };
   iframeRef: (el: HTMLIFrameElement | null) => void;
   onSelect: () => void; onDragStart: (e: ReactPointerEvent) => void;
 }) {
-  const { dir, frame, rect, zoom, live, interactive, selected, base, slug, state, thumb, reloadTick, thumbToken, at } = props;
+  const { dir, frame, rect, zoom, live, interactive, selected, base, slug, state, thumb, reloadTick, thumbToken, at, inReview, pins } = props;
   const w = rect.w * zoom, h = rect.h * zoom;
   const word = stateWordOf(state);
   // Keyed by URL, not a DOM mutation. A thumbnail can 404 simply because it
@@ -66,10 +70,19 @@ export function FrameView(props: {
       >
         <span className={cn("min-w-0 truncate text-[11.5px]", selected ? "text-text-primary" : "text-text-subtle")}>{frame.label}</span>
         <span className="shrink-0 font-mono text-[10.5px] text-text-faint">{frame.width}</span>
+        {pins > 0 && (
+          <span aria-label={`${pins} ${pins === 1 ? "finding" : "findings"}`} className="inline-flex h-[18px] shrink-0 items-center rounded-[5px] bg-fill-subtle px-1.5 font-mono text-[10.5px] text-state-warn">
+            {pins}
+          </span>
+        )}
         <span className="flex-1" />
         {state.kind === "failed" ? (
           <span className="inline-flex shrink-0 items-center gap-[5px] text-[11.5px] text-state-error">
             <span className="size-[5px] rounded-full bg-state-error" />didn't render
+          </span>
+        ) : inReview ? (
+          <span className="inline-flex shrink-0 items-center gap-[5px] text-[11.5px] text-state-neutral">
+            <span className="size-[5px] rounded-full bg-state-neutral" style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }} />in review
           </span>
         ) : live && state.kind !== "rendered" ? (
           <span className="inline-flex shrink-0 items-center gap-[5px] text-[11.5px] text-state-neutral">
