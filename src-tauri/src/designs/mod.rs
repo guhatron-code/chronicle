@@ -9,6 +9,7 @@ pub mod frame;
 pub mod prompt;
 pub mod thumbs;
 pub mod watch;
+pub mod plugin;
 
 pub const KINDS: [&str; 5] = ["app", "marketing", "deck", "brand", "ecommerce"];
 

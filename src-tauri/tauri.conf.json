@@ -43,9 +43,10 @@
       "icons/icon.icns"
     ],
     "createUpdaterArtifacts": true,
-    "resources": [
-      "resources/blocklists/*"
-    ]
+    "resources": {
+      "resources/blocklists/*": "blocklists/",
+      "resources/design-plugin/": "design-plugin/"
+    }
   },
   "plugins": {
     "updater": {

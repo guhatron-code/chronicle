@@ -10,3 +10,7 @@ src-tauri/gen/schemas/
 
 # brainstorm mockups (visual companion)
 .superpowers/
+
+# design plugin: generated from lucide-static by scripts/design-plugin.mjs
+src-tauri/resources/design-plugin/skills/chronicle-icons/icons/
+src-tauri/resources/design-plugin/skills/chronicle-icons/ICONS.txt

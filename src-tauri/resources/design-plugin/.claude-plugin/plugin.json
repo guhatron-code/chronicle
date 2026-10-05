@@ -1,0 +1,1 @@
+{ "name": "chronicle-design", "description": "The Design pane's director: taste, review rules and reviewers, bundled with Chronicle.", "version": "1.0.0", "skills": "./skills/", "agents": ["./agents/art-director.md", "./agents/ux-director.md", "./agents/accessibility.md", "./agents/copy.md"] }
