@@ -37,7 +37,7 @@ export function critiquePrompt(round: number, maxRounds: number, bar: number, ve
   const shape = CRITIQUE_SHAPE.replace("<round>", String(round)).replace("<version>", v);
   return [
     `Critique round ${round} of ${maxRounds}. The bar is ${fmtScore(bar)}. ${version == null ? "No version is saved yet" : `Version v${version} is what to review`} (use "version": ${v}).`,
-    `Run the four bundled reviewers in parallel as subagents: art-director, ux-director, accessibility, copy. Give each one ONLY: the frame files under frames/, these captures:\n${captures.join("\n")}\nthe brief and the answers in questions.json if any, the design's kind, tokens.json, and the design system if this project has one — never your own reasoning or plan.`,
+    `Run the four bundled reviewers in parallel as subagents: art-director, ux-director, accessibility, copy. Give each one ONLY: the frame files under frames/, these captures:\n${captures.join("\n")}\nthe brief and the answers in questions.json if any, the design's kind, tokens.json, and the design system if this project has one — never your own reasoning or plan. Start each subagent's description with its reviewer name, for example \`ux-director: review v6\`.`,
     `Then write critique/round-${round}.json exactly in this shape: ${shape}`,
     `Set "blocker" only when a finding repeats from the previous round and traces to what the brief asked for; otherwise null. Change no other file in this turn. End with one sentence.`,
   ].join("\n");

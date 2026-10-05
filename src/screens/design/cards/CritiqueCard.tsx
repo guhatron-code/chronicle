@@ -4,15 +4,13 @@
    it fixed, and opens the scorecard. */
 import { agentSessionFor, groupEntries, laneKey } from "@/lib/agent-session";
 import { askAnotherRound, designProjectFor, dismissCritiqueMissing, setScoreOpen } from "@/lib/design-store";
-import { fmtScore, REVIEWERS, type CritiqueRound, type ReviewerId } from "@/lib/design-review-model";
+import { fmtScore, REVIEWERS, reviewerForTitle, type CritiqueRound, type ReviewerId } from "@/lib/design-review-model";
 import { toastError } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
 import { BtnGhost, Card, CardHead, Dot, RingSpinner, ScoreChip, StateWord } from "./card";
 import { BtnSecondary } from "@/components/chrome/atoms";
 import { CheckGlyph } from "@/components/chrome/icons";
 
-/** the bundled reviewers' subagent names (design-prompts' critique prompt) */
-const AGENT: Record<ReviewerId, string> = { ux: "ux-director", art: "art-director", a11y: "accessibility", copy: "copy" };
 type Live = "queued" | "reviewing" | "done" | "failed";
 
 /** Each reviewer's subagent in the current turn (after the last message sent). */
@@ -23,7 +21,7 @@ function liveStates(dir: string): Record<ReviewerId, Live> {
   const subs = groupEntries(entries.slice(from)).flatMap((x) => (x.kind === "subagent" ? [x.tool] : []));
   const out = {} as Record<ReviewerId, Live>;
   for (const r of REVIEWERS) {
-    const t = [...subs].reverse().find((s) => s.title.toLowerCase().includes(AGENT[r.id]));
+    const t = [...subs].reverse().find((s) => reviewerForTitle(s.title) === r.id);
     out[r.id] = !t ? "queued" : t.status === "completed" ? "done" : t.status === "failed" ? "failed" : "reviewing";
   }
   return out;

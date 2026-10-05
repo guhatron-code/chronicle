@@ -23,7 +23,7 @@ describe("prompts", () => {
   });
   it("the critique prompt names the reviewers, the file, the round and the bar", () => {
     const p = critiquePrompt(2, 3, 8.0, 6, ["/p/.chronicle/designs/g/.versions/v6/thumbs/desktop.png"]);
-    for (const must of ["art-director", "ux-director", "accessibility", "copy", "critique/round-2.json", "round 2 of 3", "8.0", "in parallel", "never your own reasoning", "thumbs/desktop.png", "\"blocker\"", "one sentence"]) expect(p).toContain(must);
+    for (const must of ["art-director", "ux-director", "accessibility", "copy", "critique/round-2.json", "round 2 of 3", "8.0", "in parallel", "never your own reasoning", "thumbs/desktop.png", "\"blocker\"", "one sentence", "description with its reviewer name"]) expect(p).toContain(must);
     expect(p).not.toContain("version\":null");
   });
   it("the critique fix prompt lists severe first and caps the list", () => {

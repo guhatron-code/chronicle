@@ -75,7 +75,10 @@ export function QuestionsCard({ dir }: { dir: string }) {
   const send = () => {
     if (!ready || sending) return;
     const out: Record<string, string | string[]> = {};
-    for (const x of q.questions) if (has(picked[x.id])) out[x.id] = picked[x.id];
+    for (const x of q.questions) {
+      const a = picked[x.id];
+      if (has(a)) out[x.id] = typeof a === "string" ? a.trim() : a;
+    }
     setSending(true);
     answerQuestions(dir, out, refs.map((r) => r.value))
       .catch((e) => toastError("Couldn't send the answers", String(e).slice(0, 90)))
@@ -115,7 +118,9 @@ export function QuestionsCard({ dir }: { dir: string }) {
                   onChange={(e) => setPicked((prev) => ({ ...prev, [x.id]: e.target.value }))} />
               )
             ) : (
-              <div className="flex flex-wrap gap-1.5">
+              done && !has(a) ? (
+                <span className="text-[12.5px] text-text-secondary">No answer</span>
+              ) : <div className="flex flex-wrap gap-1.5">
                 {x.options.map((opt) => {
                   const on = Array.isArray(a) ? a.includes(opt) : a === opt;
                   const cls = cn("inline-flex h-7 items-center rounded-lg border px-2.5 text-[12px]",

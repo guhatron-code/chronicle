@@ -19,6 +19,27 @@ export const REVIEWERS = [
 export type ReviewerId = "ux" | "art" | "a11y" | "copy";
 const isReviewer = (v: unknown): v is ReviewerId => REVIEWERS.some((r) => r.id === v);
 
+/** the bundled reviewers' subagent names, spaced the way `reviewerForTitle` normalises them */
+const AGENT_NAMES: [ReviewerId, string][] = [["art", "art director"], ["ux", "ux director"], ["a11y", "accessibility"], ["copy", "copy"]];
+
+/** what may follow a reviewer's name: nothing, a separator, or a word that says
+ *  it's a review — so "Copy: review v6" is the copy reviewer and "Copy frames" isn't */
+const NAME_END = /^($|\s*[:\])·—–|,.]|\s(review|reviewer|reviewing|critique|pass|round|agent|subagent|v\d)\b)/;
+
+/** The reviewer a subagent's title names: its name as a whole word at the start
+ *  (after an optional `[` or `(`), hyphens and underscores read as spaces, and
+ *  followed by `NAME_END`. The
+ *  longest name wins when two could match; anything else is no reviewer. */
+export function reviewerForTitle(title: string): ReviewerId | null {
+  const t = title.toLowerCase().replace(/[-_]/g, " ").replace(/\s+/g, " ").trim().replace(/^[[(]\s*/, "");
+  let best: [ReviewerId, string] | null = null;
+  for (const [id, name] of AGENT_NAMES) {
+    if (!t.startsWith(name) || !NAME_END.test(t.slice(name.length))) continue;
+    if (!best || name.length > best[1].length) best = [id, name];
+  }
+  return best ? best[0] : null;
+}
+
 /* ---------- settings ---------- */
 export interface ReviewSettings { critique: boolean; bar: number; rounds: number; lint: boolean }
 export const DEFAULT_SETTINGS: ReviewSettings = { critique: true, bar: 8.0, rounds: 3, lint: true };

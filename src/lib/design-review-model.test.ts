@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampSettings, initialReviewState, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings, parseTokens, questionsPending, stateWord, weightedScore, DEFAULT_SETTINGS } from "./design-review-model";
+import { clampSettings, initialReviewState, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings, parseTokens, questionsPending, reviewerForTitle, stateWord, weightedScore, DEFAULT_SETTINGS } from "./design-review-model";
 
 describe("review settings", () => {
   it("defaults, clamps to the half and the ranges", () => {
@@ -73,5 +73,24 @@ describe("state", () => {
     expect(stateWord(s("below-bar"), 6, 7.7)).toEqual({ word: "below the bar", tone: "warn" });
     expect(stateWord(s("stopped"), 5, null)).toEqual({ word: "stopped · v5", tone: "faint" });
     expect(stateWord(s("idle"), null, null)).toEqual({ word: "draft", tone: "faint" });
+  });
+});
+
+describe("reviewerForTitle", () => {
+  it("finds the reviewer named at the start of a subagent's title", () => {
+    expect(reviewerForTitle("Art director review")).toBe("art");
+    expect(reviewerForTitle("UX director critique")).toBe("ux");
+    expect(reviewerForTitle("ux-director: review v6")).toBe("ux");
+    expect(reviewerForTitle("art_director: review v6")).toBe("art");
+    expect(reviewerForTitle("[accessibility] review v6")).toBe("a11y");
+    expect(reviewerForTitle("(Copy) review")).toBe("copy");
+    expect(reviewerForTitle("Copy: review v6")).toBe("copy");
+    expect(reviewerForTitle("Accessibility  review")).toBe("a11y");
+  });
+  it("misses titles that only mention a name, or run it into a longer word", () => {
+    expect(reviewerForTitle("Copy frames for review")).toBeNull();
+    expect(reviewerForTitle("Copywriting pass")).toBeNull();
+    expect(reviewerForTitle("Review with the art director")).toBeNull();
+    expect(reviewerForTitle("Render captures")).toBeNull();
   });
 });
