@@ -1,7 +1,7 @@
 /* The canvas's chrome (comps board 1): the 40 px toolbar over the canvas — the open
    design's title and kind — and the zoom control at the canvas's bottom-left.
-   History (Task 19) joins the toolbar's right side; Scorecard and System arrive in a
-   later sub-project and are not drawn here. */
+   Score (once a critique exists) and History join the toolbar's right side; System
+   arrives in a later sub-project and is not drawn here. */
 import { useEffect, useState, type ReactNode } from "react";
 import { KIND_LABEL, type DesignKind } from "@/lib/design-model";
 import { designProjectFor, subscribeDesigns } from "@/lib/design-store";
@@ -23,8 +23,11 @@ const Glyph = ({ size, children }: { size: number; children: ReactNode }) => (
   </svg>
 );
 
-export function CanvasToolbar({ dir, historyOpen, onToggleHistory }: {
+export function CanvasToolbar({ dir, historyOpen, onToggleHistory, scoreOpen, onToggleScore }: {
   dir: string;
+  /** the Score tab: shown once a critique exists */
+  scoreOpen?: boolean;
+  onToggleScore?: () => void;
   /** Task 19: the History segmented toggle — omitted where no History panel exists yet */
   historyOpen?: boolean;
   onToggleHistory?: () => void;
@@ -35,6 +38,11 @@ export function CanvasToolbar({ dir, historyOpen, onToggleHistory }: {
   const row = p.rows.find((r) => r.slug === p.active);
   const title = row?.title ?? p.design?.title ?? p.active ?? "";
   const kind = row?.kind ?? p.design?.kind ?? null;
+  const tab = (on: boolean) => cn(
+    "inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-md px-[9px] text-[11.5px] outline-none",
+    "focus-visible:[box-shadow:var(--focus-ring)]",
+    on ? "bg-fill-hover text-text-primary" : "text-text-muted hover:bg-fill-hover hover:text-text-primary",
+  );
   return (
     <div className="box-border flex h-10 shrink-0 items-center gap-2.5 border-b border-border-hairline pr-2.5 pl-3.5">
       <span className="min-w-0 truncate text-[12.5px] font-semibold text-text-primary">{title}</span>
@@ -44,17 +52,13 @@ export function CanvasToolbar({ dir, historyOpen, onToggleHistory }: {
         </span>
       )}
       <span className="flex-1" />
+      {onToggleScore && p.critiques.length > 0 && (
+        <button type="button" aria-pressed={!!scoreOpen} onClick={onToggleScore} className={tab(!!scoreOpen)}>
+          <Glyph size={13}><path d="M3 13V8.5M8 13V3M13 13V6" /></Glyph>Score
+        </button>
+      )}
       {onToggleHistory && (
-        <button
-          type="button"
-          aria-pressed={!!historyOpen}
-          onClick={onToggleHistory}
-          className={cn(
-            "inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-md px-[9px] text-[11.5px] outline-none",
-            "focus-visible:[box-shadow:var(--focus-ring)]",
-            historyOpen ? "bg-fill-hover text-text-primary" : "text-text-muted hover:bg-fill-hover hover:text-text-primary",
-          )}
-        >
+        <button type="button" aria-pressed={!!historyOpen} onClick={onToggleHistory} className={tab(!!historyOpen)}>
           <ClockGlyph size={13} />History
         </button>
       )}

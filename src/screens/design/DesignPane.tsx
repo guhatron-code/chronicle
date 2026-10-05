@@ -3,13 +3,14 @@
    (board 2) takes the canvas and thread's place. */
 import { useEffect, useState } from "react";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
-import { designProjectFor, loadDesigns, openDesign, redoDesign, setCompare, subscribeDesigns, undoDesign } from "@/lib/design-store";
+import { designProjectFor, loadDesigns, openDesign, redoDesign, setCompare, setScoreOpen, subscribeDesigns, undoDesign } from "@/lib/design-store";
 import { CanvasToolbar } from "./CanvasToolbar";
 import { DesignCanvas } from "./DesignCanvas";
 import { DesignSidebar } from "./DesignSidebar";
 import { DesignThread } from "./DesignThread";
 import { HistoryPanel } from "./HistoryPanel";
 import { NewDesign } from "./NewDesign";
+import { Scorecard } from "./Scorecard";
 
 export function DesignPane({ dir, onScreen, onConfirm, onRevealTerminal }: {
   dir: string;
@@ -33,13 +34,19 @@ export function DesignPane({ dir, onScreen, onConfirm, onRevealTerminal }: {
     window.addEventListener("chronicle:new-design", on);
     return () => window.removeEventListener("chronicle:new-design", on);
   }, []);
+  // The scorecard, History and the thread share the right column: opening one closes the other.
+  const openHistory = () => { setScoreOpen(dir, false); setHistoryOpen(true); };
+  const toggleScore = () => { if (p.scoreOpen) setScoreOpen(dir, false); else { closeHistory(); setScoreOpen(dir, true); } };
   useEffect(() => {
-    if (!historyOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeHistory(); };
+    if (!historyOpen && !p.scoreOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (historyOpen) closeHistory(); else setScoreOpen(dir, false);
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyOpen, dir]);
+  }, [historyOpen, p.scoreOpen, dir]);
   // ⌘Z anywhere in the pane, not only on the canvas: a restore starts from the
   // History panel, and the undo that follows it has to work with the focus still
   // on that button. The canvas's own handler claims the chord first (it calls
@@ -64,6 +71,7 @@ export function DesignPane({ dir, onScreen, onConfirm, onRevealTerminal }: {
   // the wrong design's versions — close it, the same as the button or Esc.
   useEffect(() => {
     closeHistory();
+    setScoreOpen(dir, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dir, p.active]);
   return (
@@ -73,7 +81,7 @@ export function DesignPane({ dir, onScreen, onConfirm, onRevealTerminal }: {
         <NewDesign dir={dir} onDone={() => setCreating(false)} />
       ) : p.active ? (
         <div className="flex min-w-[240px] flex-1 flex-col">
-          <CanvasToolbar dir={dir} historyOpen={historyOpen} onToggleHistory={() => (historyOpen ? closeHistory() : setHistoryOpen(true))} />
+          <CanvasToolbar dir={dir} historyOpen={historyOpen} onToggleHistory={() => (historyOpen ? closeHistory() : openHistory())} scoreOpen={p.scoreOpen} onToggleScore={toggleScore} />
           {/* keyed by design: each design starts with its own viewport, selection and live frame */}
           <DesignCanvas key={p.active} dir={dir} onScreen={onScreen} />
         </div>
@@ -81,9 +89,11 @@ export function DesignPane({ dir, onScreen, onConfirm, onRevealTerminal }: {
         <div className="flex-1" />
       )}
       {!(empty || creating) && p.active && (
-        historyOpen
-          ? <HistoryPanel dir={dir} onClose={closeHistory} />
-          : <DesignThread dir={dir} onConfirm={onConfirm} onRevealTerminal={onRevealTerminal} />
+        p.scoreOpen
+          ? <Scorecard dir={dir} onClose={() => setScoreOpen(dir, false)} />
+          : historyOpen
+            ? <HistoryPanel dir={dir} onClose={closeHistory} />
+            : <DesignThread dir={dir} onConfirm={onConfirm} onRevealTerminal={onRevealTerminal} />
       )}
     </div>
   );

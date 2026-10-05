@@ -26,6 +26,7 @@ import {
   trashDesign, undoDesign,
 } from "@/lib/design-store";
 import { designBranch } from "@/lib/ipc";
+import { stateWord } from "@/lib/design-review-model";
 import { KIND_LABEL, KINDS, orderRows, type DesignKind, type DesignRow } from "@/lib/design-model";
 import { agentSessionFor, laneKey, subscribeAgent } from "@/lib/agent-session";
 import { dropOrder } from "@/lib/design-sidebar-model";
@@ -306,6 +307,18 @@ export function DesignSidebar({ dir, onNew }: { dir: string; onNew: () => void }
 
   const trailingFor = (row: DesignRow) => {
     if (row.bad) return <span className="text-[11px] text-state-error">couldn't read this design</span>;
+    if (p.active === row.slug && !(designTurnActive && p.review.phase === "idle")) {
+      const score = p.versions.find((v) => v.n === row.latestVersion)?.score ?? p.critiques.at(-1)?.weighted ?? null;
+      const sw = stateWord(p.review, row.latestVersion, score);
+      const tone = { faint: "text-text-faint", neutral: "text-state-neutral", success: "text-state-success", warn: "text-state-warn", error: "text-state-error" }[sw.tone];
+      const chip = sw.word.startsWith("ready · ") ? sw.word.slice(8) : null;
+      return (
+        <span className={`inline-flex items-center gap-[5px] text-[11px] ${tone}`}>
+          {sw.tone === "neutral" && <span aria-hidden className="size-[5px] shrink-0 rounded-full bg-state-neutral" style={{ animation: "wv-pulse 1.6s ease-in-out infinite" }} />}
+          {chip ? <>ready · <span className="font-mono text-[10.5px] text-state-success">{chip}</span></> : /^v\d+$/.test(sw.word) ? <span className="font-mono text-[10.5px]">{sw.word}</span> : sw.word}
+        </span>
+      );
+    }
     if (designTurnActive && p.active === row.slug) {
       return (
         <span className="inline-flex items-center gap-[5px] text-[11px] text-state-neutral">

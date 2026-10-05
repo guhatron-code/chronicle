@@ -6,6 +6,8 @@ import { useEffect, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { ago } from "@/lib/roadmap-data";
 import { BtnPrimary, BtnSecondary } from "@/components/chrome/atoms";
 import { XGlyph } from "@/components/chrome/icons";
+import { fmtScore } from "@/lib/design-review-model";
+import { ScoreChip } from "./cards/card";
 import { branchVersion, designProjectFor, restoreVersion, setCompare, subscribeDesigns, type DesignProject } from "@/lib/design-store";
 import type { VersionMeta } from "@/lib/ipc";
 import { toastError, toastSuccess } from "@/overlays/toasts";
@@ -18,8 +20,8 @@ function relTime(at: string): string {
   return Number.isFinite(ms) ? ago(Date.now(), Math.floor(ms / 1000)) : "";
 }
 
-function HistoryRow({ v, first, last, current, compared, onClick, onHoverStart, onHoverEnd }: {
-  v: VersionMeta; first: boolean; last: boolean; current: boolean; compared: boolean;
+function HistoryRow({ v, bar, first, last, current, compared, onClick, onHoverStart, onHoverEnd }: {
+  v: VersionMeta; bar: number; first: boolean; last: boolean; current: boolean; compared: boolean;
   onClick: () => void;
   /** the row's own bounding rect, for the floating thumbnail HistoryPanel positions */
   onHoverStart: (e: ReactMouseEvent<HTMLDivElement>) => void;
@@ -45,6 +47,7 @@ function HistoryRow({ v, first, last, current, compared, onClick, onHoverStart, 
           <span className="font-mono text-[11px] text-text-secondary">v{v.n}</span>
           <span className="text-[11px] text-text-faint">{relTime(v.at)}</span>
           <span className="flex-1" />
+          {v.score != null && <ScoreChip value={fmtScore(v.score)} passed={v.score >= bar} />}
           {compared && (
             <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-fill-subtle px-[7px] text-[11px] text-text-subtle">comparing</span>
           )}
@@ -119,6 +122,7 @@ export function HistoryPanel({ dir, onClose }: { dir: string; onClose: () => voi
               <HistoryRow
                 key={v.n}
                 v={v}
+                bar={p.settings.bar}
                 first={i === 0}
                 last={i === versions.length - 1}
                 current={v.n === newest}
