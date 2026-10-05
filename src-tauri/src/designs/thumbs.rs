@@ -81,9 +81,9 @@ pub fn audit_call(kind: &str, width: u32, fold: u32) -> String {
     format!("window.__chronicleAudit&&window.__chronicleAudit({{\"kind\":{},\"width\":{width},\"fold\":{fold}}})", json!(kind))
 }
 
-/// The audit's JavaScript without its `<script>` wrapper. It is evaluated again
-/// right before the call, so the function that runs is always Chronicle's own,
-/// whatever the page did to `window.__chronicleAudit` after it loaded.
+/// The audit's JavaScript without its `<script>` wrapper. Frames never carry it:
+/// it is evaluated here, in the capture window, right before the call, so the
+/// function that runs is always Chronicle's own, whatever the page defines.
 pub fn audit_source() -> String {
     let s = super::frame::AUDIT.trim();
     let s = s.strip_prefix("<script>").unwrap_or(s);

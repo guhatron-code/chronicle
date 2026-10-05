@@ -97,11 +97,12 @@ pub fn design_headers(hash: &str, slug: &str, ext: Option<&str>) -> Vec<(&'stati
 /// since the canvas sets the iframe's own height to whatever is reported.
 pub const REPORTER: &str = r#"<script>(function(){var P=window.parent,top=P===window;function H(){var d=document.documentElement,b=document.body;var h=Math.max(d?d.scrollHeight:0,b?b.scrollHeight:0);return Math.min(h,16000)}function S(m){m.__chronicleFrame=1;try{P.postMessage(m,'*')}catch(e){}}addEventListener('error',function(e){S({type:'error',message:String(e.message||'The page hit an error'),line:e.lineno||0})});addEventListener('keydown',function(e){if(e.key==='Escape'||e.keyCode===27){S({type:'escape'})}});addEventListener('load',function(){var f=document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve();f.then(function(){var b=document.body;if(!b||(!b.children.length&&!b.textContent.trim())){S({type:'blank'});return}var h=H();S({type:'ready',height:h});if(top)document.title='chronicle-ready:'+h})});if(window.ResizeObserver){var last=0;new ResizeObserver(function(){var h=H();if(h!==last){last=h;S({type:'height',height:h})}}).observe(document.documentElement)}addEventListener('message',function(e){var d=e.data;if(!d||d.__chronicleCanvas!==1||d.type!=='locate')return;var rect=null;try{var el=document.querySelector(String(d.selector||''));if(el){var b=el.getBoundingClientRect();rect={x:b.left+scrollX,y:b.top+scrollY,w:b.width,h:b.height}}}catch(err){}S({type:'located',id:d.id,rect:rect})});})();</script>"#;
 
-/// The audit the hidden capture window evaluates (`window.__chronicleAudit`);
-/// inert on load, so the canvas's frames just carry it.
+/// The audit the hidden capture window evaluates (`window.__chronicleAudit`),
+/// from this source, after the page is ready. It is never served into a frame
+/// (spec §7): the canvas's frames carry only the reporter.
 pub const AUDIT: &str = include_str!("../../resources/design/audit.js");
 
-/// Splices `REPORTER` and `AUDIT` in right after the opening `<head…>` tag (so it runs
+/// Splices `REPORTER` in right after the opening `<head…>` tag (so it runs
 /// before anything else in `<head>`, catching even a head script's own error),
 /// falling back to right after the opening `<html…>` tag when there is no
 /// `<head`, and finally prepending it when there is no `<html` either.
@@ -115,16 +116,14 @@ pub fn inject_reporter(html: &[u8]) -> Vec<u8> {
     if let Some(at) = tag_open_end(&lower, "<head") { return splice_at(&text, at); }
     if let Some(at) = tag_open_end(&lower, "<html") { return splice_at(&text, at); }
     let mut s = String::from(REPORTER);
-    s.push_str(AUDIT);
     s.push_str(&text);
     s.into_bytes()
 }
 
 fn splice_at(text: &str, at: usize) -> Vec<u8> {
-    let mut s = String::with_capacity(text.len() + REPORTER.len() + AUDIT.len());
+    let mut s = String::with_capacity(text.len() + REPORTER.len());
     s.push_str(&text[..at]);
     s.push_str(REPORTER);
-    s.push_str(AUDIT);
     s.push_str(&text[at..]);
     s.into_bytes()
 }
@@ -246,13 +245,15 @@ mod tests {
     }
 
     #[test]
-    fn the_reporter_answers_locate_and_the_audit_is_injected_after_it() {
+    fn the_reporter_answers_locate_and_the_audit_is_never_served_into_a_frame() {
         assert!(REPORTER.contains("'locate'") && REPORTER.contains("'located'") && REPORTER.contains("__chronicleCanvas"));
         assert!(AUDIT.contains("window.__chronicleAudit=") || AUDIT.contains("window.__chronicleAudit ="));
-        let out = String::from_utf8(inject_reporter(b"<html><head><title>t</title></head><body></body></html>")).unwrap();
-        let r = out.find(REPORTER).expect("reporter present");
-        let a = out.find(AUDIT).expect("audit present");
-        assert_eq!(a, r + REPORTER.len(), "the audit follows the reporter directly");
-        assert!(out.find("<title>").unwrap() > a);
+        for html in [&b"<html><head><title>t</title></head><body></body></html>"[..], b"<html><body></body></html>", b"<p>bare</p>"] {
+            let out = String::from_utf8(inject_reporter(html)).unwrap();
+            let r = out.find(REPORTER).expect("reporter present");
+            assert!(!out.contains("__chronicleAudit"), "the audit stays out of the canvas's frames");
+            assert_eq!(out.len(), html.len() + REPORTER.len());
+            assert!(r <= out.find("<title>").unwrap_or(usize::MAX));
+        }
     }
 }
