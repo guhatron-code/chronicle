@@ -603,6 +603,7 @@ describe("design store", () => {
 
   it("fix all minor sends the newest version's minor lint findings, and nothing when there are none", async () => {
     const { m, p } = await looping();
+    p.review = { ...p.review, phase: "done" };
     p.lint = { ...cleanLint(3), minor: [{ rule: "r", severity: "minor", text: "tight leading", frame: "d", file: "frames/d.html" }] } as never;
     await m.fixAllMinor(DIR);
     expect(h.sent.at(-1)).toContain("- d · frames/d.html — tight leading");
