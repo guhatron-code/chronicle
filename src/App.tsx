@@ -91,12 +91,13 @@ import { HelpScreen } from "@/screens/help/HelpScreen";
 import type { HelpTarget } from "@/lib/help-content";
 import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/lib/setup-store";
 import { AgentPane } from "@/screens/agent/AgentPane";
-import { agentLive, agentSessionFor, laneKey, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent } from "@/lib/agent-session";
+import { agentLive, agentSessionFor, answerPermission, laneKey, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent } from "@/lib/agent-session";
 import {
-  answerQuestions, designProjectFor, evictDesignProject, loadDesigns, openDesign, sendDesignMessage, startDesign, subscribeDesigns,
+  answerQuestions, designProjectFor, evictDesignProject, loadDesigns, openDesign, sendDesignMessage, subscribeDesigns, titleFromBrief,
 } from "@/lib/design-store";
-import { runDesignBench, type BenchArgs, type BenchDeps, type Brief, type Verdict } from "@/lib/design-bench";
+import { refusalFor, runDesignBench, UNATTENDED, type BenchArgs, type BenchDeps, type Brief, type Verdict } from "@/lib/design-bench";
 import { questionsPending, type ReviewState } from "@/lib/design-review-model";
+import type { DesignKind } from "@/lib/design-model";
 import {
   designBenchBriefs, designBenchProject, designBenchWrite, designCapture, designCreate, designFileRead, designLintCurrent,
   designBenchStage, designBenchStageReference, designTrash, designReviewSettingsSet, designRootPath, listDir,
@@ -220,6 +221,46 @@ function laneFailed(dir: string): string | null {
   return s.phase === "error" || s.phase === "needs-login" ? s.errorMessage ?? "The design session stopped." : null;
 }
 
+/* A benchmark is unattended: a permission ask on its lanes would wait for a click that never
+   comes. Each ask gets a 5-second grace (first seen on the wait's tick), then is refused. */
+const ASK_GRACE = 5_000;
+const askSeen = new Map<string, number>();
+const askAnswered = new Set<string>();
+
+/** The lane's permission asks still waiting past the grace. */
+function staleAsks(key: string) {
+  const now = Date.now();
+  return agentSessionFor(key).entries.flatMap((e) => {
+    if (e.kind !== "perm" || e.outcome || askAnswered.has(`${key} ${e.requestId}`)) return [];
+    const id = `${key} ${e.requestId}`;
+    if (!askSeen.has(id)) askSeen.set(id, now);
+    return now - askSeen.get(id)! >= ASK_GRACE ? [e] : [];
+  });
+}
+
+/** Refuse every stale ask on the lane (its first reject_once option, else cancel) → how many. */
+async function refuseAsks(key: string): Promise<number> {
+  let n = 0;
+  for (const e of staleAsks(key)) {
+    const id = `${key} ${e.requestId}`;
+    askAnswered.add(id);
+    askSeen.delete(id);
+    await answerPermission(key, e.requestId, refusalFor(e.options)).catch(() => {});
+    n += 1;
+  }
+  return n;
+}
+
+/** The store's startDesign, with the brief sent behind the unattended line — the design's
+ *  title and its saved brief stay the brief's own. */
+async function startBenchDesign(dir: string, kind: DesignKind, brief: string): Promise<string> {
+  const slug = await designCreate(dir, kind, titleFromBrief(brief), brief);
+  await loadDesigns(dir);
+  await openDesign(dir, slug);
+  await sendDesignMessage(dir, `${UNATTENDED}\n\n${brief}`, slug);
+  return slug;
+}
+
 const watchDesignsAndAgent = (cb: () => void) => { const a = subscribeDesigns(cb); const b = subscribeAgent(cb); return () => { a(); b(); }; };
 
 /** Resolves on done / below-bar / stopped, on questions waiting for answers, and on a
@@ -230,6 +271,8 @@ function waitSettled(dir: string, slug: string): Promise<ReviewState> {
     if (p.active !== slug) return undefined;
     const ph = p.review.phase;
     if (SETTLED.has(ph) || p.critiqueMissing || (ph === "questions" && questionsPending(p.questions))) return p.review;
+    // an ask no one will click: back to the runner, which refuses it and waits again
+    if (staleAsks(laneKey(dir, "design")).length > 0) return p.review;
     if (laneFailed(dir) && !agentSessionFor(laneKey(dir, "design")).turnActive) return { ...p.review, phase: "stopped" };
     return undefined;
   });
@@ -296,6 +339,7 @@ async function judgeBlind(j: Judge, b: Brief, a: string[], bb: string[], staged:
   await watchUntil(subscribeAgent, () => {
     const failed = laneFailed(j.dir);
     if (failed) throw new Error(failed);
+    if (staleAsks(key).length > 0) void refuseAsks(key);
     return agentSessionFor(key).turnActive ? undefined : true;
   }, JUDGE_DEADLINE, "The judge didn't answer in time.");
   const raw = await designFileRead(j.dir, j.slug, rel);
@@ -321,7 +365,7 @@ async function runBench(repo: string, args: BenchArgs, host: BenchHost) {
     briefs: designBenchBriefs,
     project: designBenchProject,
     open,
-    startDesign,
+    startDesign: startBenchDesign,
     answer: answerQuestions,
     waitSettled,
     state: designProjectFor,
@@ -337,6 +381,7 @@ async function runBench(repo: string, args: BenchArgs, host: BenchHost) {
     now: Date.now,
     capture: (dir, slug) => designCapture(dir, slug),
     cost: (dir) => agentSessionFor(laneKey(dir, "design")).cost,
+    refuse: (dir) => refuseAsks(laneKey(dir, "design")),
   };
   try {
     return await runDesignBench(deps, repo, args);

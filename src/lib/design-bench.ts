@@ -33,6 +33,9 @@ export interface BenchDeps {
   capture?: (dir: string, slug: string) => Promise<string[]>;
   /** The design lane's running cost, so each brief records what it spent. */
   cost?: (dir: string) => number | null;
+  /** Refuses the permission asks the director's lane has left waiting (no one is there to
+   *  click) → how many it refused. Called when `waitSettled` comes back mid-loop. */
+  refuse?: (dir: string, slug: string) => Promise<number>;
   /** Which side ours is shown as (< 0.5 → A). Defaults to Math.random. */
   random?: () => number;
 }
@@ -45,18 +48,32 @@ export interface BenchBrief {
   phase: ReviewState["phase"]; rounds: number; score: number | null; passed: boolean;
   lint: { severe: number; minor: number } | null;
   seconds: number; cost: number | null;
+  /** permission asks (shell commands and the like) refused because no one was there to answer */
+  refused: number;
   compared: Comparison | null;
   error?: string;
 }
 export interface BenchResults {
   version: string; at: string; args: BenchArgs; project: string; bar: number;
   briefs: BenchBrief[];
-  summary: { total: number; passed: number; mean: number | null; compared: number; beat: number };
+  summary: { total: number; passed: number; mean: number | null; compared: number; beat: number; refused: number };
 }
 
 export const BENCH_SETTINGS: ReviewSettings = { critique: true, bar: 8, rounds: 3, lint: true };
 /** Questions asked again and again past this are left for the loop to stop on. */
 export const MAX_ANSWERS = 5;
+/** A lane that keeps asking past this many refusals is left for the bridge's deadline. */
+const MAX_REFUSALS = 200;
+const FINAL = new Set<ReviewState["phase"]>(["done", "below-bar", "stopped"]);
+
+/** The first line of every benchmark brief the director gets. */
+export const UNATTENDED = "This is an unattended benchmark: no one will answer a prompt, and shell commands will be refused — use system fonts or fonts already in the design folder, and never wait for an answer.";
+
+/** The answer to a permission ask no one is there for: its first "reject_once" option, or
+ *  null (cancel) when it has none. */
+export function refusalFor(options: { optionId: string; kind: string }[]): string | null {
+  return options.find((o) => o.kind === "reject_once")?.optionId ?? null;
+}
 const NO_PREFERENCE = "No preference, decide for me.";
 
 const words = (s: string) => s.toLowerCase().replace(/[-_]/g, " ");
@@ -91,6 +108,7 @@ function summarise(briefs: BenchBrief[]): BenchResults["summary"] {
     mean: scores.length ? round1(scores.reduce((s, x) => s + x, 0) / scores.length) : null,
     compared: compared.length,
     beat: compared.filter((c) => c.winner === "chronicle").length,
+    refused: briefs.reduce((n, b) => n + (b.refused ?? 0), 0),
   };
 }
 
@@ -104,8 +122,9 @@ export function renderMarkdown(r: BenchResults): string {
     const c = b.compared;
     const vs = !c ? "—" : "error" in c ? "couldn't compare" : c.winner === "chronicle" ? "won" : "lost";
     const lint = b.lint ? `${b.lint.severe} / ${b.lint.minor}` : "—";
+    const refused = b.refused ?? 0;
     const cost = b.cost == null ? "—" : `$${b.cost.toFixed(2)}`;
-    return `| ${b.id} | ${b.kind} | ${fmt(b.score)} | ${b.passed ? "yes" : "no"} | ${b.rounds} | ${lint} | ${Math.round(b.seconds)} s | ${cost} | ${vs} |`;
+    return `| ${b.id} | ${b.kind} | ${fmt(b.score)} | ${b.passed ? "yes" : "no"} | ${b.rounds} | ${lint} | ${Math.round(b.seconds)} s | ${cost} | ${refused} | ${vs} |`;
   });
   const reasons = r.briefs.flatMap((b) => (b.compared && "winner" in b.compared ? [`- **${b.id}** (${b.compared.winner === "chronicle" ? "Chronicle" : "Claude Design"} won): ${b.compared.reasons.join("; ")}`] : []));
   const errors = r.briefs.flatMap((b) => [
@@ -115,10 +134,11 @@ export function renderMarkdown(r: BenchResults): string {
   return [
     `# Design benchmark · ${r.version} · ${r.at}`, "",
     `Chronicle ${summaryLine(r)} (bar ${r.bar.toFixed(1)}).`, "",
+    `Commands refused: ${r.summary.refused} (an unattended run refuses every permission ask after a 5-second grace).`, "",
     "Method: both sides were rendered by Chronicle's capture window and compared blind under neutral names (A and B, assigned at random per brief); the judge never saw where a picture came from.",
     "A reference export is rendered from its own folder as it was exported; root-absolute links in it (`/style.css`) don't resolve.", "",
-    "| Brief | Kind | Score | Passed | Rounds | Lint severe / minor | Time | Cost | vs Claude Design |",
-    "|---|---|---|---|---|---|---|---|---|",
+    "| Brief | Kind | Score | Passed | Rounds | Lint severe / minor | Time | Cost | Commands refused | vs Claude Design |",
+    "|---|---|---|---|---|---|---|---|---|---|",
     ...rows,
     ...(reasons.length ? ["", "## The judge's reasons", "", ...reasons] : []),
     ...(errors.length ? ["", "## Errors", "", ...errors] : []),
@@ -132,10 +152,20 @@ async function runOne(deps: BenchDeps, repo: string, dir: string, b: Brief): Pro
   const base = { id: b.id, kind: b.kind, title: b.title };
   const slug = await deps.startDesign(dir, b.kind as DesignKind, b.brief);
   let st = await deps.waitSettled(dir, slug);
-  for (let n = 0; n < MAX_ANSWERS && st.phase === "questions"; n++) {
-    const q = deps.state(dir).questions;
-    if (!questionsPending(q)) break;
-    await deps.answer(dir, answersFor(b, q!), []);
+  let answered = 0, refused = 0;
+  // waitSettled comes back early for two things no one is there to do: questions (answered
+  // from the brief) and permission asks (refused); anything else ends the brief
+  for (;;) {
+    if (st.phase === "questions") {
+      const q = deps.state(dir).questions;
+      if (answered >= MAX_ANSWERS || !questionsPending(q)) break;
+      answered += 1;
+      await deps.answer(dir, answersFor(b, q!), []);
+    } else if (!FINAL.has(st.phase) && deps.refuse && refused < MAX_REFUSALS) {
+      const n = await deps.refuse(dir, slug);
+      if (n === 0) break;
+      refused += n;
+    } else break;
     st = await deps.waitSettled(dir, slug);
   }
   const p = deps.state(dir);
@@ -148,6 +178,7 @@ async function runOne(deps: BenchDeps, repo: string, dir: string, b: Brief): Pro
     seconds: (deps.now() - started) / 1000,
     // the lane's cost is a running total; a lane that restarted mid-brief starts again from zero
     cost: costAfter == null ? null : round2(costBefore != null && costAfter >= costBefore ? costAfter - costBefore : costAfter),
+    refused,
     compared: null,
   };
   out.compared = await compare(deps, repo, dir, slug, b);
@@ -191,7 +222,7 @@ export async function runDesignBench(deps: BenchDeps, repoDir: string, args: Ben
     } catch (e) {
       briefs.push({
         id: b.id, kind: b.kind, title: b.title, phase: "stopped", rounds: 0, score: null, passed: false, lint: null,
-        seconds: (deps.now() - started) / 1000, cost: null, compared: null, error: e instanceof Error ? e.message : String(e),
+        seconds: (deps.now() - started) / 1000, cost: null, refused: 0, compared: null, error: e instanceof Error ? e.message : String(e),
       });
     }
   }

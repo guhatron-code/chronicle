@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { answersFor, BENCH_SETTINGS, MAX_ANSWERS, renderMarkdown, runDesignBench, type BenchDeps, type Brief } from "./design-bench";
+import { answersFor, BENCH_SETTINGS, MAX_ANSWERS, refusalFor, renderMarkdown, runDesignBench, type BenchDeps, type Brief } from "./design-bench";
 import { initialReviewState, type Questions, type ReviewState } from "./design-review-model";
 
 describe("the benchmark runner", () => {
@@ -134,5 +134,32 @@ describe("the benchmark runner, beyond the happy path", () => {
     expect(r.briefs.map((b) => [b.id, b.error ?? null, b.passed])).toEqual([["app-1", "boom", false], ["deck-1", null, true]]);
     expect(deps.write).toHaveBeenCalledTimes(1);
     expect(renderMarkdown(r)).toContain("Method: both sides were rendered by Chronicle's capture window");
+  });
+
+  it("refuses a permission ask no one is there for, counts it, and carries on to the result", async () => {
+    const { deps } = make({}, [brief("deck-1")]);
+    let calls = 0;
+    deps.waitSettled = vi.fn(async () => (++calls === 1 ? settled({ phase: "building", best: null }) : settled()));
+    deps.refuse = vi.fn(async () => 1);
+    const r = await runDesignBench(deps, "/repo", {});
+    expect(deps.refuse).toHaveBeenCalledWith("/bench/p", "deck-1");
+    expect(r.briefs[0]).toMatchObject({ refused: 1, passed: true, score: 8.5 });
+    expect(r.summary.refused).toBe(1);
+    expect(renderMarkdown(r)).toContain("Commands refused: 1");
+    expect(renderMarkdown(r)).toMatch(/\| deck-1 \|.*\| 1 \| — \|/);
+  });
+
+  it("stops waiting when a mid-loop return has nothing to refuse", async () => {
+    const { deps } = make({}, [brief("deck-1")]);
+    deps.waitSettled = vi.fn(async () => settled({ phase: "critique", best: null }));
+    deps.refuse = vi.fn(async () => 0);
+    const r = await runDesignBench(deps, "/repo", {});
+    expect(deps.refuse).toHaveBeenCalledTimes(1);
+    expect(r.briefs[0]).toMatchObject({ refused: 0, passed: false, phase: "critique" });
+  });
+
+  it("refuses with the first reject_once option, or cancels", () => {
+    expect(refusalFor([{ optionId: "allow", kind: "allow_once" }, { optionId: "no", kind: "reject_once" }, { optionId: "never", kind: "reject_always" }])).toBe("no");
+    expect(refusalFor([{ optionId: "allow", kind: "allow_once" }])).toBeNull();
   });
 });
