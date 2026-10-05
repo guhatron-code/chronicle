@@ -443,7 +443,7 @@ describe("design store", () => {
     const m = await import("./design-store");
     await m.loadDesigns(DIR); await m.openDesign(DIR, "home");
     const p = m.designProjectFor(DIR);
-    await vi.waitFor(() => expect(h.review).toHaveBeenCalledWith(DIR, "home", 3));
+    await vi.waitFor(() => expect(h.review).toHaveBeenCalledWith(DIR, "home", 3, true));
     await vi.waitFor(() => expect(p.review.phase).toBe("critique"));
   });
 
@@ -461,6 +461,17 @@ describe("design store", () => {
     h.review.mockRejectedValueOnce(new Error("the browser isn't ready"));
     sess.turnEnds += 1; h.fireAgent();
     await vi.waitFor(() => expect(p.lint).toMatchObject({ ran: false, problem: "the browser isn't ready", version: 4, severe: [] }));
+  });
+
+  it("with the gate off, the version is rendered but never linted", async () => {
+    const { p } = await looping();
+    p.settings = { ...p.settings, lint: false };
+    h.snapshot.mockResolvedValueOnce(6);
+    h.review.mockClear();
+    h.review.mockResolvedValueOnce({ thumbs: [], lint: { v: 1, version: 6, at: "t", ran: false, problem: "Lint gate off", severe: [], minor: [] } });
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(h.review).toHaveBeenCalledWith(DIR, "home", 6, false));
+    await vi.waitFor(() => expect(p.lint).toMatchObject({ ran: false, problem: "Lint gate off", version: 6 }));
   });
 
   it("a user's send during the gate takes over: the stale step sends nothing", async () => {

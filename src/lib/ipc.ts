@@ -603,7 +603,8 @@ export const designFrameBase = (dir: string) => invoke<string>("design_frame_bas
 export const designRootPath = (dir: string) => invoke<string>("design_root_path", { dir });
 export const designThumbnails = (dir: string, slug: string, n: number) => invoke<string[]>("design_thumbnails", { dir, slug, n });
 export const designContextFiles = (dir: string) => invoke<string[]>("design_context_files", { dir });
-export const designReviewVersion = (dir: string, slug: string, n: number) => invoke<{ thumbs: string[]; lint: LintReport }>("design_review_version", { dir, slug, n });
+/** `lint: false` (the gate is off): thumbnails only, and a report that says the gate is off. */
+export const designReviewVersion = (dir: string, slug: string, n: number, lint: boolean) => invoke<{ thumbs: string[]; lint: LintReport }>("design_review_version", { dir, slug, n, lint });
 export const designCapture = (dir: string, slug: string, frame?: string) => invoke<string[]>("design_capture", { dir, slug, frame: frame ?? null });
 export const designLintCurrent = (dir: string, slug: string) => invoke<LintReport>("design_lint_current", { dir, slug });
 /** The design benchmark (src-tauri/src/designs/bench.rs): the repo's briefs, a fresh throwaway

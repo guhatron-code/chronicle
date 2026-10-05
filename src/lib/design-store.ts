@@ -256,9 +256,9 @@ const thumbKey = (dir: string, slug: string, n: number) => `${dir}\0${slug}\0${n
 
 /** Renders version `n`'s thumbnails and lints it. A gate that couldn't run comes back as a
  *  report that says so (`ran: false` + the problem), never as a silent clean pass. */
-async function reviewVersion(dir: string, slug: string, n: number): Promise<LintReport | null> {
+async function reviewVersion(dir: string, slug: string, n: number, lint: boolean): Promise<LintReport | null> {
   try {
-    const r = await designReviewVersion(dir, slug, n);
+    const r = await designReviewVersion(dir, slug, n, lint);
     thumbsOf.set(thumbKey(dir, slug, n), r.thumbs);
     return parseLint(r.lint);
   } catch (e) {
@@ -291,7 +291,7 @@ async function advance(dir: string, slug: string, n: number | null, cancelled: b
     if (looping && !cancelled && gateOn != null && before.review.phase !== "critique" && p.active === slug && stepOf(k) === startStep) {
       p.review = { ...p.review, phase: "gate" }; notify();
     }
-    const lint = gateOn != null ? await reviewVersion(dir, slug, gateOn) : null;
+    const lint = gateOn != null ? await reviewVersion(dir, slug, gateOn, before.settings.lint) : null;
     const questions = await readQuestions(dir, slug);
     const critique = before.review.phase === "critique" && !cancelled
       ? await readCritique(dir, slug, before.review.round, before.settings.bar) : null;

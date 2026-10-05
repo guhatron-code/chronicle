@@ -91,6 +91,13 @@ pub fn audit_source() -> String {
     s.trim().to_string()
 }
 
+/// The script the capture window evaluates for a frame's audit: Chronicle's own
+/// source, then the call. None when the audit is not wanted (gate off, or a
+/// picture only).
+pub fn audit_script(audit: bool, kind: &str, width: u32, fold: u32) -> Option<String> {
+    audit.then(|| format!("{};\n{}", audit_source(), audit_call(kind, width, fold)))
+}
+
 /// One rendered frame: the picture and what the audit found in it.
 pub struct Capture { pub png: Vec<u8>, pub audit: Vec<Finding> }
 
@@ -188,7 +195,7 @@ static THUMB_WINDOWS: AtomicU64 = AtomicU64::new(0);
 /// The window is destroyed on every path out of here, early errors included. An
 /// audit that can't run leaves the audit empty (logged); only the picture can fail.
 #[allow(clippy::too_many_arguments)]
-fn render_frame(app: &tauri::AppHandle, hash: &str, url: &str, frame_id: &str, file: &str, width: u32, height: u32, kind: &str) -> Result<Capture, String> {
+fn render_frame(app: &tauri::AppHandle, hash: &str, url: &str, frame_id: &str, file: &str, width: u32, height: u32, kind: &str, audit: bool) -> Result<Capture, String> {
     let parsed = url.parse().map_err(|_| "that frame's address couldn't be built".to_string())?;
     // label never "main": the IPC capability is scoped to "main", so this window gets none
     let label = format!("design-thumb-{}", THUMB_WINDOWS.fetch_add(1, Ordering::Relaxed));
@@ -212,10 +219,10 @@ fn render_frame(app: &tauri::AppHandle, hash: &str, url: &str, frame_id: &str, f
     let _ = win.set_size(tauri::LogicalSize::new(width as f64, page_h as f64));
     std::thread::sleep(Duration::from_millis(150));
     // the first screen is the frame's own height, not the grown window's
-    let js = format!("{};\n{}", audit_source(), audit_call(kind, width, height));
-    let audit = match evaluate(win, &js) {
-        Ok(s) => super::lint::from_audit(frame_id, file, &s),
-        Err(e) => { eprintln!("design audit skipped for frame {frame_id}: {e}"); vec![] }
+    let audit = match audit_script(audit, kind, width, height).map(|js| evaluate(win, &js)) {
+        None => vec![],
+        Some(Ok(s)) => super::lint::from_audit(frame_id, file, &s),
+        Some(Err(e)) => { eprintln!("design audit skipped for frame {frame_id}: {e}"); vec![] }
     };
     Ok(Capture { png: snapshot_png(win, snap_w)?, audit })
 }
@@ -224,7 +231,7 @@ fn render_frame(app: &tauri::AppHandle, hash: &str, url: &str, frame_id: &str, f
 /// there is an out dir. A frame that fails is skipped and the rest go on. Returns
 /// the ids whose picture was made and every frame's audit findings; errors only
 /// when frames existed and not a single one rendered.
-fn render_frames(app: &tauri::AppHandle, hash: &str, url_base: &str, out_dir: Option<&Path>, frames: Vec<(String, String, u32, u32)>, kind: &str) -> Result<(Vec<String>, Vec<Finding>), String> {
+fn render_frames(app: &tauri::AppHandle, hash: &str, url_base: &str, out_dir: Option<&Path>, frames: Vec<(String, String, u32, u32)>, kind: &str, audit: bool) -> Result<(Vec<String>, Vec<Finding>), String> {
     // a poisoned lock only means an earlier render panicked; its window is already gone
     let _one_at_a_time = RENDER.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(d) = out_dir { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
@@ -234,7 +241,7 @@ fn render_frames(app: &tauri::AppHandle, hash: &str, url_base: &str, out_dir: Op
     let mut failures: Vec<String> = Vec::new();
     for (id, file, width, height) in frames {
         let url = format!("{url_base}/{file}");
-        let out = render_frame(app, hash, &url, &id, &file, width, height, kind).and_then(|c| {
+        let out = render_frame(app, hash, &url, &id, &file, width, height, kind, audit).and_then(|c| {
             findings.extend(c.audit);
             match out_dir {
                 Some(d) => std::fs::write(d.join(format!("{id}.png")), c.png).map_err(|e| e.to_string()),
@@ -252,9 +259,10 @@ fn render_frames(app: &tauri::AppHandle, hash: &str, url_base: &str, out_dir: Op
     Ok((done, findings))
 }
 
-/// Renders every frame of one version into its `thumbs/`, with every frame's audit.
-fn render_version(app: &tauri::AppHandle, hash: &str, slug: &str, n: u32, vdir: &Path, frames: Vec<(String, String, u32, u32)>, kind: &str) -> Result<(Vec<String>, Vec<Finding>), String> {
-    let (ids, findings) = render_frames(app, hash, &format!("chronicle-file://{hash}/{slug}/.versions/v{n}"), Some(&vdir.join("thumbs")), frames, kind)?;
+/// Renders every frame of one version into its `thumbs/`, with every frame's audit when `audit`.
+#[allow(clippy::too_many_arguments)]
+fn render_version(app: &tauri::AppHandle, hash: &str, slug: &str, n: u32, vdir: &Path, frames: Vec<(String, String, u32, u32)>, kind: &str, audit: bool) -> Result<(Vec<String>, Vec<Finding>), String> {
+    let (ids, findings) = render_frames(app, hash, &format!("chronicle-file://{hash}/{slug}/.versions/v{n}"), Some(&vdir.join("thumbs")), frames, kind, audit)?;
     Ok((ids.iter().map(|id| thumb_rel(slug, n, id)).collect(), findings))
 }
 
@@ -287,14 +295,18 @@ pub async fn design_thumbnails(app: tauri::AppHandle, roots: State<'_, OpenRoots
     let kind = design_kind(&vdir);
     // waiting on the page blocks, so it runs off the async pool; the web view work
     // itself is dispatched to the main thread by `with_webview`
-    tauri::async_runtime::spawn_blocking(move || render_version(&app, &hash, &slug, n, &vdir, frames, &kind).map(|(t, _)| t))
+    tauri::async_runtime::spawn_blocking(move || render_version(&app, &hash, &slug, n, &vdir, frames, &kind, false).map(|(t, _)| t))
         .await.map_err(|e| e.to_string())?
 }
 
 /// Turn end: one version's thumbnails, its audit and the detector, written as
 /// `.review/lint/v<n>.json` and counted on the version. → `{ thumbs, lint }`.
+/// With the gate off (`lint: false`) only the thumbnails are made, and the
+/// report says the gate is off: no audit, no detector, no counts on the version.
 #[tauri::command]
-pub async fn design_review_version(app: tauri::AppHandle, roots: State<'_, OpenRoots>, web: State<'_, crate::web::WebState>, dir: String, slug: String, n: u32) -> Result<Value, String> {
+#[allow(clippy::too_many_arguments)]
+pub async fn design_review_version(app: tauri::AppHandle, roots: State<'_, OpenRoots>, web: State<'_, crate::web::WebState>, dir: String, slug: String, n: u32, lint: Option<bool>) -> Result<Value, String> {
+    let lint = lint.unwrap_or(true);
     let p = project_for(&roots, &dir)?;
     let design = super::design_dir(&p.dir, &slug)?;
     let vdir = design.join(".versions").join(format!("v{n}"));
@@ -304,13 +316,17 @@ pub async fn design_review_version(app: tauri::AppHandle, roots: State<'_, OpenR
     let kind = design_kind(&vdir);
     let (thumbs, audits) = if frames.is_empty() { (vec![], vec![]) } else {
         let (a, v) = (app.clone(), vdir.clone());
-        tauri::async_runtime::spawn_blocking(move || render_version(&a, &hash, &slug, n, &v, frames, &kind))
+        tauri::async_runtime::spawn_blocking(move || render_version(&a, &hash, &slug, n, &v, frames, &kind, lint))
             .await.map_err(|e| e.to_string())??
     };
-    let detector = detect(vdir.join("frames")).await;
-    let report = super::lint::report(Some(n), &super::now_iso(), detector, audits);
+    let report = if lint {
+        let detector = detect(vdir.join("frames")).await;
+        super::lint::report(Some(n), &super::now_iso(), detector, audits)
+    } else {
+        super::lint::gate_off(Some(n), &super::now_iso())
+    };
     super::lint::write_report(&design, &format!("v{n}"), &report)?;
-    super::versions::mark(&design, n, Some(report.counts()), None, None)?;
+    super::versions::mark(&design, n, lint.then(|| report.counts()), None, None)?;
     Ok(json!({ "thumbs": thumbs, "lint": report }))
 }
 
@@ -339,7 +355,7 @@ pub async fn design_capture(app: tauri::AppHandle, roots: State<'_, OpenRoots>, 
     let out = design.join(".review").join("captures");
     let (ids, _) = {
         let out = out.clone();
-        tauri::async_runtime::spawn_blocking(move || render_frames(&app, &hash, &format!("chronicle-file://{hash}/{slug}"), Some(&out), frames, &kind))
+        tauri::async_runtime::spawn_blocking(move || render_frames(&app, &hash, &format!("chronicle-file://{hash}/{slug}"), Some(&out), frames, &kind, false))
             .await.map_err(|e| e.to_string())??
     };
     Ok(ids.iter().map(|id| out.join(format!("{id}.png")).to_string_lossy().to_string()).collect())
@@ -355,7 +371,7 @@ pub async fn design_lint_current(app: tauri::AppHandle, roots: State<'_, OpenRoo
     let kind = design_kind(&design);
     let audits = if frames.is_empty() { vec![] } else {
         let hash = design_host(&web, &p.dir)?;
-        tauri::async_runtime::spawn_blocking(move || render_frames(&app, &hash, &format!("chronicle-file://{hash}/{slug}"), None, frames, &kind).map(|(_, f)| f))
+        tauri::async_runtime::spawn_blocking(move || render_frames(&app, &hash, &format!("chronicle-file://{hash}/{slug}"), None, frames, &kind, true).map(|(_, f)| f))
             .await.map_err(|e| e.to_string())??
     };
     let detector = detect(design.join("frames")).await;
@@ -383,6 +399,13 @@ mod tests {
         assert!(audit_call("x\"y", 1, 1).contains("x\\\"y"));
     }
 
+    #[test]
+    fn the_audit_runs_only_when_the_gate_wants_it() {
+        assert_eq!(audit_script(false, "landing", 1440, 900), None);
+        let js = audit_script(true, "landing", 1440, 900).unwrap();
+        assert!(js.starts_with(&audit_source()));
+        assert!(js.ends_with(&audit_call("landing", 1440, 900)));
+    }
     #[test]
     fn the_audit_is_redefined_from_chronicles_own_source() {
         let src = audit_source();

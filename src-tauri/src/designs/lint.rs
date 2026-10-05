@@ -64,6 +64,14 @@ pub fn report(version: Option<u32>, at: &str, detector: Result<Vec<Finding>, Str
     LintReport { v: 1, version, at: at.into(), ran, problem, severe, minor }
 }
 
+/// What the report says when the user turned the gate off.
+pub const GATE_OFF: &str = "Lint gate off";
+
+/// A version's report with the gate off: it did not run, and says why. Never a clean pass.
+pub fn gate_off(version: Option<u32>, at: &str) -> LintReport {
+    LintReport { v: 1, version, at: at.into(), ran: false, problem: Some(GATE_OFF.into()), severe: vec![], minor: vec![] }
+}
+
 fn lint_dir(design_dir: &Path) -> PathBuf { design_dir.join(".review/lint") }
 pub fn write_report(design_dir: &Path, name: &str, r: &LintReport) -> Result<PathBuf, String> {
     let dir = lint_dir(design_dir); std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -106,6 +114,15 @@ mod tests {
         assert!(p.ends_with(".review/lint/v3.json"));
         assert_eq!(read_report(&d, "v3").unwrap().counts(), ok.counts());
         assert!(read_report(&d, "v9").is_none());
+    }
+
+    #[test]
+    fn a_gate_that_is_off_says_so_and_never_reads_as_a_clean_pass() {
+        let r = gate_off(Some(4), "t");
+        assert!(!r.ran); assert_eq!(r.problem.as_deref(), Some("Lint gate off"));
+        assert!(r.severe.is_empty() && r.minor.is_empty()); assert_eq!(r.version, Some(4));
+        let v = serde_json::to_value(&r).unwrap();
+        assert_eq!(v["ran"], false); assert_eq!(v["problem"], "Lint gate off");
     }
 
     #[test]

@@ -6,6 +6,9 @@ import type { Finding, LintReport, ReviewSettings, ReviewState } from "@/lib/des
 import { MAX_LINT_PASSES } from "@/lib/design-loop";
 import { Card, CardHead, StateWord, ToolRow, type RowState } from "./card";
 
+/** the problem a report carries when the gate was off for its version */
+const GATE_OFF = "Lint gate off";
+
 type Row = { label: string; detail: string; match: (f: Finding) => boolean };
 const isShop = (f: Finding) => f.rule.startsWith("audit:ecom-");
 const ROWS: Row[] = [
@@ -28,6 +31,9 @@ export function LintCard({ lint, review, settings, kind }: {
   } else if (review.phase === "gate") {
     head = <StateWord word="checking" tone="neutral" />;
     body = rows.map((r) => ({ label: r.label, detail: r.detail, state: "run" }));
+  } else if (lint && !lint.ran && lint.problem === GATE_OFF) {
+    // this version was made while the gate was off
+    head = <span className="text-[11.5px] text-text-faint">{GATE_OFF}</span>;
   } else if (lint && !lint.ran) {
     head = <StateWord word={`couldn't run · ${lint.problem ?? "unknown problem"}`} tone="error" />;
   } else if (review.phase === "fixing") {
