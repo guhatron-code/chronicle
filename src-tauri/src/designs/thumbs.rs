@@ -1,7 +1,8 @@
 //! One PNG per frame per version, rendered by a hidden native web view that loads
 //! the frame through `chronicle-file://` (the design host, never the project
 //! host), waits for the reporter's ready title (fonts included, at most five
-//! seconds), grows to the page height, runs Chronicle's own audit in the page,
+//! seconds; a frame that never says it's ready fails there and the next one goes
+//! on), grows to the page height, runs Chronicle's own audit in the page,
 //! and snapshots. The same window serves the review at turn end (thumbs, audit,
 //! detector, lint report) and the director's mid-turn capture and lint.
 //!
@@ -162,6 +163,20 @@ fn evaluate(win: &tauri::WebviewWindow, js: &str) -> Result<String, String> {
     rx.recv_timeout(Duration::from_secs(5)).map_err(|_| "the audit timed out".to_string())?
 }
 
+/// Polls the page's title until the reporter's `chronicle-ready:<height>` appears
+/// or `wait` runs out. → the reported height (`fallback` when unparsable), or
+/// None when the page never said it was ready.
+fn wait_ready(wait: Duration, fallback: u32, mut title: impl FnMut() -> Option<String>) -> Option<u32> {
+    let started = Instant::now();
+    loop {
+        if let Some(h) = title().as_deref().and_then(|t| t.strip_prefix("chronicle-ready:")) {
+            return Some(h.trim().parse().unwrap_or(fallback));
+        }
+        if started.elapsed() >= wait { return None; }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// The only place a capture window may go: `chronicle-file://<that design host's hash>/…`.
 fn stays_on_design_host(u: &url::Url, hash: &str) -> bool {
     u.scheme() == "chronicle-file" && u.host_str() == Some(hash)
@@ -189,15 +204,10 @@ fn render_frame(app: &tauri::AppHandle, hash: &str, url: &str, frame_id: &str, f
     let guard = CloseOnDrop(win);
     let win = &guard.0;
 
-    let started = Instant::now();
-    let mut page_h = height;
-    while started.elapsed() < READY_WAIT {
-        if let Some(h) = title_of(win).as_deref().and_then(|t| t.strip_prefix("chronicle-ready:")) {
-            page_h = h.trim().parse().unwrap_or(height);
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
+    // a frame that never reports ready (blank, or a script that never lets it load)
+    // fails here, at READY_WAIT: no audit, no snapshot, the next frame goes on
+    let page_h = wait_ready(READY_WAIT, height, || title_of(win))
+        .ok_or_else(|| format!("the frame didn't finish loading within {} seconds (it may be blank)", READY_WAIT.as_secs()))?;
     let (snap_w, page_h) = capture_size(width, page_h);
     let _ = win.set_size(tauri::LogicalSize::new(width as f64, page_h as f64));
     std::thread::sleep(Duration::from_millis(150));
@@ -411,6 +421,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_frame_that_never_reports_ready_fails_at_the_ready_wait() {
+        let wait = Duration::from_millis(300);
+        let started = Instant::now();
+        assert_eq!(wait_ready(wait, 900, || Some("Untitled".into())), None);
+        let took = started.elapsed();
+        assert!(took >= wait && took < wait + Duration::from_millis(400), "gave up after {took:?}");
+        assert_eq!(wait_ready(wait, 900, || Some("chronicle-ready:2400".into())), Some(2400));
+        assert_eq!(wait_ready(wait, 900, || Some("chronicle-ready:x".into())), Some(900));
+        let mut polls = 0;
+        assert_eq!(wait_ready(wait, 900, || { polls += 1; (polls > 1).then(|| "chronicle-ready:10".into()) }), Some(10));
+    }
     #[test]
     fn the_capture_window_only_goes_to_its_own_design_host() {
         let ok = |s: &str| stays_on_design_host(&s.parse().unwrap(), "abc123");

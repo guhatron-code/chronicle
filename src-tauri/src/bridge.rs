@@ -49,7 +49,13 @@ pub(crate) fn verb_for(action: &str) -> &'static str {
 /// How long the app waits for the frontend to answer one action. The benchmark runs
 /// whole design sessions, so it gets hours; everything else answers in seconds.
 pub(crate) fn timeout_for(action: &str) -> std::time::Duration {
-    std::time::Duration::from_secs(if action == "designs.bench" { 3 * 60 * 60 } else { 30 })
+    std::time::Duration::from_secs(match action {
+        "designs.bench" => 3 * 60 * 60,
+        // capture and lint wait their turn behind the app's one capture window
+        // (a turn-end review may hold it), then render frame by frame
+        "designs.capture" | "designs.lint" => 3 * 60,
+        _ => 30,
+    })
 }
 
 /// The gate on `project.open`, and the only one: every other action runs on a project
@@ -470,6 +476,8 @@ mod tests {
         assert_eq!(ACTIONS.len(), 7);
         assert_eq!(timeout_for("designs.bench"), std::time::Duration::from_secs(3 * 60 * 60));
         assert_eq!(timeout_for("round.plan"), std::time::Duration::from_secs(30));
-        assert_eq!(timeout_for("designs.capture"), std::time::Duration::from_secs(30));
+        assert_eq!(timeout_for("designs.capture"), std::time::Duration::from_secs(3 * 60));
+        assert_eq!(timeout_for("designs.lint"), std::time::Duration::from_secs(3 * 60));
+        assert_eq!(timeout_for("terminal.read"), std::time::Duration::from_secs(30));
     }
 }
