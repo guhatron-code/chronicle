@@ -35,7 +35,9 @@
     { "path": "docs/superpowers/specs/2026-09-16-agent-access-and-visible-rounds-design.md", "sha256": "297f96b8134ce5c5162c59f48c09bff5ce517027c79cdf0209a70b024867e868" },
     { "path": "fixes/phase_8_fixes_plan.md", "sha256": "5848f014bf3bd3e120d43078241cb8d1b463b8283f97ec2ef9c315618dc43d9a" },
     { "path": "fixes/phase_9_fixes_plan.md", "sha256": "c6d918161447511cfa1507b00f01866cd0a867de3fd6531e22bf37b95ecd4f01" },
-    { "path": "docs/superpowers/specs/2026-09-17-design-pane-foundation-design.md", "sha256": "9790a875b0086d30cc3af96e35edf1a53f0807164f3fab26672735e8cc441c56" }
+    { "path": "docs/superpowers/specs/2026-09-17-design-pane-foundation-design.md", "sha256": "9790a875b0086d30cc3af96e35edf1a53f0807164f3fab26672735e8cc441c56" },
+    { "path": "docs/superpowers/specs/2026-10-01-design-pane-director-design.md", "sha256": "17dd2b017885ce296932f3527f6b8a5aba88d8e321bfd8cb277dd24275fce78f" },
+    { "path": "docs/superpowers/plans/2026-10-01-design-pane-director.md", "sha256": "b359a19dd55387abee58067b4c48a78b56d3261c673836b5c964c356fc700ddb" }
   ],
   "spine": [
     { "path": "PRODUCT.md" },
@@ -968,13 +970,47 @@
           ],
           "paste": [
             {
-              "label": "its own spec and plan",
+              "label": "the director plan",
               "into": "Claude Code",
-              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+              "when": "Paste docs/superpowers/plans/2026-10-01-design-pane-director.md when it is time to build the director."
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-10-01-design-pane-director-design.md"
+            },
+            {
+              "path": "docs/superpowers/plans/2026-10-01-design-pane-director.md"
             }
           ],
           "status": {
-            "done_when": []
+            "done_when": [
+              {
+                "commit_subject": "(?i)^docs\\(design\\): director live (test|check)"
+              }
+            ],
+            "current_labels": [
+              {
+                "when": [
+                  {
+                    "file_exists": "src/lib/design-loop.ts"
+                  }
+                ],
+                "label": "being built now"
+              },
+              {
+                "when": [
+                  {
+                    "file_glob": {
+                      "dir": "docs/superpowers/plans",
+                      "contains": "design-pane-director"
+                    }
+                  }
+                ],
+                "label": "plan written, ready to build"
+              }
+            ],
+            "default_label": "spec written, plan next"
           }
         },
         {
