@@ -132,6 +132,8 @@ describe("design store", () => {
     expect(p.located["d:.nope"]).toBeNull();
     m.frameMessage(DIR, "d", { type: "located", id: "d:.x", rect: { x: 1, y: 1, w: 1, h: 1 } });
     expect(p.located["d:.x"]).toBeUndefined();
+    m.frameMessage(DIR, "d", { __chronicleFrame: 1, type: "located", id: "e:.buy", rect: { x: 1, y: 1, w: 1, h: 1 } });
+    expect(p.located["e:.buy"]).toBeUndefined();
   });
   it("keeps the project's own settings apart from the effective ones", async () => {
     const m = await import("./design-store");

@@ -32,6 +32,8 @@ export interface CanvasGestures {
   drag: { id: string; x: number; y: number } | null;
   panning: boolean;
   select: (id: string | null) => void;
+  /** pans just enough to bring a frame (and its name strip) on screen */
+  reveal: (r: Rect) => void;
   enterLive: (id: string) => void;
   exitLive: () => void;
   zoomBy: (factor: number) => void;
@@ -276,5 +278,5 @@ export function useCanvasGestures({ dir, slug, canvas, rects, size, canvasRef }:
     onBlur: () => { space.current = false; },
   };
 
-  return { viewport, selected, liveId, drag, panning, select, enterLive, exitLive, zoomBy, fitAll, cycleZoom, panTo, commit, onFrameDragStart, canvasHandlers };
+  return { viewport, selected, liveId, drag, panning, select, reveal, enterLive, exitLive, zoomBy, fitAll, cycleZoom, panTo, commit, onFrameDragStart, canvasHandlers };
 }

@@ -16,9 +16,6 @@ import { ReviewPill } from "./ReviewPill";
 import { ZoomControls } from "./CanvasToolbar";
 import { useCanvasGestures } from "./useCanvasGestures";
 
-/** Room kept around a frame the scorecard brings on screen (useCanvasGestures' REVEAL). */
-const REVEAL = 48;
-
 const PLACEHOLDERS = [
   { label: "Desktop", width: 1440, w: 317, h: 260 },
   { label: "Tablet", width: 768, w: 169, h: 225 },
@@ -110,31 +107,20 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
   useEffect(() => { if (pin && pinLiveNow) locate(pin.frame); }, [pin, pinLiveNow, locate]);
 
   // The scorecard picked a finding: select its frame and bring it on screen.
-  const reach = useRef({ rects, v, size });
-  reach.current = { rects, v, size };
-  const { select, panTo, commit } = g;
+  const rectsRef = useRef(rects);
+  rectsRef.current = rects;
+  const { select, reveal } = g;
   useEffect(() => {
     const on = (e: Event) => {
       const id = (e as CustomEvent<unknown>).detail;
       if (typeof id !== "string") return;
-      const { rects: rs, v: vw, size: sz } = reach.current;
-      const r = rs[id];
+      const r = rectsRef.current[id];
       if (!r) return;
-      select(id);
-      if (!vw) return;
-      // the gestures' reveal: pan just enough to show the frame and its name strip
-      const a = worldToScreen(vw, r.x, r.y), b = worldToScreen(vw, r.x + r.w, r.y + r.h);
-      let dx = 0, dy = 0;
-      if (a.x < REVEAL || b.x - a.x > sz.w - REVEAL * 2) dx = REVEAL - a.x;
-      else if (b.x > sz.w - REVEAL) dx = sz.w - REVEAL - b.x;
-      const top = REVEAL + STRIP;
-      if (a.y < top || b.y - a.y > sz.h - top - REVEAL) dy = top - a.y;
-      else if (b.y > sz.h - REVEAL) dy = sz.h - REVEAL - b.y;
-      if (dx || dy) { panTo({ ...vw, x: vw.x + dx, y: vw.y + dy }); commit(); }
+      select(id); reveal(r);
     };
     window.addEventListener("chronicle:select-frame", on);
     return () => window.removeEventListener("chronicle:select-frame", on);
-  }, [select, panTo, commit]);
+  }, [select, reveal]);
 
   // the one derivation of "latest": p.versions is refreshed after a turn's
   // thumbnails render, so the picture a frame asks for exists by then
@@ -212,7 +198,7 @@ export function DesignCanvas({ dir, onScreen }: { dir: string; onScreen: boolean
             );
           })
         ) : null}
-        {design && v && !comparing && !p.bad && pin && <PinLayer v={v} rects={drawn} pin={pin} located={p.located} />}
+        {design && v && !comparing && !p.bad && pin && <PinLayer v={v} rects={drawn} pin={pin} located={p.located} size={size} />}
       </div>
 
       {v && frames.length > 0 && !p.bad && (

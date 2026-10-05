@@ -8,9 +8,13 @@ import type { DesignProject } from "@/lib/design-store";
 
 /** gen.py `mk`: the ring sits 4 px off the element, the chip 6 px above the ring. */
 const RING_GAP = 4, CHIP_GAP = 6;
+/** the chip's height (10.5 px text, 3 px padding), for "is there room above?" */
+const CHIP_H = 20;
 
-export function PinLayer({ v, rects, pin, located }: {
+export function PinLayer({ v, rects, pin, located, size }: {
   v: Viewport; rects: Record<string, Rect>; pin: DesignProject["pin"]; located: DesignProject["located"];
+  /** the canvas's size in screen px: the label chip stays inside it */
+  size: { w: number; h: number };
 }) {
   const r = pin ? rects[pin.frame] : undefined;
   if (!pin || !r) return null;
@@ -32,17 +36,22 @@ export function PinLayer({ v, rects, pin, located }: {
 
   const at = worldToScreen(v, r.x + loc.x, r.y + loc.y);
   const w = loc.w * v.zoom, h = loc.h * v.zoom;
+  // above-right: the chip's right edge on the ring's right edge, just above it — or
+  // just below the ring when there is no room above; never past the canvas's right edge
+  const above = at.y - RING_GAP - CHIP_GAP - CHIP_H;
+  const top = above >= 0 ? above : at.y + h + RING_GAP + CHIP_GAP;
+  const right = Math.max(0, size.w - (at.x + w + RING_GAP));
   return (
-    <div className="pointer-events-none absolute" style={{ left: at.x, top: at.y, width: w, height: h }}>
-      <div className="absolute inset-0 rounded-[2px]" style={{ outline: "2px solid var(--state-warn)", outlineOffset: RING_GAP }} />
-      {/* above-right: the chip's right edge on the ring's right edge, just above it */}
+    <>
+      <div className="pointer-events-none absolute rounded-[2px]"
+        style={{ left: at.x, top: at.y, width: w, height: h, outline: "2px solid var(--state-warn)", outlineOffset: RING_GAP }} />
       <span
         title={pin.text}
-        className="absolute max-w-[36ch] truncate whitespace-nowrap rounded-[5px] bg-state-warn px-[7px] py-[3px] text-[10.5px] font-medium text-primary-foreground"
-        style={{ right: -RING_GAP, bottom: `calc(100% + ${RING_GAP + CHIP_GAP}px)` }}
+        className="pointer-events-none absolute h-5 max-w-[36ch] truncate whitespace-nowrap rounded-[5px] bg-state-warn px-[7px] py-[3px] text-[10.5px] leading-[14px] font-medium text-primary-foreground"
+        style={{ right, top }}
       >
         {pin.text}
       </span>
-    </div>
+    </>
   );
 }
