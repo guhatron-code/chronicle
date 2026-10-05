@@ -277,8 +277,41 @@ pub fn fix_terminal_path() -> Result<(), String> {
 
 /* ================= the checks ================= */
 
-/// The six rows the Setup screen shows, in run order.
-const CHECKS: [&str; 6] = ["claude", "claude_signin", "node", "terminal_path", "github", "superpowers"];
+/// Every row the Setup screen shows, in run order. The first `REQUIRED` gate the
+/// app; the design rows are extras for the design pane and never count.
+const CHECKS: [&str; 8] = ["claude", "claude_signin", "node", "terminal_path", "github", "superpowers", "design_browser", "design_skills"];
+pub const REQUIRED: usize = 6;
+
+/// Where Playwright's Chromium lives: inside the managed tools dir, never the user's.
+pub fn browsers_dir() -> PathBuf { tools_dir().join("browsers") }
+
+/// The installed Chromium's folder name, when `dir` holds Playwright's layout:
+/// a `chromium-<digits>` directory containing at least one `.app`.
+fn browser_build_in(dir: &Path) -> Option<String> {
+    for e in std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()) {
+        let name = e.file_name().to_string_lossy().to_string();
+        let digits = name.strip_prefix("chromium-").map(|d| !d.is_empty() && d.chars().all(|c| c.is_ascii_digit())).unwrap_or(false);
+        if !digits || !e.path().is_dir() { continue; }
+        let has_app = std::fs::read_dir(e.path()).into_iter().flatten().filter_map(|x| x.ok()).any(|sub| {
+            std::fs::read_dir(sub.path()).into_iter().flatten().filter_map(|x| x.ok())
+                .any(|f| f.path().extension().map(|x| x == "app").unwrap_or(false))
+        });
+        if has_app { return Some(name); }
+    }
+    None
+}
+fn browser_ready_in(dir: &Path) -> bool { browser_build_in(dir).is_some() }
+pub fn browser_ready() -> bool { browser_ready_in(&browsers_dir()) }
+
+/// `(pct, got, total)` from a Playwright download line like `| 40% of 164.3 MiB`.
+fn parse_install_progress(line: &str) -> Option<(u64, u64, u64)> {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| regex::Regex::new(r"(\d+)% of (\d+(?:\.\d+)?) MiB").unwrap());
+    let c = re.captures(line)?;
+    let pct: u64 = c[1].parse().ok()?;
+    let total = (c[2].parse::<f64>().ok()? * 1_048_576.0) as u64;
+    Some((pct, total * pct / 100, total))
+}
 
 fn plugin_installed(id: &str) -> bool {
     std::fs::read_to_string(home().join(".claude/plugins/installed_plugins.json"))
@@ -383,6 +416,18 @@ pub fn detect(id: &str) -> Value {
             else if plugin_installed(SKILLS_PLUGIN) { ("ready", "", "") }
             else { ("missing", "", "install") }
         }
+        "design_browser" => {
+            if resolve("node").is_none() { ("blocked", "Install the engine first.", "") }
+            else if let Some(b) = browser_build_in(&browsers_dir()) { return json!({ "id": id, "state": "ready", "detail": format!("chromium · {b}"), "action": "" }); }
+            else { ("missing", "", "install") }
+        }
+        "design_skills" => {
+            let found = design_plugin_dir().ok_or_else(|| "the design skills aren't part of this build".to_string()).and_then(|d| crate::designs::plugin::intact(&d));
+            return match found {
+                Ok(d) => json!({ "id": id, "state": "ready", "detail": d, "action": "" }),
+                Err(e) => json!({ "id": id, "state": "missing", "detail": e, "action": "" }),
+            };
+        }
         _ => ("unknown", "", ""),
     };
     json!({ "id": id, "state": state, "detail": detail, "action": action })
@@ -390,8 +435,8 @@ pub fn detect(id: &str) -> Value {
 
 pub fn status() -> Value {
     let checks: Vec<Value> = CHECKS.iter().map(|id| detect(id)).collect();
-    let ready = checks.iter().filter(|c| c["state"] == "ready").count();
-    json!({ "checks": checks, "ready": ready, "total": CHECKS.len() })
+    let ready = checks.iter().take(REQUIRED).filter(|c| c["state"] == "ready").count();
+    json!({ "checks": checks, "ready": ready, "total": REQUIRED })
 }
 
 /* ================= installs ================= */
@@ -545,6 +590,72 @@ fn install_superpowers(emit: &Emit, _cancel: &AtomicBool) -> Result<(), String> 
     Err(format!("couldn't add the extra skills — {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("please try again").chars().take(80).collect::<String>()))
 }
 
+/// Download Playwright's Chromium into the managed browsers dir. Progress lines
+/// from the merged output become `installing` events; cancel stops the whole group.
+fn install_design_browser(emit: &Emit, cancel: &AtomicBool) -> Result<(), String> {
+    use std::io::Read;
+    use std::os::unix::process::CommandExt;
+    use std::process::Stdio;
+    let npx = resolve("npx").ok_or("the engine isn't installed yet — install it first")?;
+    emit_state(emit, "design_browser", json!({ "state": "installing", "pct": Value::Null }));
+    let dir = browsers_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("couldn't prepare the browser folder — {e}"))?;
+    let mut child = std::process::Command::new(&npx)
+        .args(["--yes", "--", &format!("playwright@{}", crate::designs::plugin::PLAYWRIGHT), "install", "chromium"])
+        .env("PLAYWRIGHT_BROWSERS_PATH", &dir)
+        .env("PATH", tool_env_path())
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
+        .process_group(0)
+        .spawn()
+        .map_err(|e| format!("couldn't start the browser download — {e}"))?;
+    let pgid = child.id() as i32;
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let mut readers = Vec::new();
+    let pipes: [Box<dyn Read + Send>; 2] = [Box::new(child.stdout.take().unwrap()), Box::new(child.stderr.take().unwrap())];
+    for mut pipe in pipes {
+        let tx = tx.clone();
+        readers.push(std::thread::spawn(move || {
+            // progress bars redraw with \r, so split on both \r and \n
+            let (mut buf, mut line) = ([0u8; 4096], Vec::new());
+            while let Ok(n) = pipe.read(&mut buf) {
+                if n == 0 { break; }
+                for &b in &buf[..n] {
+                    if b == b'\r' || b == b'\n' {
+                        if !line.is_empty() { let _ = tx.send(String::from_utf8_lossy(&line).to_string()); line.clear(); }
+                    } else { line.push(b); }
+                }
+            }
+            if !line.is_empty() { let _ = tx.send(String::from_utf8_lossy(&line).to_string()); }
+        }));
+    }
+    drop(tx);
+    let mut tail = String::new();
+    let mut cancelled = false;
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            cancelled = true;
+            unsafe { libc::kill(-pgid, libc::SIGTERM); }
+            break;
+        }
+        match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(line) => {
+                if let Some((pct, got, total)) = parse_install_progress(&line) {
+                    emit_state(emit, "design_browser", json!({ "state": "installing", "pct": pct, "gotBytes": got, "totalBytes": total }));
+                } else if !line.trim().is_empty() { tail = line.trim().chars().take(80).collect(); }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(_) => break,
+        }
+    }
+    let status = child.wait();
+    for r in readers { let _ = r.join(); }
+    if cancelled { return Err("cancelled".into()); }
+    match status {
+        Ok(s) if s.success() && browser_ready() => Ok(()),
+        _ => Err(format!("couldn't download the review browser — {}", if tail.is_empty() { "please try again" } else { &tail })),
+    }
+}
+
 /// Run one check's install/repair action. Returns Ok when the check is now
 /// resolved (or the action was dispatched, for sign-ins).
 pub fn install(id: &str, emit: &Emit, cancel: &AtomicBool) -> Result<(), String> {
@@ -553,6 +664,7 @@ pub fn install(id: &str, emit: &Emit, cancel: &AtomicBool) -> Result<(), String>
         "claude" => install_claude(emit, cancel),
         "github" => install_github(emit, cancel),
         "superpowers" => install_superpowers(emit, cancel),
+        "design_browser" => install_design_browser(emit, cancel),
         "terminal_path" => fix_terminal_path(),
         _ => Err(format!("{id} isn't installable here")),
     };
@@ -623,6 +735,37 @@ mod setup_tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn the_design_rows_detect_from_disk_and_never_join_the_required_count() {
+        assert_eq!(REQUIRED, 6);
+        assert!(CHECKS.contains(&"design_browser") && CHECKS.contains(&"design_skills"));
+        let s = status();
+        assert_eq!(s["total"], 6);
+        assert_eq!(s["checks"].as_array().unwrap().len(), 8);
+        let b = detect("design_browser");
+        assert!(["ready", "missing", "blocked"].contains(&b["state"].as_str().unwrap()));
+        if b["state"] == "missing" { assert_eq!(b["action"], "install"); }
+        let k = detect("design_skills");
+        assert_eq!(k["action"], "", "the skills ship with the app: nothing to install");
+    }
+    #[test]
+    fn install_progress_lines_are_parsed() {
+        let (pct, got, total) = parse_install_progress("|■■■■      | 40% of 164.3 MiB").unwrap();
+        assert_eq!(pct, 40);
+        assert_eq!(total, (164.3_f64 * 1_048_576.0) as u64);
+        assert_eq!(got, total * 40 / 100);
+        assert_eq!(parse_install_progress("Downloading Chromium 131.0.6778.33 (playwright build v1148)"), None);
+    }
+    #[test]
+    fn browser_ready_reads_playwrights_layout() {
+        let d = std::env::temp_dir().join(format!("chronicle-browsers-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        assert!(!browser_ready_in(&d));
+        std::fs::create_dir_all(d.join("chromium-1148/chrome-mac-arm64/Chromium.app")).unwrap();
+        assert!(browser_ready_in(&d));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -702,7 +845,7 @@ mod setup_tests {
     #[test]
     fn status_shape_is_honest() {
         let s = status();
-        assert_eq!(s["checks"].as_array().unwrap().len(), 6);
+        assert_eq!(s["checks"].as_array().unwrap().len(), 8);
         assert!(s["total"] == 6);
         // every check reports one of the known states
         for c in s["checks"].as_array().unwrap() {

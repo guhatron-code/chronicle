@@ -1,7 +1,6 @@
 //! The design session's bundled tools: where the Claude Code plugin Chronicle
 //! ships lives, whether it is whole, and which MCP servers a session gets.
 //! Versions are pinned here and nowhere else.
-#![allow(dead_code)] // callers land with the Setup rows (Task 8)
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 

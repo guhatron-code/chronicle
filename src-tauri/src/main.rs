@@ -3377,7 +3377,12 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
     };
     if lane == acp::Lane::Design { designs::ensure_root(&p.dir)?; }
     let designs_root = if lane == acp::Lane::Design { Some(designs::designs_root(&p.dir)) } else { None };
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, acp::LaneExtras::default(), None, acp::adapter_command(&npx))?;
+    let extras = if lane == acp::Lane::Design {
+        let browsers = if setup::browser_ready() { Some(setup::browsers_dir()) } else { None };
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir() }
+    } else { acp::LaneExtras::default() };
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, None, acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
 
@@ -3398,7 +3403,12 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
     };
     if lane == acp::Lane::Design { designs::ensure_root(&p.dir)?; }
     let designs_root = if lane == acp::Lane::Design { Some(designs::designs_root(&p.dir)) } else { None };
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, acp::LaneExtras::default(), Some(id), acp::adapter_command(&npx))?;
+    let extras = if lane == acp::Lane::Design {
+        let browsers = if setup::browser_ready() { Some(setup::browsers_dir()) } else { None };
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir() }
+    } else { acp::LaneExtras::default() };
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, Some(id), acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
 

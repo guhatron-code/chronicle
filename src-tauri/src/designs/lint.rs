@@ -1,4 +1,3 @@
-#![allow(dead_code)] // callers land in Task 6
 //! The lint gate's model: what the detector and the audit found for one
 //! version, split into what blocks (severe) and what doesn't (minor), written
 //! under the design's app-owned `.review/lint/`. Deterministic; the model never
