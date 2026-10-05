@@ -4,6 +4,7 @@ Every message starts with a line like `[design: <slug> · <folder>/]`. That name
 
 ## The file contract
 - One self-contained HTML page per frame, in `frames/` inside the design's folder (for example `frames/desktop.html`).
+- Each frame is written for its own width: a desktop, tablet and phone page are three different pages. Share styles through `assets/`, never by copying one page into three files.
 - List every frame in the folder's `design.json` under "frames": {"id", "file", "label", "width", "height", "group"}. "width" is the viewport width the page is designed for; "height" is the first screen (the fold). Keep "v", "title", "kind", "brief" and "created" as they are.
 - Put breakpoints in a group of kind "breakpoints" and alternative directions in a group of kind "variations", under "groups": {"id", "label", "kind"}.
 - Put images, stylesheets and scripts in `assets/`, and link them with relative paths.

@@ -462,6 +462,14 @@ DP-1 had; the docs list's hash for this spec is refreshed when the spec is amend
 - **Board 9's "Getting the review tools ready" lists Icons · iconify**; icons are bundled Lucide,
   so the row reads "Icons · lucide, bundled" and needs no download.
 - **Board 4's composer shows "Halden system"**; that chip is sub-project 3's.
+- **The audit is evaluated in the capture window only** (§7). The served frames carry only
+  the reporter; the capture window evaluates Chronicle's own `audit.js` source right before
+  each call, so injecting it into canvas frames bought nothing and broke §7's rule.
+- **Frames are per-width pages.** The director wrote one responsive page into all three
+  frames in the live run; the persona now says each frame is written for its own width and
+  shared styles go through `assets/`.
+- **The reviewers' tools are `Read, Glob, Grep`.** They review the files and the captures
+  Chronicle hands them; Playwright is not given to them in this sub-project.
 
 ## 15 · Decisions this spec made without the user, to confirm or overturn
 

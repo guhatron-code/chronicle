@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn the_director_prompt_keeps_the_file_contract_and_names_its_new_files() {
-        for must in ["frames/", "design.json", "assets/fonts/", "Never write outside", "questions.json", "tokens.json", "critique/round-", "Never run a critique yourself", "one sentence"] {
+        for must in ["frames/", "design.json", "assets/fonts/", "Never write outside", "questions.json", "tokens.json", "critique/round-", "Never run a critique yourself", "one sentence", "Each frame is written for its own width"] {
             assert!(DESIGN_PROMPT.contains(must), "missing: {must}");
         }
         assert!(!DESIGN_PROMPT.contains("context.mjs"));
