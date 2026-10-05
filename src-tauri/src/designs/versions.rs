@@ -13,7 +13,10 @@ const RESTORE_TMP_SUFFIX: &str = ".restore-tmp";
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct VersionMeta { pub n: u32, pub at: String, pub session: String, pub prompt: String, pub summary: String, pub hash: String }
+pub struct VersionMeta { pub n: u32, pub at: String, pub session: String, pub prompt: String, pub summary: String, pub hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub lint: Option<crate::designs::lint::LintCounts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub round: Option<u32> }
 
 /// Collects files under `base.join(rel)`, recording paths relative to `base`.
 /// Symlinks are skipped rather than followed: a symlink planted inside
@@ -177,8 +180,15 @@ pub fn snapshot_if_changed(design_dir: &Path, at: &str, session: &str, prompt: &
     let prev = list(design_dir);
     if prev.first().map(|m| m.hash == hash).unwrap_or(false) { return Ok(None); }
     let n = next_version_number(design_dir);
-    write_version(design_dir, &VersionMeta { n, at: at.into(), session: session.into(), prompt: prompt.into(), summary: summary.into(), hash })?;
+    write_version(design_dir, &VersionMeta { n, at: at.into(), session: session.into(), prompt: prompt.into(), summary: summary.into(), hash, lint: None, score: None, round: None })?;
     Ok(Some(n))
+}
+
+pub fn mark(design_dir: &Path, n: u32, lint: Option<crate::designs::lint::LintCounts>, score: Option<f64>, round: Option<u32>) -> Result<(), String> {
+    let p = versions_dir(design_dir).join(format!("v{n}")).join("meta.json");
+    let mut m: VersionMeta = serde_json::from_str(&std::fs::read_to_string(&p).map_err(|_| format!("there's no version {n}"))?).map_err(|e| e.to_string())?;
+    if lint.is_some() { m.lint = lint; } if score.is_some() { m.score = score; } if round.is_some() { m.round = round; }
+    std::fs::write(&p, serde_json::to_string_pretty(&m).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
 pub fn restore(design_dir: &Path, n: u32, at: &str) -> Result<u32, String> {
@@ -187,7 +197,7 @@ pub fn restore(design_dir: &Path, n: u32, at: &str) -> Result<u32, String> {
     swap_content_atomically(&vd, design_dir)?;
     let hash = content_hash(design_dir);
     let next = next_version_number(design_dir);
-    write_version(design_dir, &VersionMeta { n: next, at: at.into(), session: String::new(), prompt: String::new(), summary: format!("Restored v{n}"), hash })?;
+    write_version(design_dir, &VersionMeta { n: next, at: at.into(), session: String::new(), prompt: String::new(), summary: format!("Restored v{n}"), hash, lint: None, score: None, round: None })?;
     // the restored content is v<n>'s, so its pictures are too (thumbnails are
     // never part of the content hash — this is a plain copy)
     copy_thumbs(&vd, &versions_dir(design_dir).join(format!("v{next}")))?;
@@ -368,4 +378,16 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.join("frames/a.html")).unwrap(), "<h1>one</h1>");
         assert!(!dir.join("frames/linked.html").exists(), "restore must not copy a symlink (or its target) out of a version directory");
     }
+
+#[test]
+fn a_version_can_be_marked_with_lint_score_and_round_without_losing_the_rest() {
+    let d = proj("mark"); let dir = d.join(".chronicle/designs/home"); std::fs::create_dir_all(dir.join("frames")).unwrap();
+    std::fs::write(dir.join("design.json"), "{}").unwrap();
+    let n = snapshot_if_changed(&dir, "t", "s", "p", "first").unwrap().unwrap();
+    mark(&dir, n, Some(crate::designs::lint::LintCounts { severe: 1, minor: 2 }), None, None).unwrap();
+    mark(&dir, n, None, Some(8.4), Some(2)).unwrap();
+    let m = list(&dir).into_iter().find(|m| m.n == n).unwrap();
+    assert_eq!(m.summary, "first"); assert_eq!(m.lint, Some(crate::designs::lint::LintCounts { severe: 1, minor: 2 })); assert_eq!(m.score, Some(8.4)); assert_eq!(m.round, Some(2));
+    assert!(mark(&dir, 99, None, Some(1.0), None).is_err());
+}
 }
