@@ -568,6 +568,21 @@ describe("design store", () => {
     expect(h.sent.at(-1)).toContain("critique/round-3.json");
   });
 
+  it("asking for a round, or a fix, while the loop runs is refused and changes nothing", async () => {
+    const { m, p } = await looping();
+    p.critiqueMissing = false;
+    p.review = { ...p.review, phase: "critique", round: 2, version: 4 };
+    const before = h.sent.length;
+    await expect(m.askAnotherRound(DIR)).rejects.toThrow("The review is still running.");
+    await expect(m.fixFinding(DIR, finding("x") as never)).rejects.toThrow("still running");
+    expect(h.sent.length).toBe(before);
+    expect(p.review).toMatchObject({ phase: "critique", round: 2 });
+    p.review = { ...p.review, phase: "done" };
+    sess.turnActive = true;
+    await expect(m.askAnotherRound(DIR)).rejects.toThrow("still running");
+    sess.turnActive = false;
+  });
+
   it("settings change at the scope asked for and reload", async () => {
     const { m, p } = await looping();
     const ipc = await import("./ipc");

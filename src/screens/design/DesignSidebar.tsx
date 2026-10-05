@@ -308,7 +308,7 @@ export function DesignSidebar({ dir, onNew }: { dir: string; onNew: () => void }
   const trailingFor = (row: DesignRow) => {
     if (row.bad) return <span className="text-[11px] text-state-error">couldn't read this design</span>;
     if (p.active === row.slug && !(designTurnActive && p.review.phase === "idle")) {
-      const score = p.versions.find((v) => v.n === row.latestVersion)?.score ?? p.critiques.at(-1)?.weighted ?? null;
+      const score = p.versions.find((v) => v.n === row.latestVersion)?.score ?? (() => { const c = p.critiques.at(-1); return c && c.version === row.latestVersion ? c.weighted : null; })();
       const sw = stateWord(p.review, row.latestVersion, score);
       const tone = { faint: "text-text-faint", neutral: "text-state-neutral", success: "text-state-success", warn: "text-state-warn", error: "text-state-error" }[sw.tone];
       const chip = sw.word.startsWith("ready · ") ? sw.word.slice(8) : null;

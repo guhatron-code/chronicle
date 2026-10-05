@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import { BtnSecondary } from "@/components/chrome/atoms";
 import { XGlyph } from "@/components/chrome/icons";
+import { agentSessionFor, laneKey, subscribeAgent } from "@/lib/agent-session";
 import { askAnotherRound, designProjectFor, fixAllMinor, fixFinding, setPin, subscribeDesigns } from "@/lib/design-store";
 import { fmtScore, REVIEWERS, type Finding } from "@/lib/design-review-model";
 import { toastError } from "@/overlays/toasts";
@@ -13,11 +14,12 @@ import { BtnGhost, Dot, Eyebrow, StateWord } from "./cards/card";
 
 const WEIGHTS = "weighted: art 0.3 · UX 0.35 · a11y 0.2 · copy 0.15";
 
-/** "4 min 10 s", "38 s"; null when either end is unknown. */
-function span(startMs: number | null, endIso: string | undefined): string | null {
-  const end = endIso ? Date.parse(endIso) : NaN;
-  if (startMs == null || !Number.isFinite(end)) return null;
-  const secs = Math.max(0, Math.round((end - startMs) / 1000));
+/** "4 min 10 s", "38 s"; null unless the span is positive. */
+function span(startIso: string | undefined, endIso: string | undefined): string | null {
+  const a = startIso ? Date.parse(startIso) : NaN, b = endIso ? Date.parse(endIso) : NaN;
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return null;
+  const secs = Math.round((b - a) / 1000);
+  if (secs <= 0) return null;
   return secs < 60 ? `${secs} s` : `${Math.floor(secs / 60)} min ${secs % 60} s`;
 }
 
@@ -27,6 +29,7 @@ const sameFinding = (a: { frame: string; selector: string; text: string } | null
 export function Scorecard({ dir, onClose }: { dir: string; onClose: () => void }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeDesigns(() => bump((n) => n + 1)), []);
+  useEffect(() => subscribeAgent(() => bump((n) => n + 1)), []);
   const p = designProjectFor(dir);
   const last = p.critiques.at(-1);
   const send = (job: Promise<void>, what: string) => job.catch((e) => toastError(what, String((e as Error)?.message ?? e).slice(0, 90)));
@@ -34,10 +37,12 @@ export function Scorecard({ dir, onClose }: { dir: string; onClose: () => void }
   const findings = [...(p.lint?.severe ?? []), ...(p.lint?.minor ?? [])];
   const minorCount = p.lint?.minor.length ?? 0;
   const first = p.critiques[0];
-  const took = span(p.review.startedAt, last?.at);
-  const roundsLine = last && p.critiques.length > 1 && first
-    ? `${fmtScore(first.weighted)} → ${fmtScore(last.weighted)} in ${p.critiques.length} rounds${took ? ` · ${took}` : ""}`
-    : took;
+  const took = span(first?.at, last?.at);
+  const roundsLine = !last ? null
+    : p.critiques.length === 1 ? "1 round"
+    : `${fmtScore(first.weighted)} → ${fmtScore(last.weighted)} in ${p.critiques.length} rounds${took ? ` · ${took}` : ""}`;
+  // the same state the store's guard reads
+  const busy = agentSessionFor(laneKey(dir, "design")).turnActive || (["building", "gate", "fixing", "critique"].includes(p.review.phase) && !p.critiqueMissing);
 
   const pick = (f: Finding) => {
     setPin(dir, f.selector ? { frame: f.frame, selector: f.selector, text: f.text } : null);
@@ -119,13 +124,13 @@ export function Scorecard({ dir, onClose }: { dir: string; onClose: () => void }
                 <span className="block truncate font-mono text-[10.5px] text-text-faint">{f.severity} · {f.file || f.frame}{f.line != null ? `:${f.line}` : ""}</span>
               </span>
             </button>
-            <button type="button" aria-label={`Fix: ${f.text}`} onClick={() => void send(fixFinding(dir, f), "Couldn't send that fix")} className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-text-secondary outline-none hover:bg-fill-hover hover:text-text-primary focus-visible:[box-shadow:var(--focus-ring)]">Fix</button>
+            <button type="button" disabled={busy} aria-label={`Fix: ${f.text}`} onClick={() => void send(fixFinding(dir, f), "Couldn't send that fix")} className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-text-secondary outline-none hover:bg-fill-hover hover:text-text-primary focus-visible:[box-shadow:var(--focus-ring)] disabled:opacity-40 disabled:hover:bg-transparent">Fix</button>
           </div>
         ))}
       </div>
       <div className="flex gap-2 border-t border-border-hairline px-4 py-3">
-        <BtnSecondary size="md" disabled={minorCount === 0} onClick={() => void send(fixAllMinor(dir), "Couldn't send those fixes")}>Fix all minor</BtnSecondary>
-        <BtnGhost size="md" onClick={() => void send(askAnotherRound(dir), "Couldn't ask for another round")}>Ask for round {(last?.round ?? p.review.round) + 1}</BtnGhost>
+        <BtnSecondary size="md" disabled={minorCount === 0 || busy} onClick={() => void send(fixAllMinor(dir), "Couldn't send those fixes")}>Fix all minor</BtnSecondary>
+        <BtnGhost size="md" disabled={busy} onClick={() => void send(askAnotherRound(dir), "Couldn't ask for another round")}>Ask for round {p.review.round + 1}</BtnGhost>
       </div>
     </section>
   );

@@ -674,14 +674,25 @@ export async function stopReview(dir: string): Promise<void> {
   await commitReview(dir, slug, onStop(p.review));
 }
 
+/** The review is mid-loop or the design session is mid-turn. A critique that never came
+ *  back (`critiqueMissing`) leaves the phase on "critique" with no turn behind it, so
+ *  "Ask again" stays open then. */
+function reviewBusy(dir: string): boolean {
+  const p = designProjectFor(dir);
+  return agentSessionFor(laneKey(dir, "design")).turnActive || (LOOPING.has(p.review.phase) && !p.critiqueMissing);
+}
+const STILL_RUNNING = "The review is still running.";
+
 /** One more critique round on the current version (also "Ask again" for a round that never came back). */
 export async function askAnotherRound(dir: string): Promise<void> {
+  if (reviewBusy(dir)) throw new Error(STILL_RUNNING);
   const p = designProjectFor(dir); const slug = activeSlug(dir);
   const review: ReviewState = { ...p.review, phase: "critique", round: p.review.round + 1, fixPass: 0 };
   await sendLoopPrompt(dir, slug, "critique", { review, settings: p.settings, lint: p.lint, critique: p.critiques.at(-1) ?? null });
 }
 
-export function fixFinding(dir: string, f: Finding): Promise<void> {
+export async function fixFinding(dir: string, f: Finding): Promise<void> {
+  if (reviewBusy(dir)) throw new Error(STILL_RUNNING);
   return sendPrefixed(dir, activeSlug(dir), fixFindingPrompt(f), "fixFinding");
 }
 
@@ -689,6 +700,7 @@ export function fixFinding(dir: string, f: Finding): Promise<void> {
 export async function fixAllMinor(dir: string): Promise<void> {
   const minor = designProjectFor(dir).lint?.minor ?? [];
   if (minor.length === 0) return;
+  if (reviewBusy(dir)) throw new Error(STILL_RUNNING);
   await sendPrefixed(dir, activeSlug(dir), fixAllMinorPrompt(minor), "fixFinding");
 }
 
