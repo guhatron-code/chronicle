@@ -3116,6 +3116,29 @@ fn design_bench_write(roots: State<OpenRoots>, dir: String, name: String, json: 
         .map(|(j, m)| (j.to_string_lossy().into_owned(), m.to_string_lossy().into_owned()))
 }
 
+/// Stage a Claude Design export into a design of `dir` (the judge's project) so it is
+/// captured like any design. `from` must be a folder directly inside an open project's
+/// `bench/design/reference/`. → the frame count.
+#[tauri::command]
+fn design_bench_stage_reference(roots: State<OpenRoots>, dir: String, slug: String, from: String) -> Result<u32, String> {
+    let p = project_for(&roots, &dir)?;
+    let design = designs::design_dir(&p.dir, &slug)?;
+    let src = PathBuf::from(&from).canonicalize().map_err(|_| "That reference isn't there.".to_string())?;
+    let parent = src.parent().map(Path::to_path_buf).unwrap_or_default();
+    let open: Vec<PathBuf> = roots.0.lock().map_err(|e| e.to_string())?.iter().cloned().collect();
+    let inside_a_repo = open.iter().any(|d| load_project(d).repo.join("bench/design/reference").canonicalize().ok().as_ref() == Some(&parent));
+    if !inside_a_repo { return Err("That isn't a benchmark reference.".into()); }
+    designs::bench::stage_reference(&src, &design)
+}
+
+/// Copy pictures into `<slug>/refs/<side>/` under neutral names. → design-relative paths.
+#[tauri::command]
+fn design_bench_stage(roots: State<OpenRoots>, dir: String, slug: String, side: String, paths: Vec<String>) -> Result<Vec<String>, String> {
+    let p = project_for(&roots, &dir)?;
+    let design = designs::design_dir(&p.dir, &slug)?;
+    designs::bench::stage_side(&design, &side, &paths.iter().map(PathBuf::from).collect::<Vec<_>>())
+}
+
 #[tauri::command]
 fn design_lint_read(roots: State<OpenRoots>, dir: String, slug: String, name: String) -> Result<Option<designs::lint::LintReport>, String> {
     let p = project_for(&roots, &dir)?;
@@ -4055,7 +4078,7 @@ fn main() {
             design_review_settings, design_review_settings_set, design_review_state, design_review_state_set,
             design_questions_answer, design_critique_read, design_reminders, design_reminders_set,
             design_file_read, design_version_mark, design_lint_read, design_ref_attach,
-            design_bench_briefs, design_bench_project, design_bench_write
+            design_bench_briefs, design_bench_project, design_bench_write, design_bench_stage_reference, design_bench_stage
         ])
         .build(tauri::generate_context!())
         .expect("error while building Chronicle")

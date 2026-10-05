@@ -610,6 +610,10 @@ export const designLintCurrent = (dir: string, slug: string) => invoke<LintRepor
 export const designBenchBriefs = (dir: string) => invoke<import("./design-bench").Brief[]>("design_bench_briefs", { dir });
 export const designBenchProject = () => invoke<string>("design_bench_project");
 export const designBenchWrite = (dir: string, name: string, json: unknown, md: string) => invoke<[string, string]>("design_bench_write", { dir, name, json, md });
+/** Stage a Claude Design export folder into a design of `dir` as frames + assets → the frame count. */
+export const designBenchStageReference = (dir: string, slug: string, from: string) => invoke<number>("design_bench_stage_reference", { dir, slug, from });
+/** Copy pictures into `<slug>/refs/<side>/` under neutral names → design-relative paths. */
+export const designBenchStage = (dir: string, slug: string, side: "A" | "B", paths: string[]) => invoke<string[]>("design_bench_stage", { dir, slug, side, paths });
 export const designLintRead = (dir: string, slug: string, name: string) => invoke<LintReport | null>("design_lint_read", { dir, slug, name });
 export const designReviewSettings = (dir: string, slug?: string) => invoke<{ project: ReviewSettings; design: Partial<ReviewSettings> | null; effective: ReviewSettings }>("design_review_settings", { dir, slug: slug ?? null });
 export const designReviewSettingsSet = (dir: string, scope: "project" | "design", slug: string | null, patch: Partial<ReviewSettings>) => invoke<void>("design_review_settings_set", { dir, scope, slug, patch });

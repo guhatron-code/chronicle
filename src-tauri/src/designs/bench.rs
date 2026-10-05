@@ -58,7 +58,11 @@ pub fn read_briefs(repo: &Path) -> Result<Vec<Brief>, String> {
 /// A throwaway Chronicle project under the config dir, so a benchmark never designs in
 /// the user's own project.
 pub fn bench_project(config_dir: &Path, stamp: &str) -> Result<PathBuf, String> {
-    let p = config_dir.join("bench").join(stamp);
+    // two projects asked for in the same second (the run's and its judge's) get two folders
+    let base = config_dir.join("bench");
+    let mut p = base.join(stamp);
+    let mut n = 2;
+    while p.exists() { p = base.join(format!("{stamp}-{n}")); n += 1; }
     std::fs::create_dir_all(p.join(".chronicle")).map_err(|e| format!("Chronicle couldn't make the benchmark project: {e}."))?;
     std::fs::write(p.join("chronicle.json"), "{ \"name\": \"design-bench\", \"phases\": [] }\n").map_err(|e| format!("Chronicle couldn't make the benchmark project: {e}."))?;
     p.canonicalize().map_err(|e| format!("Chronicle couldn't make the benchmark project: {e}."))
@@ -73,6 +77,78 @@ pub fn write_results(repo: &Path, name: &str, json: &Value, md: &str) -> Result<
     std::fs::write(&j, serde_json::to_string_pretty(json).map_err(|e| e.to_string())?).map_err(|e| format!("Chronicle couldn't save the results: {e}."))?;
     std::fs::write(&m, md).map_err(|e| format!("Chronicle couldn't save the results: {e}."))?;
     Ok((j, m))
+}
+
+/// Copy a Claude Design export (`src`, a folder) into a design so Chronicle's capture window
+/// renders it like any design: top-level `.html` files go to `frames/`, everything else to
+/// `assets/` under its own relative path. No file is rewritten. `design.json`'s frames become
+/// one 1440 × 900 frame per HTML file. Both folders are emptied first. → the frame count.
+pub fn stage_reference(src: &Path, design: &Path) -> Result<u32, String> {
+    if !src.is_dir() { return Err("That reference isn't a folder.".into()) }
+    let (frames, assets) = (design.join("frames"), design.join("assets"));
+    for d in [&frames, &assets] {
+        let _ = std::fs::remove_dir_all(d);
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    let mut html: Vec<String> = Vec::new();
+    let mut stack = vec![PathBuf::new()];
+    while let Some(rel) = stack.pop() {
+        for e in std::fs::read_dir(src.join(&rel)).map_err(|e| e.to_string())?.flatten() {
+            let md = match e.path().symlink_metadata() { Ok(m) => m, Err(_) => continue };
+            let name = e.file_name().to_string_lossy().into_owned();
+            if md.file_type().is_symlink() || name.starts_with('.') { continue }
+            let r = rel.join(&name);
+            if md.is_dir() { stack.push(r); continue }
+            let top_html = rel.as_os_str().is_empty() && name.to_ascii_lowercase().ends_with(".html");
+            let to = if top_html { frames.join(&name) } else { assets.join(&r) };
+            if let Some(parent) = to.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+            std::fs::copy(e.path(), &to).map_err(|e| format!("{name} couldn't be copied: {e}."))?;
+            if top_html { html.push(name); }
+        }
+    }
+    html.sort();
+    let mut ids: Vec<String> = Vec::new();
+    let frames_json: Vec<Value> = html.iter().map(|name| {
+        let stem = &name[..name.len() - ".html".len()];
+        let mut id: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).take(72).collect();
+        if id.is_empty() { id = "frame".into(); }
+        let (base, mut n) = (id.clone(), 2);
+        while ids.contains(&id) { id = format!("{base}-{n}"); n += 1; }
+        ids.push(id.clone());
+        serde_json::json!({ "id": id, "file": format!("frames/{name}"), "label": stem, "width": 1440, "height": 900, "group": "breakpoints" })
+    }).collect();
+    let path = design.join("design.json");
+    let mut v: Value = std::fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| serde_json::json!({ "v": 1 }));
+    if !v.is_object() { v = serde_json::json!({ "v": 1 }); }
+    v["frames"] = Value::Array(frames_json);
+    std::fs::write(&path, serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(html.len() as u32)
+}
+
+const PICTURES: [&str; 4] = ["png", "jpg", "jpeg", "webp"];
+
+/// Copy pictures into `<design>/refs/<side>/` under neutral names `1.<ext>`, `2.<ext>`, …,
+/// emptying that side first, so a judge never learns where a picture came from.
+/// → the design-relative paths.
+pub fn stage_side(design: &Path, side: &str, paths: &[PathBuf]) -> Result<Vec<String>, String> {
+    if side != "A" && side != "B" { return Err("The side must be A or B.".into()) }
+    let mut checked = Vec::new();
+    for p in paths {
+        let md = p.symlink_metadata().map_err(|_| format!("{} isn't there.", p.display()))?;
+        let ext = p.extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase).unwrap_or_default();
+        if !md.is_file() || !PICTURES.contains(&ext.as_str()) { return Err(format!("{} isn't a picture Chronicle stages.", p.display())) }
+        checked.push((p, ext));
+    }
+    let dir = design.join("refs").join(side);
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for (i, (p, ext)) in checked.into_iter().enumerate() {
+        let name = format!("{}.{ext}", i + 1);
+        std::fs::copy(p, dir.join(&name)).map_err(|e| format!("A picture couldn't be copied: {e}."))?;
+        out.push(format!("refs/{side}/{name}"));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -103,5 +179,50 @@ mod tests {
         let repo = std::env::temp_dir().join(format!("chronicle-benchrepo-{}", std::process::id()));
         let (j, m) = write_results(&repo, "0.12.0-2026-10-01", &serde_json::json!({ "briefs": [] }), "# Results\n").unwrap();
         assert!(j.ends_with("bench/design/results/0.12.0-2026-10-01.json") && m.exists());
+    }
+    #[test]
+    fn a_bench_project_asked_for_twice_in_one_second_is_two_folders() {
+        let cfg = std::env::temp_dir().join(format!("chronicle-benchtwice-{}", std::process::id())); let _ = std::fs::remove_dir_all(&cfg);
+        let a = bench_project(&cfg, "2026-10-01T10-00-00").unwrap();
+        let b = bench_project(&cfg, "2026-10-01T10-00-00").unwrap();
+        assert_ne!(a, b); assert!(b.ends_with("2026-10-01T10-00-00-2"));
+    }
+    #[test]
+    fn a_reference_export_is_staged_as_frames_and_assets_without_rewriting() {
+        let t = std::env::temp_dir().join(format!("chronicle-stageref-{}", std::process::id())); let _ = std::fs::remove_dir_all(&t);
+        let (src, design) = (t.join("ref"), t.join("design"));
+        std::fs::create_dir_all(src.join("img")).unwrap(); std::fs::create_dir_all(design.join("frames")).unwrap();
+        std::fs::write(src.join("Home Page.html"), "<img src=img/a.png>").unwrap();
+        std::fs::write(src.join("checkout.html"), "x").unwrap();
+        std::fs::write(src.join("style.css"), "body{}").unwrap();
+        std::fs::write(src.join("img/a.png"), "png").unwrap();
+        std::fs::write(src.join("img/deep.html"), "not a frame").unwrap();
+        std::fs::write(design.join("frames/old.html"), "old").unwrap();
+        std::fs::write(design.join("design.json"), r#"{"v":1,"title":"Ref","kind":"app","frames":[{"id":"old"}]}"#).unwrap();
+        assert_eq!(stage_reference(&src, &design).unwrap(), 2);
+        assert_eq!(std::fs::read_to_string(design.join("frames/Home Page.html")).unwrap(), "<img src=img/a.png>");
+        assert!(!design.join("frames/old.html").exists());
+        assert!(design.join("assets/style.css").is_file() && design.join("assets/img/a.png").is_file() && design.join("assets/img/deep.html").is_file());
+        let d: Value = serde_json::from_str(&std::fs::read_to_string(design.join("design.json")).unwrap()).unwrap();
+        assert_eq!(d["title"], "Ref");
+        assert_eq!(d["frames"], serde_json::json!([
+            { "id": "Home-Page", "file": "frames/Home Page.html", "label": "Home Page", "width": 1440, "height": 900, "group": "breakpoints" },
+            { "id": "checkout", "file": "frames/checkout.html", "label": "checkout", "width": 1440, "height": 900, "group": "breakpoints" },
+        ]));
+        assert!(stage_reference(&t.join("missing"), &design).is_err());
+    }
+    #[test]
+    fn pictures_are_staged_under_neutral_names_one_side_at_a_time() {
+        let t = std::env::temp_dir().join(format!("chronicle-stageside-{}", std::process::id())); let _ = std::fs::remove_dir_all(&t);
+        let design = t.join("design"); std::fs::create_dir_all(&design).unwrap();
+        std::fs::write(t.join("home.png"), "a").unwrap(); std::fs::write(t.join("cart.JPG"), "b").unwrap(); std::fs::write(t.join("x.html"), "c").unwrap();
+        assert_eq!(stage_side(&design, "A", &[t.join("home.png"), t.join("cart.JPG")]).unwrap(), vec!["refs/A/1.png", "refs/A/2.jpg"]);
+        assert_eq!(std::fs::read_to_string(design.join("refs/A/2.jpg")).unwrap(), "b");
+        assert_eq!(stage_side(&design, "A", &[t.join("cart.JPG")]).unwrap(), vec!["refs/A/1.jpg"]);
+        assert!(!design.join("refs/A/2.jpg").exists() && !design.join("refs/A/1.png").exists());
+        assert!(stage_side(&design, "C", &[]).is_err());
+        assert!(stage_side(&design, "B", &[t.join("x.html")]).is_err());
+        assert!(stage_side(&design, "B", &[t.join("nope.png")]).is_err());
+        assert!(stage_side(&design, "B", &[t.clone()]).is_err());
     }
 }

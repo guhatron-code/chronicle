@@ -99,7 +99,7 @@ import { runDesignBench, type BenchArgs, type BenchDeps, type Brief, type Verdic
 import { questionsPending, type ReviewState } from "@/lib/design-review-model";
 import {
   designBenchBriefs, designBenchProject, designBenchWrite, designCapture, designCreate, designFileRead, designLintCurrent,
-  designReviewSettingsSet, designRootPath, listDir,
+  designBenchStage, designBenchStageReference, designReviewSettingsSet, designRootPath, listDir,
 } from "@/lib/ipc";
 import { getVersion } from "@tauri-apps/api/app";
 import { continuePrompt } from "@/lib/design-prompts";
@@ -187,19 +187,22 @@ function undoChord(k: MenuKey) {
 
 /* ---- the design benchmark's real deps (the runner itself is pure: src/lib/design-bench.ts) ---- */
 
-/** Watches `check` on every store change and on an `every()` cadence, until it settles. */
-function watchUntil<T>(subscribe: (cb: () => void) => () => void, check: () => T | undefined): Promise<T> {
+/** Watches `check` on every store change and on an `every()` cadence until it gives a value;
+ *  past `deadline` (ms) it rejects with `late`. */
+function watchUntil<T>(subscribe: (cb: () => void) => () => void, check: () => T | undefined, deadline?: number, late?: string): Promise<T> {
   return new Promise((resolve, reject) => {
+    const started = Date.now();
     let un: () => void = () => {};
     let stop: () => void = () => {};
     let done = false;
+    const finish = (f: () => void) => { done = true; un(); stop(); f(); };
     const run = () => {
       if (done) return;
       try {
         const v = check();
-        if (v === undefined) return;
-        done = true; un(); stop(); resolve(v);
-      } catch (e) { done = true; un(); stop(); reject(e); }
+        if (v !== undefined) finish(() => resolve(v));
+        else if (deadline != null && Date.now() - started > deadline) finish(() => reject(new Error(late ?? "That took too long.")));
+      } catch (e) { finish(() => reject(e)); }
     };
     un = subscribe(run);
     stop = every(2_000, run);
@@ -208,6 +211,8 @@ function watchUntil<T>(subscribe: (cb: () => void) => () => void, check: () => T
 }
 
 const SETTLED = new Set<ReviewState["phase"]>(["done", "below-bar", "stopped"]);
+const JUDGE_DEADLINE = 15 * 60_000;
+const DESIGN_KINDS = ["app", "marketing", "deck", "brand", "ecommerce"] as const;
 
 /** The design lane of `dir` errored out: nothing more will come of this turn. */
 function laneFailed(dir: string): string | null {
@@ -215,10 +220,12 @@ function laneFailed(dir: string): string | null {
   return s.phase === "error" || s.phase === "needs-login" ? s.errorMessage ?? "The design session stopped." : null;
 }
 
+const watchDesignsAndAgent = (cb: () => void) => { const a = subscribeDesigns(cb); const b = subscribeAgent(cb); return () => { a(); b(); }; };
+
 /** Resolves on done / below-bar / stopped, on questions waiting for answers, and on a
  *  critique that never came back (it would otherwise wait out the bridge). */
 function waitSettled(dir: string, slug: string): Promise<ReviewState> {
-  return watchUntil((cb) => { const a = subscribeDesigns(cb); const b = subscribeAgent(cb); return () => { a(); b(); }; }, () => {
+  return watchUntil(watchDesignsAndAgent, () => {
     const p = designProjectFor(dir);
     if (p.active !== slug) return undefined;
     const ph = p.review.phase;
@@ -228,46 +235,61 @@ function waitSettled(dir: string, slug: string): Promise<ReviewState> {
   });
 }
 
-/** The judge: a second throwaway project whose design lane compares two capture sets
- *  blind. Its one design exists only so the lane has a design to work in — it is created
- *  without a brief, so no design turn runs for it, and its review loop is off. */
-const judges = new Map<string, Promise<{ dir: string; slug: string; root: string }>>();
-function judgeFor(benchDir: string, open: (dir: string) => Promise<void>) {
-  let j = judges.get(benchDir);
-  if (!j) {
-    j = (async () => {
-      const dir = await designBenchProject();
-      if (dir === benchDir) throw new Error("The judge's project came out the same as the benchmark's; run it again.");
-      await open(dir);
-      await designReviewSettingsSet(dir, "project", null, { critique: false, lint: false });
-      const slug = await designCreate(dir, "app", "Judge", "Judges benchmark designs blind.");
-      await loadDesigns(dir);
-      await openDesign(dir, slug);
-      return { dir, slug, root: (await designRootPath(dir)).replace(/\/+$/, "") };
-    })();
-    judges.set(benchDir, j);
-    j.catch(() => judges.delete(benchDir));
-  }
-  return j;
+/** How the benchmark uses the app's projects: opened without a recents entry or a switch,
+ *  closed when the run ends, and the calling project brought back. */
+interface BenchHost { open: (dir: string) => Promise<void>; close: (dir: string) => void; back: (dir: string, closed: string[]) => void }
+interface Judge { dir: string; slug: string; root: string }
+
+/** The judge: a second throwaway project. Its "Judge" design gives the lane a design to work
+ *  in (made without a brief, so no design turn runs for it, and its review loop is off); each
+ *  reference export is staged as a design of its own there and captured like ours. */
+async function makeJudge(open: (dir: string) => Promise<void>): Promise<Judge> {
+  const dir = await designBenchProject();
+  await open(dir);
+  await designReviewSettingsSet(dir, "project", null, { critique: false, lint: false });
+  const slug = await designCreate(dir, "app", "Judge", "Judges benchmark designs blind.");
+  await loadDesigns(dir);
+  await openDesign(dir, slug);
+  return { dir, slug, root: (await designRootPath(dir)).replace(/\/+$/, "") };
+}
+
+/** The brief's Claude Design export, rendered by Chronicle's capture window: null when the
+ *  brief has none, [] when it didn't render. */
+async function referenceCaptures(repo: string, id: string, judge: () => Promise<Judge>): Promise<string[] | null> {
+  const rel = `bench/design/reference/${id}`;
+  const files = await listDir(repo, rel).catch(() => []);
+  if (!files.some((f) => !f.name.startsWith("."))) return null;
+  const j = await judge();
+  const prefix = id.split("-")[0];
+  const kind = DESIGN_KINDS.find((k) => k === prefix) ?? "app";
+  const slug = await designCreate(j.dir, kind, `Reference ${id}`, "");
+  const frames = await designBenchStageReference(j.dir, slug, `${repo.replace(/\/+$/, "")}/${rel}`);
+  return frames === 0 ? [] : designCapture(j.dir, slug);
 }
 
 function judgePrompt(b: Brief, a: string[], bb: string[], out: string): string {
-  const list = (xs: string[]) => (xs.length ? xs.map((x) => `- ${x}`).join("\n") : "- (no pictures)");
+  const list = (xs: string[]) => xs.map((x) => `- ${x}`).join("\n");
   return [
     "You are judging two designs of the same brief, blind. Do not design anything and do not ask questions.",
     "", `The brief (${b.kind}): ${b.brief}`,
-    "", "Design A:", list(a), "", "Design B:", list(bb),
-    "", "Open every file of both. Judge them as an art director would: does it answer the brief, hierarchy, type, colour, craft, accessibility, copy.",
+    "", "Both A and B are pictures of a design for that brief, in this design's folder:",
+    "", "Design A (refs/A/):", list(a), "", "Design B (refs/B/):", list(bb),
+    "", "Look at every picture of both. Judge them as an art director would: does it answer the brief, hierarchy, type, colour, craft, accessibility, copy.",
     `Then write ${out} as JSON: { "winner": "A" or "B", "reasons": ["three short reasons"] } — and nothing else.`,
   ].join("\n");
 }
 
-async function judgeBlind(benchDir: string, b: Brief, a: string[], bb: string[], open: (dir: string) => Promise<void>): Promise<Verdict> {
-  const j = await judgeFor(benchDir, open);
+async function judgeBlind(j: Judge, b: Brief, a: string[], bb: string[]): Promise<Verdict> {
+  const ra = await designBenchStage(j.dir, j.slug, "A", a);
+  const rb = await designBenchStage(j.dir, j.slug, "B", bb);
   const rel = `verdict-${b.id}.json`;
-  await sendDesignMessage(j.dir, judgePrompt(b, a, bb, `${j.root}/${j.slug}/${rel}`), j.slug);
+  await sendDesignMessage(j.dir, judgePrompt(b, ra, rb, `${j.root}/${j.slug}/${rel}`), j.slug);
   const key = laneKey(j.dir, "design");
-  await watchUntil(subscribeAgent, () => (agentSessionFor(key).turnActive ? undefined : true));
+  await watchUntil(subscribeAgent, () => {
+    const failed = laneFailed(j.dir);
+    if (failed) throw new Error(failed);
+    return agentSessionFor(key).turnActive ? undefined : true;
+  }, JUDGE_DEADLINE, "The judge didn't answer in time.");
   const raw = await designFileRead(j.dir, j.slug, rel);
   let v: unknown = null;
   try { v = raw ? JSON.parse(raw) : null; } catch { v = null; }
@@ -277,15 +299,15 @@ async function judgeBlind(benchDir: string, b: Brief, a: string[], bb: string[],
   return { winner: o.winner, reasons };
 }
 
-/** A Claude Design export of the brief, if one was put in `bench/design/reference/<id>/`. */
-async function referenceFiles(repo: string, id: string): Promise<string[] | null> {
-  const rel = `bench/design/reference/${id}`;
-  const files = await listDir(repo, rel).catch(() => []);
-  const out = files.filter((f) => !f.is_dir && !f.name.startsWith(".")).map((f) => `${repo.replace(/\/+$/, "")}/${rel}/${f.name}`);
-  return out.length ? out : null;
-}
-
-async function runBench(repo: string, args: BenchArgs, open: (dir: string) => Promise<void>) {
+/** One benchmark run from `repo`: every project it opens is closed when it ends, however it ends. */
+async function runBench(repo: string, args: BenchArgs, host: BenchHost) {
+  const opened: string[] = [];
+  const open = async (dir: string) => { await host.open(dir); opened.push(dir); };
+  let judge: Promise<Judge> | null = null;
+  const judgeOnce = () => {
+    if (!judge) { judge = makeJudge(open); judge.catch(() => { judge = null; }); }
+    return judge;
+  };
   const deps: BenchDeps = {
     briefs: designBenchBriefs,
     project: designBenchProject,
@@ -295,15 +317,21 @@ async function runBench(repo: string, args: BenchArgs, open: (dir: string) => Pr
     waitSettled,
     state: designProjectFor,
     setSettings: (dir, patch) => designReviewSettingsSet(dir, "project", null, patch),
-    judge: (dir, b, a, bb) => judgeBlind(dir, b, a, bb, open),
-    referenceCaptures: referenceFiles,
+    judge: async (_dir, b, a, bb) => judgeBlind(await judgeOnce(), b, a, bb),
+    referenceCaptures: (r, id) => referenceCaptures(r, id, judgeOnce),
     write: async (r, name, json, md) => { await designBenchWrite(r, name, json, md); },
     version: await getVersion(),
     now: Date.now,
     capture: (dir, slug) => designCapture(dir, slug),
     cost: (dir) => agentSessionFor(laneKey(dir, "design")).cost,
   };
-  return runDesignBench(deps, repo, args);
+  try {
+    return await runDesignBench(deps, repo, args);
+  } finally {
+    // back first: a close of the project on screen would otherwise pick some other project
+    host.back(repo, opened);
+    for (const dir of opened) host.close(dir);
+  }
 }
 
 export default function App() {
@@ -618,7 +646,24 @@ function AppShell() {
     return () => window.removeEventListener("chronicle:open-setup", on);
   }, []);
 
-  const doOpenProject = useCallback((path: string): Promise<void> => {
+  /** `transient`: the benchmark's throwaway projects — no recents entry, no switch to it,
+   *  no pane change; the benchmark closes them itself when it ends. */
+  const doOpenProject = useCallback((path: string, opts?: { transient?: boolean }): Promise<void> => {
+    if (opts?.transient) {
+      if (projectsRef.current.has(path)) return Promise.resolve();
+      return openProject(path).then(async (p) => {
+        const dir = (p as { dir?: string } | null)?.dir ?? path;
+        await removeRecent(dir).catch(() => {});
+        setProjects((prev) => {
+          if (prev.has(dir)) return prev;
+          const next = new Map(prev);
+          next.set(dir, { dir, name: dir.split("/").filter(Boolean).pop() ?? dir, state: null, partOf: null, updated: false });
+          return next;
+        });
+        void pollOne(dir);
+        void watchProject(dir).catch(() => {});
+      });
+    }
     if (projectsRef.current.has(path)) {
       // already open — just foreground it, keep whatever pane the user was on
       activate(path);
@@ -1099,10 +1144,19 @@ function AppShell() {
       designCapture,
       designLint: designLintCurrent,
       // the benchmark designs in throwaway projects it opens itself, never in `dir`
-      designBench: (dir, args) => runBench(dir, args, doOpenProject),
+      designBench: (dir, args) => runBench(dir, args, {
+        open: (d) => doOpenProject(d, { transient: true }),
+        close: closeProject,
+        // the run never takes the foreground, but if the window ended up on one of its
+        // projects (or on none), it goes back to the project that asked for the run
+        back: (d, closed) => {
+          const front = activeRef.current;
+          if (projectsRef.current.has(d) && (front == null || closed.includes(front))) activate(d);
+        },
+      }),
     });
     return unmount;
-  }, [doOpenProject, patchLayout, activate]);
+  }, [doOpenProject, closeProject, patchLayout, activate]);
 
   /* ---- the same map, arriving from the native menu (src-tauri/src/menu.rs) ----
      The Web pane's page is a native WKWebView: while it is first responder our

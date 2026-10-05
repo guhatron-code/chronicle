@@ -9,6 +9,11 @@ VERSION="${1:?usage: ./release.sh <version> \"<notes>\"}"
 NOTES="${2:?usage: ./release.sh <version> \"<notes>\"}"
 TAG="v$VERSION"
 
+# 0 · the design benchmark should have been run before this ships: results named for the
+# new version, or for the version being replaced (the app a run used was built from it)
+CURRENT="$(node -p "require('./package.json').version")"
+if ! ls bench/design/results/${VERSION}-*.json >/dev/null 2>&1 && ! ls bench/design/results/${CURRENT}-*.json >/dev/null 2>&1; then echo "No design benchmark results for $VERSION or $CURRENT (run: chronicle designs bench --quick). Continue? [y/N]"; read -r a; [ "$a" = "y" ] || exit 1; fi
+
 # 1 · version stamps (both files must agree)
 python3 - "$VERSION" <<'PYEOF'
 import json, re, sys
@@ -18,9 +23,6 @@ for p in ['package.json', 'src-tauri/tauri.conf.json']:
     s = re.sub(r'"version": "[0-9.]+"', f'"version": "{v}"', s, count=1)
     open(p, 'w').write(s)
 PYEOF
-
-# the design benchmark should have been run on this version before it ships
-if ! ls bench/design/results/${VERSION}-*.json >/dev/null 2>&1; then echo "No design benchmark results for $VERSION (run: chronicle designs bench --quick). Continue? [y/N]"; read -r a; [ "$a" = "y" ] || exit 1; fi
 
 # 2 · signed + notarized build with updater artifacts
 source .sign.env
