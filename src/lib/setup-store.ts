@@ -22,7 +22,7 @@ import { every } from "./scheduler";
 
 /** The row order + plain-language identity the screen renders. Names live here
  *  so the store, not the JSX, is the source of truth for what each check is. */
-export const CHECK_META: { id: string; name: string; blurb: string; kind: "claude" | "node" | "signin" | "path" | "github" | "skills" | "agents" }[] = [
+export const CHECK_META: { id: string; name: string; blurb: string; kind: "claude" | "node" | "signin" | "path" | "github" | "skills" | "agents" | "browser" | "design_skills" }[] = [
   { id: "claude", name: "The AI that does the work", blurb: "Claude Code — the assistant that writes and edits your project.", kind: "claude" },
   { id: "claude_signin", name: "Sign in to Claude", blurb: "So the AI can start working on your behalf.", kind: "signin" },
   { id: "node", name: "The engine the AI runs on", blurb: "The background software the AI needs to do its work.", kind: "node" },
@@ -30,12 +30,17 @@ export const CHECK_META: { id: string; name: string; blurb: string; kind: "claud
   { id: "github", name: "Your projects' online home", blurb: "Where your projects live online, so you can publish and share them.", kind: "github" },
   { id: "superpowers", name: "Extra skills for the AI", blurb: "Extra abilities that make the AI better at bigger jobs.", kind: "skills" },
   { id: "agents", name: "Let agents reach Chronicle", blurb: "Claude Code in this project can read and write its notes, see the roadmap, read this project's terminal output, and start rounds you watch.", kind: "agents" },
+  { id: "design_browser", name: "A browser for checking designs", blurb: "Opens each design the way a visitor would and checks contrast and tap sizes. Downloaded once.", kind: "browser" },
+  { id: "design_skills", name: "Design skills", blurb: "The director’s taste and review rules, including shopping-page guidelines.", kind: "design_skills" },
 ];
 
 /** The machine-wide prerequisites the first-launch gate and the "all set" celebration
  *  require. "agents" is excluded on purpose: it is a per-project opt-in that needs an
  *  open project to even ask about, so it must never block reaching one. */
-const REQUIRED_META = CHECK_META.filter((c) => c.kind !== "agents");
+const REQUIRED_META = CHECK_META.filter((c) => c.kind !== "agents" && c.kind !== "browser" && c.kind !== "design_skills");
+
+/** The Design pane's own rows: shown as a group of their own, never required. */
+export const DESIGN_META = CHECK_META.filter((c) => c.kind === "browser" || c.kind === "design_skills");
 
 export interface DoctorState {
   checks: Map<string, SetupCheck>;

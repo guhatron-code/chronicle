@@ -44,3 +44,10 @@ describe("agentsRowFor", () => {
     });
   });
 });
+
+it("the Design rows exist, are never required, and do not count toward ready", async () => {
+  const m = await import("./setup-store");
+  expect(m.CHECK_META.map((c) => c.id)).toEqual(expect.arrayContaining(["design_browser", "design_skills"]));
+  expect(m.totalRequired()).toBe(6);
+  expect(m.DESIGN_META.map((c) => c.id)).toEqual(["design_browser", "design_skills"]);
+});

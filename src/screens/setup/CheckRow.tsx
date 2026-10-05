@@ -33,6 +33,19 @@ function KindIcon({ kind }: { kind: string }) {
         <path d="M8 8v4.8M6.2 10.4 8 12.4l1.8-2" />
       </svg>
     );
+  if (kind === "browser")
+    return (
+      <svg {...common} strokeWidth="1.3" className="text-text-subtle">
+        <rect x="1.8" y="2.5" width="12.4" height="9" rx="1.2" />
+        <path d="M5.5 14h5" />
+      </svg>
+    );
+  if (kind === "design_skills")
+    return (
+      <svg {...common} strokeWidth="1.3" className="text-text-subtle">
+        <path d="m2.5 13.5 8-8M9 4l1-1 3 3-1 1M12 1.5v1.5M14.5 4H13M3.5 3v2M2.5 4h2" />
+      </svg>
+    );
   if (kind === "agents")
     return (
       <svg {...common} strokeWidth="1.4" className="text-text-subtle">
@@ -78,6 +91,12 @@ function StateWord({ check }: { check: SetupCheck }) {
         couldn't finish
       </span>
     );
+  if (s === "missing" && check.action === "")
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12.5px] text-state-error">
+        <span className="size-1.5 shrink-0 rounded-full bg-state-error" />not bundled
+      </span>
+    );
   if (s === "needs_you" || s === "missing")
     return (
       <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[12.5px] text-state-error">
@@ -115,6 +134,9 @@ export function CheckRow({
   const failed = check.state === "couldnt_finish";
   const waiting = waitingSignin(check.id);
   const detail = check.detail || meta.blurb;
+  // a ready skills row names what shipped (mono); a missing one with nothing to
+  // install says why in plain text, beside "not bundled"
+  const monoDetail = meta.kind === "design_skills" && check.state === "ready" && !!check.detail;
 
   return (
     <div className="flex items-start gap-[15px] border-t border-divider py-[15px] first:border-t-0" data-check-row={check.id} data-check-state={check.state}>
@@ -123,7 +145,7 @@ export function CheckRow({
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="text-[13px] font-medium text-text-primary">{meta.name}</div>
-        <div className={cn("text-[12px] leading-snug", failed ? "text-text-secondary" : "text-text-dim")}>{detail}</div>
+        <div className={cn("leading-snug", monoDetail ? "font-mono text-[11.5px] text-text-subtle" : "text-[12px]", !monoDetail && (failed || (check.state === "missing" && check.action === "") ? "text-text-secondary" : "text-text-dim"))}>{detail}</div>
         {installing && (
           <div className="mt-0.5 flex items-center gap-2.5">
             <span className="block h-[3px] flex-1 overflow-hidden rounded-[2px] bg-fill-hover">
