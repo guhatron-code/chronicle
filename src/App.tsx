@@ -14,7 +14,7 @@ import { CommandPalette, type PaletteProject } from "@/overlays/CommandPalette";
 import { ConfirmDialog, type ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { NewProjectDialog } from "@/overlays/NewProjectDialog";
 import { ShortcutsOverlay } from "@/overlays/ShortcutsOverlay";
-import { ChronicleToaster, toastSuccess, toastError } from "@/overlays/toasts";
+import { ChronicleToaster, toastSuccess, toastError, toastAction } from "@/overlays/toasts";
 import {
   agentsAvailable,
   createProject,
@@ -92,10 +92,13 @@ import type { HelpTarget } from "@/lib/help-content";
 import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/lib/setup-store";
 import { AgentPane } from "@/screens/agent/AgentPane";
 import { agentLive, agentSessionFor, laneKey, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent } from "@/lib/agent-session";
-import { evictDesignProject } from "@/lib/design-store";
+import { evictDesignProject, sendDesignMessage } from "@/lib/design-store";
+import { continuePrompt } from "@/lib/design-prompts";
+import { dropRemindersWhenAllowed, loadReminders, startReminderTicker } from "@/lib/reminders";
+import { limitsReading, subscribeLimits } from "@/lib/limits-store";
 import { startRoundInTerminal } from "@/lib/round-run";
 import { mountAgentBridge } from "@/lib/agent-bridge";
-import { agentBridgeReady, agentSessionStop, readFileText } from "@/lib/ipc";
+import { agentBridgeReady, agentSessionStop, notifyNative, readFileText } from "@/lib/ipc";
 import { openAgentReview } from "@/screens/repo/RepoPane";
 import { copyText, githubClone, githubRepos, initStatus, launchOpenDir, openUrl, unwatchProject, watchProject, type GithubRepo } from "@/lib/ipc";
 import type { StateData } from "@/lib/ipc";
@@ -463,6 +466,22 @@ function AppShell() {
      failed open must not be reported as opened). The toast is still raised
      here, so a UI caller can ignore the rejection: `openFromUi` below is that
      door, and every button goes through it. */
+  /* the usage-limit reminder: a ticker that fires due reminders, a pane event
+     the thread card uses to reveal the Web pane, and a cleared limit drops them */
+  useEffect(() => startReminderTicker({
+    now: Date.now,
+    focused: () => document.hasFocus(),
+    toast: toastAction,
+    notify: notifyNative,
+    continueDesign: (dir, slug) => sendDesignMessage(dir, continuePrompt(), slug),
+  }), []);
+  useEffect(() => subscribeLimits(() => dropRemindersWhenAllowed(limitsReading()?.status ?? null)), []);
+  useEffect(() => {
+    const on = (e: Event) => { if ((e as CustomEvent).detail === "web") goPane("web"); };
+    window.addEventListener("chronicle:show-pane", on);
+    return () => window.removeEventListener("chronicle:show-pane", on);
+  }, [goPane]);
+
   const doOpenProject = useCallback((path: string): Promise<void> => {
     if (projectsRef.current.has(path)) {
       // already open — just foreground it, keep whatever pane the user was on
@@ -489,6 +508,7 @@ function AppShell() {
         setPane("road");
         activate(dir);
         void pollOne(dir);
+        void loadReminders(dir).catch(() => {});
         void watchProject(dir).catch(() => {}); // freshness: fs events poll immediately
         refreshPicker();
       })

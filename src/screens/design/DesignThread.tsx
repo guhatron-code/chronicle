@@ -9,6 +9,8 @@ import { designOutsideUndo } from "@/lib/ipc";
 import { limitsReading, subscribeLimits, fmtResetTime } from "@/lib/limits-store";
 import { designProjectFor, subscribeDesigns } from "@/lib/design-store";
 import { toastError } from "@/overlays/toasts";
+import { addReminder, remindersFor, subscribeReminders } from "@/lib/reminders";
+import { newTab } from "@/lib/web-store";
 
 export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
   dir: string;
@@ -35,6 +37,8 @@ export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
   const limits = limitsReading();
   const p = designProjectFor(dir);
   const latest = p.versions[0]?.n;
+  useEffect(() => subscribeReminders(() => bump((n) => n + 1)), []);
+  const reminded = !!p.active && remindersFor(dir).some((r) => r.slug === p.active);
   return (
     <div className="flex w-[392px] min-w-[320px] shrink flex-col border-l border-border-hairline bg-surface-panel">
       {s.outside.length > 0 && (
@@ -59,6 +63,23 @@ export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
             {limits.resetsAt != null ? `It resets at ${fmtResetTime(limits.resetsAt)}.` : "It resets soon."}
             {latest ? ` Everything up to v${latest} is saved.` : ""} Send your next message then.
           </span>
+          <div className="flex items-center gap-3">
+            <button className="text-[11.5px] text-text-secondary hover:text-text-primary disabled:opacity-40"
+              disabled={limits.resetsAt == null || !p.active || reminded}
+              onClick={() => {
+                if (limits.resetsAt == null || !p.active) return;
+                const title = p.rows.find((r) => r.slug === p.active)?.title ?? p.design?.title ?? p.active;
+                void addReminder({ dir, slug: p.active, title, version: latest ?? null, at: limits.resetsAt })
+                  .catch((e) => toastError("Couldn't set the reminder", String(e).slice(0, 90)));
+              }}>
+              {reminded ? "Reminder set" : limits.resetsAt != null ? `Remind me at ${fmtResetTime(limits.resetsAt)}` : "Remind me"}
+            </button>
+            <button className="text-[11.5px] text-text-secondary hover:text-text-primary"
+              onClick={() => {
+                void newTab(dir, "https://claude.ai/settings/usage");
+                window.dispatchEvent(new CustomEvent("chronicle:show-pane", { detail: "web" }));
+              }}>Open plan settings</button>
+          </div>
         </div>
       )}
       <div className="flex min-h-0 flex-1 flex-col">
