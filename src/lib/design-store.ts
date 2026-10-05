@@ -1,15 +1,30 @@
 /* The Design pane's state per project: the design list, the open design, how each
-   frame rendered, the user's undo stack, and the glue that turns a finished design
-   turn into a version. Mirrors notes-store: module Maps, one subscribe, no React. */
+   frame rendered, the user's undo stack, and the review loop — every design turn end
+   becomes a version, goes through the gate and the critique, and the store sends the
+   next step. Mirrors notes-store: module Maps, one subscribe, no React. */
 import {
   designsList, designRead, designFrameBase, designVersions, designCanvasSave, designRename, designSetKind,
-  designTrash, designUntrash, designsOrderSave, designCreate, designSnapshot, designThumbnails, onDesignsChanged,
-  designRestore, designBranch, designRootPath, type VersionMeta,
+  designTrash, designUntrash, designsOrderSave, designCreate, designSnapshot, onDesignsChanged,
+  designRestore, designBranch, designRootPath, designContextFiles, designReviewVersion, designLintRead,
+  designReviewSettings, designReviewSettingsSet, designReviewState, designReviewStateSet, designQuestionsAnswer,
+  designCritiqueRead, designFileRead, designVersionMark, type VersionMeta,
 } from "./ipc";
 import { parseDesign, type CanvasFile, type Design, type DesignKind, type DesignRow } from "./design-model";
 import {
-  laneKey, agentSessionFor, subscribeAgent, sendAgentMessage, startAgentSession, resumeAgentSession, type AgentEntry,
+  laneKey, agentSessionFor, subscribeAgent, sendAgentMessage, startAgentSession, resumeAgentSession, cancelAgentTurn,
+  type AgentEntry,
 } from "./agent-session";
+import {
+  DEFAULT_SETTINGS, initialReviewState, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings,
+  parseTokens, questionsPending, type CritiqueRound, type Finding, type LintReport, type PromptKind, type Questions,
+  type ReviewSettings, type ReviewState, type TokensPlan,
+} from "./design-review-model";
+import { afterTurn, MAX_LINT_PASSES, onAccept, onSend, onStop, resumeAfterRestart } from "./design-loop";
+import {
+  answersMessage, continuePrompt, critiqueFixPrompt, critiquePrompt, fixAllMinorPrompt, fixFindingPrompt,
+  lintFixPrompt, resolveBlockerPrompt, skipMessage,
+} from "./design-prompts";
+import { toastError } from "@/overlays/toasts";
 import { every } from "@/lib/scheduler";
 
 export type FrameState = { kind: "placeholder" } | { kind: "rendering" } | { kind: "rendered"; height: number } | { kind: "failed"; message: string; line: number };
@@ -30,7 +45,36 @@ export interface DesignProject {
   /** bumped on every non-reload `openDesign`; a slower, older call that lands
    *  after a newer one started is dropped instead of clobbering it */
   openToken: number;
+  /** the open design's review loop (`.review/state.json`), persisted on every step */
+  review: ReviewState;
+  /** the effective review settings for the open design (project, then its override) */
+  settings: ReviewSettings;
+  /** the open design's own override, null when it follows the project */
+  settingsScope: { design: Partial<ReviewSettings> | null };
+  /** the director's files: its questions form and its token plan */
+  questions: Questions | null;
+  tokens: TokensPlan | null;
+  /** every critique round so far, round 1 first */
+  critiques: CritiqueRound[];
+  /** the gate's report on the newest version */
+  lint: LintReport | null;
+  /** the scorecard is open in the right column */
+  scoreOpen: boolean;
+  /** the finding the canvas outlines, picked from the scorecard */
+  pin: { frame: string; selector: string; text: string } | null;
+  /** the "getting the review tools ready" card shows (Task 15 decides when) */
+  toolsCard: boolean;
+  /** a critique turn ended without its round file */
+  critiqueMissing: boolean;
+  /** the project's context files the prefix names (PRODUCT.md, DESIGN.md); null until the first send */
+  context: string[] | null;
 }
+
+/** The review fields a freshly opened design starts from, before its files are read. */
+const blankReview = () => ({
+  review: initialReviewState(), settings: DEFAULT_SETTINGS, settingsScope: { design: null }, questions: null, tokens: null,
+  critiques: [] as CritiqueRound[], lint: null, scoreOpen: false, pin: null, critiqueMissing: false,
+});
 
 const projects = new Map<string, DesignProject>();
 const subs = new Set<() => void>();
@@ -45,7 +89,11 @@ export function designProjectFor(dir: string): DesignProject {
     // Seed the counter from the design lane's OWN turnEnds — an already-running
     // session's past turns are not new turns this store needs to version.
     const seenTurnEnds = agentSessionFor(laneKey(dir, "design")).turnEnds;
-    p = { rows: [], order: {}, active: null, design: null, canvas: emptyCanvas(), bad: false, frameStates: {}, base: null, rootPath: null, versions: [], reloadTick: 0, undo: [], redo: [], seenTurnEnds, turnSlug: null, openToken: 0, compare: null };
+    p = {
+      rows: [], order: {}, active: null, design: null, canvas: emptyCanvas(), bad: false, frameStates: {}, base: null, rootPath: null,
+      versions: [], reloadTick: 0, undo: [], redo: [], seenTurnEnds, turnSlug: null, openToken: 0, compare: null,
+      ...blankReview(), toolsCard: false, context: null,
+    };
     projects.set(dir, p);
   }
   return p;
@@ -64,9 +112,13 @@ function ensure() {
   void onDesignsChanged((e) => {
     const p = projects.get(e.dir);
     if (!p) return;
+    // The director's own files only feed the thread's cards: reload just those.
+    const director = e.paths.filter(isDirectorFile);
+    if (director.length > 0 && p.active === e.slug) reloadDirectorFiles(e.dir, e.slug, director).catch(() => {});
     // a pan or zoom rewrites canvas.json (via its .tmp sibling) — nothing the
     // list or the open design shows changed
-    if (e.paths.length > 0 && e.paths.every((x) => x === "canvas.json" || x === "canvas.json.tmp")) return;
+    const rest = e.paths.filter((x) => !isDirectorFile(x) && x !== "canvas.json" && x !== "canvas.json.tmp");
+    if (e.paths.length > 0 && rest.length === 0) return;
     loadDesigns(e.dir).catch(() => {});
     if (p.active === e.slug) openDesign(e.dir, e.slug, true).catch(() => {});
   });
@@ -84,15 +136,19 @@ function ensure() {
         // off outside sendDesignMessage).
         const slug = p.turnSlug ?? p.active;
         p.turnSlug = null;
-        if (slug) void snapshotTurn(dir, slug);
+        if (slug) snapshotTurn(dir, slug).catch((e) => toastError("The review stopped", String(e).slice(0, 110)));
       }
     }
   });
 }
 
 /** `root` is the absolute designs folder: in a linked worktree it isn't under the
- *  session's cwd, so a relative `.chronicle/designs/` would name the wrong folder. */
-export const designPrefix = (slug: string, root: string) => `[design: ${slug} · ${root.replace(/\/+$/, "")}/${slug}/]`;
+ *  session's cwd, so a relative `.chronicle/designs/` would name the wrong folder.
+ *  `context` names the project's context files (PRODUCT.md, DESIGN.md) on a second line. */
+export function designPrefix(slug: string, root: string, context: string[]): string {
+  const line = `[design: ${slug} · ${root.replace(/\/+$/, "")}/${slug}/]`;
+  return context.length > 0 ? `${line}\n[context: ${context.join(", ")} — read these first]` : line;
+}
 
 export function summaryOf(entries: AgentEntry[]): string {
   const last = [...entries].reverse().find((e) => e.kind === "assistant") as { text?: string } | undefined;
@@ -101,14 +157,190 @@ export function summaryOf(entries: AgentEntry[]): string {
   return (m ? m[0] : text).trim().slice(0, 200);
 }
 
+/* ---------- reading the director's files ---------- */
+
+const isDirectorFile = (rel: string) => rel === "questions.json" || rel === "tokens.json" || rel.startsWith("critique/");
+/** the bad JSON already toasted, per file — one toast per change, not one per read */
+const badJson = new Map<string, string>();
+
+/** A director-owned JSON file, parsed; absent or unreadable → null, broken JSON → null and one toast. */
+async function readDesignJson(dir: string, slug: string, rel: string): Promise<unknown> {
+  const raw = await designFileRead(dir, slug, rel).catch(() => null);
+  if (raw == null) return null;
+  const key = `${dir}\0${slug}\0${rel}`;
+  try {
+    const v: unknown = JSON.parse(raw);
+    badJson.delete(key);
+    return v;
+  } catch {
+    if (badJson.get(key) !== raw) {
+      badJson.set(key, raw);
+      toastError(`Couldn't read ${rel}`, `${slug}/${rel} isn't valid JSON yet`);
+    }
+    return null;
+  }
+}
+
+const readQuestions = async (dir: string, slug: string) => parseQuestions(await readDesignJson(dir, slug, "questions.json"));
+const readTokens = async (dir: string, slug: string) => parseTokens(await readDesignJson(dir, slug, "tokens.json"));
+const readCritique = (dir: string, slug: string, round: number, bar: number) =>
+  designCritiqueRead(dir, slug, round).then((v) => parseCritique(v, bar, round)).catch(() => null);
+
+/** Every round file from 1 to `rounds`; a missing one is skipped. */
+async function readCritiques(dir: string, slug: string, rounds: number, bar: number): Promise<CritiqueRound[]> {
+  const all = await Promise.all(Array.from({ length: Math.max(0, rounds) }, (_, i) => readCritique(dir, slug, i + 1, bar)));
+  return all.filter((c): c is CritiqueRound => c != null);
+}
+
+/** The gate's stored report on version `n` (`.review/lint/v<n>.json`). */
+const readLint = (dir: string, slug: string, n: number | undefined) =>
+  n == null ? Promise.resolve(null) : designLintRead(dir, slug, `v${n}`).then(parseLint).catch(() => null);
+
+/** The watcher saw the director write some of its files: re-read just those. */
+async function reloadDirectorFiles(dir: string, slug: string, paths: string[]): Promise<void> {
+  const p = designProjectFor(dir);
+  const [questions, tokens, critiques] = await Promise.all([
+    paths.includes("questions.json") ? readQuestions(dir, slug) : p.questions,
+    paths.includes("tokens.json") ? readTokens(dir, slug) : p.tokens,
+    paths.some((x) => x.startsWith("critique/")) ? readCritiques(dir, slug, p.review.round, p.settings.bar) : p.critiques,
+  ]);
+  if (p.active !== slug) return;
+  p.questions = questions; p.tokens = tokens; p.critiques = critiques;
+  notify();
+}
+
+/* ---------- the review state, wherever the design is ---------- */
+
+/** The designs a loop step is running for right now — a reopen never regates under it. */
+const inFlight = new Set<string>();
+const flightKey = (dir: string, slug: string) => `${dir}\0${slug}`;
+
+/** The loop's state and settings for `slug`: the open design's from memory, any other's from disk. */
+async function reviewOf(dir: string, slug: string): Promise<{ review: ReviewState; settings: ReviewSettings }> {
+  const p = designProjectFor(dir);
+  if (p.active === slug) return { review: p.review, settings: p.settings };
+  const [raw, set] = await Promise.all([
+    designReviewState(dir, slug).catch(() => null),
+    designReviewSettings(dir, slug).catch(() => null),
+  ]);
+  return { review: parseReviewState(raw), settings: set ? parseSettings(set.effective) : DEFAULT_SETTINGS };
+}
+
+/** Keeps a step: in memory when the design is open, and on disk always (a restart resumes from it). */
+async function commitReview(dir: string, slug: string, st: ReviewState): Promise<void> {
+  const p = designProjectFor(dir);
+  if (p.active === slug) { p.review = st; notify(); }
+  await designReviewStateSet(dir, slug, st).catch(() => {});
+}
+
+/* ---------- the turn-end path ---------- */
+
+/** The phases a loop is running in; a turn that ends in any other one is only versioned. */
+const LOOPING = new Set<ReviewState["phase"]>(["building", "gate", "fixing", "critique"]);
+/** the thumbnails each gated version rendered, for the critique prompt's captures */
+const thumbsOf = new Map<string, string[]>();
+const thumbKey = (dir: string, slug: string, n: number) => `${dir}\0${slug}\0${n}`;
+
+/** Renders version `n`'s thumbnails and lints it; null when the gate couldn't run at all. */
+async function reviewVersion(dir: string, slug: string, n: number): Promise<LintReport | null> {
+  const r = await designReviewVersion(dir, slug, n).catch(() => null);
+  if (!r) return null;
+  thumbsOf.set(thumbKey(dir, slug, n), r.thumbs);
+  return parseLint(r.lint);
+}
+
+/** A design turn ended: version it, gate it, read what the director wrote, and take the loop's next step. */
 async function snapshotTurn(dir: string, slug: string) {
   const s = agentSessionFor(laneKey(dir, "design"));
+  // read before any await: the next turn end overwrites it
+  const cancelled = s.lastStopReason === "cancelled";
   const n = await designSnapshot(dir, slug, s.lastPrompt, summaryOf(s.entries), s.sessionId ?? "").catch(() => null);
+  await advance(dir, slug, n, cancelled, false);
+}
+
+/** One loop step after a turn end (`n` = the new version, if any) or a restart's regate. */
+async function advance(dir: string, slug: string, n: number | null, cancelled: boolean, regate: boolean): Promise<void> {
   const p = designProjectFor(dir);
-  if (n != null) await designThumbnails(dir, slug, n).catch(() => []);
-  p.versions = await designVersions(dir, slug).catch(() => p.versions);
-  await loadDesigns(dir);
-  notify();
+  const k = flightKey(dir, slug);
+  inFlight.add(k);
+  try {
+    const before = await reviewOf(dir, slug);
+    const looping = LOOPING.has(before.review.phase);
+    const gateOn = n ?? (regate ? before.review.version : null);
+    if (looping && !cancelled && gateOn != null && before.review.phase !== "critique" && p.active === slug) {
+      p.review = { ...p.review, phase: "gate" }; notify();
+    }
+    const lint = gateOn != null ? await reviewVersion(dir, slug, gateOn) : null;
+    const questions = await readQuestions(dir, slug);
+    const critique = before.review.phase === "critique" && !cancelled
+      ? await readCritique(dir, slug, before.review.round, before.settings.bar) : null;
+
+    // decide on the state as it is NOW: a Stop pressed during the gate wins
+    const { review: now, settings } = await reviewOf(dir, slug);
+    let next: ReturnType<typeof afterTurn>["next"] = { kind: "wait" };
+    let state: ReviewState;
+    if (LOOPING.has(now.phase)) {
+      ({ state, next } = afterTurn(now, settings, {
+        version: regate ? now.version : n, questionsPending: questionsPending(questions), lint, critique, cancelled,
+      }));
+    } else {
+      state = { ...now, version: n ?? now.version };
+    }
+    await commitReview(dir, slug, state);
+    const marked = critique ? critique.version ?? state.version : null;
+    if (critique && marked != null) await designVersionMark(dir, slug, marked, critique.weighted, critique.round).catch(() => {});
+
+    if (p.active === slug) {
+      p.questions = questions;
+      if (lint) p.lint = lint;
+      if (critique) p.critiques = [...p.critiques.filter((c) => c.round !== critique.round), critique].sort((a, b) => a.round - b.round);
+      if (next.kind === "critiqueMissing") p.critiqueMissing = true;
+      p.versions = await designVersions(dir, slug).catch(() => p.versions);
+    }
+    await loadDesigns(dir).catch(() => {});
+    notify();
+    if (next.kind === "send") await sendLoopPrompt(dir, slug, next.prompt, { review: state, settings, lint: lint ?? (p.active === slug ? p.lint : null), critique });
+  } finally {
+    inFlight.delete(k);
+  }
+}
+
+/** What a loop prompt is built from: the state it was decided on and what the turn produced. */
+interface LoopCtx { review: ReviewState; settings: ReviewSettings; lint: LintReport | null; critique: CritiqueRound | null }
+
+/** Absolute paths of version `n`'s thumbnails: what the gate rendered, else one per frame of the open design. */
+function capturesFor(dir: string, slug: string, n: number | null): string[] {
+  const p = designProjectFor(dir);
+  if (n == null || !p.rootPath) return [];
+  const root = p.rootPath.replace(/\/+$/, "");
+  const known = thumbsOf.get(thumbKey(dir, slug, n));
+  const rels = known ?? (p.active === slug ? (p.design?.frames ?? []).map((f) => `${slug}/.versions/v${n}/thumbs/${f.id}.png`) : []);
+  return rels.map((r) => `${root}/${r}`);
+}
+
+/** The blocker to resolve: the last round's own sentence, else a finding the last two rounds share, else its first severe one. */
+function blockerOf(critiques: CritiqueRound[]): string | null {
+  const last = critiques.at(-1);
+  if (!last) return null;
+  if (last.blocker) return last.blocker;
+  const texts = (c: CritiqueRound | undefined) => (c?.reviewers ?? []).flatMap((r) => r.findings);
+  const prev = new Set(texts(critiques.at(-2)).map((f) => f.text));
+  const all = texts(last);
+  return (all.find((f) => prev.has(f.text)) ?? all.find((f) => f.severity === "severe") ?? all[0])?.text ?? null;
+}
+
+/** Builds a loop prompt's body and sends it for `slug`. */
+async function sendLoopPrompt(dir: string, slug: string, kind: PromptKind, ctx: LoopCtx): Promise<void> {
+  const p = designProjectFor(dir);
+  await ensurePrefixInputs(dir);
+  const { review, settings } = ctx;
+  let body: string;
+  if (kind === "lintFix") body = lintFixPrompt(ctx.lint ?? { v: 1, version: review.version, at: "", ran: true, problem: null, severe: [], minor: [] }, review.fixPass, MAX_LINT_PASSES);
+  else if (kind === "critique") body = critiquePrompt(review.round, settings.rounds, settings.bar, review.version, capturesFor(dir, slug, review.version));
+  else if (kind === "critiqueFix" && ctx.critique) body = critiqueFixPrompt(ctx.critique);
+  else if (kind === "resolve") body = resolveBlockerPrompt(blockerOf(p.active === slug ? p.critiques : ctx.critique ? [ctx.critique] : []) ?? "the last round's findings");
+  else body = continuePrompt();
+  await sendPrefixed(dir, slug, body, kind, review);
 }
 
 export async function loadDesigns(dir: string): Promise<void> {
@@ -129,6 +361,7 @@ export async function openDesign(dir: string, slug: string, reload = false): Pro
     p.active = slug;
     p.design = null; p.bad = false; p.canvas = emptyCanvas();
     p.frameStates = {}; p.versions = []; p.compare = null;
+    Object.assign(p, blankReview());
     notify();
   }
   if (!p.base) p.base = await designFrameBase(dir);
@@ -148,6 +381,44 @@ export async function openDesign(dir: string, slug: string, reload = false): Pro
   if (reload) p.reloadTick += 1;
   p.versions = await designVersions(dir, slug).catch(() => []);
   notify();
+  await loadReview(dir, slug, reload, token);
+}
+
+/** The open design's review: its state (a fresh open only — mid-loop the store is the
+ *  state's one writer), its settings, the director's files, the newest version's lint,
+ *  and every critique round; then a fresh open resumes a loop a restart interrupted. */
+async function loadReview(dir: string, slug: string, reload: boolean, token: number): Promise<void> {
+  const p = designProjectFor(dir);
+  const stale = () => p.active !== slug || (!reload && token !== p.openToken);
+  const [raw, set] = await Promise.all([
+    reload ? null : designReviewState(dir, slug).catch(() => null),
+    designReviewSettings(dir, slug).catch(() => null),
+  ]);
+  if (stale()) return;
+  if (!reload) { p.review = parseReviewState(raw); p.critiqueMissing = false; }
+  if (set) { p.settings = parseSettings(set.effective); p.settingsScope = { design: set.design ?? null }; }
+  const [questions, tokens, lint, critiques] = await Promise.all([
+    readQuestions(dir, slug), readTokens(dir, slug), readLint(dir, slug, p.versions[0]?.n),
+    readCritiques(dir, slug, p.review.round, p.settings.bar),
+  ]);
+  if (stale()) return;
+  p.questions = questions; p.tokens = tokens; p.lint = lint; p.critiques = critiques;
+  notify();
+  if (!reload) await resumeLoop(dir, slug);
+}
+
+/** After a restart: a loop that was mid-build re-runs the gate on its version; a critique
+ *  that never came back is flagged. A turn still running is left to end on its own. */
+async function resumeLoop(dir: string, slug: string): Promise<void> {
+  const p = designProjectFor(dir);
+  if (["idle", "done", "stopped", "below-bar"].includes(p.review.phase) || inFlight.has(flightKey(dir, slug))) return;
+  const { state, next } = resumeAfterRestart(p.review, agentSessionFor(laneKey(dir, "design")).turnActive);
+  if (next.kind === "regate") {
+    await commitReview(dir, slug, state);
+    await advance(dir, slug, null, false, true);
+  } else if (next.kind === "critiqueMissing") {
+    p.critiqueMissing = true; notify();
+  }
 }
 
 export function frameMessage(dir: string, frameId: string, data: unknown): void {
@@ -288,6 +559,21 @@ function waitForReady(key: string, ms: number): Promise<void> {
 export async function sendDesignMessage(dir: string, text: string, forSlug?: string): Promise<void> {
   const p = designProjectFor(dir); const slug = forSlug ?? p.active;
   if (!slug) throw new Error("Pick a design first.");
+  await sendPrefixed(dir, slug, text, "user");
+}
+
+/** The prefix's inputs, read once per project: the designs folder and the context files. */
+async function ensurePrefixInputs(dir: string): Promise<void> {
+  const p = designProjectFor(dir);
+  if (!p.rootPath) p.rootPath = await designRootPath(dir);
+  if (p.context == null) p.context = await designContextFiles(dir).catch(() => []);
+}
+
+/** Every design-lane send: starts the lane if it has to, records the send as a loop step
+ *  (`onSend`, persisted), and sends `body` behind the design prefix. A send that fails
+ *  puts the step back — no turn started, so no turn end will ever take it. */
+async function sendPrefixed(dir: string, slug: string, body: string, kind: PromptKind, from?: ReviewState): Promise<void> {
+  const p = designProjectFor(dir);
   const key = laneKey(dir, "design");
   const s = agentSessionFor(key);
   if (s.phase !== "ready") {
@@ -299,13 +585,114 @@ export async function sendDesignMessage(dir: string, text: string, forSlug?: str
     // the Rust handshake allows 180 s for initialize; this outlasts it
     await waitForReady(key, 200_000);
   }
-  if (!p.rootPath) p.rootPath = await designRootPath(dir);
-  p.turnSlug = slug;
+  await ensurePrefixInputs(dir);
+  const k = flightKey(dir, slug);
+  const held = inFlight.has(k);
+  inFlight.add(k);
   try {
-    await sendAgentMessage(key, text, undefined, { prefix: designPrefix(slug, p.rootPath) });
-  } catch (e) {
-    // no turn started, so no turn end will ever claim this slug
-    if (p.turnSlug === slug) p.turnSlug = null;
-    throw e;
+    const prev = from ?? (await reviewOf(dir, slug)).review;
+    let step = onSend(prev, kind, Date.now());
+    // a lint fix pass reads as "fixing" while it runs (the pill and the gate card say so)
+    if (kind === "lintFix") step = { ...step, phase: "fixing" };
+    if (p.active === slug) p.critiqueMissing = false;
+    await commitReview(dir, slug, step);
+    p.turnSlug = slug;
+    try {
+      await sendAgentMessage(key, body, undefined, { prefix: designPrefix(slug, p.rootPath!, p.context ?? []) });
+    } catch (e) {
+      // no turn started, so no turn end will ever claim this slug
+      if (p.turnSlug === slug) p.turnSlug = null;
+      await commitReview(dir, slug, prev);
+      throw e;
+    }
+  } finally {
+    if (!held) inFlight.delete(k);
   }
+}
+
+/* ---------- loop actions ---------- */
+
+/** The open design's slug, or a throw the caller's toast shows. */
+function activeSlug(dir: string): string {
+  const slug = designProjectFor(dir).active;
+  if (!slug) throw new Error("Pick a design first.");
+  return slug;
+}
+
+async function submitQuestions(dir: string, answers: Record<string, unknown>, skipped: boolean, message: (q: Questions) => string, kind: PromptKind) {
+  const p = designProjectFor(dir); const slug = activeSlug(dir);
+  const asked = p.questions ?? { questions: [], references: false, answers: null, skipped: false };
+  await designQuestionsAnswer(dir, slug, answers, skipped);
+  p.questions = (await readQuestions(dir, slug)) ?? p.questions;
+  notify();
+  await sendPrefixed(dir, slug, message(asked), kind);
+}
+
+export function answerQuestions(dir: string, answers: Record<string, string | string[]>, references: string[]): Promise<void> {
+  return submitQuestions(dir, { ...answers, references }, false, (q) => answersMessage(q, answers, references), "answers");
+}
+
+export function skipQuestions(dir: string): Promise<void> {
+  return submitQuestions(dir, {}, true, () => skipMessage(), "answers");
+}
+
+/** Stop: cancels the running turn (its turn end reads "cancelled") and parks the loop. */
+export async function stopReview(dir: string): Promise<void> {
+  const p = designProjectFor(dir); const slug = activeSlug(dir);
+  const key = laneKey(dir, "design");
+  if (agentSessionFor(key).turnActive) await cancelAgentTurn(key);
+  await commitReview(dir, slug, onStop(p.review));
+}
+
+/** One more critique round on the current version (also "Ask again" for a round that never came back). */
+export async function askAnotherRound(dir: string): Promise<void> {
+  const p = designProjectFor(dir); const slug = activeSlug(dir);
+  const review: ReviewState = { ...p.review, phase: "critique", round: p.review.round + 1, fixPass: 0 };
+  await sendLoopPrompt(dir, slug, "critique", { review, settings: p.settings, lint: p.lint, critique: p.critiques.at(-1) ?? null });
+}
+
+export function fixFinding(dir: string, f: Finding): Promise<void> {
+  return sendPrefixed(dir, activeSlug(dir), fixFindingPrompt(f), "fixFinding");
+}
+
+/** Sends every minor lint finding of the newest version as one fix; nothing to fix, nothing sent. */
+export async function fixAllMinor(dir: string): Promise<void> {
+  const minor = designProjectFor(dir).lint?.minor ?? [];
+  if (minor.length === 0) return;
+  await sendPrefixed(dir, activeSlug(dir), fixAllMinorPrompt(minor), "fixFinding");
+}
+
+/** Below the bar, keep it: the loop is done and the best round's version carries its score. */
+export async function acceptBelowBar(dir: string): Promise<void> {
+  const p = designProjectFor(dir); const slug = activeSlug(dir);
+  const best = p.review.best;
+  await commitReview(dir, slug, onAccept(p.review));
+  const n = best ? p.critiques.find((c) => c.round === best.round)?.version ?? p.review.version : null;
+  if (best && n != null) await designVersionMark(dir, slug, n, best.score, best.round).catch(() => {});
+  p.versions = await designVersions(dir, slug).catch(() => p.versions);
+  notify();
+}
+
+export async function resolveBlocker(dir: string): Promise<void> {
+  const p = designProjectFor(dir); const slug = activeSlug(dir);
+  await sendLoopPrompt(dir, slug, "resolve", { review: p.review, settings: p.settings, lint: p.lint, critique: p.critiques.at(-1) ?? null });
+}
+
+export async function setReviewSettings(dir: string, scope: "project" | "design", patch: Partial<ReviewSettings>): Promise<void> {
+  const p = designProjectFor(dir); const slug = activeSlug(dir);
+  await designReviewSettingsSet(dir, scope, scope === "design" ? slug : null, patch);
+  const set = await designReviewSettings(dir, slug);
+  if (p.active !== slug) return;
+  p.settings = parseSettings(set.effective); p.settingsScope = { design: set.design ?? null };
+  notify();
+}
+
+export function setScoreOpen(dir: string, open: boolean) { designProjectFor(dir).scoreOpen = open; notify(); }
+export function setPin(dir: string, pin: DesignProject["pin"]) { designProjectFor(dir).pin = pin; notify(); }
+export function dismissCritiqueMissing(dir: string) { designProjectFor(dir).critiqueMissing = false; notify(); }
+
+/** `m:ss` since the loop's attempt started (the review pill's clock). */
+export function reviewElapsed(p: DesignProject, now: number): string {
+  const secs = p.review.startedAt == null ? 0 : Math.max(0, Math.floor((now - p.review.startedAt) / 1000));
+  return `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
 }

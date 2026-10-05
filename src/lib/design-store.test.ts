@@ -4,13 +4,14 @@ const h = vi.hoisted(() => {
   const sessions = new Map<string, {
     phase: string; entries: unknown[]; turnEnds: number; lastPrompt: string;
     sessionId: string | null; errorMessage: string | null; loadSession: boolean;
+    turnActive?: boolean; lastStopReason?: string | null;
   }>();
   // The mock session object for a lane key, created on first touch (defaults
   // match the original single-session mock: ready, no turns yet).
   const sessionFor = (key: string) => {
     let s = sessions.get(key);
     if (!s) {
-      s = { phase: "ready", entries: [], turnEnds: 0, lastPrompt: "", sessionId: "s", errorMessage: null, loadSession: false };
+      s = { phase: "ready", entries: [], turnEnds: 0, lastPrompt: "", sessionId: "s", errorMessage: null, loadSession: false, turnActive: false, lastStopReason: null };
       sessions.set(key, s);
     }
     return s;
@@ -22,11 +23,27 @@ const h = vi.hoisted(() => {
     agentSubs: new Set<() => void>(),
     sessions,
     sessionFor,
+    /** director files served by `designFileRead`, keyed by their path in the design */
+    files: new Map<string, string>(),
+    snapshot: vi.fn(async (..._a: unknown[]): Promise<number | null> => null),
+    review: vi.fn(async (..._a: unknown[]): Promise<{ thumbs: string[]; lint: unknown }> => ({ thumbs: [], lint: { v: 1, version: null, at: "", ran: true, problem: null, severe: [], minor: [] } })),
+    critique: vi.fn(async (..._a: unknown[]): Promise<unknown> => { throw new Error("no round file"); }),
+    state: vi.fn(async (..._a: unknown[]): Promise<unknown> => null),
+    stateSet: vi.fn(async (..._a: unknown[]) => {}),
+    answered: vi.fn(async (..._a: unknown[]): Promise<unknown> => null),
+    mark: vi.fn(async (..._a: unknown[]) => {}),
+    cancel: vi.fn(async (..._a: unknown[]) => {}),
+    /** every message the design lane was sent, prefix included, as the wire sees it */
+    sent: [] as string[],
+    fireAgent: () => {},
   };
 });
 const calls = h.calls;
 /** Fires every registered `subscribeAgent` listener — simulates a store change. */
 const fireAgent = () => { for (const cb of h.agentSubs) cb(); };
+h.fireAgent = fireAgent;
+/** the design lane's session for DIR, which the loop tests flip by hand */
+const sess = h.sessionFor("/p#design");
 
 vi.mock("./ipc", async (orig) => ({
   ...(await orig<typeof import("./ipc")>()),
@@ -41,17 +58,35 @@ vi.mock("./ipc", async (orig) => ({
   designRestore: h.restore,
   designBranch: vi.fn(async () => "home-2"),
   designCreate: vi.fn(async (_d: string, _k: string, title: string) => { h.calls.push(`create:${title}`); return "brand-new"; }),
-  designSnapshot: vi.fn(async () => null),
+  designSnapshot: h.snapshot,
   designThumbnails: vi.fn(async () => []),
+  designContextFiles: vi.fn(async () => []),
+  designReviewVersion: h.review,
+  designReviewState: h.state,
+  designReviewStateSet: h.stateSet,
+  designReviewSettings: vi.fn(async () => {
+    const d = { critique: true, bar: 8, rounds: 3, lint: true };
+    return { project: d, design: null, effective: d };
+  }),
+  designReviewSettingsSet: vi.fn(async () => {}),
+  designQuestionsAnswer: h.answered,
+  designCritiqueRead: h.critique,
+  designFileRead: vi.fn(async (_d: string, _s: string, rel: string) => h.files.get(rel) ?? null),
+  designLintRead: vi.fn(async () => null),
+  designVersionMark: h.mark,
 }));
 vi.mock("./agent-session", async () => ({
   laneKey: (d: string) => `${d}#design`,
   agentSessionFor: (key: string) => h.sessionFor(key),
   subscribeAgent: (cb: () => void) => { h.agentSubs.add(cb); return () => h.agentSubs.delete(cb); },
-  sendAgentMessage: vi.fn(async () => {}),
+  sendAgentMessage: vi.fn(async (_key: string, text: string, _blocks?: unknown, opts?: { prefix?: string }) => {
+    h.sent.push(opts?.prefix ? `${opts.prefix}\n\n${text}` : text);
+  }),
+  cancelAgentTurn: h.cancel,
   startAgentSession: vi.fn(async (key: string) => { h.sessionFor(key).phase = "ready"; }),
   resumeAgentSession: vi.fn(async (key: string, id: string) => { const s = h.sessionFor(key); s.phase = "ready"; s.sessionId = id; }),
 }));
+vi.mock("@/overlays/toasts", () => ({ toastError: vi.fn(), toastSuccess: vi.fn() }));
 
 const DIR = "/p";
 
@@ -88,8 +123,8 @@ describe("design store", () => {
   });
   it("summarises and prefixes", async () => {
     const m = await import("./design-store");
-    expect(m.designPrefix("home", "/Users/me/main/.chronicle/designs")).toBe("[design: home · /Users/me/main/.chronicle/designs/home/]");
-    expect(m.designPrefix("home", "/r/.chronicle/designs/")).toBe("[design: home · /r/.chronicle/designs/home/]");
+    expect(m.designPrefix("home", "/Users/me/main/.chronicle/designs", [])).toBe("[design: home · /Users/me/main/.chronicle/designs/home/]");
+    expect(m.designPrefix("home", "/r/.chronicle/designs/", [])).toBe("[design: home · /r/.chronicle/designs/home/]");
     expect(m.summaryOf([{ kind: "assistant", text: "Added three frames. Then more." } as never])).toBe("Added three frames.");
   });
 
@@ -261,5 +296,91 @@ describe("design store", () => {
     await m.sendDesignMessage(dir, "go again");
     expect(resume).toHaveBeenCalledWith(key, "sid-2");
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("prefixes the design and, when there are context files, names them", async () => {
+    const m = await import("./design-store");
+    expect(m.designPrefix("guji", "/p/.chronicle/designs", [])).toBe("[design: guji · /p/.chronicle/designs/guji/]");
+    expect(m.designPrefix("guji", "/p/.chronicle/designs/", ["PRODUCT.md", "DESIGN.md"]))
+      .toBe("[design: guji · /p/.chronicle/designs/guji/]\n[context: PRODUCT.md, DESIGN.md — read these first]");
+  });
+
+  it("drives brief → questions → answers → lint fix → critique → done, persisting each step", async () => {
+    const m = await import("./design-store");
+    const ipc = await import("./ipc");
+    h.files.set("questions.json", JSON.stringify({ v: 1, questions: [{ id: "who", label: "Who is buying?", type: "single", options: ["Gift buyers", "Regulars"] }], references: true }));
+    await m.loadDesigns(DIR); await m.openDesign(DIR, "home");
+    const p = m.designProjectFor(DIR);
+    await m.sendDesignMessage(DIR, "A product page", "home");
+    expect(p.review.phase).toBe("building");
+    // the director wrote questions.json and ended its turn with no file changes
+    h.snapshot.mockResolvedValueOnce(null);
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(p.review.phase).toBe("questions"));
+    expect(p.questions?.questions[0].id).toBe("who");
+    expect(h.stateSet).toHaveBeenLastCalledWith(DIR, "home", expect.objectContaining({ phase: "questions" }));
+    await m.answerQuestions(DIR, { who: "Gift buyers" }, []);
+    expect(h.answered).toHaveBeenCalledWith(DIR, "home", { who: "Gift buyers", references: [] }, false);
+    expect(h.sent.at(-1)).toContain("- Who is buying?: Gift buyers");
+    // the build turn ends: v1 with one severe finding
+    h.files.set("questions.json", JSON.stringify({ v: 1, questions: [{ id: "who", label: "Who is buying?" }], answers: { who: "Gift buyers" } }));
+    h.snapshot.mockResolvedValueOnce(1);
+    h.review.mockResolvedValueOnce({ thumbs: ["home/.versions/v1/thumbs/d.png"], lint: { v: 1, version: 1, at: "t", ran: true, problem: null, severe: [{ rule: "audit:overflow", severity: "severe", text: "wide", frame: "d", file: "frames/d.html" }], minor: [] } });
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(p.review).toMatchObject({ phase: "fixing", fixPass: 1 }));
+    expect(h.sent.at(-1)).toMatch(/^\[design: home · .*\]\n\nLint fix pass 1 of 2/);
+    // the fix turn ends clean → critique
+    h.snapshot.mockResolvedValueOnce(2);
+    h.review.mockResolvedValueOnce({ thumbs: [], lint: { v: 1, version: 2, at: "t", ran: true, problem: null, severe: [], minor: [] } });
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(p.review).toMatchObject({ phase: "critique", round: 1 }));
+    expect(h.sent.at(-1)).toContain("critique/round-1.json");
+    // the critique turn ends with a passing round file
+    h.snapshot.mockResolvedValueOnce(null);
+    h.critique.mockResolvedValueOnce({ round: 1, version: 2, reviewers: [{ id: "ux", score: 8.5 }, { id: "art", score: 8 }, { id: "a11y", score: 9 }, { id: "copy", score: 8 }], blocker: null });
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(p.review.phase).toBe("done"));
+    expect(p.critiques[0].weighted).toBeCloseTo(8.38, 2);
+    expect(h.mark).toHaveBeenCalledWith(DIR, "home", 2, expect.closeTo(8.38, 2), 1);
+    expect(ipc.designReviewStateSet).toHaveBeenCalled();
+  });
+
+  it("stop cancels the running turn and a critique that never came back is flagged, not passed", async () => {
+    const m = await import("./design-store");
+    await m.loadDesigns(DIR); await m.openDesign(DIR, "home");
+    const p = m.designProjectFor(DIR);
+    await m.sendDesignMessage(DIR, "x", "home");
+    sess.turnActive = true;
+    await m.stopReview(DIR);
+    expect(h.cancel).toHaveBeenCalled(); expect(p.review.phase).toBe("stopped");
+    p.review = { ...p.review, phase: "critique", round: 1 };
+    h.snapshot.mockResolvedValueOnce(null); h.critique.mockRejectedValueOnce(new Error("no file"));
+    sess.turnActive = false; sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(p.critiqueMissing).toBe(true));
+    expect(p.review.phase).toBe("critique");
+  });
+
+  it("a change to the director's files reloads just those files", async () => {
+    const m = await import("./design-store");
+    const ipc = await import("./ipc");
+    const read = ipc.designRead as unknown as ReturnType<typeof vi.fn>;
+    await m.openDesign(DIR, "home");
+    const p = m.designProjectFor(DIR);
+    read.mockClear();
+    h.files.set("tokens.json", JSON.stringify({ colors: [{ name: "ink", value: "#111" }], type: [], rejected: [] }));
+    h.designsChanged!({ dir: DIR, slug: "home", paths: ["tokens.json"] });
+    await vi.waitFor(() => expect(p.tokens?.colors[0].name).toBe("ink"));
+    expect(read).not.toHaveBeenCalled();
+    h.files.delete("tokens.json");
+  });
+
+  it("reopening a design mid-loop after a restart re-runs the gate on the latest version", async () => {
+    h.state.mockResolvedValueOnce({ v: 1, phase: "fixing", round: 1, fixPass: 1, version: 3, best: null, startedAt: 1, lastPrompt: "lintFix", accepted: false });
+    h.review.mockResolvedValueOnce({ thumbs: [], lint: { v: 1, version: 3, at: "t", ran: true, problem: null, severe: [], minor: [] } });
+    const m = await import("./design-store");
+    await m.loadDesigns(DIR); await m.openDesign(DIR, "home");
+    const p = m.designProjectFor(DIR);
+    await vi.waitFor(() => expect(h.review).toHaveBeenCalledWith(DIR, "home", 3));
+    await vi.waitFor(() => expect(p.review.phase).toBe("critique"));
   });
 });

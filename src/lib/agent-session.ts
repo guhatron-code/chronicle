@@ -203,6 +203,9 @@ export interface AgentSessionState {
   turnEnds: number;
   /** the last prompt's plain (unprefixed) text, for the design lane's echo */
   lastPrompt: string;
+  /** the last turn end's stop reason ("cancelled" when Stop ended it) — the
+   *  design store's review loop reads it to tell a stop from a finished turn */
+  lastStopReason: string | null;
 }
 
 const blank = (): AgentSessionState => ({
@@ -233,6 +236,7 @@ const blank = (): AgentSessionState => ({
   endedReason: null,
   turnEnds: 0,
   lastPrompt: "",
+  lastStopReason: null,
 });
 
 const sessions = new Map<string, AgentSessionState>();
@@ -565,6 +569,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     s.turnActive = false;
     settleStreaming(s);
     if (live) s.turnEnds += 1;
+    s.lastStopReason = typeof params.stopReason === "string" ? params.stopReason : null;
     const stopReason = params.error != null ? "error" : str(params.stopReason) || null;
     // A turn carries a plan or a run, never both. The plan's record is settled
     // HERE and nowhere else: `round_plan_settle` mid-turn would mark the round

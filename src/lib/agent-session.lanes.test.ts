@@ -57,6 +57,15 @@ describe("lanes", () => {
     expect(s.endedReason).toBe("idle");
   });
 
+  it("remembers why the last design turn stopped", async () => {
+    const m = await import("./agent-session");
+    const key = m.laneKey(DIR, "design");
+    h.onUpdate!({ dir: DIR, lane: "design", message: { method: "_chronicle/turn_end", params: { stopReason: "cancelled" } } });
+    expect(m.agentSessionFor(key).lastStopReason).toBe("cancelled");
+    h.onUpdate!({ dir: DIR, lane: "design", message: { method: "_chronicle/turn_end", params: {} } });
+    expect(m.agentSessionFor(key).lastStopReason).toBeNull();
+  });
+
   it("sends the prefix to the agent but shows the plain text", async () => {
     const m = await import("./agent-session");
     const key = m.laneKey(DIR, "design");
