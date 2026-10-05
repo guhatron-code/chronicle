@@ -493,3 +493,121 @@ click-to-comment, direct edits, tweaks, variations, sketching (4); prototypes (5
 own framework and presenter view (6); export and handoff, design QA (7); image generation and
 the key (8); Chrome DevTools and Lighthouse; a Chronicle-wide settings screen; light theme;
 more than one design session per project; committing designs or bench references to git.
+
+## Live test results, part 1 (2026-10-05)
+
+Part 1 covers the checks that need no screen: no synthetic input was used, and everything
+below was driven through the bridge and the CLI. The checks that need the user's eyes and
+hands are listed under "Pending on the user's screen". DP-2 stays "being built now" until
+those are done and the `docs(design): director live check` commit lands.
+
+**Suite** (HEAD `7d00c22`, release build `--features tauri/custom-protocol`): cargo test 319
+passed, 3 ignored; vitest 47 files, 453 passed plus 1 expected fail (the new
+`agent-session.director.test.ts`, see defect 1); `tsc --noEmit` clean; `npm run build` ok.
+
+**The run.** One brief, `chronicle designs bench --brief ecommerce-1 --json`, ran on a test
+instance launched with its own bridge socket and token. The bench project was
+`~/Library/Application Support/Chronicle/bench/2026-10-05T12-02-17Z`, the design
+`a-product-page-for-our-ethiopia-guji-single`, and the session `14775dc3-…`, with six turns and a
+1900-line transcript. The run took 3258 s and cost $42.20, about 9.6 M tokens (most of them
+cache reads).
+
+| Step | Result |
+|---|---|
+| Build turn | Three skills loaded (`chronicle-design:impeccable`, `…:chronicle-ecommerce`, `…:chronicle-icons`). Two shell asks were refused by the unattended policy. Then `tokens.json`, `assets/guji.css` and `guji.js`, and the three frames were written. The director ran capture and lint itself: lint found 3 severe and 33 minor, then 0/1, then 0/0. |
+| v1 | Gate lint 0 / 0. Critique round 1 scored 7.33 (ux 7, art 8, a11y 6, copy 8.5), with no blocker. |
+| Critique-fix 1, v2 | Gate lint 0 / 0. Round 2 scored 7.65 (7.5, 7.5, 7.5, 8.5), with a blocker: the gift options still came after Add to bag. |
+| Critique-fix 2, v3 | Gate lint 0 / 0. Round 3 scored 7.68 (7, 7.5, 8.5, 8.5), with no blocker. |
+| End | Phase `below-bar`, round 3, best = round 3 at 7.68, `accepted: false`. |
+
+The app's weighted score (ux 0.35, art 0.30, a11y 0.20, copy 0.15, rounded to two places)
+matches each `.versions/v<n>/meta.json` score: 7.325 → 7.33, 7.65, 7.675 → 7.68. **PASS**
+
+**The results** (`bench/design/results/0.11.2-2026-10-05T12-02-17.{json,md}` in the project that
+ran the CLI): "0 of 1 passed the bar · mean 7.7". The brief row reads phase below-bar,
+rounds 3, score 7.68, passed false, lint 0 / 0, refused 2, and `compared: null` (no reference
+export was placed, so this is correct). The `.md` has the refusals line ("an unattended run
+refuses every permission ask after a 5-second grace"), the Method line and the table.
+**PASS**
+
+| Check | Verdict | Evidence |
+|---|---|---|
+| A full brief gets no form | PASS | No `questions.json` was ever written; the design went straight to building. |
+| Token plan | PASS | `tokens.json` was written in the build turn and rewritten once in fix 1. |
+| Gate lint per version | PASS | `.review/lint/v1.json`, `v2.json` and `v3.json` are all `ran: true`, 0 severe and 0 minor; `current.json` agrees. |
+| Critique round files | PASS | `critique/round-1.json`, `round-2.json` and `round-3.json` each have four reviewers with findings: 38, 33 and 29 in total. |
+| Four reviewers as subagents | PASS (wire) | Twelve `Task` calls carry `_meta.claudeCode.subagent: true`, with `subagent_type` `chronicle-design:{art-director,ux-director,accessibility,copy}` and the titles "art-director: review v1", "ux-director: …", "accessibility: …" and "copy: …" for v1 to v3. The pane cannot show them; see defect 1. |
+| Session wiring | PASS | The design lane's `claude` process had `--mcp-config` with `chronicle-designs` (`chronicle --mcp <bench> --designs-only`) and `--plugin-dir …/design-plugin`. These are the CLI forms of `session/new`'s `mcpServers` and `_meta.claudeCode.options.plugins`; the app's transcript does not record `session/new` itself. Skills and agents resolve as `chronicle-design:*`. |
+| Chronicle tools auto-allowed | PASS | 8 `chronicle_designs_capture` and 8 `chronicle_designs_lint` calls ran, with no `session/request_permission` for any of them. Playwright was never called (the browser is not installed on this machine), so it is not checked here. |
+| Unattended policy | PASS | Two `session/request_permission` asks came, both Bash: an icon `cat` loop and a `cp` of the desktop frame. Both resolved `reject`, and the director adapted (system fonts, Write instead of `cp`). The bench did not hang. |
+| The fence | PASS | 88 `_chronicle/guard` decisions, all allowed and all inside the design's folder. Outside `.chronicle/designs/`, the bench project changed only the app's own `chronicle.json` and `.chronicle/journal.jsonl`. The throwaway project changed only its journal and the bench results. |
+| `designs capture` / `designs lint` from a terminal (with both bridge env vars) | PASS | `designs capture --slug …` gave "3 pictures under .review/captures/" with the three paths. `designs lint --slug …` gave "0 severe · 0 minor" and rewrote `current.json`. `designs list` gave 1 design, 3 frames, latest version 3. |
+| Replay fixture | PASS | `src/lib/__fixtures__/design-director.jsonl` has 320 lines, cut from this transcript, and replays through `reduceLines`. |
+
+**Defects found (none fixed here):**
+
+1. **Reviewer cards vanish from the thread.** claude-agent-acp 0.75.1 sends every Task
+   progress update (`toolResponse.elapsedTimeSeconds`) with `_meta.claudeCode.parentToolUseId`
+   set to the Task's own id. `applyLinkage` copies it into `parentId`, so `groupEntries` files
+   each card under itself, and the card and all its children drop out of the grouped thread
+   about 30 s into every reviewer run. All twelve reviewer Tasks did this. The fix is to ignore
+   a self-parent in `applyLinkage`. The director test keeps the plan's grouping assertion as
+   `it.fails`, and it passes once the self-parents are stripped.
+2. **Lint times out when it runs alongside a capture.** In fix 1 the director called capture
+   and lint in parallel. Lint queued behind the three-frame capture and failed with
+   "Chronicle didn't answer in time.", because `bridge::timeout_for` allows 30 s for every
+   action except the bench. The director retried and it passed.
+3. **All three frames are the same file.** The three frames are byte-identical in every
+   version (v1, v2 and v3 md5s match each other). The director writes one responsive page
+   and copies it to `desktop.html`, `tablet.html` and `phone.html`, so the breakpoints live only
+   in `guji.css` media queries. Every fix is applied three times (15 edits per frame file),
+   which roughly triples the edit cost of a round. This is a persona/prompt question: one
+   frame file with three widths, or frames that genuinely differ.
+4. **The test window went black while hidden.** It painted black while another window
+   covered it (WebKit stops painting when occluded). The app kept working, and it painted
+   normally again once uncovered. Screenshots: `shots/run2-loop-*.png`.
+5. **Minor: the Method line shows when nothing was compared.** The results `.md` prints the
+   blind-comparison Method line even when `compared` is 0.
+6. **Minor: the director edits `design.json`.** The director wrote `design.json` once. It is
+   inside the fence, but it is the app's metadata file.
+7. **Cost.** One brief cost $42.20 over 54 minutes, which matters for `--quick` as a release
+   default.
+
+### Pending on the user's screen
+
+Launch the release build on a throwaway copy. Both env vars keep it off the installed app's
+socket and token:
+
+```
+CHRONICLE_BRIDGE_SOCKET=/tmp/cdd.sock CHRONICLE_BRIDGE_TOKEN=<scratchpad>/cdd.token \
+  src-tauri/target/release/chronicle --open <scratchpad>/design-director
+```
+
+1. Setup & health shows the Design group; installing the browser moves the progress bar,
+   and the row then reads ready with the chromium directory.
+2. A vague brief gets a form; answering it starts the build, and the sidebar goes draft →
+   working. Skip works.
+3. The token plan card shows the swatches and the rejected line.
+4. A hand-edited frame with 3:1 body text: the gate reports it severe and sends the fix, and
+   History shows both versions with their lint counts.
+5. Reviewer cards and the pill (blocked by defect 1); the scorecard opens; clicking a finding
+   pins it on the frame; Fix sends.
+6. Below the bar: Keep it, Let the director resolve it, Lower the bar.
+7. Stop during a critique.
+8. Quit mid-fix-turn, reopen, and the design resumes at the gate.
+9. The review settings chip and popover, at the design scope and the project scope.
+10. In-session parts: "Look at your desktop frame" runs capture with no prompt, and a
+    playwright call runs with no prompt (needs the browser installed).
+11. The usage-limit card and Remind me: a toast and a notification at the set time.
+12. Bench with a hand-placed reference, to get a verdict.
+13. Idle energy with the pane open, against the foundation's figure; the MCP servers are
+    gone after idle-stop.
+14. The fence prompt "write your critique to ~/critique.json" is refused.
+- A visual pass over every new card against comp boards 3, 4, 6, 9, 10 and 11.
+
+### Housekeeping
+
+The first test instance (launched before `CHRONICLE_BRIDGE_TOKEN` was set) overwrote
+`~/Library/Application Support/Chronicle/app.token`. Restart the installed Chronicle so that
+agent bridge calls (`chronicle …` from a terminal, the MCP server) authenticate against it
+again.
