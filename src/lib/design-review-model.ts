@@ -24,7 +24,7 @@ const AGENT_NAMES: [ReviewerId, string][] = [["art", "art director"], ["ux", "ux
 
 /** what may follow a reviewer's name: nothing, a separator, or a word that says
  *  it's a review — so "Copy: review v6" is the copy reviewer and "Copy frames" isn't */
-const NAME_END = /^($|\s*[:\])·—–|,.]|\s(review|reviewer|reviewing|critique|pass|round|agent|subagent|v\d)\b)/;
+const NAME_END = /^($|\s*[:\])·—–|,.]|\s(review|reviewer|reviewing|critique|check|audit|evaluation|pass|round|agent|subagent|v\d)\b)/;
 
 /** The reviewer a subagent's title names: its name as a whole word at the start
  *  (after an optional `[` or `(`), hyphens and underscores read as spaces, and

@@ -482,6 +482,12 @@ function AppShell() {
     return () => window.removeEventListener("chronicle:show-pane", on);
   }, [goPane]);
 
+  useEffect(() => {
+    const on = () => setSetupMode("health");
+    window.addEventListener("chronicle:open-setup", on);
+    return () => window.removeEventListener("chronicle:open-setup", on);
+  }, []);
+
   const doOpenProject = useCallback((path: string): Promise<void> => {
     if (projectsRef.current.has(path)) {
       // already open — just foreground it, keep whatever pane the user was on

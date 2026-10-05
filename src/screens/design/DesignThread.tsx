@@ -18,6 +18,7 @@ import { LintCard } from "./cards/LintCard";
 import { CritiqueCard } from "./cards/CritiqueCard";
 import { BelowBarCard } from "./cards/BelowBarCard";
 import { ReviewToolsCard } from "./cards/ReviewToolsCard";
+import { ReviewChip } from "./ReviewSettingsPopover";
 
 export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
   dir: string;
@@ -104,6 +105,7 @@ export function DesignThread({ dir, onConfirm, onRevealTerminal }: {
       )}
       <div className="flex min-h-0 flex-1 flex-col">
         <AgentPane dir={key} variant="design" onConfirm={onConfirm} onRevealTerminal={onRevealTerminal} onOpenReview={() => {}}
+          composerChips={<ReviewChip dir={dir} />}
           trailing={cards.length > 0 ? cards : undefined} />
       </div>
     </div>

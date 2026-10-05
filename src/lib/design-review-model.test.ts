@@ -86,6 +86,9 @@ describe("reviewerForTitle", () => {
     expect(reviewerForTitle("(Copy) review")).toBe("copy");
     expect(reviewerForTitle("Copy: review v6")).toBe("copy");
     expect(reviewerForTitle("Accessibility  review")).toBe("a11y");
+    expect(reviewerForTitle("Accessibility check")).toBe("a11y");
+    expect(reviewerForTitle("Art director audit")).toBe("art");
+    expect(reviewerForTitle("UX director")).toBe("ux");
   });
   it("misses titles that only mention a name, or run it into a longer word", () => {
     expect(reviewerForTitle("Copy frames for review")).toBeNull();
