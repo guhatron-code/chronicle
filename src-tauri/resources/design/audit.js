@@ -30,6 +30,9 @@
   function visible(el){var r=el.getBoundingClientRect();if(r.width===0||r.height===0)return false;var cs=getComputedStyle(el);return cs.visibility!=='hidden'&&cs.display!=='none'&&parseFloat(cs.opacity)>0}
   function textOf(el){return Array.prototype.filter.call(el.childNodes,function(n){return n.nodeType===3}).map(function(n){return n.textContent}).join('').trim()}
   var INTERACTIVE='a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],[tabindex]:not([tabindex="-1"])';
+  // at most CAP findings per rule AND severity: twenty minors never crowd out a severe one
+  var CAP=20;
+  function overCap(counts,rule,severity){var k=rule+'|'+severity;counts[k]=(counts[k]||0)+1;return counts[k]>CAP}
   function walk(rules,fn){for(var i=0;i<rules.length;i++){var r=rules[i];if(r.selectorText)fn(r);if(r.cssRules)walk(r.cssRules,fn)}}
   function isPrimary(b){
     var t=b.tagName;
@@ -43,7 +46,7 @@
     opts=opts||{};var width=opts.width||window.innerWidth;var fold=opts.fold||window.innerHeight;var kind=opts.kind||'app';
     var out=[];var counts={};var all=[];var inter=[];
     function add(rule,severity,text,el){
-      counts[rule]=(counts[rule]||0)+1;if(counts[rule]>20)return;
+      if(overCap(counts,rule,severity))return;
       var s;if(el){try{s=sel(el)}catch(e){}}
       out.push({rule:rule,severity:severity,text:text,selector:s})}
     function section(name,fn){try{fn()}catch(e){out.push({rule:'audit-error',severity:'minor',text:'Part of the audit could not run: '+name})}}
@@ -95,6 +98,6 @@
       if(cart&&!foldTop(cart))add('ecom-cta','severe','Add to cart is below the first screen on this width',cart)});
     return JSON.stringify(out);
   };
-  window.__chronicleAuditLib={contrast:contrast,parseColor:parseColor,luminance:luminance,isLarge:isLarge,minTarget:minTarget};
+  window.__chronicleAuditLib={contrast:contrast,parseColor:parseColor,luminance:luminance,isLarge:isLarge,minTarget:minTarget,overCap:overCap};
 })();
 </script>

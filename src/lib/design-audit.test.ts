@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // arithmetic is checked here by evaluating the script against a stub window.
 const src = readFileSync(path.resolve(__dirname, "../../src-tauri/resources/design/audit.js"), "utf8");
 const body = src.replace(/^<script>/, "").replace(/<\/script>\s*$/, "");
-type Lib = { contrast: (a: number[], b: number[]) => number; parseColor: (s: string) => number[] | null; isLarge: (px: number, weight: number) => boolean; minTarget: (width: number) => number };
+type Lib = { contrast: (a: number[], b: number[]) => number; parseColor: (s: string) => number[] | null; isLarge: (px: number, weight: number) => boolean; minTarget: (width: number) => number; overCap: (counts: Record<string, number>, rule: string, severity: string) => boolean };
 function load(): Lib {
   const win: Record<string, unknown> = {};
   new Function("window", "document", body)(win, undefined);
@@ -30,6 +30,13 @@ describe("the audit's arithmetic", () => {
     expect(lib.minTarget(390)).toBe(44);
     expect(lib.minTarget(768)).toBe(44);
     expect(lib.minTarget(769)).toBe(24);
+  });
+  it("caps findings per rule and severity, so a severe one is never dropped behind twenty minors", () => {
+    const counts: Record<string, number> = {};
+    const minors = Array.from({ length: 25 }, () => lib.overCap(counts, "contrast", "minor"));
+    expect(minors.filter((over) => !over)).toHaveLength(20);
+    expect(lib.overCap(counts, "contrast", "severe")).toBe(false);
+    expect(lib.overCap(counts, "target", "minor")).toBe(false);
   });
   it("defines the entry point and runs nothing on load", () => {
     const win: Record<string, unknown> = {};
