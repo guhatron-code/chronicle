@@ -114,7 +114,9 @@ function summarise(briefs: BenchBrief[]): BenchResults["summary"] {
 
 export function summaryLine(r: BenchResults): string {
   const s = r.summary;
-  return `beat Claude Design on ${s.beat} of ${s.compared} compared briefs; mean score ${fmt(s.mean)}; ${s.passed} of ${s.total} passed the bar`;
+  // nothing was compared: there is no "beat" to report
+  const beat = s.compared > 0 ? `beat Claude Design on ${s.beat} of ${s.compared} compared briefs; ` : "";
+  return `${beat}mean score ${fmt(s.mean)}; ${s.passed} of ${s.total} passed the bar`;
 }
 
 export function renderMarkdown(r: BenchResults): string {
@@ -135,8 +137,10 @@ export function renderMarkdown(r: BenchResults): string {
     `# Design benchmark · ${r.version} · ${r.at}`, "",
     `Chronicle ${summaryLine(r)} (bar ${r.bar.toFixed(1)}).`, "",
     `Commands refused: ${r.summary.refused} (an unattended run refuses every permission ask after a 5-second grace).`, "",
-    "Method: both sides were rendered by Chronicle's capture window and compared blind under neutral names (A and B, assigned at random per brief); the judge never saw where a picture came from.",
-    "A reference export is rendered from its own folder as it was exported; root-absolute links in it (`/style.css`) don't resolve.", "",
+    ...(r.summary.compared > 0 ? [
+      "Method: both sides were rendered by Chronicle's capture window and compared blind under neutral names (A and B, assigned at random per brief); the judge never saw where a picture came from.",
+      "A reference export is rendered from its own folder as it was exported; root-absolute links in it (`/style.css`) don't resolve.", "",
+    ] : []),
     "| Brief | Kind | Score | Passed | Rounds | Lint severe / minor | Time | Cost | Commands refused | vs Claude Design |",
     "|---|---|---|---|---|---|---|---|---|---|",
     ...rows,
@@ -226,7 +230,9 @@ export async function runDesignBench(deps: BenchDeps, repoDir: string, args: Ben
       });
     }
   }
-  const results: BenchResults = { version: deps.version, at, args, project: dir, bar: BENCH_SETTINGS.bar, briefs, summary: summarise(briefs) };
+  // the bench project's stamp only: its full path carries the user's name into the repo
+  const project = dir.split("/").filter(Boolean).at(-1) ?? "";
+  const results: BenchResults = { version: deps.version, at, args, project, bar: BENCH_SETTINGS.bar, briefs, summary: summarise(briefs) };
   const name = `${deps.version}-${at.slice(0, 19).replace(/:/g, "-")}`;
   await deps.write(repoDir, name, results, renderMarkdown(results));
   return results;

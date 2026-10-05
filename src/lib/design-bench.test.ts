@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { answersFor, BENCH_SETTINGS, MAX_ANSWERS, refusalFor, renderMarkdown, runDesignBench, type BenchDeps, type Brief } from "./design-bench";
+import { answersFor, BENCH_SETTINGS, MAX_ANSWERS, refusalFor, renderMarkdown, runDesignBench, summaryLine, type BenchDeps, type Brief } from "./design-bench";
 import { initialReviewState, type Questions, type ReviewState } from "./design-review-model";
 
 describe("the benchmark runner", () => {
@@ -108,6 +108,8 @@ describe("the benchmark runner, beyond the happy path", () => {
       expect(chronicleWas === "A" ? [a, bb] : [bb, a]).toEqual([["/bench/p/ours.png"], ["/judge/ref/1.png"]]);
       expect(r.briefs[0].compared).toEqual({ winner: expected, reasons: ["r"], chronicleWas });
       expect(r.briefs[1].compared).toBeNull();
+      expect(renderMarkdown(r)).toContain("Method: both sides were rendered by Chronicle's capture window");
+      expect(summaryLine(r)).toMatch(/^beat Claude Design on [01] of 1 compared briefs; /);
     }
   });
 
@@ -133,7 +135,20 @@ describe("the benchmark runner, beyond the happy path", () => {
     const r = await runDesignBench(deps, "/repo", {});
     expect(r.briefs.map((b) => [b.id, b.error ?? null, b.passed])).toEqual([["app-1", "boom", false], ["deck-1", null, true]]);
     expect(deps.write).toHaveBeenCalledTimes(1);
-    expect(renderMarkdown(r)).toContain("Method: both sides were rendered by Chronicle's capture window");
+    // nothing was compared: no Method line, no "beat … 0 of 0"
+    expect(r.summary.compared).toBe(0);
+    expect(renderMarkdown(r)).not.toContain("Method:");
+    expect(summaryLine(r)).not.toContain("beat");
+    expect(summaryLine(r)).toMatch(/^mean score /);
+  });
+
+  it("records the bench project's stamp, never its absolute path", async () => {
+    const { deps } = make();
+    deps.project = async () => "/Users/someone/Library/Application Support/Chronicle/bench/2026-10-01T10-00-00-2";
+    const r = await runDesignBench(deps, "/repo", {});
+    expect(r.project).toBe("2026-10-01T10-00-00-2");
+    const written = JSON.stringify(vi.mocked(deps.write).mock.calls[0][2]);
+    expect(written).not.toContain("/Users/");
   });
 
   it("refuses a permission ask no one is there for, counts it, and carries on to the result", async () => {
