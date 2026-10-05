@@ -18,6 +18,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { MenuKey } from "./menu-keys";
+import type { LintReport, ReviewSettings } from "./design-review-model";
 
 export type { MenuKey };
 
@@ -581,7 +582,7 @@ export const designOutsideFiles = (dir: string) => invoke<AgentEditFile[]>("desi
 export const designOutsideUndo = (dir: string, path: string | null) => invoke<number>("design_outside_undo", { dir, path });
 
 /* ---------- the Design pane's own commands (src-tauri/src/designs/*) ---------- */
-export interface VersionMeta { n: number; at: string; session: string; prompt: string; summary: string; hash: string }
+export interface VersionMeta { n: number; at: string; session: string; prompt: string; summary: string; hash: string; lint?: { severe: number; minor: number }; score?: number; round?: number }
 export interface DesignsChanged { dir: string; slug: string; paths: string[] }
 export const designsList = (dir: string) => invoke<{ rows: import("./design-model").DesignRow[]; order: Record<string, string[]> }>("designs_list", { dir });
 export const designCreate = (dir: string, kind: string, title: string, brief: string) => invoke<string>("design_create", { dir, kind, title, brief });
@@ -600,6 +601,22 @@ export const designFrameBase = (dir: string) => invoke<string>("design_frame_bas
 /** The designs folder as an absolute path (in a linked worktree it's the main checkout's). */
 export const designRootPath = (dir: string) => invoke<string>("design_root_path", { dir });
 export const designThumbnails = (dir: string, slug: string, n: number) => invoke<string[]>("design_thumbnails", { dir, slug, n });
+export const designContextFiles = (dir: string) => invoke<string[]>("design_context_files", { dir });
+export const designReviewVersion = (dir: string, slug: string, n: number) => invoke<{ thumbs: string[]; lint: LintReport }>("design_review_version", { dir, slug, n });
+export const designCapture = (dir: string, slug: string, frame?: string) => invoke<string[]>("design_capture", { dir, slug, frame: frame ?? null });
+export const designLintCurrent = (dir: string, slug: string) => invoke<LintReport>("design_lint_current", { dir, slug });
+export const designLintRead = (dir: string, slug: string, name: string) => invoke<LintReport | null>("design_lint_read", { dir, slug, name });
+export const designReviewSettings = (dir: string, slug?: string) => invoke<{ project: ReviewSettings; design: Partial<ReviewSettings> | null; effective: ReviewSettings }>("design_review_settings", { dir, slug: slug ?? null });
+export const designReviewSettingsSet = (dir: string, scope: "project" | "design", slug: string | null, patch: Partial<ReviewSettings>) => invoke<void>("design_review_settings_set", { dir, scope, slug, patch });
+export const designReviewState = (dir: string, slug: string) => invoke<unknown>("design_review_state", { dir, slug });
+export const designReviewStateSet = (dir: string, slug: string, state: unknown) => invoke<void>("design_review_state_set", { dir, slug, state });
+export const designQuestionsAnswer = (dir: string, slug: string, answers: unknown, skipped: boolean) => invoke<unknown>("design_questions_answer", { dir, slug, answers, skipped });
+export const designCritiqueRead = (dir: string, slug: string, round: number) => invoke<unknown>("design_critique_read", { dir, slug, round });
+export const designReminders = (dir: string) => invoke<unknown[]>("design_reminders", { dir });
+export const designRemindersSet = (dir: string, list: unknown[]) => invoke<void>("design_reminders_set", { dir, list });
+export const designFileRead = (dir: string, slug: string, rel: string) => invoke<string | null>("design_file_read", { dir, slug, rel });
+export const designVersionMark = (dir: string, slug: string, n: number, score: number | null, round: number | null) => invoke<void>("design_version_mark", { dir, slug, n, score, round });
+export const designRefAttach = (dir: string, slug: string, name: string, b64: string) => invoke<string>("design_ref_attach", { dir, slug, name, b64 });
 export const onDesignsChanged = (cb: (e: DesignsChanged) => void) => listen<DesignsChanged>("designs-changed", (e) => cb(e.payload));
 export const agentEditDiff = (dir: string, path: string) =>
   invoke<string>("agent_edit_diff", { dir, path });
