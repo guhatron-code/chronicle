@@ -121,7 +121,9 @@ function ensure() {
     if (director.length > 0 && p.active === e.slug) reloadDirectorFiles(e.dir, e.slug, director).catch(() => {});
     // a pan or zoom rewrites canvas.json (via its .tmp sibling) — nothing the
     // list or the open design shows changed
-    const rest = e.paths.filter((x) => !isDirectorFile(x) && x !== "canvas.json" && x !== "canvas.json.tmp");
+    // and `.review/` is the app's own (loop state, lint, captures, settings): the
+    // store already holds what it wrote, and a reload would remount every frame
+    const rest = e.paths.filter((x) => !isDirectorFile(x) && x !== "canvas.json" && x !== "canvas.json.tmp" && !x.startsWith(".review/"));
     if (e.paths.length > 0 && rest.length === 0) return;
     loadDesigns(e.dir).catch(() => {});
     if (p.active === e.slug) openDesign(e.dir, e.slug, true).catch(() => {});

@@ -265,6 +265,27 @@ describe("design store", () => {
     await new Promise((r) => setImmediate(r));
   });
 
+  it("ignores a change under .review/ — the app's own writes never remount the frames", async () => {
+    const m = await import("./design-store");
+    const ipc = await import("./ipc");
+    const list = ipc.designsList as unknown as ReturnType<typeof vi.fn>;
+    const read = ipc.designRead as unknown as ReturnType<typeof vi.fn>;
+    await m.openDesign(DIR, "home");
+    const p = m.designProjectFor(DIR);
+    m.frameMessage(DIR, "d", { __chronicleFrame: 1, type: "ready", height: 2400 });
+    const tick = p.reloadTick;
+    const states = p.frameStates;
+    list.mockClear(); read.mockClear();
+    h.designsChanged!({ dir: DIR, slug: "home", paths: [".review/state.json"] });
+    h.designsChanged!({ dir: DIR, slug: "home", paths: [".review/lint/v2.json", ".review/captures/d.png", ".review/settings.json"] });
+    await new Promise((r) => setImmediate(r));
+    expect(list).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(p.reloadTick).toBe(tick);
+    expect(p.frameStates).toBe(states);
+    expect(p.frameStates.d).toEqual({ kind: "rendered", height: 2400 });
+  });
+
   it("closing a project forgets its design state", async () => {
     const m = await import("./design-store");
     const p = m.designProjectFor("/closing");

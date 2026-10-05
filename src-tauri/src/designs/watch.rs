@@ -11,7 +11,7 @@ pub fn design_event(path: &Path) -> Option<(String, String)> {
     let s = path.to_string_lossy();
     let (_, rest) = s.split_once("/.chronicle/designs/")?;
     let (slug, rel) = rest.split_once('/')?;
-    if !super::valid_slug(slug) || rel.is_empty() || rel.starts_with(".versions/") { return None; }
+    if !super::valid_slug(slug) || rel.is_empty() || rel.starts_with(".versions/") || rel.starts_with(".review/") { return None; }
     Some((slug.to_string(), rel.to_string()))
 }
 
@@ -39,6 +39,10 @@ mod tests {
         assert_eq!(design_event(Path::new("/p/.chronicle/designs/home/design.json")), Some(("home".into(), "design.json".into())));
         assert_eq!(design_event(Path::new("/p/.chronicle/designs/home/.versions/v1/meta.json")), None);
         assert_eq!(design_event(Path::new("/p/.chronicle/designs/.threads/s/thread.jsonl")), None);
+        // the app's own review files never reload the open design
+        for rel in [".review/state.json", ".review/lint/v3.json", ".review/captures/d.png", ".review/settings.json"] {
+            assert_eq!(design_event(Path::new(&format!("/p/.chronicle/designs/home/{rel}"))), None, "{rel}");
+        }
         assert_eq!(design_event(Path::new("/p/.chronicle/designs/order.json")), None);
         assert_eq!(design_event(Path::new("/p/src/a.ts")), None);
     }
