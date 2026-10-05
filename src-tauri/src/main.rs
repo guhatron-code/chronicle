@@ -3014,6 +3014,13 @@ fn design_frame_base(roots: State<OpenRoots>, web: State<web::WebState>, dir: St
     Ok(format!("chronicle-file://{hash}/"))
 }
 
+/// Which of the project's context files (PRODUCT.md, DESIGN.md) exist at the repo root.
+#[tauri::command]
+fn design_context_files(roots: State<OpenRoots>, dir: String) -> Result<Vec<String>, String> {
+    let p = project_for(&roots, &dir)?;
+    Ok(designs::prompt::context_files(&p.repo))
+}
+
 /// The designs folder as an absolute, canonical path. The design lane's message
 /// prefix names a design's folder with it: in a linked worktree the folder lives
 /// in the main checkout, so a cwd-relative `.chronicle/designs/` would point the
@@ -3912,7 +3919,7 @@ fn main() {
             power::get_power_source, power::set_ui_visible,
             web::web_open_file, web::web_tabs_load, web::web_tabs_save,
             web::web_tab_open, web::web_tab_close, web::web_tab_show, web::web_hide_all,
-            design_frame_base, design_root_path,
+            design_frame_base, design_root_path, design_context_files,
             web::web_set_bounds, web::web_tab_navigate, web::web_tab_back, web::web_tab_forward, web::web_tab_reload,
             blocklists::web_blocklists_prepare, blocklists::web_blocklists_info,
             designs::designs_list, designs::design_create, designs::design_read,

@@ -20,19 +20,12 @@
 use serde_json::{json, Map, Value};
 use std::path::Path;
 
-pub const DESIGN_PROMPT: &str = r#"You are working in Chronicle's Design pane. You make designs as real HTML files that Chronicle shows side by side on a canvas.
+pub const DESIGN_PROMPT: &str = include_str!("../../resources/design/DIRECTOR.md");
 
-Every message starts with a line like `[design: <slug> · <folder>/]`. That names the active design and its folder, as an absolute path. Work only on that design, in the folder named in the prefix (an absolute path).
-
-File contract:
-- One self-contained HTML page per frame, in `frames/` inside the design's folder (for example `frames/desktop.html`).
-- List every frame in the folder's `design.json` under "frames": {"id", "file", "label", "width", "height", "group"}. "width" is the viewport width the page is designed for; "height" is the first screen (the fold). Keep "v", "title", "kind", "brief" and "created" as they are.
-- Put breakpoints in a group of kind "breakpoints" and alternative directions in a group of kind "variations", under "groups": {"id", "label", "kind"}.
-- Put images, stylesheets and scripts in `assets/`, and link them with relative paths.
-- Fonts are local: download any font you use once into `assets/fonts/` and load it with @font-face from there. Never link a font service.
-- Never write outside the active design's folder, and never into a name that starts with a dot. Never edit `canvas.json`; Chronicle owns it.
-
-End every turn with one sentence saying what changed."#;
+/// The project-context files at the repo root, in reading order.
+pub fn context_files(repo: &Path) -> Vec<String> {
+    ["PRODUCT.md", "DESIGN.md"].iter().filter(|n| repo.join(n).is_file()).map(|n| n.to_string()).collect()
+}
 
 /// The design lane's session `_meta`: a prompt append and, when given, a
 /// local plugin under `claudeCode.options.plugins` — the ONLY option set
@@ -83,9 +76,30 @@ mod tests {
 
     #[test]
     fn the_prompt_states_the_file_contract() {
-        for needle in ["the folder named in the prefix (an absolute path)", "design.json", "frames/", "assets/fonts/", "[design:", "one sentence"] {
+        for needle in ["as an absolute path", "design.json", "frames/", "assets/fonts/", "[design:", "one sentence"] {
             assert!(DESIGN_PROMPT.contains(needle), "prompt is missing {needle}");
         }
+    }
+
+    #[test]
+    fn the_director_prompt_keeps_the_file_contract_and_names_its_new_files() {
+        for must in ["frames/", "design.json", "assets/fonts/", "Never write outside", "questions.json", "tokens.json", "critique/round-", "Never run a critique yourself", "one sentence"] {
+            assert!(DESIGN_PROMPT.contains(must), "missing: {must}");
+        }
+        assert!(!DESIGN_PROMPT.contains("context.mjs"));
+        assert!(DESIGN_PROMPT.len() < 12_000, "the append stays short enough to sit beside Claude Code's own prompt");
+    }
+
+    #[test]
+    fn context_files_lists_only_what_exists() {
+        let d = std::env::temp_dir().join(format!("chronicle-ctx-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        assert!(context_files(&d).is_empty());
+        std::fs::write(d.join("DESIGN.md"), "x").unwrap();
+        std::fs::write(d.join("PRODUCT.md"), "x").unwrap();
+        assert_eq!(context_files(&d), vec!["PRODUCT.md", "DESIGN.md"]);
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
