@@ -130,14 +130,31 @@ pub fn weighted(scores: &[(String, f64)]) -> (f64, Vec<String>) {
     ((total * 100.0 + 1e-6).round() / 100.0, missing)
 }
 
+/// A reviewer id as a critique file writes it: the canonical id, or the bundled
+/// agent's own name (`ux-director`, `art-director`, `accessibility`).
+pub fn reviewer_id(raw: &str) -> Option<&'static str> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "ux" | "ux-director" => Some("ux"),
+        "art" | "art-director" => Some("art"),
+        "a11y" | "accessibility" => Some("a11y"),
+        "copy" => Some("copy"),
+        _ => None,
+    }
+}
+
 pub fn read_critique(design_dir: &Path, round: u32, bar: f64) -> Result<Value, String> {
     let path = design_dir.join("critique").join(format!("round-{round}.json"));
     let mut c = read_json(&path).filter(|v| v.is_object()).ok_or_else(|| format!("there's no critique for round {round} yet"))?;
-    let reviewers = c["reviewers"].as_array().ok_or("that critique has no reviewers in it")?;
-    let scores: Vec<(String, f64)> = reviewers.iter()
-        .filter_map(|r| Some((r["id"].as_str()?.to_string(), r["score"].as_f64()?))).collect();
+    let reviewers = c["reviewers"].as_array_mut().ok_or("that critique has no reviewers in it")?;
+    let mut scores: Vec<(String, f64)> = vec![];
+    for r in reviewers.iter_mut() {
+        let Some(id) = r["id"].as_str().and_then(reviewer_id) else { continue };
+        // the agents' names read as their canonical ids from here on
+        r["id"] = json!(id);
+        if let Some(s) = r["score"].as_f64() { scores.push((id.to_string(), s)); }
+    }
     let (w, missing) = weighted(&scores);
-    c["weighted"] = json!(w); c["passed"] = json!(w >= bar); c["bar"] = json!(bar);
+    c["weighted"] = json!(w); c["passed"] = json!(w >= bar && missing.is_empty()); c["bar"] = json!(bar);
     c["missing"] = json!(missing); c["round"] = json!(round);
     Ok(c)
 }
@@ -237,6 +254,20 @@ mod tests {
         let c2 = read_critique(&d, 2, 8.0).unwrap();
         assert_eq!(c2["missing"], json!(["a11y", "copy"])); assert!((c2["weighted"].as_f64().unwrap() - 5.85).abs() < 1e-9);
         assert!(read_critique(&d, 3, 8.0).is_err());
+    }
+    #[test]
+    fn an_agent_named_round_scores_all_four_and_a_missing_reviewer_never_passes() {
+        let d = tmp("aliases"); std::fs::create_dir_all(d.join("critique")).unwrap();
+        let w = |r: &str| std::fs::write(d.join("critique/round-1.json"), r).unwrap();
+        w(r#"{"reviewers":[{"id":"art-director","score":8},{"id":"ux-director","score":9},{"id":"accessibility","score":8},{"id":"copy","score":8}]}"#);
+        let c = read_critique(&d, 1, 8.0).unwrap();
+        assert_eq!(c["missing"], json!([])); assert_eq!(c["passed"], true);
+        assert!((c["weighted"].as_f64().unwrap() - 8.35).abs() < 1e-9);
+        assert_eq!(c["reviewers"][0]["id"], "art"); assert_eq!(c["reviewers"][2]["id"], "a11y");
+        w(r#"{"reviewers":[{"id":"ux","score":10},{"id":"art","score":10},{"id":"a11y","score":10}]}"#);
+        let c = read_critique(&d, 1, 8.0).unwrap();
+        assert!((c["weighted"].as_f64().unwrap() - 8.5).abs() < 1e-9);
+        assert_eq!(c["missing"], json!(["copy"])); assert_eq!(c["passed"], false);
     }
     #[test]
     fn the_gate_rounds_its_score_and_trusts_only_the_effective_bar() {

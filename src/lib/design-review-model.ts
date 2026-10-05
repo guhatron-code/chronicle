@@ -18,6 +18,14 @@ export const REVIEWERS = [
 ] as const;
 export type ReviewerId = "ux" | "art" | "a11y" | "copy";
 const isReviewer = (v: unknown): v is ReviewerId => REVIEWERS.some((r) => r.id === v);
+/** the bundled agents return their own names as the id; each maps to its reviewer */
+const ID_ALIASES: Record<string, ReviewerId> = { "ux-director": "ux", "art-director": "art", accessibility: "a11y" };
+/** A reviewer id as a critique file writes it — canonical or an agent's name — or null. */
+export function reviewerId(v: unknown): ReviewerId | null {
+  if (typeof v !== "string") return null;
+  const k = v.trim().toLowerCase();
+  return isReviewer(k) ? k : ID_ALIASES[k] ?? null;
+}
 
 /** the bundled reviewers' subagent names, spaced the way `reviewerForTitle` normalises them */
 const AGENT_NAMES: [ReviewerId, string][] = [["art", "art director"], ["ux", "ux director"], ["a11y", "accessibility"], ["copy", "copy"]];
@@ -163,8 +171,8 @@ export function parseCritique(raw: unknown, bar: number, round: number): Critiqu
   for (const x of r.reviewers) {
     const o = obj(x);
     const score = o && num(o.score);
-    if (!o || !isReviewer(o.id) || score == null || reviewers.some((v) => v.id === o.id)) continue;
-    const id = o.id;
+    const id = o && reviewerId(o.id);
+    if (!o || !id || score == null || reviewers.some((v) => v.id === id)) continue;
     const findings = (Array.isArray(o.findings) ? o.findings : []).flatMap((f) => {
       const p = obj(f), t = p && str(p.text);
       if (!p || t == null) return [];
@@ -176,7 +184,7 @@ export function parseCritique(raw: unknown, bar: number, round: number): Critiqu
     reviewers.push({ id, score: Math.min(10, Math.max(0, score)), notes: strs(o.notes), findings });
   }
   const { weighted, missing } = weightedScore(Object.fromEntries(reviewers.map((v) => [v.id, v.score])));
-  return { round, version: num(r.version), at: str(r.at) ?? "", bar, weighted, passed: weighted >= bar, reviewers, missing, blocker: str(r.blocker) };
+  return { round, version: num(r.version), at: str(r.at) ?? "", bar, weighted, passed: weighted >= bar && missing.length === 0, reviewers, missing, blocker: str(r.blocker) };
 }
 
 /* ---------- state ---------- */

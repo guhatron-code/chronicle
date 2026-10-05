@@ -56,6 +56,20 @@ describe("critique", () => {
     const pass = parseCritique({ reviewers: [{ id: "ux", score: 8.5 }, { id: "art", score: 8 }, { id: "a11y", score: 8 }, { id: "copy", score: 8 }] }, 8.0, 1)!;
     expect(pass.weighted).toBeCloseTo(8.18, 2); expect(pass.passed).toBe(true);
   });
+  it("scores a round written with the agents' own names", () => {
+    const c = parseCritique({ reviewers: [
+      { id: "art-director", score: 8 }, { id: "ux-director", score: 9 }, { id: "accessibility", score: 8 }, { id: "copy", score: 8 } ] }, 8.0, 1)!;
+    expect(c.reviewers.map((r) => r.id).sort()).toEqual(["a11y", "art", "copy", "ux"]);
+    expect(c.missing).toEqual([]);
+    expect(c.weighted).toBeCloseTo(8.35, 2); expect(c.passed).toBe(true);
+    expect(c.reviewers.find((r) => r.id === "art")!.findings).toEqual([]);
+  });
+  it("never passes a round with a reviewer missing", () => {
+    const c = parseCritique({ reviewers: [{ id: "ux", score: 10 }, { id: "art", score: 10 }, { id: "a11y", score: 10 }] }, 8.0, 1)!;
+    expect(c.weighted).toBeCloseTo(8.5, 2);
+    expect(c.missing).toEqual(["copy"]);
+    expect(c.passed).toBe(false);
+  });
 });
 
 describe("state", () => {
