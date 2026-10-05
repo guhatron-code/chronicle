@@ -10,7 +10,8 @@
 //! `.chronicle/designs/.threads/…` (the design session's own records)
 //! without Chronicle ever being asked, breaking the Task 4 guarantee that
 //! every design write is fenced. So no allow rules are emitted here at all:
-//! `design_session_meta` returns only `systemPrompt`. Every design write
+//! `design_session_meta` returns `systemPrompt` and, at most, a local plugin
+//! under `claudeCode.options.plugins` — never `settings`. Every design write
 //! then reaches `session/request_permission`, and Task 4's layer 1
 //! (`design_write_decision`) answers it automatically — allow_once inside
 //! the designs folder, reject_once/cancel outside or on a dot entry. The
@@ -33,11 +34,15 @@ File contract:
 
 End every turn with one sentence saying what changed."#;
 
-/// The design lane's session `_meta`: only a prompt append. See the module
-/// doc comment for why no `claudeCode` permission rules are emitted.
-pub fn design_session_meta(_designs_root: &Path) -> Map<String, Value> {
+/// The design lane's session `_meta`: a prompt append and, when given, a
+/// local plugin under `claudeCode.options.plugins` — the ONLY option set
+/// there. See the module doc comment for why no permission rules are emitted.
+pub fn design_session_meta(_designs_root: &Path, plugin_dir: Option<&Path>) -> Map<String, Value> {
     let mut m = Map::new();
     m.insert("systemPrompt".into(), json!({ "append": DESIGN_PROMPT }));
+    if let Some(p) = plugin_dir {
+        m.insert("claudeCode".into(), json!({ "options": { "plugins": [ { "type": "local", "path": p.to_string_lossy() } ] } }));
+    }
     m
 }
 
@@ -60,10 +65,20 @@ mod tests {
 
     #[test]
     fn meta_appends_the_prompt_and_carries_no_permission_rules() {
-        let m = design_session_meta(std::path::Path::new("/Users/t/p/.chronicle/designs"));
+        let m = design_session_meta(std::path::Path::new("/Users/t/p/.chronicle/designs"), None);
         assert_eq!(m["systemPrompt"]["append"], DESIGN_PROMPT);
         assert!(m["systemPrompt"].get("type").is_none(), "the adapter locks type/preset itself");
         assert!(m.get("claudeCode").is_none(), "no allow rules — every design write must still ask (Task 4 fences it)");
+    }
+
+    #[test]
+    fn meta_carries_the_plugin_and_still_no_permission_rules() {
+        let m = design_session_meta(Path::new("/p/.chronicle/designs"), Some(Path::new("/app/Resources/design-plugin")));
+        assert_eq!(m["systemPrompt"]["append"], DESIGN_PROMPT);
+        assert_eq!(m["claudeCode"]["options"]["plugins"], json!([{ "type": "local", "path": "/app/Resources/design-plugin" }]));
+        assert_eq!(m["claudeCode"]["options"].as_object().unwrap().len(), 1, "plugins is the only option");
+        let none = design_session_meta(Path::new("/p/.chronicle/designs"), None);
+        assert!(none.get("claudeCode").is_none());
     }
 
     #[test]

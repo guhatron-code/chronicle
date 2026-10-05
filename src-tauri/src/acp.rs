@@ -665,6 +665,34 @@ pub fn path_in_roots(p: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|r| r.canonicalize().map(|cr| canon.starts_with(&cr)).unwrap_or(false))
 }
 
+/// What a lane carries into `session/new` beyond the prompt: the MCP servers
+/// it may talk to (ACP stdio shape) and a local Claude Code plugin. The chat
+/// lane sends none of either; the design lane's are built in main.rs from
+/// `designs::plugin::servers`.
+#[derive(Clone, Default, Debug)]
+pub struct LaneExtras {
+    pub mcp_servers: Vec<Value>,
+    pub plugin_dir: Option<PathBuf>,
+}
+
+/// Tool names the design lane answers "allow once" for without asking: the
+/// session's own MCP servers (a headless review browser with no profile, the
+/// component registry, Chronicle's read-only design tools). They read pages
+/// and files; none of them writes into the project.
+const AUTO_MCP_PREFIXES: [&str; 3] = ["mcp__playwright__", "mcp__shadcn__", "mcp__chronicle__"];
+
+/// The `allow_once` option id for a permission ask from one of the design
+/// session's own MCP servers; `None` for any other tool, or when no once-only
+/// option exists (the ask then reaches the user as usual).
+pub fn design_mcp_decision(params: &Value) -> Option<String> {
+    let call = params.get("toolCall")?;
+    let name = call.get("name").and_then(|v| v.as_str())
+        .or_else(|| call.pointer("/_meta/claudeCode/toolName").and_then(|v| v.as_str()))?;
+    if !AUTO_MCP_PREFIXES.iter().any(|p| name.starts_with(p)) { return None; }
+    let options = params.get("options").and_then(|v| v.as_array())?;
+    options.iter().find(|o| o["kind"] == "allow_once").and_then(|o| o["optionId"].as_str()).map(String::from)
+}
+
 #[derive(Debug)]
 pub enum WriteDecision {
     Allow { option_id: String },
@@ -800,6 +828,8 @@ pub struct AcpSession {
     key: String,
     /// `Some` exactly for the design lane: every write must land inside it.
     designs_root: Option<PathBuf>,
+    /// MCP servers and a plugin this lane carries into session/new + load.
+    extras: LaneExtras,
     /// Which of the project's two sessions this is (chat or design).
     lane: Lane,
     /// The lane's record store — transcripts, ledger, `current` pointer.
@@ -905,6 +935,7 @@ pub fn start(
     project_dir: PathBuf,
     roots: Vec<PathBuf>,
     designs_root: Option<PathBuf>,
+    extras: LaneExtras,
     resume: Option<String>,
     mut cmd: std::process::Command,
 ) -> Result<bool, String> {
@@ -934,6 +965,7 @@ pub fn start(
     let session = Arc::new(AcpSession {
         key: key.clone(),
         designs_root,
+        extras,
         lane,
         store: lane.store(&project_dir),
         chat_store: Lane::Chat.store(&project_dir),
@@ -1114,21 +1146,27 @@ impl AcpSession {
                 // the adapter replays history during load; our transcript is
                 // the UI's source, so the replay stays suppressed
                 self.suppress_updates.store(true, Ordering::SeqCst);
-                let mut load = json!({ "sessionId": old_sid, "cwd": cwd, "mcpServers": [] });
+                let mut load = json!({ "sessionId": old_sid, "cwd": cwd, "mcpServers": self.extras.mcp_servers });
                 if let Some(root) = &self.designs_root {
-                    load["_meta"] = Value::Object(crate::designs::prompt::design_session_meta(root));
+                    load["_meta"] = Value::Object(crate::designs::prompt::design_session_meta(root, self.extras.plugin_dir.as_deref()));
                 }
                 ("session/load", load)
             }
             None => {
-                let mut new_req = proto::NewSessionRequest::new(cwd);
-                if let Some(root) = &self.designs_root {
-                    new_req = new_req.meta(crate::designs::prompt::design_session_meta(root));
-                }
-                match serde_json::to_value(&new_req) {
-                    Ok(v) => ("session/new", v),
+                // built as JSON (not via the proto builder) so `mcpServers`
+                // rides as given, without depending on the crate's McpServer enum
+                let new_req = proto::NewSessionRequest::new(cwd);
+                let mut v = match serde_json::to_value(&new_req) {
+                    Ok(v) => v,
                     Err(e) => return self.fail_handshake(&e.to_string()),
+                };
+                if !self.extras.mcp_servers.is_empty() {
+                    v["mcpServers"] = Value::Array(self.extras.mcp_servers.clone());
                 }
+                if let Some(root) = &self.designs_root {
+                    v["_meta"] = Value::Object(crate::designs::prompt::design_session_meta(root, self.extras.plugin_dir.as_deref()));
+                }
+                ("session/new", v)
             }
         };
         match self.request_blocking(method, params, NEW_SESSION_TIMEOUT) {
@@ -1324,6 +1362,11 @@ impl AcpSession {
                             "toolCallId": tool_call_id, "allowed": false, "path": "", "reason": DESIGN_MODE_LOCK } });
                         self.append_transcript(&guard);
                         self.emit_msg(guard);
+                        return;
+                    }
+                    // the session's own MCP servers read; they never write the project
+                    if let Some(option_id) = design_mcp_decision(&params) {
+                        self.respond_ok(&id, json!({ "outcome": { "outcome": "selected", "optionId": option_id } }));
                         return;
                     }
                 }
@@ -1762,7 +1805,7 @@ mod acp_tests {
     /// answer arrive. A second prompt asks permission and waits forever —
     /// only a cancel resolves it.
     const MOCK_AGENT: &str = r#"
-import sys, json
+import sys, json, os
 def send(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 project = sys.argv[1]
@@ -1770,6 +1813,7 @@ turn = 0
 state = {}
 for line in sys.stdin:
     msg = json.loads(line)
+    open(os.path.join(sys.argv[1], ".mock-requests.jsonl"), "a").write(json.dumps(msg) + "\n")
     m = msg.get("method")
     if m == "initialize":
         send({"jsonrpc":"2.0","id":msg["id"],"result":{"protocolVersion":1,
@@ -1887,7 +1931,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        assert!(start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, None, cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), None, cmd).unwrap());
         Some(Harness { state, rx, key, dir })
     }
 
@@ -2075,6 +2119,7 @@ for line in sys.stdin:
         let s = AcpSession {
             key: "k".into(),
             designs_root: None,
+            extras: LaneExtras::default(),
             roots: vec![dir.clone()],
             repo: dir.clone(),
             lane: Lane::Chat,
@@ -2248,6 +2293,7 @@ for line in sys.stdin:
         let s = AcpSession {
             key: Lane::Design.key(&d.to_string_lossy()),
             designs_root: Some(root.clone()),
+            extras: LaneExtras::default(),
             roots: vec![d.clone()],
             repo: d.clone(),
             lane: Lane::Design,
@@ -2309,6 +2355,7 @@ for line in sys.stdin:
         let s = AcpSession {
             key: d.to_string_lossy().to_string(),
             designs_root: None,
+            extras: LaneExtras::default(),
             roots: vec![d.clone()],
             repo: d.clone(),
             lane: Lane::Chat,
@@ -2461,7 +2508,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, None, adapter_command(&npx)).unwrap();
+        start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), None, adapter_command(&npx)).unwrap();
 
         let ready = wait_for(&rx, 300, |v| state_is(v, "ready") || state_is(v, "needs-login") || state_is(v, "error"));
         if !state_is(&ready, "ready") {
@@ -2599,7 +2646,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = Lane::Design.key(&dir.to_string_lossy());
-        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), None, cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
         wait_for(&rx, 20, |v| state_is(v, "ready"));
         state.get(&key).unwrap().prompt(vec![json!({"type":"text","text":"DESIGN-FENCE"})], "DESIGN-FENCE".into()).unwrap();
         let g1 = wait_for(&rx, 20, |v| method_is(v, "_chronicle/guard"));
@@ -2624,7 +2671,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = Lane::Design.key(&dir.to_string_lossy());
-        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), None, cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
         wait_for(&rx, 20, |v| state_is(v, "ready"));
 
         // the real path waits DESIGN_IDLE — call the stop path directly instead
@@ -2724,6 +2771,7 @@ for line in sys.stdin:
         AcpSession {
             key: Lane::Design.key(&d.to_string_lossy()),
             designs_root: Some(root.to_path_buf()),
+            extras: LaneExtras::default(),
             roots: vec![d.to_path_buf()],
             repo: d.to_path_buf(),
             lane: Lane::Design,
@@ -2841,7 +2889,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = Lane::Design.key(&dir.to_string_lossy());
-        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), None, cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
         wait_for(&rx, 20, |v| state_is(v, "ready"));
         state.get(&key).unwrap().prompt(vec![json!({"type":"text","text":"EXIT-PLAN"})], "EXIT-PLAN".into()).unwrap();
         let guard = wait_for(&rx, 20, |v| method_is(v, "_chronicle/guard"));
@@ -2870,7 +2918,7 @@ for line in sys.stdin:
         let (tx, rx2) = mpsc::channel::<Value>();
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let dkey = Lane::Design.key(&h.key);
-        assert!(start(&h.state, emit, dkey.clone(), Lane::Design, h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], Some(h.dir.join(".chronicle/designs")), None, cmd).unwrap());
+        assert!(start(&h.state, emit, dkey.clone(), Lane::Design, h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], Some(h.dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
         let chat_ready = wait_for(&h.rx, 20, |v| state_is(v, "ready"));
         let design_ready = wait_for(&rx2, 20, |v| state_is(v, "ready"));
         assert_eq!(chat_ready["lane"], "chat");
@@ -2884,6 +2932,53 @@ for line in sys.stdin:
         assert!(Lane::Design.store(&h.dir).join("current").exists());
         h.state.get(&dkey).unwrap().stop(false);
         assert!(h.state.get(&h.key).is_some(), "stopping the design lane leaves chat alive");
+        h.state.drain();
+    }
+
+    #[test]
+    fn mcp_tools_from_the_sessions_own_servers_are_allowed_without_asking() {
+        let ask = |name: &str| json!({ "toolCall": { "toolCallId": "m1", "name": name },
+            "options": [ { "optionId": "yes", "kind": "allow_once" }, { "optionId": "no", "kind": "reject_once" } ] });
+        assert_eq!(design_mcp_decision(&ask("mcp__playwright__browser_navigate")).as_deref(), Some("yes"));
+        assert_eq!(design_mcp_decision(&ask("mcp__shadcn__search_items_in_registries")).as_deref(), Some("yes"));
+        assert_eq!(design_mcp_decision(&ask("mcp__chronicle__chronicle_designs_capture")).as_deref(), Some("yes"));
+        assert!(design_mcp_decision(&ask("mcp__figma__get_design_context")).is_none(), "unknown servers still ask");
+        assert!(design_mcp_decision(&ask("Bash")).is_none());
+        let via_meta = json!({ "toolCall": { "toolCallId": "m2", "_meta": { "claudeCode": { "toolName": "mcp__playwright__browser_snapshot" } } },
+            "options": [ { "optionId": "ok", "kind": "allow_once" } ] });
+        assert_eq!(design_mcp_decision(&via_meta).as_deref(), Some("ok"));
+        let no_once = json!({ "toolCall": { "toolCallId": "m3", "name": "mcp__playwright__browser_click" },
+            "options": [ { "optionId": "always", "kind": "allow_always" } ] });
+        assert!(design_mcp_decision(&no_once).is_none(), "never picks an always option");
+    }
+
+    #[test]
+    fn the_design_lane_sends_its_servers_and_plugin_and_the_chat_lane_sends_none() {
+        let Some(h) = start_mock("lane-extras") else { return };
+        let py = python3().unwrap();
+        let script = h.dir.join(".mock-agent.py");
+        let mut cmd = std::process::Command::new(py);
+        cmd.arg(&script).arg(&h.dir);
+        let (tx, rx2) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let dkey = Lane::Design.key(&h.key);
+        let extras = LaneExtras {
+            mcp_servers: vec![json!({ "name": "playwright", "command": "/usr/bin/true", "args": ["--headless"], "env": [] })],
+            plugin_dir: Some(PathBuf::from("/Applications/Chronicle.app/Contents/Resources/design-plugin")),
+        };
+        assert!(start(&h.state, emit, dkey.clone(), Lane::Design, h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], Some(h.dir.join(".chronicle/designs")), extras, None, cmd).unwrap());
+        let _ = wait_for(&rx2, 20, |v| state_is(v, "ready"));
+        // both lanes ready ⇒ both session/new requests are already logged
+        let _ = wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        // the mock agent echoes every request it received into <dir>/.mock-requests.jsonl
+        let log = std::fs::read_to_string(h.dir.join(".mock-requests.jsonl")).unwrap_or_default();
+        let new_req = log.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|v| v["method"] == "session/new" && v["params"]["mcpServers"].is_array() && !v["params"]["mcpServers"].as_array().unwrap().is_empty()).expect("a session/new with servers");
+        assert_eq!(new_req["params"]["mcpServers"][0]["name"], "playwright");
+        assert_eq!(new_req["params"]["_meta"]["claudeCode"]["options"]["plugins"][0]["type"], "local");
+        assert!(new_req["params"]["_meta"]["claudeCode"]["options"].get("settings").is_none(), "no permission rules ride along");
+        // the chat lane's own session/new (started by start_mock) has none
+        let chat_req = log.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|v| v["method"] == "session/new" && v["params"].get("_meta").is_none()).expect("the chat session/new");
+        assert!(chat_req["params"].get("mcpServers").map(|m| m.as_array().map(|a| a.is_empty()).unwrap_or(true)).unwrap_or(true));
         h.state.drain();
     }
 }

@@ -3278,7 +3278,7 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
     };
     if lane == acp::Lane::Design { designs::ensure_root(&p.dir)?; }
     let designs_root = if lane == acp::Lane::Design { Some(designs::designs_root(&p.dir)) } else { None };
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, None, acp::adapter_command(&npx))?;
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, acp::LaneExtras::default(), None, acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
 
@@ -3299,7 +3299,7 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
     };
     if lane == acp::Lane::Design { designs::ensure_root(&p.dir)?; }
     let designs_root = if lane == acp::Lane::Design { Some(designs::designs_root(&p.dir)) } else { None };
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, Some(id), acp::adapter_command(&npx))?;
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, acp::LaneExtras::default(), Some(id), acp::adapter_command(&npx))?;
     Ok(json!({ "started": started }))
 }
 
