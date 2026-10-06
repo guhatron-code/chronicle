@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answersMessage, critiqueFixPrompt, critiquePrompt, findingLine, fixAllMinorPrompt, lintFixPrompt, resolveBlockerPrompt, skipMessage } from "./design-prompts";
+import { answersMessage, critiqueFixPrompt, critiquePrompt, findingLine, fixAllMinorPrompt, fixFindingPrompt, lintFixPrompt, resolveBlockerPrompt, skipMessage } from "./design-prompts";
 import type { CritiqueRound, Finding, LintReport, Questions } from "./design-review-model";
 
 const f = (over: Partial<Finding>): Finding => ({ rule: "audit:contrast", severity: "severe", text: "Text at 3.2:1 needs 4.5:1", frame: "desktop", file: "frames/desktop.html", ...over });
@@ -14,6 +14,9 @@ describe("prompts", () => {
   it("lint and finding lines name frame, file, line and selector", () => {
     expect(findingLine(f({ line: 188, selector: "p.lede" }))).toBe("- desktop · frames/desktop.html:188 · p.lede — Text at 3.2:1 needs 4.5:1");
     expect(findingLine(f({}))).toBe("- desktop · frames/desktop.html — Text at 3.2:1 needs 4.5:1");
+    // a reviewer's finding, as parseCritique shapes it: no file, a frame and a selector
+    expect(fixFindingPrompt({ rule: "critique:ux", severity: "minor", text: "The hero runs long", frame: "mobile", file: "", selector: ".hero p" }))
+      .toBe("Fix this and change nothing else:\n- mobile · .hero p — The hero runs long\nSay what you changed in one sentence.");
     const r: LintReport = { v: 1, version: 3, at: "t", ran: true, problem: null, severe: [f({})], minor: [f({ severity: "minor" })] };
     const p = lintFixPrompt(r, 1, 2);
     expect(p.startsWith("Lint fix pass 1 of 2. Fix these and change nothing else:\n- desktop")).toBe(true);

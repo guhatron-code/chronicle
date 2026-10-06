@@ -3,11 +3,12 @@ import { REVIEWERS, fmtScore } from "./design-review-model";
 import type { CritiqueRound, Finding, LintReport, Questions } from "./design-review-model";
 
 const ONE_SENTENCE = "Say what you changed in one sentence.";
+// a reviewer's finding names a frame and a selector but no file; the line skips the gap
 const where = (f: Finding) => (f.line != null ? `${f.file}:${f.line}` : f.file);
 
-/** The shared line: `- <frame> · <file>[:<line>][ · <selector>] — <text>`. */
+/** The shared line: `- <frame>[ · <file>[:<line>]][ · <selector>] — <text>`. */
 export function findingLine(f: Finding): string {
-  return `- ${f.frame} · ${where(f)}${f.selector ? ` · ${f.selector}` : ""} — ${f.text}`;
+  return `- ${[f.frame, where(f), f.selector].filter(Boolean).join(" · ")} — ${f.text}`;
 }
 
 export function answersMessage(q: Questions, answers: Record<string, string | string[]>, references: string[]): string {

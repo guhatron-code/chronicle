@@ -26,6 +26,23 @@ function span(startIso: string | undefined, endIso: string | undefined): string 
 const sameFinding = (a: { frame: string; selector: string; text: string } | null, f: Finding) =>
   !!a && a.text === f.text && a.frame === f.frame && a.selector === (f.selector ?? "");
 
+/** One finding, lint or reviewer: pin on click, Fix sends it to the session. */
+function FindingRow({ f, pinned, busy, onPick, onFix }: { f: Finding; pinned: boolean; busy: boolean; onPick: () => void; onFix: () => void }) {
+  const at = f.file ? `${f.file}${f.line != null ? `:${f.line}` : ""}` : [f.frame, f.selector].filter(Boolean).join(" · ");
+  return (
+    <div className={cn("flex items-start gap-2 py-2 pr-4 pl-4", pinned && "bg-fill-hover")}>
+      <button type="button" onClick={onPick} aria-pressed={pinned} className="flex min-w-0 flex-1 items-start gap-2 text-left outline-none focus-visible:[box-shadow:var(--focus-ring)]">
+        <span className="mt-1"><Dot tone={f.severity === "severe" ? "error" : "warn"} /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-[12px] text-text-primary">{f.text}</span>
+          <span className="block truncate font-mono text-[10.5px] text-text-faint">{f.severity} · {at}</span>
+        </span>
+      </button>
+      <button type="button" disabled={busy} aria-label={`Fix: ${f.text}`} onClick={onFix} className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-text-secondary outline-none hover:bg-fill-hover hover:text-text-primary focus-visible:[box-shadow:var(--focus-ring)] disabled:opacity-40 disabled:hover:bg-transparent">Fix</button>
+    </div>
+  );
+}
+
 export function Scorecard({ dir, onClose }: { dir: string; onClose: () => void }) {
   const [, bump] = useState(0);
   useEffect(() => subscribeDesigns(() => bump((n) => n + 1)), []);
@@ -104,6 +121,13 @@ export function Scorecard({ dir, onClose }: { dir: string; onClose: () => void }
                       {res.notes.map((n, i) => <li key={i} className="mb-1 text-[12px] leading-normal text-text-secondary">{n}</li>)}
                     </ul>
                   )}
+                  {res.findings.length > 0 && (
+                    <div className="-mx-4 mt-1">
+                      {res.findings.map((f, i) => (
+                        <FindingRow key={i} f={f} pinned={sameFinding(p.pin, f)} busy={busy} onPick={() => pick(f)} onFix={() => void send(fixFinding(dir, f), "Couldn't send that fix")} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -116,16 +140,7 @@ export function Scorecard({ dir, onClose }: { dir: string; onClose: () => void }
         </div>
         {findings.length === 0 && <p className="px-4 pb-3 text-[11.5px] text-text-faint">{p.lint ? "Nothing to fix." : "No lint report yet."}</p>}
         {findings.map((f, i) => (
-          <div key={i} className={cn("flex items-start gap-2 py-2 pr-4 pl-4", sameFinding(p.pin, f) && "bg-fill-hover")}>
-            <button type="button" onClick={() => pick(f)} aria-pressed={sameFinding(p.pin, f)} className="flex min-w-0 flex-1 items-start gap-2 text-left outline-none focus-visible:[box-shadow:var(--focus-ring)]">
-              <span className="mt-1"><Dot tone={f.severity === "severe" ? "error" : "warn"} /></span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[12px] text-text-primary">{f.text}</span>
-                <span className="block truncate font-mono text-[10.5px] text-text-faint">{f.severity} · {f.file || f.frame}{f.line != null ? `:${f.line}` : ""}</span>
-              </span>
-            </button>
-            <button type="button" disabled={busy} aria-label={`Fix: ${f.text}`} onClick={() => void send(fixFinding(dir, f), "Couldn't send that fix")} className="shrink-0 rounded-md px-1.5 py-0.5 text-[11px] text-text-secondary outline-none hover:bg-fill-hover hover:text-text-primary focus-visible:[box-shadow:var(--focus-ring)] disabled:opacity-40 disabled:hover:bg-transparent">Fix</button>
-          </div>
+          <FindingRow key={i} f={f} pinned={sameFinding(p.pin, f)} busy={busy} onPick={() => pick(f)} onFix={() => void send(fixFinding(dir, f), "Couldn't send that fix")} />
         ))}
       </div>
       <div className="flex gap-2 border-t border-border-hairline px-4 py-3">
