@@ -133,7 +133,7 @@ pub fn review_jpegs(png: &[u8], frame_w: u32, fold: u32) -> Result<(Vec<u8>, Vec
 /// Writes `<id>.png` and its two review JPEGs into `dir`.
 fn write_capture(dir: &Path, id: &str, c: &Capture) -> Result<(), String> {
     let (fold, full) = review_jpegs(&c.png, c.frame_w, c.fold)?;
-    for (name, bytes) in [(format!("{id}.png"), &c.png), (format!("{id}.fold.jpg"), &fold), (format!("{id}.jpg"), &full)] {
+    for (name, bytes) in capture_files(id).into_iter().zip([&c.png, &fold, &full]) {
         std::fs::write(dir.join(name), bytes).map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -312,10 +312,28 @@ fn render_frames(app: &tauri::AppHandle, hash: &str, url_base: &str, out_dir: Op
     Ok((done, findings))
 }
 
-/// Renders every frame of one version into its `thumbs/`, with every frame's audit when `audit`.
+/// The three files a rendered frame leaves behind.
+fn capture_files(id: &str) -> [String; 3] { [format!("{id}.png"), format!("{id}.fold.jpg"), format!("{id}.jpg")] }
+
+/// Copies the rendered frames `ids` from `from` into `.review/captures/`, so the
+/// paths the critique hands its reviewers always show the version just gated,
+/// whether or not the director captured anything itself this turn.
+fn mirror_captures(from: &Path, design: &Path, ids: &[String]) -> Result<(), String> {
+    let to = design.join(".review").join("captures");
+    std::fs::create_dir_all(&to).map_err(|e| e.to_string())?;
+    for id in ids { for f in capture_files(id) { std::fs::copy(from.join(&f), to.join(&f)).map_err(|e| format!("{f}: {e}"))?; } }
+    Ok(())
+}
+
+/// Renders every frame of one version into its `thumbs/`, with every frame's
+/// audit when `audit`, and mirrors the pictures into the design's `.review/captures/`.
 #[allow(clippy::too_many_arguments)]
 fn render_version(app: &tauri::AppHandle, hash: &str, slug: &str, n: u32, vdir: &Path, frames: Vec<(String, String, u32, u32)>, kind: &str, audit: bool) -> Result<(Vec<String>, Vec<Finding>), String> {
-    let (ids, findings) = render_frames(app, hash, &format!("chronicle-file://{hash}/{slug}/.versions/v{n}"), Some(&vdir.join("thumbs")), frames, kind, audit)?;
+    let thumbs = vdir.join("thumbs");
+    let (ids, findings) = render_frames(app, hash, &format!("chronicle-file://{hash}/{slug}/.versions/v{n}"), Some(&thumbs), frames, kind, audit)?;
+    if let Some(design) = vdir.parent().and_then(|p| p.parent()) {
+        if let Err(e) = mirror_captures(&thumbs, design, &ids) { eprintln!("design captures not mirrored for v{n}: {e}"); }
+    }
     Ok((ids.iter().map(|id| thumb_rel(slug, n, id)).collect(), findings))
 }
 
@@ -546,6 +564,13 @@ mod tests {
         write_capture(&d, "desktop", &Capture { png: small, audit: vec![], frame_w: 390, fold: 200 }).unwrap();
         for f in ["desktop.png", "desktop.fold.jpg", "desktop.jpg"] { assert!(d.join(f).is_file(), "{f}"); }
         assert_eq!(image::image_dimensions(d.join("desktop.fold.jpg")).unwrap(), (780, 400));
+        // a version's render is mirrored into the design's .review/captures/, the critique's paths
+        let design = d.join("home"); let thumbs = design.join(".versions/v3/thumbs");
+        std::fs::create_dir_all(&thumbs).unwrap();
+        for f in capture_files("desktop") { std::fs::copy(d.join(&f), thumbs.join(&f)).unwrap(); }
+        mirror_captures(&thumbs, &design, &["desktop".to_string()]).unwrap();
+        for f in capture_files("desktop") { assert!(design.join(".review/captures").join(&f).is_file(), "{f}"); }
+        assert!(mirror_captures(&thumbs, &design, &["missing".to_string()]).is_err());
         let _ = std::fs::remove_dir_all(&d);
     }
 
