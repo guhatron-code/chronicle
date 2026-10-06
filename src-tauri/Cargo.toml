@@ -37,6 +37,8 @@ flate2 = "1" # the bundled block-list chunks ship gzipped
 url = "2"
 trash = "5.2.8" # Finder's Trash, restorable — the app never unlinks a user's file
 percent-encoding = "2"
+# already in the build through arboard (png + tiff); jpeg adds only the encoder, for the review crops beside each capture
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 
 # muda is what tauri::menu parses accelerator strings with; it is not re-exported, so
 # the test that pins every Go accelerator borrows the type directly. Version tracks

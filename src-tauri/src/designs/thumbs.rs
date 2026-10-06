@@ -4,7 +4,9 @@
 //! seconds; a frame still loading then is captured anyway and its audit says it
 //! hadn't finished), grows to the page height, runs Chronicle's own audit in the page,
 //! and snapshots. The same window serves the review at turn end (thumbs, audit,
-//! detector, lint report) and the director's mid-turn capture and lint.
+//! detector, lint report) and the director's mid-turn capture and lint. Beside
+//! every PNG go two small JPEGs — the first screen and the full page, at most
+//! 900 px wide — which are what the reviewers read.
 //!
 //! The hidden window's label never matches "main", so the capability in
 //! `capabilities/default.json` (scoped to webview "main") gives it no IPC.
@@ -98,8 +100,48 @@ pub fn audit_script(audit: bool, kind: &str, width: u32, fold: u32) -> Option<St
     audit.then(|| format!("{};\n{}", audit_source(), audit_call(kind, width, fold)))
 }
 
-/// One rendered frame: the picture and what the audit found in it.
-pub struct Capture { pub png: Vec<u8>, pub audit: Vec<Finding> }
+/// Review crops are at most this many pixels wide, and this JPEG quality.
+const REVIEW_WIDTH: u32 = 900;
+const REVIEW_QUALITY: u8 = 80;
+
+/// The two JPEGs that go beside a capture PNG: the first screen (`fold` points
+/// tall in a frame `frame_w` points wide — the PNG's own scale is read off its
+/// width) and the full page, each shrunk to at most 900 px wide. These are what
+/// a reviewer reads; the PNG is many times the size.
+pub fn review_jpegs(png: &[u8], frame_w: u32, fold: u32) -> Result<(Vec<u8>, Vec<u8>), String> {
+    use image::{codecs::jpeg::JpegEncoder, imageops::{resize, FilterType}, RgbImage};
+    let img = image::load_from_memory(png).map_err(|e| format!("the capture couldn't be read: {e}"))?.into_rgb8();
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 { return Err("the capture is empty".into()); }
+    let fold_px = ((fold as f64 * w as f64 / frame_w.max(1) as f64).round() as u32).clamp(1, h);
+    let encode = |src: &RgbImage| -> Result<Vec<u8>, String> {
+        let (sw, sh) = src.dimensions();
+        let shrunk;
+        let src = if sw > REVIEW_WIDTH {
+            let nh = ((sh as f64 * REVIEW_WIDTH as f64 / sw as f64).round() as u32).max(1);
+            shrunk = resize(src, REVIEW_WIDTH, nh, FilterType::Triangle);
+            &shrunk
+        } else { src };
+        let mut out = Vec::new();
+        JpegEncoder::new_with_quality(&mut out, REVIEW_QUALITY).encode_image(src).map_err(|e| format!("the crop couldn't be saved: {e}"))?;
+        Ok(out)
+    };
+    let fold_crop = image::imageops::crop_imm(&img, 0, 0, w, fold_px).to_image();
+    Ok((encode(&fold_crop)?, encode(&img)?))
+}
+
+/// Writes `<id>.png` and its two review JPEGs into `dir`.
+fn write_capture(dir: &Path, id: &str, c: &Capture) -> Result<(), String> {
+    let (fold, full) = review_jpegs(&c.png, c.frame_w, c.fold)?;
+    for (name, bytes) in [(format!("{id}.png"), &c.png), (format!("{id}.fold.jpg"), &fold), (format!("{id}.jpg"), &full)] {
+        std::fs::write(dir.join(name), bytes).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// One rendered frame: the picture, what the audit found in it, and the frame's
+/// own width and fold (points) so the picture's first screen can be cut out.
+pub struct Capture { pub png: Vec<u8>, pub audit: Vec<Finding>, pub frame_w: u32, pub fold: u32 }
 
 /// Destroys the hidden window however the render ends — success, error, or panic.
 struct CloseOnDrop(tauri::WebviewWindow);
@@ -235,11 +277,11 @@ fn render_frame(app: &tauri::AppHandle, hash: &str, url: &str, frame_id: &str, f
     // so the gate never reads clean over a frame it saw half-loaded
     if audit { findings.extend(not_ready_finding(ready.is_some(), frame_id, file)); }
     let audit = findings;
-    Ok(Capture { png: snapshot_png(win, snap_w)?, audit })
+    Ok(Capture { png: snapshot_png(win, snap_w)?, audit, frame_w: width, fold: height })
 }
 
-/// Renders each frame from `<url_base>/<file>`, writing `<out_dir>/<id>.png` when
-/// there is an out dir. A frame that fails is skipped and the rest go on. Returns
+/// Renders each frame from `<url_base>/<file>`, writing `<out_dir>/<id>.png` and
+/// its review JPEGs (`<id>.fold.jpg`, `<id>.jpg`) when there is an out dir. A frame that fails is skipped and the rest go on. Returns
 /// the ids whose picture was made and every frame's audit findings; errors only
 /// when frames existed and not a single one rendered.
 fn render_frames(app: &tauri::AppHandle, hash: &str, url_base: &str, out_dir: Option<&Path>, frames: Vec<(String, String, u32, u32)>, kind: &str, audit: bool) -> Result<(Vec<String>, Vec<Finding>), String> {
@@ -252,10 +294,10 @@ fn render_frames(app: &tauri::AppHandle, hash: &str, url_base: &str, out_dir: Op
     let mut failures: Vec<String> = Vec::new();
     for (id, file, width, height) in frames {
         let url = format!("{url_base}/{file}");
-        let out = render_frame(app, hash, &url, &id, &file, width, height, kind, audit).and_then(|c| {
-            findings.extend(c.audit);
+        let out = render_frame(app, hash, &url, &id, &file, width, height, kind, audit).and_then(|mut c| {
+            findings.extend(std::mem::take(&mut c.audit));
             match out_dir {
-                Some(d) => std::fs::write(d.join(format!("{id}.png")), c.png).map_err(|e| e.to_string()),
+                Some(d) => write_capture(d, &id, &c),
                 None => Ok(()),
             }
         });
@@ -354,7 +396,8 @@ fn current_frames(design: &Path, frame: Option<&str>) -> Result<Vec<(String, Str
 }
 
 /// Mid-turn: pictures of the current files of one frame or all, written to
-/// `.review/captures/<frame id>.png`. → the absolute paths written.
+/// `.review/captures/<frame id>.png` (with `<frame id>.fold.jpg` and
+/// `<frame id>.jpg` beside each). → the absolute paths of the PNGs written.
 #[tauri::command]
 pub async fn design_capture(app: tauri::AppHandle, roots: State<'_, OpenRoots>, web: State<'_, crate::web::WebState>, dir: String, slug: String, frame: Option<String>) -> Result<Vec<String>, String> {
     let p = project_for(&roots, &dir)?;
@@ -474,6 +517,38 @@ mod tests {
             frame: "desktop".into(), file: "frames/desktop.html".into(), line: None, selector: None });
         assert!(not_ready_finding(true, "desktop", "frames/desktop.html").is_none());
     }
+    #[test]
+    fn a_capture_gets_a_fold_crop_and_a_full_page_jpeg_at_most_900_wide() {
+        // a 1440-point frame captured at 720 points on a 2x screen: 1440 px wide, 4000 px tall, fold 900 points
+        let mut png = Vec::new();
+        image::RgbaImage::from_fn(1440, 4000, |_, y| image::Rgba([(y % 256) as u8, 40, 200, 255]))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        let (fold, full) = review_jpegs(&png, 1440, 900).unwrap();
+        assert_eq!(image::guess_format(&fold).unwrap(), image::ImageFormat::Jpeg);
+        assert_eq!(image::guess_format(&full).unwrap(), image::ImageFormat::Jpeg);
+        let fold = image::load_from_memory(&fold).unwrap();
+        let full = image::load_from_memory(&full).unwrap();
+        assert_eq!((fold.width(), fold.height()), (900, 563), "the first screen: 900 of 1440 points, shrunk to 900 px wide");
+        assert_eq!((full.width(), full.height()), (900, 2500), "the full page, shrunk the same way");
+        // a phone frame on a 2x screen (780 px wide) is narrower than 900 and keeps its size; a fold past the page's end is the page
+        let mut small = Vec::new();
+        image::RgbImage::from_pixel(780, 1000, image::Rgb([9, 9, 9])).write_to(&mut std::io::Cursor::new(&mut small), image::ImageFormat::Png).unwrap();
+        let dims = |b: &[u8]| { let i = image::load_from_memory(b).unwrap(); (i.width(), i.height()) };
+        let (fold, full) = review_jpegs(&small, 390, 844).unwrap();
+        assert_eq!(dims(&fold), (780, 1000), "a fold past the page's end is the whole page");
+        assert_eq!(dims(&full), (780, 1000));
+        let (fold, _) = review_jpegs(&small, 390, 200).unwrap();
+        assert_eq!(dims(&fold), (780, 400));
+        assert!(review_jpegs(b"not a picture", 390, 200).is_err());
+        // on disk: the png and both jpegs land beside each other
+        let d = std::env::temp_dir().join(format!("chronicle-thumbs-jpeg-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        write_capture(&d, "desktop", &Capture { png: small, audit: vec![], frame_w: 390, fold: 200 }).unwrap();
+        for f in ["desktop.png", "desktop.fold.jpg", "desktop.jpg"] { assert!(d.join(f).is_file(), "{f}"); }
+        assert_eq!(image::image_dimensions(d.join("desktop.fold.jpg")).unwrap(), (780, 400));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn the_capture_window_only_goes_to_its_own_design_host() {
         let ok = |s: &str| stays_on_design_host(&s.parse().unwrap(), "abc123");
