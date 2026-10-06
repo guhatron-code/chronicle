@@ -87,7 +87,17 @@ mod tests {
             assert!(DESIGN_PROMPT.contains(must), "missing: {must}");
         }
         assert!(!DESIGN_PROMPT.contains("context.mjs"));
+        assert!(!DESIGN_PROMPT.contains("download any font"), "fonts come from the bundle now");
         assert!(DESIGN_PROMPT.len() < 12_000, "the append stays short enough to sit beside Claude Code's own prompt");
+    }
+
+    #[test]
+    fn the_director_prompt_keeps_a_build_turn_off_the_network_and_out_of_the_shell() {
+        for must in ["chronicle-fonts skill", "Never download a font and never link a font service", "Make no network calls while you build: no stock photos, no curl",
+            "look at each frame once", "Never run the lint tool yourself", "Prefer Write and Edit over shell commands"] {
+            assert!(DESIGN_PROMPT.contains(must), "missing: {must}");
+        }
+        assert!(DESIGN_PROMPT.split_whitespace().count() < 750, "the persona stays under 750 words");
     }
 
     #[test]
