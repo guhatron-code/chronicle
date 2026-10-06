@@ -3,7 +3,11 @@ import type { CritiqueRound, LintReport, PromptKind, ReviewSettings, ReviewState
 
 export const MAX_LINT_PASSES = 2;
 
-export interface TurnResult { version: number | null; questionsPending: boolean; lint: LintReport | null; critique: CritiqueRound | null; cancelled: boolean }
+export interface TurnResult {
+  version: number | null; questionsPending: boolean; lint: LintReport | null; critique: CritiqueRound | null; cancelled: boolean;
+  /** the current version already has a critique round (a `critique/round-<n>.json` whose `version` is it) */
+  critiqued: boolean;
+}
 export type Next =
   | { kind: "wait" }
   | { kind: "send"; prompt: PromptKind }
@@ -16,10 +20,17 @@ export type Next =
 
 const NEW_ATTEMPT: PromptKind[] = ["brief", "user", "answers", "continue"];
 const FIX_PROMPTS: PromptKind[] = ["lintFix", "critiqueFix", "fixFinding", "resolve"];
+/** The phases a user's message can leave and, when it changed nothing, come back to. */
+const RESTING = new Set<ReviewState["phase"]>(["done", "below-bar", "stopped"]);
 
 export function onSend(st: ReviewState, prompt: PromptKind, now: number): ReviewState {
-  const base: ReviewState = { ...st, phase: prompt === "critique" ? "critique" : prompt === "lintFix" ? "fixing" : "building", lastPrompt: prompt };
-  if (NEW_ATTEMPT.includes(prompt)) return { ...base, round: 0, fixPass: 0, best: null, accepted: false, startedAt: now };
+  const base: ReviewState = { ...st, phase: prompt === "critique" ? "critique" : prompt === "lintFix" ? "fixing" : "building", lastPrompt: prompt, prior: null };
+  if (NEW_ATTEMPT.includes(prompt)) {
+    // a user's message sets a finished attempt aside, not away: a reply that changes nothing restores it
+    const prior: ReviewState["prior"] = prompt === "user" && RESTING.has(st.phase)
+      ? { phase: st.phase, round: st.round, fixPass: st.fixPass, best: st.best, startedAt: st.startedAt, accepted: st.accepted } : null;
+    return { ...base, round: 0, fixPass: 0, best: null, accepted: false, startedAt: now, prior };
+  }
   if (prompt === "resolve") return { ...base, accepted: false };
   return base;
 }
@@ -38,6 +49,10 @@ export function afterTurn(st: ReviewState, s: ReviewSettings, t: TurnResult): { 
   }
 
   if (t.questionsPending) return { state: { ...st, phase: "questions", version }, next: { kind: "questions" } };
+  // a chat reply that cut no version on a version already critiqued: the attempt it set aside comes back as it was
+  if (st.lastPrompt === "user" && t.version == null && t.critiqued && st.prior) {
+    return { state: { ...st, ...st.prior, version, prior: null }, next: { kind: "wait" } };
+  }
   const noProgress = t.version == null && st.lastPrompt != null && FIX_PROMPTS.includes(st.lastPrompt);
   if (!noProgress && s.lint && t.lint && t.lint.severe.length > 0 && st.fixPass < MAX_LINT_PASSES) {
     return { state: { ...st, phase: "fixing", fixPass: st.fixPass + 1, version }, next: { kind: "send", prompt: "lintFix" } };

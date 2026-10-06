@@ -2,27 +2,20 @@
    keep it at its score, let the director resolve the blocker, or lower the bar
    for this design (the settings popover listens for the event). */
 import { acceptBelowBar, designProjectFor, resolveBlocker } from "@/lib/design-store";
-import { fmtScore, type CritiqueRound, type ReviewerId } from "@/lib/design-review-model";
+import { blockerOf, fmtScore, type CritiqueRound, type ReviewerId } from "@/lib/design-review-model";
 import { BtnPrimary, BtnSecondary } from "@/components/chrome/atoms";
 import { toastError } from "@/overlays/toasts";
 import { BtnGhost, Card, StateWord } from "./card";
 
 const WHO: Record<ReviewerId, string> = { ux: "The UX director", art: "The art director", a11y: "The accessibility reviewer", copy: "The copy reviewer" };
 
-/** The blocker the director wrote, else the finding that came back most rounds. */
+/** The same blocker the resolve prompt sends (`blockerOf`), phrased for the card. */
 function why(critiques: CritiqueRound[]): string | null {
-  const blocker = [...critiques].reverse().find((c) => c.blocker)?.blocker;
-  if (blocker) return blocker;
-  const seen = new Map<string, { id: ReviewerId; text: string; rounds: Set<number>; severe: boolean }>();
-  for (const c of critiques) for (const r of c.reviewers) for (const f of r.findings) {
-    const k = `${r.id}\0${f.text.trim().toLowerCase()}`;
-    const e = seen.get(k) ?? { id: r.id, text: f.text.trim(), rounds: new Set<number>(), severe: false };
-    e.rounds.add(c.round); e.severe ||= f.severity === "severe";
-    seen.set(k, e);
-  }
-  const top = [...seen.values()].sort((a, b) => b.rounds.size - a.rounds.size || Number(b.severe) - Number(a.severe))[0];
-  if (!top) return null;
-  return top.rounds.size > 1 ? `${WHO[top.id]} keeps flagging the same thing: ${top.text}` : `${WHO[top.id]}’s top finding: ${top.text}`;
+  const b = blockerOf(critiques);
+  if (!b) return null;
+  const who = b.reviewer ? WHO[b.reviewer] : "The critique";
+  if (b.why === "blocker") return b.text;
+  return b.why === "repeated" ? `${who} keeps flagging the same thing: ${b.text}` : `${who}’s top finding: ${b.text}`;
 }
 
 const run = (p: Promise<unknown>, what: string) => void p.catch((e) => toastError(what, String(e).slice(0, 90)));

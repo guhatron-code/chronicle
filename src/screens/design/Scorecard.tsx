@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { BtnSecondary } from "@/components/chrome/atoms";
 import { XGlyph } from "@/components/chrome/icons";
 import { subscribeAgent } from "@/lib/agent-session";
-import { askAnotherRound, designProjectFor, fixAllMinor, fixFinding, reviewBusy, setPin, subscribeDesigns } from "@/lib/design-store";
+import { askAnotherRound, designProjectFor, fixAllMinor, fixFinding, nextRound, reviewBusy, setPin, subscribeDesigns } from "@/lib/design-store";
 import { fmtScore, REVIEWERS, type Finding } from "@/lib/design-review-model";
 import { toastError } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
@@ -145,7 +145,7 @@ export function Scorecard({ dir, onClose }: { dir: string; onClose: () => void }
       </div>
       <div className="flex gap-2 border-t border-border-hairline px-4 py-3">
         <BtnSecondary size="md" disabled={minorCount === 0 || busy} onClick={() => void send(fixAllMinor(dir), "Couldn't send those fixes")}>Fix all minor</BtnSecondary>
-        <BtnGhost size="md" disabled={busy} onClick={() => void send(askAnotherRound(dir), "Couldn't ask for another round")}>Ask for round {p.review.round + 1}</BtnGhost>
+        <BtnGhost size="md" disabled={busy} onClick={() => void send(askAnotherRound(dir), "Couldn't ask for another round")}>Ask for round {nextRound(p.review)}</BtnGhost>
       </div>
     </section>
   );

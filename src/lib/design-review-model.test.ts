@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampSettings, fixedSummary, fmtScore, initialReviewState, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings, parseTokens, questionsPending, reviewerForTitle, stateWord, weightedScore, DEFAULT_SETTINGS } from "./design-review-model";
+import { blockerOf, clampSettings, fixedSummary, fmtScore, initialReviewState, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings, parseTokens, questionsPending, reviewerForTitle, stateWord, weightedScore, DEFAULT_SETTINGS } from "./design-review-model";
 
 describe("review settings", () => {
   it("defaults, clamps to the half and the ranges", () => {
@@ -90,6 +90,9 @@ describe("state", () => {
   it("parses, defaults and words each phase", () => {
     expect(parseReviewState(undefined)).toEqual(initialReviewState());
     expect(parseReviewState({ v: 1, phase: "nonsense", round: 2 }).phase).toBe("idle");
+    expect(parseReviewState({ v: 1, phase: "building", round: 0, prior: { phase: "done", round: 2, best: { round: 2, score: 8.4 }, accepted: true, startedAt: 7 } }).prior)
+      .toEqual({ phase: "done", round: 2, fixPass: 0, best: { round: 2, score: 8.4 }, accepted: true, startedAt: 7 });
+    expect(parseReviewState({ v: 1, phase: "building", prior: "junk" }).prior).toBeNull();
     const s = (phase: ReturnType<typeof initialReviewState>["phase"]) => ({ ...initialReviewState(), phase });
     expect(stateWord(s("questions"), null, null)).toEqual({ word: "draft", tone: "faint" });
     expect(stateWord(s("building"), 2, null).word).toBe("working");
@@ -123,5 +126,22 @@ describe("reviewerForTitle", () => {
     expect(reviewerForTitle("Copywriting pass")).toBeNull();
     expect(reviewerForTitle("Review with the art director")).toBeNull();
     expect(reviewerForTitle("Render captures")).toBeNull();
+  });
+});
+
+describe("blockerOf", () => {
+  const f = (text: string, severity: "severe" | "minor" = "minor") => ({ rule: "critique:ux", severity, text, frame: "d", file: "" });
+  const round = (n: number, findings: ReturnType<typeof f>[], blocker: string | null = null, id: "ux" | "art" = "ux") =>
+    ({ round: n, version: n + 1, at: "t", bar: 8, weighted: 7, passed: false, reviewers: [{ id, score: 7, notes: [], findings }], missing: [], blocker });
+  it("takes the most recent round's blocker sentence over everything", () => {
+    expect(blockerOf([round(1, [f("cramped")], "Two heroes"), round(2, [f("cramped")])])).toEqual({ text: "Two heroes", reviewer: null, why: "blocker" });
+    expect(blockerOf([round(1, [], "old"), round(2, [], "new")])!.text).toBe("new");
+  });
+  it("else a finding the last two rounds share, else the first severe, else the first", () => {
+    expect(blockerOf([round(1, [f("Cramped ")]), round(2, [f("loud", "severe"), f("cramped")], null, "art")])).toEqual({ text: "cramped", reviewer: "art", why: "repeated" });
+    expect(blockerOf([round(1, [f("cramped")]), round(2, [f("quiet"), f("loud", "severe")])])).toEqual({ text: "loud", reviewer: "ux", why: "severe" });
+    expect(blockerOf([round(1, [f("quiet"), f("plain")])])).toEqual({ text: "quiet", reviewer: "ux", why: "first" });
+    expect(blockerOf([round(1, [])])).toBeNull();
+    expect(blockerOf([])).toBeNull();
   });
 });

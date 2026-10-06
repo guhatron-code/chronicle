@@ -15,7 +15,7 @@ import {
   type AgentEntry,
 } from "./agent-session";
 import {
-  DEFAULT_SETTINGS, initialReviewState, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings,
+  DEFAULT_SETTINGS, blockerOf, initialReviewState, knownRounds, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings,
   parseTokens, questionsPending, type CritiqueRound, type Finding, type LintReport, type PromptKind, type Questions,
   type ReviewSettings, type ReviewState, type TokensPlan,
 } from "./design-review-model";
@@ -208,7 +208,7 @@ async function reloadDirectorFiles(dir: string, slug: string, paths: string[]): 
   const [questions, tokens, critiques] = await Promise.all([
     paths.includes("questions.json") ? readQuestions(dir, slug) : p.questions,
     paths.includes("tokens.json") ? readTokens(dir, slug) : p.tokens,
-    paths.some((x) => x.startsWith("critique/")) ? readCritiques(dir, slug, p.review.round, p.settings.bar) : p.critiques,
+    paths.some((x) => x.startsWith("critique/")) ? readCritiques(dir, slug, knownRounds(p.review), p.settings.bar) : p.critiques,
   ]);
   if (p.active !== slug) return;
   p.questions = questions; p.tokens = tokens; p.critiques = critiques;
@@ -278,6 +278,14 @@ async function snapshotTurn(dir: string, slug: string) {
   await advance(dir, slug, n, cancelled, false, startStep);
 }
 
+/** Version `v` already has a critique round: a `critique/round-<n>.json` whose `version` is it. */
+async function versionCritiqued(dir: string, slug: string, review: ReviewState, settings: ReviewSettings, v: number | null): Promise<boolean> {
+  if (v == null) return false;
+  const p = designProjectFor(dir);
+  const rounds = p.active === slug ? p.critiques : await readCritiques(dir, slug, knownRounds(review), settings.bar);
+  return rounds.some((c) => c.version === v);
+}
+
 /** One loop step after a turn end (`n` = the new version, if any) or a restart's regate. */
 async function advance(dir: string, slug: string, n: number | null, cancelled: boolean, regate: boolean, startStep: number): Promise<void> {
   const p = designProjectFor(dir);
@@ -295,6 +303,9 @@ async function advance(dir: string, slug: string, n: number | null, cancelled: b
     const questions = await readQuestions(dir, slug);
     const critique = before.review.phase === "critique" && !cancelled
       ? await readCritique(dir, slug, before.review.round, before.settings.bar) : null;
+    // a chat reply that cut no version: does the version it left alone already have a round?
+    const critiqued = n == null && before.review.lastPrompt === "user" && !regate
+      ? await versionCritiqued(dir, slug, before.review, before.settings, before.review.version) : false;
 
     // decide on the state as it is NOW: a Stop or a user's send that landed while
     // this step was gating has already taken the next step — only the version is kept
@@ -304,7 +315,7 @@ async function advance(dir: string, slug: string, n: number | null, cancelled: b
     let state: ReviewState;
     if (!moved && LOOPING.has(now.phase)) {
       ({ state, next } = afterTurn(now, settings, {
-        version: regate ? now.version : n, questionsPending: questionsPending(questions), lint, critique, cancelled,
+        version: regate ? now.version : n, questionsPending: questionsPending(questions), lint, critique, cancelled, critiqued,
       }));
     } else {
       state = { ...now, version: n ?? now.version };
@@ -351,17 +362,6 @@ function capturesFor(dir: string, slug: string, n: number | null): string[] {
   return rels.map((r) => `${root}/${r}`);
 }
 
-/** The blocker to resolve: the last round's own sentence, else a finding the last two rounds share, else its first severe one. */
-function blockerOf(critiques: CritiqueRound[]): string | null {
-  const last = critiques.at(-1);
-  if (!last) return null;
-  if (last.blocker) return last.blocker;
-  const texts = (c: CritiqueRound | undefined) => (c?.reviewers ?? []).flatMap((r) => r.findings);
-  const prev = new Set(texts(critiques.at(-2)).map((f) => f.text));
-  const all = texts(last);
-  return (all.find((f) => prev.has(f.text)) ?? all.find((f) => f.severity === "severe") ?? all[0])?.text ?? null;
-}
-
 /** Builds a loop prompt's body and sends it for `slug`; `step` (the count the loop decided
  *  on) makes the send give up if anything committed since. */
 async function sendLoopPrompt(dir: string, slug: string, kind: PromptKind, ctx: LoopCtx, step?: number): Promise<void> {
@@ -372,7 +372,7 @@ async function sendLoopPrompt(dir: string, slug: string, kind: PromptKind, ctx: 
   if (kind === "lintFix") body = lintFixPrompt(ctx.lint ?? { v: 1, version: review.version, at: "", ran: true, problem: null, severe: [], minor: [] }, review.fixPass, MAX_LINT_PASSES);
   else if (kind === "critique") body = critiquePrompt(review.round, settings.rounds, settings.bar, review.version, capturesFor(dir, slug, review.version));
   else if (kind === "critiqueFix" && ctx.critique) body = critiqueFixPrompt(ctx.critique);
-  else if (kind === "resolve") body = resolveBlockerPrompt(blockerOf(p.active === slug ? p.critiques : ctx.critique ? [ctx.critique] : []) ?? "the last round's findings");
+  else if (kind === "resolve") body = resolveBlockerPrompt(blockerOf(p.active === slug ? p.critiques : ctx.critique ? [ctx.critique] : [])?.text ?? "the last round's findings");
   else body = continuePrompt();
   await sendPrefixed(dir, slug, body, kind, review, step);
 }
@@ -433,7 +433,7 @@ async function loadReview(dir: string, slug: string, reload: boolean, token: num
   if (set) { p.settings = parseSettings(set.effective); p.settingsScope = { project: set.project ?? null, design: set.design ?? null }; }
   const [questions, tokens, lint, critiques] = await Promise.all([
     readQuestions(dir, slug), readTokens(dir, slug), readLint(dir, slug, p.versions[0]?.n),
-    readCritiques(dir, slug, p.review.round, p.settings.bar),
+    readCritiques(dir, slug, knownRounds(p.review), p.settings.bar),
   ]);
   if (stale()) return;
   p.questions = questions; p.tokens = tokens; p.lint = lint; p.critiques = critiques;
@@ -699,11 +699,15 @@ export function reviewBusy(dir: string): boolean {
 }
 const STILL_RUNNING = "The review is still running.";
 
-/** One more critique round on the current version (also "Ask again" for a round that never came back). */
+/** The round "Ask for another round" would run: the next one — or, for a round that never
+ *  came back (the phase is still "critique" with no turn behind it), that same round again. */
+export const nextRound = (st: ReviewState) => (st.phase === "critique" ? st.round : st.round + 1);
+
+/** One more critique round on the current version (`nextRound`: a lost round is asked again, not skipped). */
 export async function askAnotherRound(dir: string): Promise<void> {
   if (reviewBusy(dir)) throw new Error(STILL_RUNNING);
   const p = designProjectFor(dir); const slug = activeSlug(dir);
-  const review: ReviewState = { ...p.review, phase: "critique", round: p.review.round + 1, fixPass: 0 };
+  const review: ReviewState = { ...p.review, phase: "critique", round: nextRound(p.review), fixPass: 0 };
   await sendLoopPrompt(dir, slug, "critique", { review, settings: p.settings, lint: p.lint, critique: p.critiques.at(-1) ?? null });
 }
 

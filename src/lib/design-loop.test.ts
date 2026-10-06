@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { afterTurn, MAX_LINT_PASSES, onAccept, onSend, onStop, resumeAfterRestart, type TurnResult } from "./design-loop";
-import { DEFAULT_SETTINGS, initialReviewState, type CritiqueRound, type LintReport, type ReviewSettings } from "./design-review-model";
+import { DEFAULT_SETTINGS, initialReviewState, knownRounds, type CritiqueRound, type LintReport, type ReviewSettings } from "./design-review-model";
 
 const lint = (severe: number): LintReport => ({ v: 1, version: 1, at: "t", ran: true, problem: null, severe: Array.from({ length: severe }, (_, i) => ({ rule: `r${i}`, severity: "severe", text: "x", frame: "d", file: "frames/d.html" })), minor: [] });
 const crit = (weighted: number, bar = 8): CritiqueRound => ({ round: 1, version: 1, at: "t", bar, weighted, passed: weighted >= bar, reviewers: [], missing: [], blocker: null });
-const turn = (over: Partial<TurnResult>): TurnResult => ({ version: 2, questionsPending: false, lint: null, critique: null, cancelled: false, ...over });
+const turn = (over: Partial<TurnResult>): TurnResult => ({ version: 2, questionsPending: false, lint: null, critique: null, cancelled: false, critiqued: false, ...over });
 const S: ReviewSettings = DEFAULT_SETTINGS;
 
 describe("the review loop", () => {
@@ -65,6 +65,27 @@ describe("the review loop", () => {
   it("a user message during done starts a fresh attempt", () => {
     const st = onSend({ ...initialReviewState(), phase: "done", round: 3, best: { round: 3, score: 8.2 }, accepted: true }, "user", 9);
     expect(st).toMatchObject({ phase: "building", round: 0, fixPass: 0, best: null, accepted: false, startedAt: 9 });
+  });
+  it("a chat reply that changed nothing never re-critiques", () => {
+    const rested = { ...initialReviewState(), phase: "done" as const, round: 2, version: 5, best: { round: 2, score: 8.4 }, accepted: true, startedAt: 7 };
+    const st = onSend(rested, "user", 9);
+    expect(st).toMatchObject({ phase: "building", round: 0, prior: { phase: "done", round: 2, best: { round: 2, score: 8.4 }, accepted: true, startedAt: 7 } });
+    // no version cut, v5 already has its round: done stays done, as it was
+    const r = afterTurn(st, S, turn({ version: null, critiqued: true }));
+    expect(r.next).toEqual({ kind: "wait" });
+    expect(r.state).toMatchObject({ phase: "done", round: 2, version: 5, best: { round: 2, score: 8.4 }, accepted: true, startedAt: 7, prior: null });
+    // below the bar and stopped come back the same way
+    for (const phase of ["below-bar", "stopped"] as const) {
+      const back = afterTurn(onSend({ ...rested, phase, accepted: false }, "user", 9), S, turn({ version: null, critiqued: true }));
+      expect(back.state.phase).toBe(phase); expect(back.next).toEqual({ kind: "wait" });
+    }
+    // a reply that cut a version is a fresh attempt; one on a version never critiqued still gets its critique
+    expect(afterTurn(st, S, turn({ version: 6, lint: lint(0), critiqued: true })).next).toEqual({ kind: "send", prompt: "critique" });
+    expect(afterTurn(st, S, turn({ version: null, critiqued: false })).next).toEqual({ kind: "send", prompt: "critique" });
+    // a message sent mid-loop has nothing to come back to
+    expect(onSend({ ...rested, phase: "building" }, "user", 9).prior).toBeNull();
+    // the attempt's rounds count the one set aside, so the round files still load
+    expect(knownRounds(st)).toBe(2);
   });
   it("restart resumes at the gate, or asks again for a missing critique", () => {
     expect(resumeAfterRestart({ ...initialReviewState(), phase: "fixing" }, true).next).toEqual({ kind: "wait" });

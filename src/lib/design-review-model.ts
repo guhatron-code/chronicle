@@ -193,25 +193,60 @@ export type PromptKind = "brief" | "answers" | "user" | "lintFix" | "critique" |
 const PHASES: ReviewPhase[] = ["idle", "building", "questions", "gate", "fixing", "critique", "done", "below-bar", "stopped"];
 const PROMPTS: PromptKind[] = ["brief", "answers", "user", "lintFix", "critique", "critiqueFix", "resolve", "fixFinding", "continue"];
 
-export interface ReviewState { v: 1; phase: ReviewPhase; round: number; fixPass: number; version: number | null; best: { round: number; score: number } | null; startedAt: number | null; lastPrompt: PromptKind | null; accepted: boolean }
-export const initialReviewState = (): ReviewState => ({ v: 1, phase: "idle", round: 0, fixPass: 0, version: null, best: null, startedAt: null, lastPrompt: null, accepted: false });
+/** The attempt a user's message stepped away from: a reply that changes nothing comes back to it. */
+export type PriorAttempt = Pick<ReviewState, "phase" | "round" | "fixPass" | "best" | "startedAt" | "accepted">;
+export interface ReviewState { v: 1; phase: ReviewPhase; round: number; fixPass: number; version: number | null; best: { round: number; score: number } | null; startedAt: number | null; lastPrompt: PromptKind | null; accepted: boolean; prior: PriorAttempt | null }
+export const initialReviewState = (): ReviewState => ({ v: 1, phase: "idle", round: 0, fixPass: 0, version: null, best: null, startedAt: null, lastPrompt: null, accepted: false, prior: null });
+
+/** How many rounds this design has had: the attempt's own, or the one a user's message set aside. */
+export const knownRounds = (st: ReviewState) => Math.max(st.round, st.prior?.round ?? 0);
+
+function parseBest(raw: unknown): ReviewState["best"] {
+  const b = obj(raw), br = b && num(b.round), bs = b && num(b.score);
+  return br != null && bs != null ? { round: br, score: bs } : null;
+}
 
 export function parseReviewState(raw: unknown): ReviewState {
   const r = obj(raw);
   const init = initialReviewState();
   if (!r) return init;
-  const b = obj(r.best), br = b && num(b.round), bs = b && num(b.score);
+  const pr = obj(r.prior);
   return {
     v: 1,
     phase: PHASES.find((p) => p === r.phase) ?? "idle",
     round: num(r.round) ?? 0,
     fixPass: num(r.fixPass) ?? 0,
     version: num(r.version),
-    best: br != null && bs != null ? { round: br, score: bs } : null,
+    best: parseBest(r.best),
     startedAt: num(r.startedAt),
     lastPrompt: PROMPTS.find((p) => p === r.lastPrompt) ?? null,
     accepted: r.accepted === true,
+    prior: pr ? {
+      phase: PHASES.find((p) => p === pr.phase) ?? "idle", round: num(pr.round) ?? 0, fixPass: num(pr.fixPass) ?? 0,
+      best: parseBest(pr.best), startedAt: num(pr.startedAt), accepted: pr.accepted === true,
+    } : null,
   };
+}
+
+/* ---------- the blocker ---------- */
+export interface Blocker { text: string; reviewer: ReviewerId | null; why: "blocker" | "repeated" | "severe" | "first" }
+
+/** The one thing the critique keeps stalling on: the most recent round's own blocker sentence,
+ *  else a finding the last two rounds share, else the last round's first severe finding, else its first. */
+export function blockerOf(critiques: CritiqueRound[]): Blocker | null {
+  const said = [...critiques].reverse().find((c) => c.blocker);
+  if (said?.blocker) return { text: said.blocker, reviewer: null, why: "blocker" };
+  const last = critiques.at(-1);
+  if (!last) return null;
+  const findings = (c: CritiqueRound | undefined) => (c?.reviewers ?? []).flatMap((r) => r.findings.map((f) => ({ f, reviewer: r.id })));
+  const norm = (t: string) => t.trim().toLowerCase();
+  const prev = new Set(findings(critiques.at(-2)).map((x) => norm(x.f.text)));
+  const all = findings(last);
+  const repeated = all.find((x) => prev.has(norm(x.f.text)));
+  if (repeated) return { text: repeated.f.text, reviewer: repeated.reviewer, why: "repeated" };
+  const severe = all.find((x) => x.f.severity === "severe");
+  if (severe) return { text: severe.f.text, reviewer: severe.reviewer, why: "severe" };
+  return all[0] ? { text: all[0].f.text, reviewer: all[0].reviewer, why: "first" } : null;
 }
 
 /** "Fixed: a, b, c and 2 more" — at most three findings, severe first, each

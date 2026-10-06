@@ -588,6 +588,32 @@ describe("design store", () => {
     expect(p.review).toMatchObject({ phase: "building", round: 0, best: null, accepted: false });
   });
 
+  it("a chat reply that changed nothing never re-critiques", async () => {
+    const { m, p } = await looping();
+    p.critiques = [round(1, []), round(2, [])] as never; // v2 and v3
+    p.review = { ...p.review, phase: "done", round: 2, version: 3, best: { round: 2, score: 8.4 }, accepted: true };
+    await m.sendDesignMessage(DIR, "what font is that?", "home");
+    expect(p.review).toMatchObject({ phase: "building", round: 0, prior: { phase: "done", round: 2 } });
+    const sends = h.sent.length;
+    h.snapshot.mockResolvedValueOnce(null);
+    sess.turnEnds += 1; h.fireAgent();
+    await vi.waitFor(() => expect(p.review.phase).toBe("done"));
+    expect(p.review).toMatchObject({ round: 2, version: 3, best: { round: 2, score: 8.4 }, accepted: true, prior: null });
+    expect(h.sent.length).toBe(sends);
+    expect(h.stateSet).toHaveBeenLastCalledWith(DIR, "home", expect.objectContaining({ phase: "done", prior: null }));
+  });
+
+  it("asking again for a round that never came back runs that round, not the next", async () => {
+    const { m, p } = await looping();
+    p.review = { ...p.review, phase: "critique", round: 2, version: 4 };
+    p.critiqueMissing = true;
+    expect(m.nextRound(p.review)).toBe(2);
+    await m.askAnotherRound(DIR);
+    expect(p.review).toMatchObject({ phase: "critique", round: 2 });
+    expect(h.sent.at(-1)).toContain("critique/round-2.json");
+    expect(p.critiqueMissing).toBe(false);
+  });
+
   it("the pill's clock reads m:ss since the attempt started", async () => {
     const m = await import("./design-store");
     const p = m.designProjectFor("/clock");
