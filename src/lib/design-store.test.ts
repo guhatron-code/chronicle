@@ -5,13 +5,14 @@ const h = vi.hoisted(() => {
     phase: string; entries: unknown[]; turnEnds: number; lastPrompt: string;
     sessionId: string | null; errorMessage: string | null; loadSession: boolean;
     turnActive?: boolean; lastStopReason?: string | null;
+    configOptions: { id: string; name: string; currentValue: string; options: { value: string; name: string }[] }[]; userConfig: string[];
   }>();
   // The mock session object for a lane key, created on first touch (defaults
   // match the original single-session mock: ready, no turns yet).
   const sessionFor = (key: string) => {
     let s = sessions.get(key);
     if (!s) {
-      s = { phase: "ready", entries: [], turnEnds: 0, lastPrompt: "", sessionId: "s", errorMessage: null, loadSession: false, turnActive: false, lastStopReason: null };
+      s = { phase: "ready", entries: [], turnEnds: 0, lastPrompt: "", sessionId: "s", errorMessage: null, loadSession: false, turnActive: false, lastStopReason: null, configOptions: [], userConfig: [] };
       sessions.set(key, s);
     }
     return s;
@@ -33,6 +34,7 @@ const h = vi.hoisted(() => {
     answered: vi.fn(async (..._a: unknown[]): Promise<unknown> => null),
     mark: vi.fn(async (..._a: unknown[]) => {}),
     cancel: vi.fn(async (..._a: unknown[]) => {}),
+    setOption: vi.fn(async (..._a: unknown[]) => {}),
     /** every message the design lane was sent, prefix included, as the wire sees it */
     sent: [] as string[],
     fireAgent: () => {},
@@ -83,6 +85,7 @@ vi.mock("./agent-session", async () => ({
     h.sent.push(opts?.prefix ? `${opts.prefix}\n\n${text}` : text);
   }),
   cancelAgentTurn: h.cancel,
+  setAgentConfigOption: h.setOption,
   startAgentSession: vi.fn(async (key: string) => { h.sessionFor(key).phase = "ready"; }),
   resumeAgentSession: vi.fn(async (key: string, id: string) => { const s = h.sessionFor(key); s.phase = "ready"; s.sessionId = id; }),
 }));
@@ -190,7 +193,7 @@ describe("design store", () => {
     const key = "/p2#design";
     // An already-running session that has completed 2 turns BEFORE this store
     // ever touches the project — those must not be treated as new.
-    h.sessions.set(key, { phase: "ready", entries: [], turnEnds: 2, lastPrompt: "", sessionId: "s2", errorMessage: null, loadSession: true });
+    h.sessions.set(key, { phase: "ready", entries: [], turnEnds: 2, lastPrompt: "", sessionId: "s2", errorMessage: null, loadSession: true, configOptions: [], userConfig: [] });
     await m.loadDesigns(DIR2);
     await m.openDesign(DIR2, "home");
     expect(snap).not.toHaveBeenCalled();
@@ -362,7 +365,7 @@ describe("design store", () => {
     const resume = agentMod.resumeAgentSession as unknown as ReturnType<typeof vi.fn>;
     const dir = "/p3";
     const key = "/p3#design";
-    h.sessions.set(key, { phase: "ended", entries: [], turnEnds: 0, lastPrompt: "", sessionId: "sid-1", errorMessage: null, loadSession: false });
+    h.sessions.set(key, { phase: "ended", entries: [], turnEnds: 0, lastPrompt: "", sessionId: "sid-1", errorMessage: null, loadSession: false, configOptions: [], userConfig: [] });
     const p = m.designProjectFor(dir);
     p.active = "home";
 
@@ -616,6 +619,37 @@ describe("design store", () => {
     expect(p.review).toMatchObject({ phase: "critique", round: 2 });
     expect(h.sent.at(-1)).toContain("critique/round-2.json");
     expect(p.critiqueMissing).toBe(false);
+  });
+
+  it("the design lane's effort goes to medium once per session start, never over the user's pick", async () => {
+    const m = await import("./design-store");
+    const effort = (currentValue: string) => ({ id: "effort", name: "Effort", currentValue, options: [{ value: "low", name: "Low" }, { value: "medium", name: "Medium" }, { value: "high", name: "High" }] });
+    const base = { phase: "ready" as const, sessionId: "s1", configOptions: [effort("high")], userConfig: [] as string[] };
+    // the pure decision
+    expect(m.effortStep({ ...base, phase: "starting" as const }, null)).toBe("wait");
+    expect(m.effortStep({ ...base, configOptions: [] }, null)).toBe("wait");
+    expect(m.effortStep({ ...base, configOptions: [{ ...effort("high"), options: [{ value: "high", name: "High" }] }] }, null)).toBe("wait");
+    expect(m.effortStep(base, null)).toBe("set");
+    expect(m.effortStep(base, "s1")).toBe("done");
+    expect(m.effortStep({ ...base, sessionId: "s2" }, "s1")).toBe("set");
+    expect(m.effortStep({ ...base, configOptions: [effort("medium")] }, null)).toBe("done");
+    expect(m.effortStep({ ...base, userConfig: ["effort"] }, null)).toBe("done");
+    // the lane, as a send and a store change see it: once for this session
+    await m.loadDesigns(DIR); await m.openDesign(DIR, "home");
+    const lane = h.sessionFor("/p#design");
+    lane.sessionId = "effort-1"; lane.configOptions = [effort("high")]; lane.userConfig = [];
+    h.setOption.mockClear();
+    await m.sendDesignMessage(DIR, "hello", "home");
+    expect(h.setOption).toHaveBeenCalledTimes(1);
+    expect(h.setOption).toHaveBeenCalledWith("/p#design", "effort", "medium", false);
+    h.fireAgent();
+    await m.sendDesignMessage(DIR, "again", "home");
+    expect(h.setOption).toHaveBeenCalledTimes(1);
+    // a new session the user already set by hand is left alone
+    lane.sessionId = "effort-2"; lane.configOptions = [effort("high")]; lane.userConfig = ["effort"];
+    h.fireAgent();
+    expect(h.setOption).toHaveBeenCalledTimes(1);
+    lane.sessionId = "s"; lane.configOptions = []; lane.userConfig = [];
   });
 
   it("the pill's clock reads m:ss since the attempt started", async () => {

@@ -162,6 +162,8 @@ export interface AgentSessionState {
   modes: { currentModeId: string; availableModes: AgentMode[] } | null;
   /** the agent's config options — the model picker reads the "model" one */
   configOptions: AgentConfigOption[];
+  /** the config options the user picked by hand this session (ids) — a default set by the app never overrides one */
+  userConfig: string[];
   /** the agent's slash commands, including every skill — the composer's / menu */
   commands: AgentCommand[];
   loadSession: boolean; // adapter capability — Z-4 resume gating
@@ -223,6 +225,7 @@ const blank = (): AgentSessionState => ({
   fullAutoConfirmed: false,
   autoConfirmed: false,
   configOptions: [],
+  userConfig: [],
   commands: [],
   draft: null,
   composerText: "",
@@ -891,10 +894,12 @@ export async function setAgentMode(dir: string, modeId: string): Promise<void> {
   notify();
 }
 
-export async function setAgentConfigOption(dir: string, configId: string, value: string): Promise<void> {
+/** `byUser` (the default) records the pick, so an app default (the design lane's effort) never overrides it. */
+export async function setAgentConfigOption(dir: string, configId: string, value: string, byUser = true): Promise<void> {
   const s = agentSessionFor(dir);
   const opt = s.configOptions.find((o) => o.id === configId);
   if (opt) opt.currentValue = value; // optimistic; config_option_update confirms
+  if (byUser && !s.userConfig.includes(configId)) s.userConfig.push(configId);
   notify();
   await agentSetConfigOption(dir, configId, value);
 }

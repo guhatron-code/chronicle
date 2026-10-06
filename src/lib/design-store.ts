@@ -12,7 +12,7 @@ import {
 import { parseDesign, type CanvasFile, type Design, type DesignKind, type DesignRow } from "./design-model";
 import {
   laneKey, agentSessionFor, subscribeAgent, sendAgentMessage, startAgentSession, resumeAgentSession, cancelAgentTurn,
-  type AgentEntry,
+  setAgentConfigOption, type AgentEntry, type AgentSessionState,
 } from "./agent-session";
 import {
   DEFAULT_SETTINGS, blockerOf, initialReviewState, knownRounds, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings,
@@ -130,6 +130,7 @@ function ensure() {
   });
   subscribeAgent(() => {
     for (const [dir, p] of projects) {
+      void settleEffort(dir);
       const s = agentSessionFor(laneKey(dir, "design"));
       // An idle-stop or a restart resets the session's own counter (blank());
       // follow it down so the NEXT real turn still reads as new, instead of
@@ -146,6 +147,36 @@ function ensure() {
       }
     }
   });
+}
+
+/* ---------- the design lane's effort ---------- */
+
+/** The effort the design lane starts at: the director's turns are long and mostly reads. */
+export const DESIGN_EFFORT = "medium";
+/** per lane key, the session id whose effort is settled — set once per session start */
+const effortHandled = new Map<string, string>();
+
+/** Whether to set the design lane's effort to `DESIGN_EFFORT` now (`handled` is the session already settled):
+ *  "set" when the session is ready, offers that value and sits elsewhere; "done" when there is nothing to
+ *  do for this session (already there, already settled, or the user picked an effort by hand);
+ *  "wait" while the session isn't ready or hasn't advertised the option yet. */
+export function effortStep(s: Pick<AgentSessionState, "phase" | "sessionId" | "configOptions" | "userConfig">, handled: string | null): "set" | "done" | "wait" {
+  if (s.phase !== "ready" || !s.sessionId) return "wait";
+  if (s.sessionId === handled || s.userConfig.includes("effort")) return "done";
+  const opt = s.configOptions.find((o) => o.id === "effort");
+  if (!opt || !opt.options.some((o) => o.value === DESIGN_EFFORT)) return "wait";
+  return opt.currentValue === DESIGN_EFFORT ? "done" : "set";
+}
+
+/** Settles the design lane's effort for its current session; the main lane is never touched.
+ *  A send awaits it so the first prompt already runs at that effort; a failure is nobody's problem here. */
+async function settleEffort(dir: string): Promise<void> {
+  const key = laneKey(dir, "design");
+  const s = agentSessionFor(key);
+  const step = effortStep(s, effortHandled.get(key) ?? null);
+  if (step === "wait") return;
+  effortHandled.set(key, s.sessionId!);
+  if (step === "set") await setAgentConfigOption(key, "effort", DESIGN_EFFORT, false).catch(() => {});
 }
 
 /** `root` is the absolute designs folder: in a linked worktree it isn't under the
@@ -628,6 +659,7 @@ async function sendPrefixed(dir: string, slug: string, body: string, kind: Promp
     // the Rust handshake allows 180 s for initialize; this outlasts it
     await waitForReady(key, 200_000);
   }
+  await settleEffort(dir);
   await ensurePrefixInputs(dir);
   const k = flightKey(dir, slug);
   // a loop step whose decision went stale while the lane started is dropped, not sent
