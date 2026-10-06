@@ -36,7 +36,7 @@
     { "path": "fixes/phase_8_fixes_plan.md", "sha256": "5848f014bf3bd3e120d43078241cb8d1b463b8283f97ec2ef9c315618dc43d9a" },
     { "path": "fixes/phase_9_fixes_plan.md", "sha256": "c6d918161447511cfa1507b00f01866cd0a867de3fd6531e22bf37b95ecd4f01" },
     { "path": "docs/superpowers/specs/2026-09-17-design-pane-foundation-design.md", "sha256": "9790a875b0086d30cc3af96e35edf1a53f0807164f3fab26672735e8cc441c56" },
-    { "path": "docs/superpowers/specs/2026-10-01-design-pane-director-design.md", "sha256": "4bf2b823af27dd78ca1dd5914bfe10b892bc7b0d22fc483d0ca52505e54809dc" },
+    { "path": "docs/superpowers/specs/2026-10-01-design-pane-director-design.md", "sha256": "bbc31a56b0945563688981a991bf718a7629508fdf782912ad49754bd0b73b99" },
     { "path": "docs/superpowers/plans/2026-10-01-design-pane-director.md", "sha256": "b359a19dd55387abee58067b4c48a78b56d3261c673836b5c964c356fc700ddb" }
   ],
   "spine": [

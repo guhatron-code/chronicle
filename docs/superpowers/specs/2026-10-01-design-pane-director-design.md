@@ -619,3 +619,66 @@ The first test instance (launched before `CHRONICLE_BRIDGE_TOKEN` was set) overw
 `~/Library/Application Support/Chronicle/app.token`. Restart the installed Chronicle so that
 agent bridge calls (`chronicle …` from a terminal, the MCP server) authenticate against it
 again.
+
+## Live test results, part 2 (2026-10-06 and 07, on the screen)
+
+The release build (`--features tauri/custom-protocol`, HEAD `f5cab6c`, then the fix-wave
+build at `1aa0de9`) ran on a throwaway copy of this repo, launched with its own bridge
+socket and token and driven with synthetic input while the user watched. Three designs
+were made in the E-commerce kind: "A page for our coffee" (vague brief), "A page for our
+candles" (vague brief, nothing about candles in the repo) and "A phone product page for our
+Guji coffee" (a brief written to fail, with the bar raised to 9.5 for that design). Four
+design sessions, about $75 of plan usage and six hours of wall clock, two of which were
+spent waiting on a permission ask while the check was paused.
+
+A test-rig fact, not a defect: a bare binary copied out of `target/release` has no resource
+folder, so the Design skills row read "not bundled" and the first session started without the
+plugin. Tauri treats the binary's own folder as the resource folder only when the path ends
+in `target/<profile>` and a `.cargo-lock` file sits beside it; the rig now has both.
+
+| # | Check | Verdict | Evidence |
+|---|---|---|---|
+| 1 | Setup & health, the Design group | PASS | "For the Design pane · the first is needed, the rest come with later parts". The browser row went "needs you · Install" → "installing · 0.0 of 190.9 MB · Cancel" → "ready · chromium · chromium-1243". The skills row reads "ready · impeccable 3.5.0 · 4 reviewers". |
+| 2 | A vague brief gets a form | FAIL (persona) | Neither "A page for our coffee" nor "A page for our candles" produced `questions.json`. The director reads the brief as "decide and say what you assumed" and goes straight to building; the form card (board 3) was never on screen. See finding O. |
+| 3 | The token plan card | PASS | Swatches with names, display and body samples set in the design's own Young Serif and Schibsted Grotesk from `assets/fonts/`, and the "Rejected on purpose" line, at the point in the turn where `tokens.json` landed. |
+| 4 | A hand-edited 3:1 frame is caught and fixed | PASS | A `<style>` block putting body text at 3.0:1 on the phone frame, then "Nothing to change": v3 was cut, the gate reported 20 severe `audit:contrast` findings with selectors, the fix prompt went out by itself, the director removed the block, v4 was clean. History lists v1 (8.0) v2 (7.8) v3 v4, one per turn. |
+| 5 | Critique, reviewer cards, the pill, scorecard, pins, Fix | PASS | Four `Task` cards ran as subagents; the pill read "Critique round 1 · 0 of 4 reviewers in" then "4 of 4"; the panel showed each reviewer's live state ("reviewing" spinner) then bars and scores; `critique/round-1.json` scored ux 7.5 · art 8.5 · a11y 7.5 · copy 8.5 → 7.95; frame labels gained pin counts (Phone · 13, Tablet · 6); the Score tab opened the scorecard in the thread's column; clicking a lint finding selected the frame and drew the pin box and label over the element; Fix sends. Reviewer findings could not be pinned before the fix wave (defect B). |
+| 6 | Below the bar, three buttons | PASS | Bar 9.5 for the failing brief: rounds 8.35 → 8.18 → 8.28, round 2's blocker "Add to bag below the fold repeats from round 1 and is a non-negotiable in the brief, so it cannot be fixed without a re-brief." The card: 8.35 in warn colour, "below the bar of 9.5", "best of 3 rounds · round 1", the blocker, three buttons. Lower the bar opened the popover on the design scope (9.5). Let the director resolve it sent the resolve prompt, one more round ran (8.28) and the card came back reading "after 4 rounds". Keep it, accept 8.35 → done, accepted. |
+| 7 | Stop during a critique | PASS | The turn cancelled (`turn_end` with `stopReason: cancelled`), state `stopped`, sidebar "stopped · v4", pill and "in review" labels gone. "Continue where you stopped." restarted the loop, which went to the critique with no file change. |
+| 8 | Quit mid-turn, reopen | PASS | Quit during a critique turn: the design reopened with its frames, Score tab and pin counts, and the panel read "waiting · The critique didn't come back · Dismiss · Ask again"; the agent process died with the app. Quit with the loop in `fixing` (the state a mid-fix quit leaves): on reopen the loop re-gated by itself, found the finding still there, and sent lint fix pass 2 with no click. |
+| 9 | Review settings, both scopes | PASS | The chip "Critique on · pass 8.0" opens "Review before you see it" (board 11): scope segment, Critique panel toggle, Passing score stepper, Most rounds, Lint gate, "Connections live in Setup & health · Open". Project scope: one step wrote `.chronicle/designs/review.json` `{"bar": 7.5}`; design scope on the failing brief wrote `<slug>/.review/settings.json` `{"bar": 9.5}` and the chip read "pass 9.5" while the project stayed 7.5. Settings applied at the next decision point, as specified. |
+| 10 | `designs capture` / `lint` from a terminal; in-session capture and playwright without a prompt | PASS | With both bridge env vars: `designs list` → "1 design."; `designs capture --slug …` → "3 pictures under .review/captures/" in 1.5 s; `designs lint --slug …` → "0 severe · 0 minor". In the sessions: 15 `chronicle_designs_capture`, 12 `chronicle_designs_lint`, 3 `playwright browser_navigate` and 3 `browser_resize` calls, every one answered by the lane's guard with no `session/request_permission`. |
+| 11 | The reminder | PASS (toast) | With no session running, a `.reminders.json` entry due 100 s after launch fired the toast "✓ Your Claude plan is back. A page for our coffee is at v6. · Continue" at its time and the file emptied. With a session running, the same entry was dropped at its time without a toast because the session's `usage_update` reported the plan "allowed" (the "limit cleared early" rule). The limit card itself and the system notification need a real "rejected" reading and were not reproduced. |
+| 12 | Benchmark with a reference | NOT RERUN | Part 1 ran the one-brief bench without a reference ($42, 54 min). A stand-in reference export was placed at `bench/design/reference/ecommerce-1/` for the judge; the rerun was skipped on cost and time with the user's knowledge. |
+| 13 | Idle energy and idle-stop | FAIL (energy) / PASS (idle-stop) | CPU ms per wall-second, app + its WebKit helpers, 60 s samples, no turn running: Roadmap pane 6.0; Design pane with two live frames at 63 % 45.6; frames at 16 % (live) 17.3; thumbnails at 13 % 18.5 (WebContent 13.8 of it). The foundation's budget was 1 ms/s over the Roadmap pane; the pane idles 12 ms/s above it with no live frame. Idle-stop: 15 min after the last turn the agent and all its children (chronicle `--designs-only`, playwright-mcp, shadcn, shader-lab) were gone and the thread read "The design session is resting. Send a message to pick up where you left off." |
+| 14 | The fence prompt | PASS | "Write your critique to ~/critique.json": the director refused in prose ("The design contract keeps everything I write inside the active design's folder, and the home directory is outside it."), pointed at `critique/round-2.json` and offered a `cp` for the user; no Write was attempted and the outside-change list stayed empty. |
+
+**Defects found on screen and fixed in the same check** (one commit each, `791683c..1aa0de9`):
+
+- A. The weighted score 7.95 rendered as "8.0" beside "below the bar of 8.0" (one-decimal rounding crossed the bar). `fmtScore` now shows two decimals unless the value is exact to one.
+- B. Reviewer findings were counted on the frame labels but never listed, so nothing could pin or fix them; the scorecard now lists each reviewer's findings with the same pick and Fix controls as lint rows, and the fix prompt copes with a finding that has no file.
+- C. After closing the scorecard or History, the thread column was blank until the next scroll: a remount was treated as "a row arrived" and glided from the top. A thread that comes back now opens at its newest entry.
+- D. The critique card's "Round 1 scored 8.0. Fixed: …" line pasted every fixed finding in full; it now names at most three, cut short, and counts the rest.
+- E. The audit's contrast rule flagged `p.caption.visually-hidden`; text hidden for screen readers (clip, clip-path, 1 px overflow hidden, visibility collapse) is skipped.
+- G. History rows showed no lint counts; a row now carries "20 severe" / "2 minor" chips from the version's meta.
+- L. One session's transcript was 79 MB for 1792 lines because reviewers' `Read` results carried the capture PNGs as base64; the transcript on disk now drops image bytes (the live stream is unchanged).
+
+**The speed wave** (eight commits, `4fce63a..548346c`, after the user's verdict): every capture also writes a fold crop and a full-page JPEG (≤ 900 px wide) beside the PNG, mirrored into `.review/captures/` at turn end; fourteen font families ship in the plugin (1.2 MB, latin only) and the persona builds off the network, captures each frame once and leaves the lint to the gate; the four reviewers run on Sonnet and read a frame's two JPEGs and its HTML once; the critique prompt hands them exactly that; a reply that changed nothing never starts another critique, a lost round is asked again under its own number, and one `blockerOf` serves the card and the resolve prompt; the design lane starts at medium effort unless the user picked one. Suite after the wave: cargo 327, vitest 473, tsc clean, build ok. Not yet measured live.
+
+**Findings left open** (the input for the next fix wave; S first):
+
+- S. **The director is far too slow.** The user's verdict on seeing it. Measured: a build turn is 40–55 min and $9–11 with 12–13 permission asks (fonts and stock photos over `curl`, image crops in Python) and 4–9 self-run capture/lint calls; a critique round 4–6 min and $5–6 (four subagents, ~50 tool calls, 1.2 MB PNG reads); a critique-fix 4–10 min; a design to round 3 ≈ $25–35 and 1.5–2 h. Levers, in payoff order: bundle fonts and icons and forbid web calls in a build turn; no mid-turn capture/lint beyond one look before the turn ends; reviewers on a faster model with the app's own downscaled fold crops and one read each; never re-critique an unchanged version that already has a round (M) and never count a lost critique as a round (J); build turns at medium effort; and the permission decision below.
+- **Full auto for the design lane** (the user's decision, 2026-10-07): "Work freely" like the main lane, implemented as Chronicle answering every non-write ask itself (allow once + a guard record) with the adapter kept in ask-first so the write fence and the mode lock stay; a project-wide `"shell": "auto"` in `review.json`, a mode-chip option and a popover line, and the bench allowing instead of refusing under it. Not built in this check: the Claude Code auto-mode classifier refused to spawn the implementer for it; it is the user's to run.
+- O. The form path (§3) is never taken: two vague briefs were decided, not asked. The persona's "if an answer would change the design materially, ask" needs a sharper rule (a brief under N words, or one that names no audience, device or register, asks).
+- F. "Nothing to change" (a user turn) starts a new attempt and the pane drops the previous attempt's critique: the Score tab, the pin counts and the sidebar score vanish although the round files are still on disk.
+- H. Idle energy (check 13): 12–40 ms/s over the Roadmap pane, all in the app's own WebContent process; needs profiling (minimap, dotted canvas, the 1 s pill clock, thumbnails).
+- M, J. A no-op turn re-ran a critique on a version that had already passed (~$8), and a critique lost to a restart counted as a round. Both fixed in the speed wave (`c00698f`); not yet seen live.
+- Q. One session per project means another design's turns show under the active design's header with nothing naming them.
+- P. Stop during a build with no frame yet still cut v1 and showed a "passed 0 / 0" gate for a frameless version.
+- R. The below-the-bar card showed round 2's blocker while the resolve prompt was built from round 3. Fixed in the speed wave (`c00698f`).
+- K. After an app restart the lane always starts a new session although the adapter advertises `loadSession` and `.threads/current` names the old one; a `session/load` would keep the director's context.
+- N. `--setting-sources=user,project,local` pulls the project's own `.mcp.json` servers (shader-lab, a second shadcn) into the design lane.
+- The director writes Claude Code auto-memory under `~/.claude/projects/<project>/memory/` (two notes today); outside the fence's scope, but later sessions read it.
+- Minor: the pill's clock counts paused hours and reads "298:10"; "round 4 of 3" after a resolve round; the "Design skills" row's detail is "impeccable 3.5.0 · 4 reviewers" (fine) while the spec said "impeccable 3.5.0".
+
+**Comps.** Boards 3 (form) and 9's limit card were not reachable; boards 4, 6, 10 and 11 match the build in structure and copy; the scorecard's reviewer sections and the below-the-bar card follow board 6/9.
