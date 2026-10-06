@@ -214,7 +214,12 @@ export function parseReviewState(raw: unknown): ReviewState {
   };
 }
 
-export const fmtScore = (n: number) => n.toFixed(1);
+// A score shows one decimal when it is exact to one (8.0, 7.5) and two otherwise
+// (7.95), so a weighted score never rounds up onto the bar it sits below.
+export const fmtScore = (n: number) => {
+  const two = n.toFixed(2);
+  return two.endsWith("0") ? two.slice(0, -1) : two;
+};
 
 export function stateWord(st: ReviewState, latestVersion: number | null, latestScore: number | null): { word: string; tone: "faint" | "neutral" | "success" | "warn" | "error" } {
   const v = latestVersion != null ? `v${latestVersion}` : "draft";

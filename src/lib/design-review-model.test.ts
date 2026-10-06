@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampSettings, initialReviewState, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings, parseTokens, questionsPending, reviewerForTitle, stateWord, weightedScore, DEFAULT_SETTINGS } from "./design-review-model";
+import { clampSettings, fmtScore, initialReviewState, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings, parseTokens, questionsPending, reviewerForTitle, stateWord, weightedScore, DEFAULT_SETTINGS } from "./design-review-model";
 
 describe("review settings", () => {
   it("defaults, clamps to the half and the ranges", () => {
@@ -55,6 +55,11 @@ describe("critique", () => {
     expect(parseCritique({ reviewers: "x" }, 8, 1)).toBeNull();
     const pass = parseCritique({ reviewers: [{ id: "ux", score: 8.5 }, { id: "art", score: 8 }, { id: "a11y", score: 8 }, { id: "copy", score: 8 }] }, 8.0, 1)!;
     expect(pass.weighted).toBeCloseTo(8.18, 2); expect(pass.passed).toBe(true);
+  });
+  it("shows a score to one decimal when exact, two when rounding would cross the bar", () => {
+    expect(fmtScore(8)).toBe("8.0"); expect(fmtScore(7.5)).toBe("7.5"); expect(fmtScore(10)).toBe("10.0");
+    expect(fmtScore(7.95)).toBe("7.95"); expect(fmtScore(7.68)).toBe("7.68");
+    expect(fmtScore(weightedScore({ ux: 7.5, art: 8.5, a11y: 7.5, copy: 8.5 }).weighted)).toBe("7.95");
   });
   it("scores a round written with the agents' own names", () => {
     const c = parseCritique({ reviewers: [
