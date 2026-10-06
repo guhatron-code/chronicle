@@ -27,7 +27,12 @@
     while(cur&&cur!==document.body&&parts.length<4){var s=cur.tagName.toLowerCase();var cls=(cur.className&&typeof cur.className==='string')?cur.className.trim().split(/\s+/).filter(Boolean).slice(0,2).map(function(c){return '.'+CSS.escape(c)}).join(''):'';if(cls)s+=cls;var p=cur.parentElement;if(p){var same=Array.prototype.filter.call(p.children,function(x){return x.tagName===cur.tagName});if(same.length>1)s+=':nth-of-type('+(same.indexOf(cur)+1)+')'}parts.unshift(s);cur=p}
     return parts.join(' > ');
   }
-  function visible(el){var r=el.getBoundingClientRect();if(r.width===0||r.height===0)return false;var cs=getComputedStyle(el);return cs.visibility!=='hidden'&&cs.display!=='none'&&parseFloat(cs.opacity)>0}
+  // the usual visually-hidden recipe: clipped to nothing, or a 1 px box with its overflow cut off
+  function clippedAway(cs,r){
+    if(/^rect\(\s*0(px)?\s*,?\s*0(px)?\s*,?\s*0(px)?\s*,?\s*0(px)?\s*\)$/.test(cs.clip||''))return true;
+    if(/^inset\(\s*(50|100)%\s*\)$/.test(cs.clipPath||''))return true;
+    return r.width<=1&&r.height<=1&&cs.overflow==='hidden'}
+  function visible(el){var r=el.getBoundingClientRect();if(r.width===0||r.height===0)return false;var cs=getComputedStyle(el);return cs.visibility!=='hidden'&&cs.visibility!=='collapse'&&cs.display!=='none'&&parseFloat(cs.opacity)>0&&!clippedAway(cs,r)}
   function textOf(el){return Array.prototype.filter.call(el.childNodes,function(n){return n.nodeType===3}).map(function(n){return n.textContent}).join('').trim()}
   var INTERACTIVE='a[href],button,input:not([type=hidden]),select,textarea,[role=button],[role=link],[tabindex]:not([tabindex="-1"])';
   // at most CAP findings per rule AND severity: twenty minors never crowd out a severe one
@@ -98,6 +103,6 @@
       if(cart&&!foldTop(cart))add('ecom-cta','severe','Add to cart is below the first screen on this width',cart)});
     return JSON.stringify(out);
   };
-  window.__chronicleAuditLib={contrast:contrast,parseColor:parseColor,luminance:luminance,isLarge:isLarge,minTarget:minTarget,overCap:overCap};
+  window.__chronicleAuditLib={contrast:contrast,parseColor:parseColor,luminance:luminance,isLarge:isLarge,minTarget:minTarget,overCap:overCap,clippedAway:clippedAway};
 })();
 </script>

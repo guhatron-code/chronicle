@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 // arithmetic is checked here by evaluating the script against a stub window.
 const src = readFileSync(path.resolve(__dirname, "../../src-tauri/resources/design/audit.js"), "utf8");
 const body = src.replace(/^<script>/, "").replace(/<\/script>\s*$/, "");
-type Lib = { contrast: (a: number[], b: number[]) => number; parseColor: (s: string) => number[] | null; isLarge: (px: number, weight: number) => boolean; minTarget: (width: number) => number; overCap: (counts: Record<string, number>, rule: string, severity: string) => boolean };
+type Lib = { contrast: (a: number[], b: number[]) => number; parseColor: (s: string) => number[] | null; isLarge: (px: number, weight: number) => boolean; minTarget: (width: number) => number; overCap: (counts: Record<string, number>, rule: string, severity: string) => boolean; clippedAway: (cs: Record<string, string>, r: { width: number; height: number }) => boolean };
 function load(): Lib {
   const win: Record<string, unknown> = {};
   new Function("window", "document", body)(win, undefined);
@@ -37,6 +37,15 @@ describe("the audit's arithmetic", () => {
     expect(minors.filter((over) => !over)).toHaveLength(20);
     expect(lib.overCap(counts, "contrast", "severe")).toBe(false);
     expect(lib.overCap(counts, "target", "minor")).toBe(false);
+  });
+  it("skips text hidden by the visually-hidden recipe, so a caption for screen readers is not a contrast finding", () => {
+    const box = { width: 1, height: 1 };
+    expect(lib.clippedAway({ clip: "rect(0px, 0px, 0px, 0px)", clipPath: "none", overflow: "visible" }, { width: 300, height: 20 })).toBe(true);
+    expect(lib.clippedAway({ clip: "rect(0,0,0,0)", clipPath: "none", overflow: "visible" }, { width: 300, height: 20 })).toBe(true);
+    expect(lib.clippedAway({ clip: "auto", clipPath: "inset(50%)", overflow: "visible" }, { width: 300, height: 20 })).toBe(true);
+    expect(lib.clippedAway({ clip: "auto", clipPath: "none", overflow: "hidden" }, box)).toBe(true);
+    expect(lib.clippedAway({ clip: "auto", clipPath: "none", overflow: "visible" }, box)).toBe(false);
+    expect(lib.clippedAway({ clip: "rect(0px, 100px, 20px, 0px)", clipPath: "none", overflow: "hidden" }, { width: 300, height: 20 })).toBe(false);
   });
   it("defines the entry point and runs nothing on load", () => {
     const win: Record<string, unknown> = {};
