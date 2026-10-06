@@ -423,13 +423,50 @@ pub mod transcript {
         store.join(sid).join("thread.jsonl")
     }
 
+    /// An image block's base64, wherever the wire puts it: the ACP block's
+    /// `data`, the Anthropic shape's `source.data`, or a tool response's
+    /// `file.base64`. Empties it and marks the block `_trimmed`; says whether
+    /// anything was cut.
+    fn trim_images(v: &mut Value) -> bool {
+        let mut cut = false;
+        match v {
+            Value::Array(items) => { for x in items { cut |= trim_images(x); } }
+            Value::Object(o) => {
+                if o.get("type").and_then(|t| t.as_str()) == Some("image") {
+                    let empty = |d: Option<&mut Value>| match d {
+                        Some(d) if d.as_str().map_or(false, |s| !s.is_empty()) => { *d = Value::String(String::new()); true }
+                        _ => false,
+                    };
+                    cut |= empty(o.get_mut("data"));
+                    cut |= empty(o.get_mut("source").and_then(|s| s.get_mut("data")));
+                    cut |= empty(o.get_mut("file").and_then(|f| f.get_mut("base64")));
+                    if cut { o.insert("_trimmed".into(), Value::Bool(true)); }
+                }
+                for (_, x) in o.iter_mut() { cut |= trim_images(x); }
+            }
+            _ => {}
+        }
+        cut
+    }
+
+    /// The line as it is written: a `session/update` loses its image bytes
+    /// (the pane never shows them, and a reviewer's Read of a capture is a
+    /// megabyte each); every other message is written as it came.
+    pub fn line_for_disk(msg: &Value) -> String {
+        if msg.get("method").and_then(|m| m.as_str()) == Some("session/update") {
+            let mut m = msg.clone();
+            if trim_images(&mut m) { return serde_json::to_string(&m).unwrap_or_default(); }
+        }
+        serde_json::to_string(msg).unwrap_or_default()
+    }
+
     pub fn append(store: &Path, sid: &str, msg: &Value) {
         let p = path(store, sid);
         if let Some(parent) = p.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
         if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&p) {
-            let _ = writeln!(f, "{}", serde_json::to_string(msg).unwrap_or_default());
+            let _ = writeln!(f, "{}", line_for_disk(msg));
         }
     }
 
@@ -2503,6 +2540,52 @@ for line in sys.stdin:
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[0]["method"], "_chronicle/user_message");
         assert_eq!(lines[2]["method"], "_chronicle/turn_end");
+    }
+
+    #[test]
+    fn transcript_drops_image_bytes_on_disk_and_leaves_the_rest_as_it_came() {
+        let d = tmp("transcript-images");
+        let store = ledger::agent_dir(&d);
+        let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+        let read = json!({"method":"session/update","params":{"sessionId":"s1","update":{
+            "sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed",
+            "content":[{"type":"content","content":{"type":"image","data":png,"mimeType":"image/png"}},
+                       {"type":"content","content":{"type":"text","text":"read it"}}],
+            "rawOutput":{"type":"image","source":{"type":"base64","media_type":"image/png","data":png}},
+            "_meta":{"claudeCode":{"toolResponse":{"type":"image","file":{"base64":png,"type":"image/png","originalSize":1200}}}}
+        }}});
+        let chunk = json!({"method":"session/update","params":{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ok"}}}});
+        let user = json!({"method":"_chronicle/user_message","params":{"text":"look at the capture"}});
+        transcript::append(&store, "s1", &user);
+        transcript::append(&store, "s1", &read);
+        transcript::append(&store, "s1", &chunk);
+
+        let raw = std::fs::read_to_string(transcript::path(&store, "s1")).unwrap();
+        let lines: Vec<&str> = raw.lines().collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0], serde_json::to_string(&user).unwrap(), "a message without images is written as it came");
+        assert_eq!(lines[2], serde_json::to_string(&chunk).unwrap());
+        assert!(!raw.contains(png), "no base64 reaches the disk");
+
+        let on_disk: Value = serde_json::from_str(lines[1]).unwrap();
+        let up = &on_disk["params"]["update"];
+        assert_eq!(up["content"][0]["content"]["data"], "");
+        assert_eq!(up["content"][0]["content"]["_trimmed"], true);
+        assert_eq!(up["content"][0]["content"]["mimeType"], "image/png", "the block keeps its other fields");
+        assert_eq!(up["content"][1]["content"]["text"], "read it", "the text block is untouched");
+        assert!(up["content"][1]["content"].get("_trimmed").is_none());
+        assert_eq!(up["rawOutput"]["source"]["data"], "");
+        assert_eq!(up["rawOutput"]["_trimmed"], true);
+        assert_eq!(up["_meta"]["claudeCode"]["toolResponse"]["file"]["base64"], "");
+        assert_eq!(up["_meta"]["claudeCode"]["toolResponse"]["file"]["originalSize"], 1200);
+        assert_eq!(up["_meta"]["claudeCode"]["toolResponse"]["_trimmed"], true);
+        assert_eq!(up["toolCallId"], "t1");
+        // the live message was not changed by the write
+        assert_eq!(read["params"]["update"]["content"][0]["content"]["data"], png);
+
+        // the same block under any other method is left alone
+        let other = json!({"method":"_chronicle/guard","params":{"content":{"type":"image","data":png}}});
+        assert_eq!(transcript::line_for_disk(&other), serde_json::to_string(&other).unwrap());
     }
 
     /// The real adapter, end to end: gated behind CHRONICLE_ACP_TEST=1 (needs
