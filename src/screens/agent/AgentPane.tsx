@@ -5,7 +5,7 @@
  * ended), and the composer. Session state lives in lib/agent-session.ts —
  * this component only renders and dispatches.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   agentSessionFor,
@@ -586,6 +586,16 @@ export function AgentPane({
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottom = useRef(true);
   const rowCount = useRef(0);
+  // A thread that mounts with rows already in it (back from the scorecard or
+  // History) opens at its newest entry before the first paint. Counting the rows
+  // here keeps the effect below from taking the mount for a row that arrived and
+  // gliding across the whole thread while every row is still fading in — which
+  // left the list blank until the next scroll.
+  useLayoutEffect(() => {
+    rowCount.current = s.entries.length;
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
   useEffect(() => {
     const el = scrollRef.current;
     const rows = s.entries.length;
