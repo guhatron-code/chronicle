@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 pub const PLAYWRIGHT_MCP: &str = "0.0.83";
 pub const PLAYWRIGHT: &str = "1.63.0";
 pub const SHADCN: &str = "4.21.0";
-pub const SKILLS: [&str; 6] = ["impeccable", "frontend-design", "canvas-design", "algorithmic-art", "chronicle-ecommerce", "chronicle-icons"];
+pub const SKILLS: [&str; 7] = ["impeccable", "frontend-design", "canvas-design", "algorithmic-art", "chronicle-ecommerce", "chronicle-icons", "chronicle-fonts"];
+/// At least this many bundled font families must hold a woff2 for the plugin to count as whole.
+pub const MIN_FONT_FAMILIES: usize = 8;
 pub const REVIEWERS: [&str; 4] = ["art-director", "ux-director", "accessibility", "copy"];
 
 pub fn plugin_dir(resource_dir: &Path) -> PathBuf { resource_dir.join("design-plugin") }
@@ -24,7 +26,17 @@ pub fn intact(dir: &Path) -> Result<String, String> {
         .map(|d| d.filter_map(|e| e.ok()).filter(|e| e.path().extension().map(|x| x == "svg").unwrap_or(false)).count())
         .unwrap_or(0);
     if icons < 100 { return Err("the icons are missing".into()); }
+    if font_families(dir) < MIN_FONT_FAMILIES { return Err("the fonts are missing".into()); }
     Ok("impeccable 3.5.0 · 4 reviewers".into())
+}
+
+/// How many family folders under the fonts skill hold at least one woff2.
+fn font_families(dir: &Path) -> usize {
+    let has_woff2 = |d: &Path| std::fs::read_dir(d).map(|r| r.filter_map(|e| e.ok())
+        .any(|e| e.path().extension().map(|x| x == "woff2").unwrap_or(false))).unwrap_or(false);
+    std::fs::read_dir(dir.join("skills/chronicle-fonts/fonts"))
+        .map(|d| d.filter_map(|e| e.ok()).filter(|e| e.path().is_dir() && has_woff2(&e.path())).count())
+        .unwrap_or(0)
 }
 
 fn env(pairs: &[(&str, String)]) -> Value {
@@ -90,6 +102,14 @@ mod tests {
         assert!(intact(&d).unwrap_err().contains("icons"));
         let icons = d.join("skills/chronicle-icons/icons"); std::fs::create_dir_all(&icons).unwrap();
         for i in 0..120 { std::fs::write(icons.join(format!("i{i}.svg")), "<svg/>").unwrap(); }
+        assert!(intact(&d).unwrap_err().contains("fonts"));
+        let fonts = d.join("skills/chronicle-fonts/fonts");
+        // seven families with a font, one folder without, one stray file: not enough
+        for i in 0..7 { let f = fonts.join(format!("family-{i}")); std::fs::create_dir_all(&f).unwrap(); std::fs::write(f.join("family-latin-400-normal.woff2"), "wOF2").unwrap(); }
+        std::fs::create_dir_all(fonts.join("empty")).unwrap();
+        std::fs::write(fonts.join("stray.woff2"), "wOF2").unwrap();
+        assert!(intact(&d).unwrap_err().contains("fonts"));
+        let f = fonts.join("family-7"); std::fs::create_dir_all(&f).unwrap(); std::fs::write(f.join("family-latin-400-italic.woff2"), "wOF2").unwrap();
         assert_eq!(intact(&d).unwrap(), "impeccable 3.5.0 · 4 reviewers");
     }
     #[test]

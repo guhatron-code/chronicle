@@ -1,6 +1,6 @@
 # Notice
 
-This plugin bundles third-party skills. Each keeps its own licence file beside it. Chronicle's own parts (`chronicle-ecommerce`, `chronicle-icons`, `agents/`, `.claude-plugin/`, this notice) are Chronicle's.
+This plugin bundles third-party skills. Each keeps its own licence file beside it. Chronicle's own parts (`chronicle-ecommerce`, `chronicle-icons`, `chronicle-fonts`, `agents/`, `.claude-plugin/`, this notice) are Chronicle's.
 
 ## Vendored skills
 
@@ -16,6 +16,10 @@ This plugin bundles third-party skills. Each keeps its own licence file beside i
 ## Icons
 
 `skills/chronicle-icons/icons/` is the Lucide icon set (ISC licence, https://lucide.dev), copied from the `lucide-static` npm package (1.49.0) by `scripts/design-plugin.mjs`. The icons are generated at build time and not committed; the licence text is `skills/chronicle-icons/LICENSE`, copied from the package by the same script and committed.
+
+## Fonts
+
+`skills/chronicle-fonts/fonts/<family>/` holds fourteen open font families (SIL Open Font License 1.1), copied from the `@fontsource/<family>` npm packages (5.3.0) by `scripts/design-plugin.mjs`: the latin subset, weights 400 to 700 upright and the 400 italic where the family has them. The files are generated at build time and not committed; each family's licence text is `skills/chronicle-fonts/licenses/<family>.txt`, copied from the package by the same script and committed.
 
 ## Edits to vendored files (impeccable 3.5.0)
 
