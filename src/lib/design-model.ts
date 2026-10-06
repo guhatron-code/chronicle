@@ -55,6 +55,16 @@ export function placeFrames(d: Design, positions: CanvasFile["positions"], heigh
   return out;
 }
 
+/** The lint chips a History row shows for a version: "20 severe" in error,
+    "2 minor" in warn, both when both, none when the gate found nothing. */
+export function lintChips(lint: { severe: number; minor: number } | undefined): { label: string; tone: "error" | "warn" }[] {
+  if (!lint) return [];
+  const out: { label: string; tone: "error" | "warn" }[] = [];
+  if (lint.severe > 0) out.push({ label: `${lint.severe} severe`, tone: "error" });
+  if (lint.minor > 0) out.push({ label: `${lint.minor} minor`, tone: "warn" });
+  return out;
+}
+
 export function readingOrder(rects: Record<string, { x: number; y: number }>): string[] {
   return Object.entries(rects).sort(([, a], [, b]) => (a.y === b.y ? a.x - b.x : a.y - b.y)).map(([id]) => id);
 }

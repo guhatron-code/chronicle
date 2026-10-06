@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseDesign, placeFrames, readingOrder, orderRows, type DesignRow } from "./design-model";
+import { lintChips, parseDesign, placeFrames, readingOrder, orderRows, type DesignRow } from "./design-model";
 
 const raw = {
   v: 1, title: "Home", kind: "ecommerce", brief: "b", created: "t",
@@ -56,5 +56,12 @@ describe("design model", () => {
     expect(g.app.map((r) => r.slug)).toEqual(["x", "y"]);
     expect(g.brand.map((r) => r.slug)).toEqual(["z"]);
     expect(g.deck).toEqual([]);
+  });
+  it("shows a version's lint counts as chips, severe first, and none for a clean or unlinted one", () => {
+    expect(lintChips(undefined)).toEqual([]);
+    expect(lintChips({ severe: 0, minor: 0 })).toEqual([]);
+    expect(lintChips({ severe: 20, minor: 0 })).toEqual([{ label: "20 severe", tone: "error" }]);
+    expect(lintChips({ severe: 0, minor: 2 })).toEqual([{ label: "2 minor", tone: "warn" }]);
+    expect(lintChips({ severe: 20, minor: 2 })).toEqual([{ label: "20 severe", tone: "error" }, { label: "2 minor", tone: "warn" }]);
   });
 });

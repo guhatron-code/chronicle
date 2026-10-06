@@ -9,6 +9,7 @@ import { XGlyph } from "@/components/chrome/icons";
 import { fmtScore } from "@/lib/design-review-model";
 import { ScoreChip } from "./cards/card";
 import { branchVersion, designProjectFor, restoreVersion, setCompare, subscribeDesigns, type DesignProject } from "@/lib/design-store";
+import { lintChips } from "@/lib/design-model";
 import type { VersionMeta } from "@/lib/ipc";
 import { toastError, toastSuccess } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
@@ -47,6 +48,11 @@ function HistoryRow({ v, bar, first, last, current, compared, onClick, onHoverSt
           <span className="font-mono text-[11px] text-text-secondary">v{v.n}</span>
           <span className="text-[11px] text-text-faint">{relTime(v.at)}</span>
           <span className="flex-1" />
+          {lintChips(v.lint).map((c) => (
+            <span key={c.tone} className={cn("inline-flex h-[18px] shrink-0 items-center whitespace-nowrap rounded-[5px] bg-fill-subtle px-1.5 font-mono text-[10.5px]", c.tone === "error" ? "text-state-error" : "text-state-warn")}>
+              {c.label}
+            </span>
+          ))}
           {v.score != null && <ScoreChip value={fmtScore(v.score)} passed={v.score >= bar} />}
           {compared && (
             <span className="inline-flex h-5 shrink-0 items-center rounded-md bg-fill-subtle px-[7px] text-[11px] text-text-subtle">comparing</span>
