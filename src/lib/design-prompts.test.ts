@@ -25,9 +25,21 @@ describe("prompts", () => {
     expect(fixAllMinorPrompt([f({ severity: "minor" })])).toContain("Fix these minor findings");
   });
   it("the critique prompt names the reviewers, the file, the round and the bar", () => {
-    const p = critiquePrompt(2, 3, 8.0, 6, ["/p/.chronicle/designs/g/.versions/v6/thumbs/desktop.png"]);
-    for (const must of ["art-director", "ux-director", "accessibility", "copy", "critique/round-2.json", "round 2 of 3", "8.0", "in parallel", "never your own reasoning", "thumbs/desktop.png", "\"blocker\"", "one sentence", "description with its reviewer name"]) expect(p).toContain(must);
+    const d = "/p/.chronicle/designs/g";
+    const p = critiquePrompt(2, 3, 8.0, 6, [{ frame: "desktop", html: `${d}/frames/desktop.html`, fold: `${d}/.review/captures/desktop.fold.jpg`, full: `${d}/.review/captures/desktop.jpg` }]);
+    for (const must of ["art-director", "ux-director", "accessibility", "copy", "critique/round-2.json", "round 2 of 3", "8.0", "in parallel", "never your own reasoning", "\"blocker\"", "one sentence", "description with its reviewer name"]) expect(p).toContain(must);
     expect(p).not.toContain("version\":null");
+  });
+  it("each reviewer gets a frame's HTML and its two captures, read once, and nothing else", () => {
+    const d = "/p/.chronicle/designs/g";
+    const p = critiquePrompt(1, 3, 8.0, 6, [
+      { frame: "desktop", html: `${d}/frames/desktop.html`, fold: `${d}/.review/captures/desktop.fold.jpg`, full: `${d}/.review/captures/desktop.jpg` },
+      { frame: "mobile", html: `${d}/frames/mobile.html`, fold: `${d}/.review/captures/mobile.fold.jpg`, full: `${d}/.review/captures/mobile.jpg` },
+    ]);
+    expect(p).toContain(`- desktop: ${d}/frames/desktop.html · ${d}/.review/captures/desktop.fold.jpg (the first screen) · ${d}/.review/captures/desktop.jpg (the whole page)`);
+    expect(p).toContain(`- mobile: ${d}/frames/mobile.html`);
+    expect(p).toContain("nothing else"); expect(p).toContain("reads each of them once");
+    expect(p).not.toContain(".png");
   });
   it("the critique fix prompt lists severe first and caps the list", () => {
     const c: CritiqueRound = { round: 1, version: 5, at: "t", bar: 8, weighted: 7.6, passed: false, missing: [], blocker: "The 140 px headline pushes the price down",

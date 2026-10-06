@@ -22,7 +22,7 @@ import {
 import { afterTurn, MAX_LINT_PASSES, onAccept, onSend, onStop, resumeAfterRestart } from "./design-loop";
 import {
   answersMessage, continuePrompt, critiqueFixPrompt, critiquePrompt, fixAllMinorPrompt, fixFindingPrompt,
-  lintFixPrompt, resolveBlockerPrompt, skipMessage,
+  lintFixPrompt, resolveBlockerPrompt, skipMessage, type FrameCapture,
 } from "./design-prompts";
 import { toastError } from "@/overlays/toasts";
 import { every } from "@/lib/scheduler";
@@ -250,16 +250,12 @@ async function commitReview(dir: string, slug: string, st: ReviewState): Promise
 
 /** The phases a loop is running in; a turn that ends in any other one is only versioned. */
 const LOOPING = new Set<ReviewState["phase"]>(["building", "gate", "fixing", "critique"]);
-/** the thumbnails each gated version rendered, for the critique prompt's captures */
-const thumbsOf = new Map<string, string[]>();
-const thumbKey = (dir: string, slug: string, n: number) => `${dir}\0${slug}\0${n}`;
 
 /** Renders version `n`'s thumbnails and lints it. A gate that couldn't run comes back as a
  *  report that says so (`ran: false` + the problem), never as a silent clean pass. */
 async function reviewVersion(dir: string, slug: string, n: number, lint: boolean): Promise<LintReport | null> {
   try {
     const r = await designReviewVersion(dir, slug, n, lint);
-    thumbsOf.set(thumbKey(dir, slug, n), r.thumbs);
     return parseLint(r.lint);
   } catch (e) {
     const problem = e instanceof Error ? e.message : String(e);
@@ -352,14 +348,15 @@ async function advance(dir: string, slug: string, n: number | null, cancelled: b
 /** What a loop prompt is built from: the state it was decided on and what the turn produced. */
 interface LoopCtx { review: ReviewState; settings: ReviewSettings; lint: LintReport | null; critique: CritiqueRound | null }
 
-/** Absolute paths of version `n`'s thumbnails: what the gate rendered, else one per frame of the open design. */
-function capturesFor(dir: string, slug: string, n: number | null): string[] {
+/** What the reviewers read, per frame of the open design: its HTML and the two captures the
+ *  gate just wrote under `.review/captures/` (the first screen and the whole page, as JPEGs). */
+function capturesFor(dir: string, slug: string): FrameCapture[] {
   const p = designProjectFor(dir);
-  if (n == null || !p.rootPath) return [];
-  const root = p.rootPath.replace(/\/+$/, "");
-  const known = thumbsOf.get(thumbKey(dir, slug, n));
-  const rels = known ?? (p.active === slug ? (p.design?.frames ?? []).map((f) => `${slug}/.versions/v${n}/thumbs/${f.id}.png`) : []);
-  return rels.map((r) => `${root}/${r}`);
+  if (!p.rootPath || p.active !== slug) return [];
+  const design = `${p.rootPath.replace(/\/+$/, "")}/${slug}`;
+  return (p.design?.frames ?? []).map((f) => ({
+    frame: f.id, html: `${design}/${f.file}`, fold: `${design}/.review/captures/${f.id}.fold.jpg`, full: `${design}/.review/captures/${f.id}.jpg`,
+  }));
 }
 
 /** Builds a loop prompt's body and sends it for `slug`; `step` (the count the loop decided
@@ -370,7 +367,7 @@ async function sendLoopPrompt(dir: string, slug: string, kind: PromptKind, ctx: 
   const { review, settings } = ctx;
   let body: string;
   if (kind === "lintFix") body = lintFixPrompt(ctx.lint ?? { v: 1, version: review.version, at: "", ran: true, problem: null, severe: [], minor: [] }, review.fixPass, MAX_LINT_PASSES);
-  else if (kind === "critique") body = critiquePrompt(review.round, settings.rounds, settings.bar, review.version, capturesFor(dir, slug, review.version));
+  else if (kind === "critique") body = critiquePrompt(review.round, settings.rounds, settings.bar, review.version, capturesFor(dir, slug));
   else if (kind === "critiqueFix" && ctx.critique) body = critiqueFixPrompt(ctx.critique);
   else if (kind === "resolve") body = resolveBlockerPrompt(blockerOf(p.active === slug ? p.critiques : ctx.critique ? [ctx.critique] : [])?.text ?? "the last round's findings");
   else body = continuePrompt();

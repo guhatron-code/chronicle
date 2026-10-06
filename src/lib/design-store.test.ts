@@ -416,6 +416,10 @@ describe("design store", () => {
     sess.turnEnds += 1; h.fireAgent();
     await vi.waitFor(() => expect(p.review).toMatchObject({ phase: "critique", round: 1 }));
     expect(h.sent.at(-1)).toContain("critique/round-1.json");
+    // the reviewers get the frame's HTML and the gate's two JPEG captures, never the PNG thumbnails
+    const home = "/Users/me/main-checkout/.chronicle/designs/home";
+    expect(h.sent.at(-1)).toContain(`- d: ${home}/frames/d.html · ${home}/.review/captures/d.fold.jpg (the first screen) · ${home}/.review/captures/d.jpg (the whole page)`);
+    expect(h.sent.at(-1)).not.toContain(".png");
     // the critique turn ends with a passing round file
     h.snapshot.mockResolvedValueOnce(null);
     h.critique.mockResolvedValueOnce({ round: 1, version: 2, reviewers: [{ id: "ux", score: 8.5 }, { id: "art", score: 8 }, { id: "a11y", score: 9 }, { id: "copy", score: 8 }], blocker: null });
