@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampSettings, fmtScore, initialReviewState, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings, parseTokens, questionsPending, reviewerForTitle, stateWord, weightedScore, DEFAULT_SETTINGS } from "./design-review-model";
+import { clampSettings, fixedSummary, fmtScore, initialReviewState, parseCritique, parseLint, parseQuestions, parseReviewState, parseSettings, parseTokens, questionsPending, reviewerForTitle, stateWord, weightedScore, DEFAULT_SETTINGS } from "./design-review-model";
 
 describe("review settings", () => {
   it("defaults, clamps to the half and the ranges", () => {
@@ -60,6 +60,15 @@ describe("critique", () => {
     expect(fmtScore(8)).toBe("8.0"); expect(fmtScore(7.5)).toBe("7.5"); expect(fmtScore(10)).toBe("10.0");
     expect(fmtScore(7.95)).toBe("7.95"); expect(fmtScore(7.68)).toBe("7.68");
     expect(fmtScore(weightedScore({ ux: 7.5, art: 8.5, a11y: 7.5, copy: 8.5 }).weighted)).toBe("7.95");
+  });
+  it("sums the fixed findings to three short ones, severe first, and counts the rest", () => {
+    const f = (severity: "severe" | "minor", text: string) => ({ rule: "critique:ux", severity, text, frame: "desktop", file: "", selector: "" });
+    expect(fixedSummary([])).toBe("");
+    expect(fixedSummary([f("minor", "Tighten the hero. It runs long and the eye wanders."), f("severe", "Buttons lack focus rings!")]))
+      .toBe("Buttons lack focus rings, Tighten the hero");
+    const long = f("minor", "A".repeat(100));
+    expect(fixedSummary([f("minor", "one"), f("minor", "two"), long, f("minor", "four"), f("minor", "five")]))
+      .toBe(`one, two, ${"A".repeat(79)}… and 2 more`);
   });
   it("scores a round written with the agents' own names", () => {
     const c = parseCritique({ reviewers: [

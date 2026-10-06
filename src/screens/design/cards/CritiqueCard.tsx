@@ -4,7 +4,7 @@
    it fixed, and opens the scorecard. */
 import { agentSessionFor, groupEntries, laneKey } from "@/lib/agent-session";
 import { askAnotherRound, designProjectFor, dismissCritiqueMissing, setScoreOpen } from "@/lib/design-store";
-import { fmtScore, REVIEWERS, reviewerForTitle, type CritiqueRound, type ReviewerId } from "@/lib/design-review-model";
+import { fixedSummary, fmtScore, REVIEWERS, reviewerForTitle, type CritiqueRound, type ReviewerId } from "@/lib/design-review-model";
 import { toastError } from "@/overlays/toasts";
 import { cn } from "@/lib/utils";
 import { BtnGhost, Card, CardHead, Dot, RingSpinner, ScoreChip, StateWord } from "./card";
@@ -27,12 +27,10 @@ function liveStates(dir: string): Record<ReviewerId, Live> {
   return out;
 }
 
-/** "Round 1 scored 7.6. Fixed: a, b." — the previous round's top findings. */
+/** "Round 1 scored 7.6. Fixed: a, b and 3 more." — the previous round's top findings. */
 function previousLine(prev: CritiqueRound): string {
-  const all = prev.reviewers.flatMap((r) => r.findings);
-  const top = [...all.filter((f) => f.severity === "severe"), ...all.filter((f) => f.severity === "minor")]
-    .slice(0, 2).map((f) => f.text.trim().replace(/[.!]$/, ""));
-  return `Round ${prev.round} scored ${fmtScore(prev.weighted)}.${top.length ? ` Fixed: ${top.join(", ")}.` : ""}`;
+  const fixed = fixedSummary(prev.reviewers.flatMap((r) => r.findings));
+  return `Round ${prev.round} scored ${fmtScore(prev.weighted)}.${fixed ? ` Fixed: ${fixed}.` : ""}`;
 }
 
 const run = (p: Promise<unknown>, what: string) => void p.catch((e) => toastError(what, String(e).slice(0, 90)));

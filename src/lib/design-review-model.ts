@@ -214,6 +214,20 @@ export function parseReviewState(raw: unknown): ReviewState {
   };
 }
 
+/** "Fixed: a, b, c and 2 more" — at most three findings, severe first, each
+    cut to its first sentence or 80 characters. */
+export function fixedSummary(findings: Finding[], max = 3): string {
+  const ordered = [...findings.filter((f) => f.severity === "severe"), ...findings.filter((f) => f.severity !== "severe")];
+  const cut = (text: string) => {
+    const first = text.trim().split(/(?<=[.!?])\s+/)[0]?.replace(/[.!?]+$/, "").trim() ?? "";
+    return first.length > 80 ? `${first.slice(0, 79).trimEnd()}…` : first;
+  };
+  const top = ordered.slice(0, max).map((f) => cut(f.text)).filter(Boolean);
+  const more = ordered.length - top.length;
+  if (!top.length) return "";
+  return more > 0 ? `${top.join(", ")} and ${more} more` : top.join(", ");
+}
+
 // A score shows one decimal when it is exact to one (8.0, 7.5) and two otherwise
 // (7.95), so a weighted score never rounds up onto the bar it sits below.
 export const fmtScore = (n: number) => {
