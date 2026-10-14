@@ -871,6 +871,10 @@ fn canonical_deep(p: &Path) -> Option<PathBuf> {
 
 pub struct AcpSession {
     key: String,
+    /// When the child was spawned, and the session log it shares with the
+    /// adapter's stderr: Chronicle's own state transitions are stamped into it.
+    spawned: std::time::Instant,
+    log_path: PathBuf,
     /// `Some` exactly for the design lane: every write must land inside it.
     designs_root: Option<PathBuf>,
     /// MCP servers and a plugin this lane carries into session/new + load.
@@ -982,6 +986,11 @@ fn stamp_line(ms: u128, text: &str) -> String {
     format!("[+{ms}] {text}\n")
 }
 
+/// The session-log text for a state transition: `chronicle state=<state>`.
+fn state_log_text(params: &Value) -> String {
+    format!("chronicle state={}", params.get("state").and_then(Value::as_str).unwrap_or("?"))
+}
+
 /// Build a child PATH that can find `node`: the resolved tool's own directory
 /// (node itself, or beside npx) and the well-known install dirs, ahead of whatever
 /// PATH this process inherited. Idempotent-ish — duplicate dirs are harmless.
@@ -1058,6 +1067,8 @@ pub fn start(
 
     let session = Arc::new(AcpSession {
         key: key.clone(),
+        spawned,
+        log_path: log.clone(),
         designs_root,
         extras,
         lane,
@@ -1151,7 +1162,16 @@ impl AcpSession {
         }
     }
 
+    /// Append one stamped line to the session log. Opened per call (the stderr
+    /// thread holds its own handle; appends interleave line by line); errors ignored.
+    fn log_line(&self, line: &str) {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.log_path) {
+            let _ = f.write_all(stamp_line(self.spawned.elapsed().as_millis(), line).as_bytes());
+        }
+    }
+
     fn emit_state(&self, params: Value) {
+        self.log_line(&state_log_text(&params));
         self.emit_msg(json!({ "method": "_chronicle/session_state", "params": params }));
     }
 
@@ -2218,6 +2238,15 @@ for line in sys.stdin:
     }
 
     #[test]
+    fn state_transitions_are_logged_in_the_stamp_format() {
+        // the session struct needs a live child, so this tests the shared helpers only
+        let l = stamp_line(7, &state_log_text(&json!({ "state": "ready" })));
+        assert_eq!(l, "[+7] chronicle state=ready\n");
+        assert!(l.starts_with("[+") && l.contains("chronicle state=ready"));
+        assert_eq!(state_log_text(&json!({})), "chronicle state=?");
+    }
+
+    #[test]
     fn log_lines_carry_a_millisecond_stamp() {
         assert_eq!(stamp_line(42, "boot"), "[+42] boot\n");
     }
@@ -2260,6 +2289,8 @@ for line in sys.stdin:
     fn jail_refuses_relative_traversal_and_outside_paths() {
         let dir = tmp("jail");
         let s = AcpSession {
+            spawned: std::time::Instant::now(),
+            log_path: PathBuf::new(),
             key: "k".into(),
             designs_root: None,
             extras: LaneExtras::default(),
@@ -2434,6 +2465,8 @@ for line in sys.stdin:
         let sid = "sess-d";
         let (tx, rx) = mpsc::channel::<Value>();
         let s = AcpSession {
+            spawned: std::time::Instant::now(),
+            log_path: PathBuf::new(),
             key: Lane::Design.key(&d.to_string_lossy()),
             designs_root: Some(root.clone()),
             extras: LaneExtras::default(),
@@ -2496,6 +2529,8 @@ for line in sys.stdin:
         // a session whose turn starts here
         let (tx, _rx) = mpsc::channel::<Value>();
         let s = AcpSession {
+            spawned: std::time::Instant::now(),
+            log_path: PathBuf::new(),
             key: d.to_string_lossy().to_string(),
             designs_root: None,
             extras: LaneExtras::default(),
@@ -2959,6 +2994,8 @@ for line in sys.stdin:
 
     fn design_session(d: &Path, root: &Path, sid: &str, emit: Emit) -> AcpSession {
         AcpSession {
+            spawned: std::time::Instant::now(),
+            log_path: PathBuf::new(),
             key: Lane::Design.key(&d.to_string_lossy()),
             designs_root: Some(root.to_path_buf()),
             extras: LaneExtras::default(),
