@@ -957,6 +957,26 @@ pub fn adapter_command(npx: &str) -> std::process::Command {
     adapter_command_for(&AdapterLaunch::Npx { npx: npx.to_string() })
 }
 
+/// Drain `src` to `out`, one stamped line at a time, until EOF. Bytes are read
+/// raw (stderr may carry non-UTF-8) and converted lossily; read or write
+/// errors never stop the drain, because a reader that quits wedges the child.
+fn stamp_stream<R: std::io::Read, W: Write>(src: R, out: &mut W, spawned: std::time::Instant) {
+    let mut r = std::io::BufReader::new(src);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match r.read_until(b'\n', &mut buf) {
+            Ok(0) => break,
+            Ok(_) => {
+                let text = String::from_utf8_lossy(&buf);
+                let _ = out.write_all(stamp_line(spawned.elapsed().as_millis(), text.trim_end_matches(['\n', '\r'])).as_bytes());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => break,
+        }
+    }
+}
+
 /// One session-log line: `[+<ms since spawn>] text\n`.
 fn stamp_line(ms: u128, text: &str) -> String {
     format!("[+{ms}] {text}\n")
@@ -1026,13 +1046,11 @@ pub fn start(
     // the adapter's stderr lands in the session log, each line stamped with
     // the milliseconds since spawn so a slow start is readable
     let spawned = std::time::Instant::now();
+    // Detached, never joined: `stop` kills the process group, EOF follows, and
+    // the File is unbuffered so nothing is stranded. It must keep draining for
+    // the child's whole life, or a full pipe would wedge the adapter.
     if let Some(stderr) = child.stderr.take() {
-        std::thread::spawn(move || {
-            for line in std::io::BufReader::new(stderr).lines() {
-                let Ok(line) = line else { break };
-                if errf.write_all(stamp_line(spawned.elapsed().as_millis(), &line).as_bytes()).is_err() { break; }
-            }
-        });
+        std::thread::spawn(move || stamp_stream(stderr, &mut errf, spawned));
     }
 
     let stdin = child.stdin.take().ok_or("no stdin pipe")?;
@@ -2181,6 +2199,22 @@ for line in sys.stdin:
         let cmd = adapter_command_for(&AdapterLaunch::Npx { npx: "/opt/homebrew/bin/npx".into() });
         let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
         assert_eq!(args, vec!["--yes".to_string(), "--".to_string(), format!("{ADAPTER_PACKAGE}@{ADAPTER_VERSION}")]);
+    }
+
+    #[test]
+    fn the_stamper_survives_invalid_utf8_and_a_dead_writer() {
+        let mut out: Vec<u8> = Vec::new();
+        stamp_stream(&b"ok\nbad \xff\xfe path\nlast"[..], &mut out, std::time::Instant::now());
+        let s = String::from_utf8(out).unwrap();
+        let lines: Vec<_> = s.lines().collect();
+        assert_eq!(lines.len(), 3, "{s}");
+        assert!(lines[1].ends_with("bad \u{fffd}\u{fffd} path"), "{s}");
+        assert!(lines[2].ends_with("last"));
+        struct Dead;
+        impl Write for Dead { fn write(&mut self, _: &[u8]) -> std::io::Result<usize> { Err(std::io::Error::other("x")) } fn flush(&mut self) -> std::io::Result<()> { Ok(()) } }
+        let mut src = std::io::Cursor::new(b"a\nb\n".to_vec());
+        stamp_stream(&mut src, &mut Dead, std::time::Instant::now());
+        assert_eq!(src.position(), 4, "kept draining after write errors");
     }
 
     #[test]
