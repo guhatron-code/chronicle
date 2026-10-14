@@ -251,6 +251,10 @@ under the run's folder, Rust scheduling the lanes and running the reviewer as a 
 lane's session. The lifecycle, record, fence, judge and card are identical either way; only §5
 changes. The spike's output is a recommendation and nothing it builds is kept.
 
+### Spike result (2026-10-14)
+
+Question 1, no: the workflow's agents were not carried as subagent cards. `Workflow` arrived as one ordinary `tool_call` (`kind: "other"`, `_meta.claudeCode.toolName: "Workflow"`) that returned `async_launched` and completed at once with the turn ending, and each lane's `Write` then arrived later as a plain top-level `tool_call` (`kind: "edit"`, `title: "Write a.txt"`) with no `Task`/Agent parent, no `lane-a` label and no live text from the lane. Question 2, no: the `session/request_permission` for a lane's `Write` carried only `_meta: {"permission":{"version":1,"title":"Write a.txt"}}` and a `toolCall` with `toolCallId`, `name`, `rawInput`, `title`, `kind`, `content`, `locations`, with no `parentToolUseId`, `agentId` or any subagent marker, so only the file path ties it to a lane and the fence cannot be per lane. Recommendation for Plan B: one ACP session per lane (`Lane::Worker`), not workflow-native, because both answers are no (the workflow also runs after the prompt's `end_turn`, outside any turn the pane owns). Measured against `@agentclientprotocol/claude-agent-acp@0.75.1`, driven headless over stdio with a node probe, not the Chronicle GUI.
+
 ## 6 · The judge, on Jev
 
 Four decisions are bounded, frequent and deadline-sensitive enough to hand to a typed decision
