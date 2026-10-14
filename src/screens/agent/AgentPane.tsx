@@ -5,7 +5,7 @@
  * ended), and the composer. Session state lives in lib/agent-session.ts —
  * this component only renders and dispatches.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Profiler, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   agentSessionFor,
@@ -22,6 +22,7 @@ import {
   type ThreadItem,
 } from "@/lib/agent-session";
 import { rowKeys } from "@/lib/thread-rows";
+import { profilerOnRender } from "@/lib/perf";
 import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
 import { sendDesignMessage } from "@/lib/design-store";
 import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint, agentsAvailable } from "@/lib/ipc";
@@ -770,29 +771,36 @@ export function AgentPane({
           }}
           className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-3"
         >
-          {(() => { const items = groupEntries(s.entries).filter((e) => variant === "chat" || (e.kind !== "round" && e.kind !== "round-plan")); const keys = rowKeys(items); return items.map((entry, i) => (
-            <Appear key={keys[i]}>
-              <Entry
-                dir={dir}
-                entry={entry}
-                turnActive={s.turnActive}
-                onConfirm={onConfirm}
-                onOpenNotes={onOpenNotes}
-                onRetryRound={(n, total) => {
-                  void startRoundInPane(dir, n, total).catch((e) => toastError("Couldn't restart the round", String(e).slice(0, 90)));
-                }}
-              />
-            </Appear>
-          )); })()}
-          {trailing}
-          {/* the "thinking" beat before the first token, so a turn never
-              looks stalled — the classic chat typing signal */}
-          {s.turnActive && s.entries.at(-1)?.kind !== "assistant" && (
-            <div className="wv-enter flex gap-2.5 px-3.5 pb-1 pt-2">
-              <AssistantAvatar />
-              <div className="pt-1.5"><TypingDots /></div>
-            </div>
-          )}
+          {(() => {
+            const body = (
+              <>
+              {(() => { const items = groupEntries(s.entries).filter((e) => variant === "chat" || (e.kind !== "round" && e.kind !== "round-plan")); const keys = rowKeys(items); return items.map((entry, i) => (
+                <Appear key={keys[i]}>
+                  <Entry
+                    dir={dir}
+                    entry={entry}
+                    turnActive={s.turnActive}
+                    onConfirm={onConfirm}
+                    onOpenNotes={onOpenNotes}
+                    onRetryRound={(n, total) => {
+                      void startRoundInPane(dir, n, total).catch((e) => toastError("Couldn't restart the round", String(e).slice(0, 90)));
+                    }}
+                  />
+                </Appear>
+              )); })()}
+              {trailing}
+              {/* the "thinking" beat before the first token, so a turn never
+                  looks stalled — the classic chat typing signal */}
+              {s.turnActive && s.entries.at(-1)?.kind !== "assistant" && (
+                <div className="wv-enter flex gap-2.5 px-3.5 pb-1 pt-2">
+                  <AssistantAvatar />
+                  <div className="pt-1.5"><TypingDots /></div>
+                </div>
+              )}
+              </>
+            );
+            return import.meta.env.DEV ? <Profiler id="thread" onRender={profilerOnRender}>{body}</Profiler> : body;
+          })()}
         </div>
       )}
       {variant === "chat" && <ReviewStrip dir={dir} s={s} onOpenReview={onOpenReview} onConfirm={onConfirm} />}
