@@ -57,15 +57,19 @@ export function SubagentCard({ group, dir, readOnly }: { group: Group; dir: stri
           ))}
           {n === 0 && <div className="px-[11px] py-[5px] text-[12px] text-text-dim">{running ? "Starting…" : "Made no calls."}</div>}
         </div>
-        {report && (
-          <div className="wv-grow" data-open={!running}>
-            <div>
-              <div data-selectable className="mt-1.5 max-h-24 overflow-y-auto rounded-md bg-surface-input px-3 py-2 font-mono text-[11px] leading-[1.7] text-text-muted">
+        {/* Always mounted so a report landing with `running` already false still
+            transitions 0fr -> 1fr. -mt-2 cancels the container's space-y-2 margin
+            under the list, so a closed wrapper adds no height and no margin; the
+            14px (8 + 6) of spacing lives inside the grown block as mt-3.5. */}
+        <div className="wv-grow -mt-2" data-open={Boolean(report && !running)}>
+          <div>
+            {report && !running && (
+              <div data-selectable className="mt-3.5 max-h-24 overflow-y-auto rounded-md bg-surface-input px-3 py-2 font-mono text-[11px] leading-[1.7] text-text-muted">
                 <pre className="whitespace-pre-wrap">{report}</pre>
               </div>
-            </div>
+            )}
           </div>
-        )}
+        </div>
       </TaskContent>
     </Task>
   );
