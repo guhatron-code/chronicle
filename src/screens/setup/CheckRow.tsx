@@ -46,6 +46,12 @@ function KindIcon({ kind }: { kind: string }) {
         <path d="m2.5 13.5 8-8M9 4l1-1 3 3-1 1M12 1.5v1.5M14.5 4H13M3.5 3v2M2.5 4h2" />
       </svg>
     );
+  if (kind === "connector")
+    return (
+      <svg {...common} strokeWidth="1.3" className="text-text-subtle">
+        <path d="M5 2.5v3a3 3 0 0 0 6 0v-3M8 8.5v5M5.5 13.5h5" />
+      </svg>
+    );
   if (kind === "agents")
     return (
       <svg {...common} strokeWidth="1.4" className="text-text-subtle">

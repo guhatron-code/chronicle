@@ -51,3 +51,13 @@ it("the Design rows exist, are never required, and do not count toward ready", a
   expect(m.totalRequired()).toBe(6);
   expect(m.DESIGN_META.map((c) => c.id)).toEqual(["design_browser", "design_skills"]);
 });
+
+it("the connector row exists, installs, and never counts toward ready", async () => {
+  const m = await import("./setup-store");
+  const row = m.CHECK_META.find((c) => c.id === "connector");
+  expect(row).toMatchObject({ kind: "connector", name: "The agent’s connector" });
+  expect(m.totalRequired()).toBe(6);
+  // it sits right after the engine it needs
+  const ids = m.CHECK_META.map((c) => c.id);
+  expect(ids.indexOf("connector")).toBe(ids.indexOf("node") + 1);
+});

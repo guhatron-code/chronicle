@@ -22,10 +22,11 @@ import { every } from "./scheduler";
 
 /** The row order + plain-language identity the screen renders. Names live here
  *  so the store, not the JSX, is the source of truth for what each check is. */
-export const CHECK_META: { id: string; name: string; blurb: string; kind: "claude" | "node" | "signin" | "path" | "github" | "skills" | "agents" | "browser" | "design_skills" }[] = [
+export const CHECK_META: { id: string; name: string; blurb: string; kind: "claude" | "node" | "connector" | "signin" | "path" | "github" | "skills" | "agents" | "browser" | "design_skills" }[] = [
   { id: "claude", name: "The AI that does the work", blurb: "Claude Code — the assistant that writes and edits your project.", kind: "claude" },
   { id: "claude_signin", name: "Sign in to Claude", blurb: "So the AI can start working on your behalf.", kind: "signin" },
   { id: "node", name: "The engine the AI runs on", blurb: "The background software the AI needs to do its work.", kind: "node" },
+  { id: "connector", name: "The agent’s connector", blurb: "The small program Chronicle talks to the AI through. Installed once, so sessions start fast.", kind: "connector" },
   { id: "terminal_path", name: "Make the AI work in the terminal", blurb: "So typing the AI's name in the terminal works.", kind: "path" },
   { id: "github", name: "Your projects' online home", blurb: "Where your projects live online, so you can publish and share them.", kind: "github" },
   { id: "superpowers", name: "Extra skills for the AI", blurb: "Extra abilities that make the AI better at bigger jobs.", kind: "skills" },
@@ -37,7 +38,7 @@ export const CHECK_META: { id: string; name: string; blurb: string; kind: "claud
 /** The machine-wide prerequisites the first-launch gate and the "all set" celebration
  *  require. "agents" is excluded on purpose: it is a per-project opt-in that needs an
  *  open project to even ask about, so it must never block reaching one. */
-const REQUIRED_META = CHECK_META.filter((c) => c.kind !== "agents" && c.kind !== "browser" && c.kind !== "design_skills");
+const REQUIRED_META = CHECK_META.filter((c) => c.kind !== "agents" && c.kind !== "connector" && c.kind !== "browser" && c.kind !== "design_skills");
 
 /** The Design pane's own rows: shown as a group of their own, never required. */
 export const DESIGN_META = CHECK_META.filter((c) => c.kind === "browser" || c.kind === "design_skills");
