@@ -16,6 +16,8 @@
 @import '@fontsource-variable/geist-mono';
 @import 'tailwindcss';
 @import 'tw-animate-css';
+/* streamdown (the agent's streaming reply) is styled with Tailwind utilities inside node_modules */
+@source "../node_modules/streamdown/dist/*.js";
 
 /* Dark is DEFAULT. [data-theme] is set explicitly on <html>, so the `dark:` utility keys off
    [data-theme="dark"] rather than prefers-color-scheme. */
@@ -858,3 +860,7 @@ a:focus-visible,
     }
   }
 }
+
+.assistant-md { font-size: 13px; line-height: 1.65; }
+.assistant-md pre { font-family: var(--font-mono); font-size: 11px; line-height: 1.55; }
+.assistant-md code:not(pre code) { font-family: var(--font-mono); font-size: 11px; }

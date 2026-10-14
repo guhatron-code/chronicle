@@ -1,0 +1,29 @@
+/*
+ * The agent's reply, formatted as it streams. streamdown parses completed
+ * blocks once and re-parses only the open one, so a chunk costs the open
+ * paragraph, not the whole reply. A caret trails the live text.
+ */
+import { Streamdown } from "streamdown";
+import { assistantMarkdownProps } from "@/lib/assistant-markdown";
+import { AssistantAvatar, MessageRow, TypingDots } from "./rows";
+
+const props = assistantMarkdownProps();
+
+export function AssistantMessage({ text, streaming }: { text: string; streaming: boolean }) {
+  return (
+    <MessageRow who="Chronigirl" avatar={<AssistantAvatar />}>
+      <span data-streaming={streaming || undefined}>
+        {streaming && !text.trim() ? (
+          <TypingDots />
+        ) : (
+          <span data-selectable className="assistant-md [&>*:last-child]:inline">
+            <Streamdown {...props} className="space-y-1.5">{text}</Streamdown>
+            {streaming && (
+              <span className="ml-0.5 inline-block h-[15px] w-px translate-y-[2px] bg-text-secondary" style={{ animation: "wv-pulse 1.1s step-end infinite" }} />
+            )}
+          </span>
+        )}
+      </span>
+    </MessageRow>
+  );
+}
