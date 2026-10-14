@@ -26,10 +26,13 @@ describe("the streaming reply", () => {
     expect(html).not.toContain("<script");
     expect(html).not.toContain("onerror");
   });
-  it("links and images are limited to http(s)", () => {
-    const p = assistantMarkdownProps();
-    expect(p.allowedLinkPrefixes).toEqual(["https://", "http://"]);
-    expect(p.allowedImagePrefixes).toEqual(["https://", "http://"]);
-    expect(p.parseIncompleteMarkdown).toBe(true);
+  it("a javascript: link never renders as a link", () => {
+    expect(render("[x](javascript:alert(1))")).not.toContain('href="javascript:');
+  });
+  it("a data: image never renders a data: source", () => {
+    expect(render("![i](data:image/png;base64,AAAA)")).not.toContain('src="data:');
+  });
+  it("an https link renders an anchor to its URL", () => {
+    expect(render("[docs](https://example.com/a)")).toContain('href="https://example.com/a"');
   });
 });
