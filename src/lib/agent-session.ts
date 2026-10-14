@@ -492,7 +492,7 @@ function settleStreaming(s: AgentSessionState) {
 /** the thought at the tail stops streaming — whatever arrived is not a thought chunk */
 function settleThoughtTail(s: AgentSessionState) {
   const last = s.entries[s.entries.length - 1];
-  if (last?.kind === "thought") { last.streaming = false; touch(last); }
+  if (last?.kind === "thought") { const was = last.streaming; last.streaming = false; if (was) touch(last); }
 }
 
 function routeUpdate(u: AcpUpdate) {

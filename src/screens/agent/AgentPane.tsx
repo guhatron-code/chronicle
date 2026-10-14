@@ -476,11 +476,18 @@ function Entry({
  *  mutates entries in place, so identity cannot carry that information). */
 const ThreadRow = memo(
   function ThreadRow(props: Parameters<typeof Entry>[0] & { sig: string }) {
-    const { sig: _sig, ...rest } = props;
+    const { sig, ...rest } = props;
+    void sig; // only the comparator reads it
     return <Entry {...rest} />;
   },
   (a, b) => a.sig === b.sig && a.turnActive === b.turnActive && a.readOnly === b.readOnly && a.dir === b.dir,
 );
+
+/** Round cards also read the notes index (done-note counts), which the entry
+ *  does not carry — fold its generation into their signature. */
+function sigFor(entry: ThreadItem, gen: number): string {
+  return entry.kind === "round" || entry.kind === "round-plan" ? `${rowSignature(entry)}:n${gen}` : rowSignature(entry);
+}
 
 /** A design-lane write the seam kept out of the project. Allowed writes inside
  *  the designs folder are not shown; the frames appearing on the canvas show them. */
@@ -557,6 +564,7 @@ export function AgentPane({
   const [, bump] = useState(0);
   useEffect(() => subscribeNotesIndex(() => bump((n) => n + 1)), []); // round cards tick with the vault, not with a keystroke
   useEffect(() => () => flushAgentNotifications(), []); // a pane unmounting mid-stream leaves nothing pending
+  const gen = indexFor(dir).generation; // re-read each render: the notes bump above re-renders the pane
   const onRetryRound = useCallback((n: number, total: number) => {
     void startRoundInPane(dir, n, total).catch((e) => toastError("Couldn't restart the round", String(e).slice(0, 90)));
   }, [dir]);
@@ -752,7 +760,7 @@ export function AgentPane({
             const keys = rowKeys(items);
             return items.map((entry, i) => (
               <Appear key={keys[i]}>
-                <ThreadRow sig={rowSignature(entry)} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} />
+                <ThreadRow sig={sigFor(entry, gen)} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} />
               </Appear>
             ));
           })()}
@@ -799,7 +807,7 @@ export function AgentPane({
                 const keys = rowKeys(items);
                 return items.map((entry, i) => (
                   <Appear key={keys[i]}>
-                    <ThreadRow sig={rowSignature(entry)} dir={dir} entry={entry} turnActive={s.turnActive} onConfirm={onConfirm} onOpenNotes={onOpenNotes} onRetryRound={onRetryRound} />
+                    <ThreadRow sig={sigFor(entry, gen)} dir={dir} entry={entry} turnActive={s.turnActive} onConfirm={onConfirm} onOpenNotes={onOpenNotes} onRetryRound={onRetryRound} />
                   </Appear>
                 ));
               })()}
