@@ -918,14 +918,25 @@ pub struct AcpSession {
     sessions: Arc<Mutex<HashMap<String, Arc<AcpSession>>>>,
 }
 
-/// Build the pinned adapter spawn: `npx --yes -- <package>@<version>`.
+/// How the adapter process is started: the managed install launched by node
+/// directly (0.2 s), or `npx` resolving the pinned package (2 s). Setup
+/// decides which is possible; the command is built the same way either way.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AdapterLaunch {
+    Direct { node: String, entry: PathBuf },
+    Npx { npx: String },
+}
+
+/// Build the pinned adapter spawn: `node <entry>` or `npx --yes -- <package>@<version>`.
 /// ANTHROPIC_API_KEY is blanked so the adapter uses the user's Claude Code
 /// login (verified: Zed does exactly this).
-pub fn adapter_command(npx: &str) -> std::process::Command {
-    let mut cmd = std::process::Command::new(npx);
-    cmd.arg("--yes")
-        .arg("--")
-        .arg(format!("{ADAPTER_PACKAGE}@{ADAPTER_VERSION}"))
+pub fn adapter_command_for(launch: &AdapterLaunch) -> std::process::Command {
+    let (program, args): (&str, Vec<String>) = match launch {
+        AdapterLaunch::Direct { node, entry } => (node.as_str(), vec![entry.to_string_lossy().to_string()]),
+        AdapterLaunch::Npx { npx } => (npx.as_str(), vec!["--yes".into(), "--".into(), format!("{ADAPTER_PACKAGE}@{ADAPTER_VERSION}")]),
+    };
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args)
         .env("ANTHROPIC_API_KEY", "")
         // the adapter's inner claude refuses to launch when it thinks it's
         // nested in another Claude Code session — Chronicle's session is a
@@ -934,12 +945,21 @@ pub fn adapter_command(npx: &str) -> std::process::Command {
         // CRUCIAL for a Finder-launched app: our PATH is minimal
         // (/usr/bin:/bin:/usr/sbin:/sbin), but `npx` is a Node script whose
         // `#!/usr/bin/env node` shebang needs `node` ON THE CHILD'S PATH.
-        // Resolving npx by absolute path is not enough — without this the
+        // Resolving the tool by absolute path is not enough — without this the
         // adapter dies instantly with `env: node: No such file or directory`
-        // (exit 127) and the pane reports "session ended". Prepend npx's own
-        // dir (node sits beside it) + the well-known tool dirs.
-        .env("PATH", child_path(npx));
+        // (exit 127) and the pane reports "session ended". Prepend the tool's
+        // own dir (node sits beside npx) + the well-known tool dirs.
+        .env("PATH", child_path(program));
     cmd
+}
+
+pub fn adapter_command(npx: &str) -> std::process::Command {
+    adapter_command_for(&AdapterLaunch::Npx { npx: npx.to_string() })
+}
+
+/// One session-log line: `[+<ms since spawn>] text\n`.
+fn stamp_line(ms: u128, text: &str) -> String {
+    format!("[+{ms}] {text}\n")
 }
 
 /// Build a child PATH that can find `node`: the resolved tool's own directory
@@ -994,15 +1014,26 @@ pub fn start(
     }
 
     let log = session_log_path(&key);
-    let errf = std::fs::File::create(&log).map_err(|e| e.to_string())?;
+    let mut errf = std::fs::File::create(&log).map_err(|e| e.to_string())?;
     let mut child = cmd
         .current_dir(&cwd)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(errf)
+        .stderr(std::process::Stdio::piped())
         .process_group(0)
         .spawn()
         .map_err(|e| format!("couldn't start the agent bridge: {e}"))?;
+    // the adapter's stderr lands in the session log, each line stamped with
+    // the milliseconds since spawn so a slow start is readable
+    let spawned = std::time::Instant::now();
+    if let Some(stderr) = child.stderr.take() {
+        std::thread::spawn(move || {
+            for line in std::io::BufReader::new(stderr).lines() {
+                let Ok(line) = line else { break };
+                if errf.write_all(stamp_line(spawned.elapsed().as_millis(), &line).as_bytes()).is_err() { break; }
+            }
+        });
+    }
 
     let stdin = child.stdin.take().ok_or("no stdin pipe")?;
     let stdout = child.stdout.take().ok_or("no stdout pipe")?;
@@ -2131,6 +2162,30 @@ for line in sys.stdin:
 
         s.stop(true);
         let _ = std::fs::remove_dir_all(&h.dir);
+    }
+
+    #[test]
+    fn a_direct_launch_runs_node_on_the_entry_with_the_same_env_as_npx() {
+        let cmd = adapter_command_for(&AdapterLaunch::Direct { node: "/x/bin/node".into(), entry: PathBuf::from("/x/adapter/dist/index.js") });
+        assert_eq!(cmd.get_program(), std::ffi::OsStr::new("/x/bin/node"));
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        assert_eq!(args, vec!["/x/adapter/dist/index.js".to_string()]);
+        let path = cmd.get_envs().find(|(k, _)| *k == std::ffi::OsStr::new("PATH")).and_then(|(_, v)| v).unwrap().to_string_lossy().to_string();
+        assert!(path.starts_with("/x/bin"), "node's own dir leads the PATH: {path}");
+        assert!(cmd.get_envs().any(|(k, v)| k == std::ffi::OsStr::new("ANTHROPIC_API_KEY") && v == Some(std::ffi::OsStr::new(""))));
+        assert!(cmd.get_envs().any(|(k, v)| k == std::ffi::OsStr::new("CLAUDECODE") && v.is_none()));
+    }
+
+    #[test]
+    fn an_npx_launch_is_unchanged() {
+        let cmd = adapter_command_for(&AdapterLaunch::Npx { npx: "/opt/homebrew/bin/npx".into() });
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        assert_eq!(args, vec!["--yes".to_string(), "--".to_string(), format!("{ADAPTER_PACKAGE}@{ADAPTER_VERSION}")]);
+    }
+
+    #[test]
+    fn log_lines_carry_a_millisecond_stamp() {
+        assert_eq!(stamp_line(42, "boot"), "[+42] boot\n");
     }
 
     #[test]

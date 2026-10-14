@@ -3411,8 +3411,7 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
     let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     let key = session_key(&dir, lane)?;
-    let npx = find_tool("npx")
-        .ok_or("the agent needs Node.js — install it from nodejs.org, then try again")?;
+    let launch = setup::adapter_launch().ok_or("the agent needs Node.js — install it from Setup & health, then try again")?;
     let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
     jail_roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
     let emit: acp::Emit = {
@@ -3422,11 +3421,12 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
     if lane == acp::Lane::Design { designs::ensure_root(&p.dir)?; }
     let designs_root = if lane == acp::Lane::Design { Some(designs::designs_root(&p.dir)) } else { None };
     let extras = if lane == acp::Lane::Design {
+        let npx = find_tool("npx").unwrap_or_default();
         let browsers = if setup::browser_ready() { Some(setup::browsers_dir()) } else { None };
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir() }
     } else { acp::LaneExtras::default() };
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, None, acp::adapter_command(&npx))?;
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, None, acp::adapter_command_for(&launch))?;
     Ok(json!({ "started": started }))
 }
 
@@ -3437,8 +3437,7 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
     let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     let key = session_key(&dir, lane)?;
-    let npx = find_tool("npx")
-        .ok_or("the agent needs Node.js — install it from nodejs.org, then try again")?;
+    let launch = setup::adapter_launch().ok_or("the agent needs Node.js — install it from Setup & health, then try again")?;
     let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
     jail_roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
     let emit: acp::Emit = {
@@ -3448,11 +3447,12 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
     if lane == acp::Lane::Design { designs::ensure_root(&p.dir)?; }
     let designs_root = if lane == acp::Lane::Design { Some(designs::designs_root(&p.dir)) } else { None };
     let extras = if lane == acp::Lane::Design {
+        let npx = find_tool("npx").unwrap_or_default();
         let browsers = if setup::browser_ready() { Some(setup::browsers_dir()) } else { None };
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir() }
     } else { acp::LaneExtras::default() };
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, Some(id), acp::adapter_command(&npx))?;
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, Some(id), acp::adapter_command_for(&launch))?;
     Ok(json!({ "started": started }))
 }
 

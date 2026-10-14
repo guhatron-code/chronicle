@@ -279,7 +279,7 @@ pub fn fix_terminal_path() -> Result<(), String> {
 
 /// Every row the Setup screen shows, in run order. The first `REQUIRED` gate the
 /// app; the design rows are extras for the design pane and never count.
-const CHECKS: [&str; 8] = ["claude", "claude_signin", "node", "terminal_path", "github", "superpowers", "design_browser", "design_skills"];
+const CHECKS: [&str; 9] = ["claude", "claude_signin", "node", "terminal_path", "github", "superpowers", "design_browser", "design_skills", "connector"];
 pub const REQUIRED: usize = 6;
 
 /// Where Playwright's Chromium lives: inside the managed tools dir, never the user's.
@@ -419,6 +419,11 @@ pub fn detect(id: &str) -> Value {
         "design_browser" => {
             if resolve("node").is_none() { ("blocked", "Install the engine first.", "") }
             else if let Some(b) = browser_build_in(&browsers_dir()) { return json!({ "id": id, "state": "ready", "detail": format!("chromium · {b}"), "action": "" }); }
+            else { ("missing", "", "install") }
+        }
+        "connector" => {
+            if resolve("node").is_none() { ("blocked", "Install the engine first.", "") }
+            else if adapter_entry_in(&adapter_dir(), crate::acp::ADAPTER_VERSION).is_some() { return json!({ "id": id, "state": "ready", "detail": crate::acp::ADAPTER_VERSION, "action": "" }); }
             else { ("missing", "", "install") }
         }
         "design_skills" => {
@@ -656,6 +661,46 @@ fn install_design_browser(emit: &Emit, cancel: &AtomicBool) -> Result<(), String
     }
 }
 
+/* ================= the agent's connector (the ACP adapter) ================= */
+
+pub fn adapter_dir() -> PathBuf { tools_dir().join("adapter") }
+
+/// The adapter's entry script, only when the install under `dir` is exactly
+/// `version`: a stale install after a pin bump must look like no install.
+pub fn adapter_entry_in(dir: &Path, version: &str) -> Option<PathBuf> {
+    let pkg = dir.join("node_modules").join(crate::acp::ADAPTER_PACKAGE);
+    let manifest = std::fs::read_to_string(pkg.join("package.json")).ok()?;
+    let v: Value = serde_json::from_str(&manifest).ok()?;
+    if v.get("version").and_then(|x| x.as_str()) != Some(version) { return None; }
+    let entry = pkg.join("dist/index.js");
+    entry.is_file().then_some(entry)
+}
+
+/// Direct when the managed install matches the pin and node resolves; npx otherwise; None without node at all.
+pub fn adapter_launch() -> Option<crate::acp::AdapterLaunch> {
+    if let (Some(node), Some(entry)) = (resolve("node"), adapter_entry_in(&adapter_dir(), crate::acp::ADAPTER_VERSION)) {
+        return Some(crate::acp::AdapterLaunch::Direct { node, entry });
+    }
+    resolve("npx").map(|npx| crate::acp::AdapterLaunch::Npx { npx })
+}
+
+fn install_adapter(emit: &Emit, _cancel: &AtomicBool) -> Result<(), String> {
+    let npm = resolve("npm").ok_or("the engine isn't installed yet — install it first")?;
+    emit_state(emit, "connector", json!({ "state": "installing", "pct": Value::Null }));
+    std::fs::create_dir_all(adapter_dir()).map_err(|e| e.to_string())?;
+    let out = std::process::Command::new(&npm)
+        .args(["install", "--prefix"]).arg(adapter_dir())
+        .args(["--no-audit", "--no-fund", "--no-package-lock", &format!("{}@{}", crate::acp::ADAPTER_PACKAGE, crate::acp::ADAPTER_VERSION)])
+        .env("PATH", tool_env_path())
+        .stdin(std::process::Stdio::null())
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("couldn't install the connector: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("npm failed")));
+    }
+    adapter_entry_in(&adapter_dir(), crate::acp::ADAPTER_VERSION).map(|_| ()).ok_or_else(|| "installed, but the connector's files aren't where expected".to_string())
+}
+
 /// Run one check's install/repair action. Returns Ok when the check is now
 /// resolved (or the action was dispatched, for sign-ins).
 pub fn install(id: &str, emit: &Emit, cancel: &AtomicBool) -> Result<(), String> {
@@ -665,6 +710,7 @@ pub fn install(id: &str, emit: &Emit, cancel: &AtomicBool) -> Result<(), String>
         "github" => install_github(emit, cancel),
         "superpowers" => install_superpowers(emit, cancel),
         "design_browser" => install_design_browser(emit, cancel),
+        "connector" => install_adapter(emit, cancel),
         "terminal_path" => fix_terminal_path(),
         _ => Err(format!("{id} isn't installable here")),
     };
@@ -707,12 +753,12 @@ impl SetupState {
 /// terminal opens) and their rows finish as the user signs in. Stops honestly
 /// on a hard install failure.
 pub fn run_all(state: &SetupState, emit: &Emit) {
-    for id in ["node", "claude", "terminal_path", "superpowers", "github"] {
+    for id in ["node", "connector", "claude", "terminal_path", "superpowers", "github"] {
         let cur = detect(id);
         if cur["state"] == "ready" { continue; }
         if cur["state"] == "blocked" { continue; }
         // only installables here; sign-ins are surfaced as needs_you afterward
-        if matches!(id, "node" | "claude" | "github" | "superpowers" | "terminal_path") {
+        if matches!(id, "node" | "connector" | "claude" | "github" | "superpowers" | "terminal_path") {
             let flag = state.cancel_flag(id);
             flag.store(false, Ordering::SeqCst);
             if install(id, emit, &flag).is_err() {
@@ -743,13 +789,53 @@ mod setup_tests {
         assert!(CHECKS.contains(&"design_browser") && CHECKS.contains(&"design_skills"));
         let s = status();
         assert_eq!(s["total"], 6);
-        assert_eq!(s["checks"].as_array().unwrap().len(), 8);
+        assert_eq!(s["checks"].as_array().unwrap().len(), 9);
         let b = detect("design_browser");
         assert!(["ready", "missing", "blocked"].contains(&b["state"].as_str().unwrap()));
         if b["state"] == "missing" { assert_eq!(b["action"], "install"); }
         let k = detect("design_skills");
         assert_eq!(k["action"], "", "the skills ship with the app: nothing to install");
     }
+    fn fake_adapter(dir: &Path, version: &str) {
+        let pkg = dir.join("node_modules/@agentclientprotocol/claude-agent-acp");
+        std::fs::create_dir_all(pkg.join("dist")).unwrap();
+        std::fs::write(pkg.join("package.json"), format!(r#"{{"name":"@agentclientprotocol/claude-agent-acp","version":"{version}","bin":{{"claude-agent-acp":"dist/index.js"}}}}"#)).unwrap();
+        std::fs::write(pkg.join("dist/index.js"), "#!/usr/bin/env node\n").unwrap();
+    }
+
+    #[test]
+    fn adapter_entry_resolves_the_pinned_install() {
+        let d = std::env::temp_dir().join(format!("chronicle-adapter-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        fake_adapter(&d, crate::acp::ADAPTER_VERSION);
+        let e = adapter_entry_in(&d, crate::acp::ADAPTER_VERSION).expect("the pinned install resolves");
+        assert!(e.ends_with("dist/index.js"), "{e:?}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn adapter_entry_ignores_a_stale_install() {
+        // a future pin bump must never launch the old adapter: detect says missing,
+        // the spawn falls back to npx of the pinned version
+        let d = std::env::temp_dir().join(format!("chronicle-adapter-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        fake_adapter(&d, "0.0.1");
+        assert!(adapter_entry_in(&d, crate::acp::ADAPTER_VERSION).is_none());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_connector_row_is_never_required_and_joins_the_list() {
+        assert_eq!(REQUIRED, 6);
+        assert!(CHECKS.contains(&"connector"));
+        let s = status();
+        assert_eq!(s["total"], 6);
+        assert_eq!(s["checks"].as_array().unwrap().len(), 9);
+        let c = detect("connector");
+        assert!(["ready", "missing", "blocked"].contains(&c["state"].as_str().unwrap()));
+        if c["state"] == "missing" { assert_eq!(c["action"], "install"); }
+    }
+
     #[test]
     fn install_progress_lines_are_parsed() {
         let (pct, got, total) = parse_install_progress("|■■■■      | 40% of 164.3 MiB").unwrap();
@@ -845,7 +931,7 @@ mod setup_tests {
     #[test]
     fn status_shape_is_honest() {
         let s = status();
-        assert_eq!(s["checks"].as_array().unwrap().len(), 8);
+        assert_eq!(s["checks"].as_array().unwrap().len(), 9);
         assert!(s["total"] == 6);
         // every check reports one of the known states
         for c in s["checks"].as_array().unwrap() {
