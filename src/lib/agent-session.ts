@@ -19,6 +19,7 @@ import {
   agentSessionStop,
   agentSessionsList,
   agentSetMode,
+  agentsAvailable,
   designOutsideFiles,
   onAcpUpdate,
   roundPlanBegin,
@@ -182,6 +183,8 @@ export interface AgentSessionState {
   /** the one-time "Turn on Auto?" confirm was accepted this session */
   autoConfirmed: boolean;
   /** composer preload (F38) — a labeled draft the user still has to send */
+  /** Started by the project opening, not by the user — the word says "warming" until ready. */
+  warm: boolean;
   draft: { label: string; text: string } | null;
   /** a mirror of the composer's current text — preload checks read it */
   composerText: string;
@@ -229,6 +232,7 @@ const blank = (): AgentSessionState => ({
   configOptions: [],
   userConfig: [],
   commands: [],
+  warm: false,
   draft: null,
   composerText: "",
   queue: [],
@@ -304,6 +308,7 @@ export function agentStateWord(s: AgentSessionState): { word: string; kind: "dim
   if (s.phase === "needs-login") return { word: "needs login", kind: "error" };
   if (s.phase === "error") return { word: "stopped", kind: "error" };
   if (s.phase === "ended") return { word: "ended", kind: "dim" };
+  if (s.warm && (s.phase === "installing" || s.phase === "starting")) return { word: "warming", kind: "neutral" };
   if (s.phase === "installing" || s.phase === "starting") return { word: "starting", kind: "neutral" };
   if (s.phase === "ready") {
     if (s.entries.some((e) => e.kind === "perm" && !e.outcome)) return { word: "waiting on you", kind: "neutral" };
@@ -521,7 +526,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       // the adapter's own replay is suppressed, so blanking here would leave
       // the session open on nothing — the empty-thread-after-Resume bug
       const keep = params.resume === true ? s.entries : [];
-      Object.assign(s, blank(), { lane: s.lane, phase: "installing" as AgentPhase, draft: s.draft, entries: keep });
+      Object.assign(s, blank(), { lane: s.lane, phase: "installing" as AgentPhase, draft: s.draft, warm: s.warm, entries: keep });
       // the thread and the queue are both gone; a card waiting in that queue
       // must not go on waiting for a prompt that no longer exists (`live`
       // only: a replay must never close the running round's card)
@@ -530,6 +535,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       s.phase = "starting";
     } else if (state === "ready") {
       s.phase = "ready";
+      s.warm = false;
       s.sessionId = str(params.sessionId) || null;
       s.endedReason = null;
       const modes = params.modes as Raw | null;
@@ -843,9 +849,9 @@ function markRejected(s: AgentSessionState, perm: Extract<AgentEntry, { kind: "p
 
 /* ---------- actions ---------- */
 
-export async function startAgentSession(dir: string): Promise<void> {
+export async function startAgentSession(dir: string, opts: { warm?: boolean } = {}): Promise<void> {
   const s = agentSessionFor(dir);
-  Object.assign(s, blank(), { lane: s.lane, phase: "installing" as AgentPhase, draft: s.draft });
+  Object.assign(s, blank(), { lane: s.lane, phase: "installing" as AgentPhase, draft: s.draft, warm: !!opts.warm });
   dropQueueWaiters(dir); // the queue went with the thread
   notify();
   try {
@@ -857,6 +863,26 @@ export async function startAgentSession(dir: string): Promise<void> {
     notify();
     throw e;
   }
+}
+
+/** Projects warmed this app session — a pane being hidden and shown, or a
+ *  session the user ended, must never start another on its own. */
+const warmed = new Set<string>();
+
+/** Start the project's session the moment the project is open, so the first
+ *  word is answered without the handshake in the way. Adopts a live backend
+ *  session first; otherwise starts one, once, and only when Claude is
+ *  installed — an unconfigured Mac must not open into an error banner. */
+export async function warmAgentSession(dir: string): Promise<void> {
+  await adoptAgentSession(dir);
+  if (warmed.has(dir)) return;
+  const s = agentSessionFor(dir);
+  if (s.phase !== "none") return;
+  const a = (await agentsAvailable().catch(() => null)) as { claude?: string | null } | null;
+  if (!a?.claude) return;
+  if (agentSessionFor(dir).phase !== "none") return; // re-check across the await
+  warmed.add(dir);
+  await startAgentSession(dir, { warm: true }).catch(() => { s.warm = false; });
 }
 
 /** Re-sync after a reload: a live backend session re-adopts its state (the

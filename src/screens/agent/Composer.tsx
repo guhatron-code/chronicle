@@ -152,6 +152,7 @@ function ModeSelect({
 export function Composer({
   dir,
   disabled,
+  sendDisabled = false,
   onConfirm,
   onSend,
   chips,
@@ -159,6 +160,8 @@ export function Composer({
   dir: string;
   /** true while the session isn't ready — the input dims and nothing sends */
   disabled: boolean;
+  /** true while a draft may be typed but not sent yet (the session is still warming) */
+  sendDisabled?: boolean;
   onConfirm: (spec: ConfirmSpec) => void;
   /** set by a lane that sends its own way (design): gets the text with mentions
    *  flattened, instead of the chat's blocks + sendAgentMessage */
@@ -385,7 +388,7 @@ export function Composer({
 
   const send = () => {
     const typed = text.trim();
-    if ((!typed && attachments.length === 0) || disabled || sending || s.turnActive) return;
+    if ((!typed && attachments.length === 0) || disabled || sendDisabled || sending || s.turnActive) return;
     const withRefs = attachments.length
       ? `${typed ? `${typed}\n\n` : ""}Attached files:\n${attachments.map((a) => `- ${a.relPath}`).join("\n")}`
       : typed;
@@ -686,11 +689,11 @@ export function Composer({
             <Kbd>↩</Kbd>
             <button
               data-agent-send
-              disabled={disabled || sending || (!text.trim() && attachments.length === 0)}
+              disabled={disabled || sendDisabled || sending || (!text.trim() && attachments.length === 0)}
               onClick={send}
               className={cn(
                 "h-7 rounded-md px-3 text-xs font-medium",
-                disabled || sending || (!text.trim() && attachments.length === 0)
+                disabled || sendDisabled || sending || (!text.trim() && attachments.length === 0)
                   ? "cursor-default bg-fill-subtle text-text-dimmer"
                   : "bg-primary text-primary-foreground hover:bg-[--primary-hover]",
               )}

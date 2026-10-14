@@ -18,6 +18,7 @@ let onUpdate: ((u: Update) => void) | null = null;
 const prompts: string[] = [];
 
 vi.mock("./ipc", () => ({
+  agentsAvailable: vi.fn(async () => ({ claude: null, codex: null, default: "" })),
   onAcpUpdate: vi.fn(async (cb: (u: Update) => void) => { onUpdate = cb; return () => {}; }),
   agentPrompt: vi.fn(async (_dir: string, _blocks: unknown[], text: string) => { prompts.push(text); }),
   roundRunMessage: vi.fn(async (_dir: string, n: number) => `RUN ${n}`),

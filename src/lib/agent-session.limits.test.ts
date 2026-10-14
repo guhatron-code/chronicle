@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type Update = { dir: string; message: { method: string; params?: Record<string, unknown> } };
 let onUpdate: ((u: Update) => void) | null = null;
 vi.mock("./ipc", () => ({
+  agentsAvailable: vi.fn(async () => ({ claude: null, codex: null, default: "" })),
   onAcpUpdate: vi.fn(async (cb: (u: Update) => void) => { onUpdate = cb; return () => {}; }),
   agentPrompt: vi.fn(), roundRunMessage: vi.fn(), agentSessionStart: vi.fn(),
   roundPlanBegin: vi.fn(), roundPlanCancel: vi.fn(), roundPlanSettle: vi.fn(),

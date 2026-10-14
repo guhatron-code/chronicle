@@ -8,6 +8,7 @@ type FakeAction = { id: number; dir: string; action: string; args: Record<string
 let resolveListener: ((unlisten: () => void) => void) | null = null;
 let fire: ((a: FakeAction) => void) | null = null;
 vi.mock("./ipc", () => ({
+  agentsAvailable: vi.fn(async () => ({ claude: null, codex: null, default: "" })),
   onAgentAction: vi.fn((cb: (a: FakeAction) => void) => {
     fire = cb;
     return new Promise<() => void>((resolve) => { resolveListener = resolve; });

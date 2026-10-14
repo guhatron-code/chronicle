@@ -92,7 +92,7 @@ import { HelpScreen } from "@/screens/help/HelpScreen";
 import type { HelpTarget } from "@/lib/help-content";
 import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/lib/setup-store";
 import { AgentPane } from "@/screens/agent/AgentPane";
-import { agentLive, agentSessionFor, answerPermission, laneKey, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent } from "@/lib/agent-session";
+import { agentLive, agentSessionFor, answerPermission, laneKey, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent, warmAgentSession } from "@/lib/agent-session";
 import {
   answerQuestions, designProjectFor, evictDesignProject, loadDesigns, openDesign, sendDesignMessage, subscribeDesigns, titleFromBrief,
 } from "@/lib/design-store";
@@ -621,6 +621,7 @@ function AppShell() {
     // they must act on the project being switched TO, not the one being left
     activeRef.current = dir;
     setActiveDir(dir);
+    void warmAgentSession(dir);
     setProjects((prev) => {
       const next = new Map(prev);
       const e = next.get(dir);

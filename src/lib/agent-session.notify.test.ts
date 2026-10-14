@@ -11,6 +11,7 @@ type Update = { dir: string; message: { method: string; params?: Record<string, 
 let onUpdate: ((u: Update) => void) | null = null;
 
 vi.mock("./ipc", () => ({
+  agentsAvailable: vi.fn(async () => ({ claude: null, codex: null, default: "" })),
   onAcpUpdate: vi.fn(async (cb: (u: Update) => void) => { onUpdate = cb; return () => {}; }),
   agentPrompt: vi.fn(async () => {}), roundRunMessage: vi.fn(async () => ""),
   agentSessionStart: vi.fn(async () => {}), roundPlanBegin: vi.fn(), roundPlanCancel: vi.fn(async () => {}),

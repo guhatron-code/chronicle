@@ -17,6 +17,7 @@ import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("./ipc", () => ({
+  agentsAvailable: vi.fn(async () => ({ claude: null, codex: null, default: "" })),
   onAcpUpdate: vi.fn(async () => () => {}),
   agentPrompt: vi.fn(), roundRunMessage: vi.fn(), agentSessionStart: vi.fn(),
   roundPlanBegin: vi.fn(), roundPlanCancel: vi.fn(), roundPlanSettle: vi.fn(),

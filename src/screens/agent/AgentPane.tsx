@@ -12,6 +12,7 @@ import {
   startAgentSession,
   startRoundInPane,
   adoptAgentSession,
+  warmAgentSession,
   closeAgentViewing,
   dequeueAgentMessage,
   groupEntries,
@@ -27,7 +28,7 @@ import { rowKeys, rowSignature } from "@/lib/thread-rows";
 import { profilerOnRender } from "@/lib/perf";
 import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
 import { sendDesignMessage } from "@/lib/design-store";
-import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint, agentsAvailable } from "@/lib/ipc";
+import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint } from "@/lib/ipc";
 import { CheckGlyph } from "@/components/chrome/icons";
 import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term-sessions";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
@@ -43,10 +44,6 @@ import { ToolCard } from "./ToolCard";
 import { SubagentCard } from "./SubagentCard";
 import { ThoughtCard } from "./ThoughtCard";
 import { PermissionCard } from "./PermissionCard";
-
-/** Projects we've auto-started the agent for this app session — so toggling the
- *  pane's visibility or ending a session never re-triggers auto-start. */
-const autoStarted = new Set<string>();
 
 /** One row of the thread as it arrives: it settles in from just below, once,
  *  on mount (index.css `wv-enter`). A replayed thread mounts all its rows at
@@ -499,17 +496,7 @@ export function AgentPane({
     // auto-launch into an error banner on every open; skipped after an explicit
     // End session (phase is then "ended", not "none").
     if (variant === "design") { void adoptAgentSession(dir); return; } // the design store starts its own session
-    let cancelled = false;
-    void adoptAgentSession(dir).then(async () => {
-      if (cancelled || autoStarted.has(dir)) return;
-      if (agentSessionFor(dir).phase !== "none") return;
-      const a = (await agentsAvailable().catch(() => null)) as { claude?: string | null } | null;
-      if (cancelled || !a?.claude) return;
-      if (agentSessionFor(dir).phase !== "none") return; // re-check across the await
-      autoStarted.add(dir);
-      void startAgentSession(dir).catch(() => {});
-    });
-    return () => { cancelled = true; };
+    void warmAgentSession(dir);
   }, [dir, variant]);
   const s = agentSessionFor(dir);
 
@@ -687,6 +674,9 @@ export function AgentPane({
               <span className="max-w-[34ch] text-[12.5px] leading-[1.55] text-text-muted [text-wrap:pretty]">
                 Chronicle asks before Chronigirl touches your project.
               </span>
+              {s.warm && (s.phase === "installing" || s.phase === "starting") && (
+                <span className="text-[11px] text-text-faint">Ready in a moment — you can type now</span>
+              )}
             </>
           )}
         </div>
@@ -733,8 +723,9 @@ export function AgentPane({
         disabled={
           variant === "design"
             ? s.phase === "installing" || s.phase === "starting" || s.phase === "needs-login"
-            : s.phase !== "ready"
+            : s.phase === "error" || s.phase === "needs-login"
         }
+        sendDisabled={variant !== "design" && s.phase !== "ready"}
         onConfirm={onConfirm}
         onSend={variant === "design" ? (t) => sendDesignMessage(splitLaneKey(dir).dir, t) : undefined}
         chips={composerChips}
