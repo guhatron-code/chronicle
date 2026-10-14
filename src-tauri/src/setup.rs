@@ -752,8 +752,12 @@ impl SetupState {
 /// order; the PATH repair runs non-interactively; sign-ins are triggered (the
 /// terminal opens) and their rows finish as the user signs in. Stops honestly
 /// on a hard install failure.
+/// The order `run_all` installs in. The connector is optional, so it goes last
+/// and its failure does not stop the run.
+const RUN_ALL_ORDER: [&str; 6] = ["node", "claude", "terminal_path", "superpowers", "github", "connector"];
+
 pub fn run_all(state: &SetupState, emit: &Emit) {
-    for id in ["node", "connector", "claude", "terminal_path", "superpowers", "github"] {
+    for id in RUN_ALL_ORDER {
         let cur = detect(id);
         if cur["state"] == "ready" { continue; }
         if cur["state"] == "blocked" { continue; }
@@ -762,6 +766,8 @@ pub fn run_all(state: &SetupState, emit: &Emit) {
             let flag = state.cancel_flag(id);
             flag.store(false, Ordering::SeqCst);
             if install(id, emit, &flag).is_err() {
+                // the connector is optional: install() already emitted its failure for that row
+                if id == "connector" { continue; }
                 emit_state(emit, "_all", json!({ "state": "stopped" }));
                 return;
             }
@@ -828,6 +834,7 @@ mod setup_tests {
     fn the_connector_row_is_never_required_and_joins_the_list() {
         assert_eq!(REQUIRED, 6);
         assert!(CHECKS.contains(&"connector"));
+        assert_eq!(RUN_ALL_ORDER.last(), Some(&"connector"), "the optional connector runs last");
         let s = status();
         assert_eq!(s["total"], 6);
         assert_eq!(s["checks"].as_array().unwrap().len(), 9);
