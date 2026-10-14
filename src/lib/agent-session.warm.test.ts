@@ -6,9 +6,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const started: string[] = [];
+type Update = { dir: string; message: { method: string; params?: Record<string, unknown> } };
+let onUpdate: ((u: Update) => void) | null = null;
 let claude: string | null = "/usr/local/bin/claude";
 vi.mock("./ipc", () => ({
-  onAcpUpdate: vi.fn(async () => () => {}),
+  onAcpUpdate: vi.fn(async (cb: (u: Update) => void) => { onUpdate = cb; return () => {}; }),
   agentsAvailable: vi.fn(async () => ({ claude, codex: null, default: claude ? "claude" : "" })),
   agentSessionStart: vi.fn(async (dir: string) => { started.push(dir); }),
   agentSessionState: vi.fn(async () => null),
@@ -55,5 +57,15 @@ describe("warmAgentSession", () => {
     Object.assign(agent.agentSessionFor(dir), { phase: "ended" });
     await agent.warmAgentSession(dir);
     expect(started).toEqual([]);
+  });
+
+  it("a ready session_state event clears warm", async () => {
+    const dir = "/warm-d";
+    await agent.warmAgentSession(dir);
+    const s = agent.agentSessionFor(dir);
+    expect(s.warm).toBe(true);
+    onUpdate!({ dir, message: { method: "_chronicle/session_state", params: { state: "ready", sessionId: "sid" } } });
+    expect(s.phase).toBe("ready");
+    expect(s.warm).toBe(false);
   });
 });

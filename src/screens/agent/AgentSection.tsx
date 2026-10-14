@@ -169,7 +169,7 @@ export function AgentSection({
       >
         <Chronigirl size={15} />
         <span className="text-[11.5px] font-medium text-text-secondary">Chronigirl</span>
-        <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[11px]", c.text)}>
+        <span key={word} className={cn("wv-word inline-flex items-center gap-1 whitespace-nowrap text-[11px]", c.text)}>
           <span className={cn("size-1 shrink-0 rounded-full", c.dot)} />
           {word}
         </span>
@@ -186,7 +186,7 @@ export function AgentSection({
       <div data-chrome className="flex h-9 shrink-0 items-center gap-2 border-b border-divider px-3">
         <Chronigirl size={16} />
         <span className="text-[12.5px] font-medium text-text-primary">Chronigirl</span>
-        <span data-agent-state className={cn("inline-flex items-center gap-[5px] whitespace-nowrap text-xs", c.text)}>
+        <span key={word} data-agent-state className={cn("wv-word inline-flex items-center gap-[5px] whitespace-nowrap text-xs", c.text)}>
           <span
             className={cn("size-[5px] shrink-0 rounded-full", c.dot)}
             style={word === "working" ? { animation: "wv-pulse 1.6s ease-in-out infinite" } : undefined}

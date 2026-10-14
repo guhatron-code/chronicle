@@ -723,7 +723,7 @@ export function AgentPane({
         disabled={
           variant === "design"
             ? s.phase === "installing" || s.phase === "starting" || s.phase === "needs-login"
-            : s.phase === "error" || s.phase === "needs-login"
+            : s.phase === "none" || s.phase === "ended" || s.phase === "error" || s.phase === "needs-login"
         }
         sendDisabled={variant !== "design" && s.phase !== "ready"}
         onConfirm={onConfirm}

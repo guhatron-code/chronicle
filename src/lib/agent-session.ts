@@ -182,9 +182,9 @@ export interface AgentSessionState {
   fullAutoConfirmed: boolean;
   /** the one-time "Turn on Auto?" confirm was accepted this session */
   autoConfirmed: boolean;
-  /** composer preload (F38) — a labeled draft the user still has to send */
   /** Started by the project opening, not by the user — the word says "warming" until ready. */
   warm: boolean;
+  /** composer preload (F38) — a labeled draft the user still has to send */
   draft: { label: string; text: string } | null;
   /** a mirror of the composer's current text — preload checks read it */
   composerText: string;
@@ -589,6 +589,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       const lastUser = [...s.entries].reverse().find((e) => e.kind === "user");
       if (lastUser && lastUser.kind === "user" && lastUser.checkpoint === undefined) {
         lastUser.checkpoint = id;
+        touch(lastUser);
       } else {
         s.pendingCheckpoint = id;
       }
