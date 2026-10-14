@@ -57,11 +57,15 @@ export function SubagentCard({ group, dir, readOnly }: { group: Group; dir: stri
           ))}
           {n === 0 && <div className="px-[11px] py-[5px] text-[12px] text-text-dim">{running ? "Starting…" : "Made no calls."}</div>}
         </div>
-        {report && !running && (
-          <div data-selectable className="mt-1.5 max-h-24 overflow-y-auto rounded-md bg-surface-input px-3 py-2 font-mono text-[11px] leading-[1.7] text-text-muted">
-            <pre className="whitespace-pre-wrap">{report}</pre>
+        <div className="wv-grow" data-open={Boolean(report && !running)}>
+          <div>
+            {report && !running && (
+              <div data-selectable className="mt-1.5 max-h-24 overflow-y-auto rounded-md bg-surface-input px-3 py-2 font-mono text-[11px] leading-[1.7] text-text-muted">
+                <pre className="whitespace-pre-wrap">{report}</pre>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </TaskContent>
     </Task>
   );

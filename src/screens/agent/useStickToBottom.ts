@@ -21,7 +21,7 @@ export function useStickToBottom(deps: unknown[]) {
 
   const apply = (el: HTMLElement, userScrolled: boolean) => {
     const grew = el.scrollHeight > lastHeight.current;
-    lastHeight.current = el.scrollHeight;
+    if (!userScrolled) lastHeight.current = el.scrollHeight;
     const d = stickDecision({
       pinned: pinned.current, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight,
       grew, userScrolled, reducedMotion: reducedMotion(),

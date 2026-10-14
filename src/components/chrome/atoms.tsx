@@ -113,7 +113,7 @@ export function StateWord({
     return (
       <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-state-success", className)}>
         <CheckGlyph size={glyphSize} className="shrink-0" />
-        <span className="min-w-0 truncate">{children}</span>
+        <span key={String(children)} className="wv-word min-w-0 truncate">{children}</span>
       </span>
     );
   }
@@ -121,7 +121,7 @@ export function StateWord({
     return (
       <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-state-error", className)}>
         <ErrorGlyph size={glyphSize} className="shrink-0" />
-        <span className="min-w-0 truncate">{children}</span>
+        <span key={String(children)} className="wv-word min-w-0 truncate">{children}</span>
       </span>
     );
   }
@@ -135,7 +135,7 @@ export function StateWord({
           animation: kind === "running" ? "wv-pulse 1.6s ease-in-out infinite" : undefined,
         }}
       />
-      <span className="min-w-0 truncate">{children}</span>
+      <span key={String(children)} className="wv-word min-w-0 truncate">{children}</span>
     </span>
   );
 }
