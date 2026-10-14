@@ -486,7 +486,7 @@ export function groupEntries(entries: AgentEntry[]): ThreadItem[] {
 }
 
 function settleStreaming(s: AgentSessionState) {
-  for (const e of s.entries) if (e.kind === "assistant" || e.kind === "thought") { e.streaming = false; touch(e); }
+  for (const e of s.entries) if (e.kind === "assistant" || e.kind === "thought") { const was = e.streaming; e.streaming = false; if (was) touch(e); }
 }
 
 /** the thought at the tail stops streaming — whatever arrived is not a thought chunk */

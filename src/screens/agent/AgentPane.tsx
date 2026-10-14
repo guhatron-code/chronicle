@@ -5,7 +5,7 @@
  * ended), and the composer. Session state lives in lib/agent-session.ts —
  * this component only renders and dispatches.
  */
-import { Profiler, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Profiler, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import {
   agentSessionFor,
@@ -17,11 +17,13 @@ import {
   groupEntries,
   splitLaneKey,
   subscribeAgent,
+  agentVersion,
+  flushAgentNotifications,
   type AgentEntry,
   type AgentSessionState,
   type ThreadItem,
 } from "@/lib/agent-session";
-import { rowKeys } from "@/lib/thread-rows";
+import { rowKeys, rowSignature } from "@/lib/thread-rows";
 import { profilerOnRender } from "@/lib/perf";
 import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
 import { sendDesignMessage } from "@/lib/design-store";
@@ -470,6 +472,16 @@ function Entry({
   );
 }
 
+/** One thread row, re-rendered only when its signature moves (the reducer
+ *  mutates entries in place, so identity cannot carry that information). */
+const ThreadRow = memo(
+  function ThreadRow(props: Parameters<typeof Entry>[0] & { sig: string }) {
+    const { sig: _sig, ...rest } = props;
+    return <Entry {...rest} />;
+  },
+  (a, b) => a.sig === b.sig && a.turnActive === b.turnActive && a.readOnly === b.readOnly && a.dir === b.dir,
+);
+
 /** A design-lane write the seam kept out of the project. Allowed writes inside
  *  the designs folder are not shown; the frames appearing on the canvas show them. */
 function GuardRow({ entry }: { entry: { allowed: boolean; path: string; reason: string } }) {
@@ -541,9 +553,13 @@ export function AgentPane({
   /** a row of chips above the composer's input */
   composerChips?: ReactNode;
 }) {
+  useSyncExternalStore(subscribeAgent, agentVersion, agentVersion);
   const [, bump] = useState(0);
-  useEffect(() => subscribeAgent(() => bump((n) => n + 1)), []);
   useEffect(() => subscribeNotesIndex(() => bump((n) => n + 1)), []); // round cards tick with the vault, not with a keystroke
+  useEffect(() => () => flushAgentNotifications(), []); // a pane unmounting mid-stream leaves nothing pending
+  const onRetryRound = useCallback((n: number, total: number) => {
+    void startRoundInPane(dir, n, total).catch((e) => toastError("Couldn't restart the round", String(e).slice(0, 90)));
+  }, [dir]);
   useEffect(() => {
     // a live backend session survives a reload; if there's none AND the agent
     // is actually installed, auto-start once — the pane is only mounted for the
@@ -731,11 +747,15 @@ export function AgentPane({
           </BtnPrimary>
         </div>
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2">
-          {(() => { const items = groupEntries(s.viewing.entries); const keys = rowKeys(items); return items.map((entry, i) => (
-            <Appear key={keys[i]}>
-              <Entry dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} />
-            </Appear>
-          )); })()}
+          {(() => {
+            const items = groupEntries(s.viewing.entries);
+            const keys = rowKeys(items);
+            return items.map((entry, i) => (
+              <Appear key={keys[i]}>
+                <ThreadRow sig={rowSignature(entry)} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} />
+              </Appear>
+            ));
+          })()}
         </div>
       </div>
     );
@@ -774,20 +794,15 @@ export function AgentPane({
           {(() => {
             const body = (
               <>
-              {(() => { const items = groupEntries(s.entries).filter((e) => variant === "chat" || (e.kind !== "round" && e.kind !== "round-plan")); const keys = rowKeys(items); return items.map((entry, i) => (
-                <Appear key={keys[i]}>
-                  <Entry
-                    dir={dir}
-                    entry={entry}
-                    turnActive={s.turnActive}
-                    onConfirm={onConfirm}
-                    onOpenNotes={onOpenNotes}
-                    onRetryRound={(n, total) => {
-                      void startRoundInPane(dir, n, total).catch((e) => toastError("Couldn't restart the round", String(e).slice(0, 90)));
-                    }}
-                  />
-                </Appear>
-              )); })()}
+              {(() => {
+                const items = groupEntries(s.entries).filter((e) => variant === "chat" || (e.kind !== "round" && e.kind !== "round-plan"));
+                const keys = rowKeys(items);
+                return items.map((entry, i) => (
+                  <Appear key={keys[i]}>
+                    <ThreadRow sig={rowSignature(entry)} dir={dir} entry={entry} turnActive={s.turnActive} onConfirm={onConfirm} onOpenNotes={onOpenNotes} onRetryRound={onRetryRound} />
+                  </Appear>
+                ));
+              })()}
               {trailing}
               {/* the "thinking" beat before the first token, so a turn never
                   looks stalled — the classic chat typing signal */}
