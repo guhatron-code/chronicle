@@ -246,8 +246,38 @@ const sessions = new Map<string, AgentSessionState>();
 const subs = new Set<() => void>();
 let listenersReady = false;
 
-function notify() {
+/* ---------- notifications: one delivery per frame ----------
+ * Every reducer path still calls notify() as before; delivery is deferred to
+ * the next animation frame so a burst of chunks is one pane render. A 50 ms
+ * timer backs the frame up: a hidden window gets no frames, and the round
+ * logic that listens here must not stall with it. */
+let version = 0;
+let pending = false;
+let backstop: ReturnType<typeof setTimeout> | null = null;
+
+function deliver() {
+  if (!pending) return;
+  pending = false;
+  if (backstop !== null) { clearTimeout(backstop); backstop = null; }
+  version++;
   for (const cb of subs) cb();
+}
+
+function notify() {
+  if (pending) return;
+  pending = true;
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => deliver());
+  backstop = setTimeout(deliver, 50); // timer-ok: one-shot backstop for hidden windows, cleared on delivery
+}
+
+/** Increments once per delivered notification — the snapshot `useSyncExternalStore` compares. */
+export function agentVersion(): number {
+  return version;
+}
+
+/** Deliver a pending notification now (tests; a pane unmounting mid-stream). */
+export function flushAgentNotifications(): void {
+  deliver();
 }
 
 export function subscribeAgent(cb: () => void): () => void {
@@ -620,6 +650,8 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       });
     }
     notify();
+    // Deliver NOW, not next frame: the flush below depends on waiters having woken first (see AFTER the notify).
+    flushAgentNotifications();
     // #4 — a clean turn end releases the next queued message (FIFO, one/turn).
     // A cancel (Stop) ends with stopReason "cancelled" and no error — it must
     // NOT flush (the queue persists so the user can still cancel items); on an

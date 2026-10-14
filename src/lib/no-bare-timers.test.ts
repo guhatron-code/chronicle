@@ -43,6 +43,7 @@ function scanned(): string[] {
 const ALLOWED = [
   'src/App.tsx — the fs-burst debounce, cleared on every event and on unmount',
   'src/App.tsx — one-shot, repaints the terminal tab when its grace window ends',
+  'src/lib/agent-session.ts — one-shot backstop for hidden windows, cleared on delivery',
   'src/lib/term-sessions.ts — one-shot, lets the shell prompt settle before autotyping',
   'src/lib/term-sessions.ts — the trailing foreground probe, cleared on every chunk',
   'src/lib/web-store.ts — the persist debounce, cleared on every write',
