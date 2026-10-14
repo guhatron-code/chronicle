@@ -44,8 +44,7 @@
     ],
     "createUpdaterArtifacts": true,
     "resources": {
-      "resources/blocklists/*": "blocklists/",
-      "resources/design-plugin/": "design-plugin/"
+      "resources/blocklists/*": "blocklists/"
     }
   },
   "plugins": {

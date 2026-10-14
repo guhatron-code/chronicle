@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run design-plugin && tsc -b && vite build",
+    "build": "tsc -b && vite build",
     "design-plugin": "node scripts/design-plugin.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b",

@@ -65,6 +65,7 @@ import { TrafficLights } from "@/components/chrome/TitleBar";
 import { NotesPane } from "@/screens/notes/NotesPane";
 import { WebPane } from "@/screens/web/WebPane";
 import { DesignPane } from "@/screens/design/DesignPane";
+import { DESIGN_PANE } from "@/lib/features";
 import { openInWeb, reloadProjectFiles } from "@/lib/web-store";
 import { isHtmlPath, isClaudeArtifactUrl } from "@/lib/web-url";
 import {
@@ -124,7 +125,7 @@ interface ProjectEntry {
   justSwitchedAt?: number; // the ~2s banner emphasis window
 }
 
-const PANES: Pane[] = ["road", "repo", "notes", "web", "design"];
+const PANES: Pane[] = DESIGN_PANE ? ["road", "repo", "notes", "web", "design"] : ["road", "repo", "notes", "web"];
 const splitKey = (dir: string) => `chronicle.split.${dir}`;
 
 /* F31 — the three-unit layout (content · agent · terminal): visibility,

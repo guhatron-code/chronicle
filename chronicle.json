@@ -37,7 +37,9 @@
     { "path": "fixes/phase_9_fixes_plan.md", "sha256": "c6d918161447511cfa1507b00f01866cd0a867de3fd6531e22bf37b95ecd4f01" },
     { "path": "docs/superpowers/specs/2026-09-17-design-pane-foundation-design.md", "sha256": "9790a875b0086d30cc3af96e35edf1a53f0807164f3fab26672735e8cc441c56" },
     { "path": "docs/superpowers/specs/2026-10-01-design-pane-director-design.md", "sha256": "bbc31a56b0945563688981a991bf718a7629508fdf782912ad49754bd0b73b99" },
-    { "path": "docs/superpowers/plans/2026-10-01-design-pane-director.md", "sha256": "b359a19dd55387abee58067b4c48a78b56d3261c673836b5c964c356fc700ddb" }
+    { "path": "docs/superpowers/plans/2026-10-01-design-pane-director.md", "sha256": "b359a19dd55387abee58067b4c48a78b56d3261c673836b5c964c356fc700ddb" },
+    { "path": "docs/superpowers/specs/2026-10-14-agent-orchestrator-design.md", "sha256": "aab620d38908e62d4df188e6116b7e42fcd1a80ea0faf16a52356b14e1da489d" },
+    { "path": "c-runs/DESIGN_PROMPT.md", "sha256": "82e6a13723d4103cabfe7350b68320078fc5244a5ab42143ec1b170f08961b53" }
   ],
   "spine": [
     { "path": "PRODUCT.md" },
@@ -878,7 +880,7 @@
     },
     {
       "title": "Part 17 · The Design pane",
-      "note": "A fifth pane where an agent works as your art director and UX director, built in nine parts. Each part gets its own spec, plan and release.",
+      "note": "A fifth pane where an agent works as your art director and UX director. Parked on 2026-10-14 after its first three parts shipped, so Runs (Part 18) could go first. The pane is hidden, not removed: its code and the six unbuilt parts (design systems through the full-auto lane) are in git history at e084fa3 and in the director spec.",
       "phases": [
         {
           "id": "DP-0",
@@ -1012,101 +1014,141 @@
             ],
             "default_label": "spec written, plan next"
           }
-        },
+        }
+      ]
+    },
+    {
+      "title": "Part 18 · Runs: hands-off rounds, and a pane that keeps up",
+      "note": "A round of fixes split into lanes that work at the same time, each checked before it counts, closed by Chronicle without asking you. First the chat pane gets faster and smoother, because the run card is built on it. Spec approved 2026-10-14; the boards come next.",
+      "phases": [
         {
-          "id": "DP-3",
-          "name": "Design systems",
-          "desc": "The director reads your colors, type and components from the repo, a website or Figma, and keeps designs in step with the code.",
+          "id": "RN-0",
+          "name": "Draw runs first",
+          "desc": "Before any code, the run card, an opened lane, a failing check and its fix, the needs-you rows and the pane's motion are all drawn and approved.",
+          "items": [
+            "Six boards: the run card with lanes working, a lane opened, a check failing then fixed, what still needs you, the pane in motion, and a faster session start.",
+            "Nothing in the spec is built until these boards are approved."
+          ],
           "paste": [
             {
-              "label": "its own spec and plan",
-              "into": "Claude Code",
-              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+              "path": "c-runs/DESIGN_PROMPT.md",
+              "into": "Claude Design",
+              "when": "Paste this to draw the boards, once you have read and approved the spec."
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-10-14-agent-orchestrator-design.md"
+            },
+            {
+              "path": "c-runs/DESIGN_PROMPT.md"
             }
           ],
           "status": {
-            "done_when": []
+            "done_when": [
+              {
+                "commit_subject": "(?i)^docs\\(runs\\):.*approved comps"
+              }
+            ],
+            "current_labels": [
+              {
+                "when": [
+                  {
+                    "file_exists": "c-runs/DESIGN_PROMPT.md"
+                  }
+                ],
+                "label": "spec approved, boards next"
+              }
+            ]
           }
         },
         {
-          "id": "DP-4",
-          "name": "Refining a design",
-          "desc": "Click a spot to comment on it, edit directly and have it written to the page, try tweaks and variations, and sketch on top.",
-          "paste": [
+          "id": "RN-1",
+          "name": "A one-day test of the engine",
+          "desc": "A throwaway trial that answers two questions: can the pane watch each lane live, and can a permission question be traced to the lane that asked it. The answer decides how lanes are run.",
+          "items": [
+            "Nothing built in the trial is kept. Its answer is written into the spec.",
+            "If the trace fails, each lane gets its own agent session instead."
+          ],
+          "docs": [
             {
-              "label": "its own spec and plan",
-              "into": "Claude Code",
-              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+              "path": "docs/superpowers/specs/2026-10-14-agent-orchestrator-design.md"
             }
           ],
           "status": {
-            "done_when": []
+            "done_when": [
+              {
+                "commit_subject": "(?i)^docs\\(runs\\):.*spike"
+              }
+            ]
           }
         },
         {
-          "id": "DP-5",
-          "name": "Prototypes",
-          "desc": "Link frames together, walk through a flow, add transitions, and see the whole flow as a map.",
+          "id": "RN-2",
+          "name": "A faster, smoother chat pane",
+          "desc": "The agent starts sooner, long replies stream without stutter, the view follows new text without jumping, and cards move with one shared rhythm.",
+          "items": [
+            "The agent's connector is installed once by Setup instead of being fetched at every start.",
+            "The chat session starts warming up when the project opens.",
+            "A long reply streams smoothly even on a thread with hundreds of rows.",
+            "Every card and state word moves the same way, and all of it switches off when reduced motion is on.",
+            "It ships with a before and after table of measured times."
+          ],
           "paste": [
             {
-              "label": "its own spec and plan",
+              "label": "the pane plan",
               "into": "Claude Code",
-              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+              "when": "Not written yet. It comes from the approved spec once the comps are signed off."
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-10-14-agent-orchestrator-design.md"
             }
           ],
           "status": {
-            "done_when": []
+            "done_when": [
+              {
+                "commit_subject": "(?i)^docs\\(runs\\): pane live check"
+              }
+            ]
           }
         },
         {
-          "id": "DP-6",
-          "name": "Decks",
-          "desc": "Slides at 1920 by 1080, with speaker notes and a presenter view.",
+          "id": "RN-3",
+          "name": "Runs",
+          "desc": "Ask for a round from your notes, a plan or a prompt, and Chronicle splits it into lanes, runs them at once, checks each one, saves the work and closes the round itself.",
+          "items": [
+            "Each lane may only change its own files, and only Chronicle saves.",
+            "Every lane's work is checked by the project's tests and a review before it counts.",
+            "A small decision model answers the agent's small questions so you are not asked.",
+            "You are only asked when an item cannot be done as written. Publishing is always refused.",
+            "Cost is shown on the run card but never stops a run."
+          ],
           "paste": [
             {
-              "label": "its own spec and plan",
+              "label": "the runs plan",
               "into": "Claude Code",
-              "when": "Not written yet. Each part gets its own spec once the one before it ships."
+              "when": "Not written yet. It comes from the approved spec once the comps are signed off."
+            }
+          ],
+          "docs": [
+            {
+              "path": "docs/superpowers/specs/2026-10-14-agent-orchestrator-design.md"
             }
           ],
           "status": {
-            "done_when": []
-          }
-        },
-        {
-          "id": "DP-7",
-          "name": "Export and handoff",
-          "desc": "Export as HTML, ZIP, PDF, PowerPoint or PNG, and hand a design over to be built.",
-          "paste": [
-            {
-              "label": "its own spec and plan",
-              "into": "Claude Code",
-              "when": "Not written yet. Each part gets its own spec once the one before it ships."
-            }
-          ],
-          "status": {
-            "done_when": []
-          }
-        },
-        {
-          "id": "DP-8",
-          "name": "Imagery",
-          "desc": "Generate images with your own key. Without one, designs use drawn shapes, icons and labelled spaces.",
-          "paste": [
-            {
-              "label": "its own spec and plan",
-              "into": "Claude Code",
-              "when": "Not written yet. Each part gets its own spec once the one before it ships."
-            }
-          ],
-          "status": {
-            "done_when": []
+            "done_when": [
+              {
+                "commit_subject": "(?i)^docs\\(runs\\): runs live check"
+              }
+            ]
           }
         }
       ]
     },
     {
-      "title": "Part 18 · What comes next",
+      "title": "Part 19 · What comes next",
       "note": "Written down and agreed. Steps that tick themselves has shipped; the rest has not started.",
       "phases": [
         {

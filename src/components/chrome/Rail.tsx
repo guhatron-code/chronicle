@@ -4,6 +4,7 @@
  * signal. Refresh + help at the bottom; NO settings gear (⌘, lives in the app menu).
  */
 import type { ReactNode } from "react";
+import { DESIGN_PANE } from "@/lib/features";
 import { Hint } from "@/components/ui/tooltip";
 import {
   DesignGlyph,
@@ -97,9 +98,11 @@ export function Rail({
       <RailButton label="Web" tooltip="Web" mono="⌘J to cycle" selected={pane === "web"} onClick={() => onPane("web")}>
         <WebGlyph />
       </RailButton>
-      <RailButton label="Design" tooltip="Design" mono="⌘J to cycle" selected={pane === "design"} onClick={() => onPane("design")}>
-        <DesignGlyph />
-      </RailButton>
+      {DESIGN_PANE && (
+        <RailButton label="Design" tooltip="Design" mono="⌘J to cycle" selected={pane === "design"} onClick={() => onPane("design")}>
+          <DesignGlyph />
+        </RailButton>
+      )}
       <span className="flex-1" />
       {onSetup && (
         <RailButton label="Setup and health" tooltip="Setup & health" onClick={onSetup} dim>

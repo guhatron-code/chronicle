@@ -6,6 +6,7 @@
  * celebration. Wired to the doctor store; sign-ins hand off to a terminal.
  */
 import { useEffect, useState } from "react";
+import { DESIGN_PANE } from "@/lib/features";
 import {
   CHECK_META,
   DESIGN_META,
@@ -96,6 +97,7 @@ function Checklist({ dir }: { dir: string | null }) {
         </button>
       </div>
       <div className="flex flex-col">{CHECK_META.filter((m) => !DESIGN_META.includes(m)).map((m) => rowFor(m.id))}</div>
+      {DESIGN_PANE && (
       <div className="flex flex-col gap-0.5" data-setup-group="design">
         <div className="flex items-baseline gap-2.5 pb-1.5">
           <span className="text-[10px] uppercase tracking-[0.09em] text-text-subtle">For the Design pane</span>
@@ -103,6 +105,7 @@ function Checklist({ dir }: { dir: string | null }) {
         </div>
         <div className="flex flex-col">{DESIGN_META.map((m) => rowFor(m.id))}</div>
       </div>
+      )}
     </>
   );
 }
