@@ -983,7 +983,7 @@ fn stamp_line(ms: u128, text: &str) -> String {
 }
 
 /// Build a child PATH that can find `node`: the resolved tool's own directory
-/// (node lives beside npx) and the well-known install dirs, ahead of whatever
+/// (node itself, or beside npx) and the well-known install dirs, ahead of whatever
 /// PATH this process inherited. Idempotent-ish — duplicate dirs are harmless.
 fn child_path(tool: &str) -> String {
     let home = std::env::var("HOME").unwrap_or_default();
