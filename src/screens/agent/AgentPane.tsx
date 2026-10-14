@@ -21,6 +21,7 @@ import {
   type AgentSessionState,
   type ThreadItem,
 } from "@/lib/agent-session";
+import { rowKeys } from "@/lib/thread-rows";
 import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
 import { sendDesignMessage } from "@/lib/design-store";
 import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint, agentsAvailable } from "@/lib/ipc";
@@ -50,22 +51,6 @@ const reducedMotion = () =>
  *  once, so the whole thing fades in as one — never a stagger. */
 function Appear({ children }: { children: ReactNode }) {
   return <div className="wv-enter">{children}</div>;
-}
-
-/** Keys that follow a row, not its position: a subagent's calls fold under
- *  their card when it arrives, which shifts every later index — and an
- *  index key would remount (and re-animate) rows that did not move. Identity
- *  where the wire gives one; the n-th of its kind otherwise. */
-function rowKeys(items: ThreadItem[]): string[] {
-  const seen = new Map<string, number>();
-  return items.map((it) => {
-    if (it.kind === "tool") return `tool:${it.toolCallId}`;
-    if (it.kind === "subagent") return `sub:${it.tool.toolCallId}`;
-    if (it.kind === "perm") return `perm:${it.requestId}`;
-    const n = (seen.get(it.kind) ?? 0) + 1;
-    seen.set(it.kind, n);
-    return `${it.kind}:${n}`;
-  });
 }
 
 /** F33 — the checkpoint row: a thin divider above each user message; the

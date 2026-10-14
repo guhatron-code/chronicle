@@ -288,7 +288,7 @@ export function roundPlanOutcome(
 /* `outcome` is `unknown` because other cards in that union carry an `outcome`
    of their own shape (a permission's answer); this rule only ever writes to a
    card whose kind it was handed. */
-export interface PlanCardish { kind: string; ended?: boolean; outcome?: unknown }
+export interface PlanCardish { kind: string; ended?: boolean; outcome?: unknown; rev?: number }
 
 /**
  * End the newest un-ended card of one round kind, and say whether there was
@@ -310,6 +310,7 @@ export function endNewestRoundCard(
     if (e.kind === kind && !e.ended) {
       e.ended = true;
       if (outcome !== undefined) e.outcome = outcome;
+      if (typeof e.rev === "number") e.rev++;
       return true;
     }
   }

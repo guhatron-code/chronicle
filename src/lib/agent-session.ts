@@ -33,6 +33,7 @@ import { clearRunningRound, markRunningRound, runningRoundFor } from "./round-lo
 import { indexFor, refreshNotes, roundGenerating, roundNotesFor, setRoundGenerating } from "./notes-store";
 import { endNewestRoundCard, roundPlanOutcome } from "./notes-model";
 import { announce } from "./journal";
+import { touch } from "./thread-rows";
 import { recordRateLimit } from "./limits-store";
 import { toastAction, toastError } from "@/overlays/toasts";
 
@@ -86,7 +87,7 @@ export interface AgentCommand {
 
 export type PermOutcome = { type: "selected"; optionId: string } | { type: "cancelled" };
 
-export type AgentEntry =
+export type AgentEntry = { rev: number } & (
   | { kind: "user"; text: string; checkpoint?: string | null }
   | { kind: "assistant"; text: string; streaming: boolean }
   /** the agent's own thinking (round 9) — kept, drawn collapsed, never spoken */
@@ -152,7 +153,8 @@ export type AgentEntry =
   | {
       kind: "plan";
       items: { text: string; status: "pending" | "in_progress" | "completed" }[];
-    };
+    }
+);
 
 export interface AgentSessionState {
   /** which lane this state belongs to — set once, from the key it was created under */
@@ -435,6 +437,7 @@ function applyToolContent(dir: string, entry: Extract<AgentEntry, { kind: "tool"
       const block = (c.content ?? {}) as Raw;
       if (block.type === "text" && str(block.text)) {
         entry.output = `${entry.output ?? ""}${str(block.text)}`;
+        touch(entry);
       }
     }
   }
@@ -483,13 +486,13 @@ export function groupEntries(entries: AgentEntry[]): ThreadItem[] {
 }
 
 function settleStreaming(s: AgentSessionState) {
-  for (const e of s.entries) if (e.kind === "assistant" || e.kind === "thought") e.streaming = false;
+  for (const e of s.entries) if (e.kind === "assistant" || e.kind === "thought") { e.streaming = false; touch(e); }
 }
 
 /** the thought at the tail stops streaming — whatever arrived is not a thought chunk */
 function settleThoughtTail(s: AgentSessionState) {
   const last = s.entries[s.entries.length - 1];
-  if (last?.kind === "thought") last.streaming = false;
+  if (last?.kind === "thought") { last.streaming = false; touch(last); }
 }
 
 function routeUpdate(u: AcpUpdate) {
@@ -595,7 +598,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
 
   if (method === "_chronicle/user_message") {
     // transcript replay only — live sends push their entry directly
-    s.entries.push({ kind: "user", text: str(params.text), checkpoint: s.pendingCheckpoint ?? undefined });
+    s.entries.push({ kind: "user", rev: 0, text: str(params.text), checkpoint: s.pendingCheckpoint ?? undefined });
     s.pendingCheckpoint = null;
     return;
   }
@@ -620,6 +623,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
         const e = s.entries[i];
         if (e.kind === "round-plan" && !e.ended && !e.queued) {
           e.ended = true;
+          touch(e);
           settledPlan = true;
           void settleRoundPlan(dir, e, stopReason);
           break;
@@ -633,6 +637,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
         if (e.kind === "round" && !e.ended && !e.queued) {
           e.ended = true;
           e.stopReason = stopReason;
+          touch(e);
           // the Notes card has no session to watch for this route — the thread IS
           // the round — so the turn ending is the only thing that can tell it the
           // round is no longer running, however it ended (settleRoundRun clears
@@ -645,6 +650,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     if (params.error != null) {
       const err = params.error as Raw;
       s.entries.push({
+        rev: 0,
         kind: "turn-error",
         message: str(err.message) || "The agent stopped with an error.",
       });
@@ -670,7 +676,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
   }
 
   if (method === "_chronicle/guard") {
-    s.entries.push({ kind: "guard", allowed: !!params.allowed, path: str(params.path), reason: str(params.reason) });
+    s.entries.push({ kind: "guard", rev: 0, allowed: !!params.allowed, path: str(params.path), reason: str(params.reason) });
     notify();
     return;
   }
@@ -690,6 +696,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     for (const e of s.entries) {
       if (e.kind === "perm" && e.requestId === id && !e.outcome) {
         e.outcome = outcome === "cancelled" ? { type: "cancelled" } : { type: "selected", optionId: outcome };
+        touch(e);
         markRejected(s, e);
       }
     }
@@ -701,6 +708,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     const tc = (params.toolCall ?? {}) as Raw;
     const kind = str(tc.kind) || "other";
     s.entries.push({
+      rev: 0,
       kind: "perm",
       requestId: JSON.stringify(msg.id),
       toolKind: kind,
@@ -735,21 +743,22 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       const content = (update.content ?? {}) as Raw;
       if (content.type === "text") {
         const last = s.entries[s.entries.length - 1];
-        if (last?.kind === "assistant" && last.streaming) last.text += str(content.text);
-        else s.entries.push({ kind: "assistant", text: str(content.text), streaming: true });
+        if (last?.kind === "assistant" && last.streaming) { last.text += str(content.text); touch(last); }
+        else s.entries.push({ kind: "assistant", rev: 0, text: str(content.text), streaming: true });
       }
     } else if (kind === "agent_thought_chunk") {
       const content = (update.content ?? {}) as Raw;
       if (content.type === "text") {
         settleStreamTail(s); // a thought mid-paragraph ends the paragraph, as a tool call does
         const last = s.entries[s.entries.length - 1];
-        if (last?.kind === "thought" && last.streaming) last.text += str(content.text);
-        else s.entries.push({ kind: "thought", text: str(content.text), streaming: true });
+        if (last?.kind === "thought" && last.streaming) { last.text += str(content.text); touch(last); }
+        else s.entries.push({ kind: "thought", rev: 0, text: str(content.text), streaming: true });
       }
     } else if (kind === "tool_call") {
       settleStreamTail(s);
       const toolKind = str(update.kind) || "other";
       const entry: Extract<AgentEntry, { kind: "tool" }> = {
+        rev: 0,
         kind: "tool",
         toolCallId: str(update.toolCallId),
         toolKind,
@@ -771,6 +780,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
           if (freshDetail && freshDetail !== str(update.title)) e.detail = freshDetail;
           applyToolContent(projectDir, e, update.content);
           applyLinkage(e, update);
+          touch(e);
         }
       }
     } else if (kind === "current_mode_update") {
@@ -801,8 +811,8 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       });
       // update the live plan in place; a session has one evolving list
       const last = [...s.entries].reverse().find((e) => e.kind === "plan");
-      if (last && last.kind === "plan") last.items = items;
-      else s.entries.push({ kind: "plan", items });
+      if (last && last.kind === "plan") { last.items = items; touch(last); }
+      else s.entries.push({ kind: "plan", rev: 0, items });
     } else if (kind === "available_commands_update") {
       s.commands = parseCommands(update.availableCommands);
     }
@@ -816,7 +826,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
 /** a tool_call arriving mid-stream ends the current assistant paragraph */
 function settleStreamTail(s: AgentSessionState) {
   const last = s.entries[s.entries.length - 1];
-  if (last?.kind === "assistant") last.streaming = false;
+  if (last?.kind === "assistant") { last.streaming = false; touch(last); }
 }
 
 /** A denied permission marks its tool card "You said no — skipped". */
@@ -827,7 +837,7 @@ function markRejected(s: AgentSessionState, perm: Extract<AgentEntry, { kind: "p
     perm.options.some((o) => o.optionId === outcome.optionId && o.kind.startsWith("reject"));
   if (!denied || !perm.toolCallId) return;
   for (const e of s.entries) {
-    if (e.kind === "tool" && e.toolCallId === perm.toolCallId) e.rejected = true;
+    if (e.kind === "tool" && e.toolCallId === perm.toolCallId) { e.rejected = true; touch(e); }
   }
 }
 
@@ -902,7 +912,7 @@ export async function sendAgentMessage(
   const sent = opts?.prefix ? `${opts.prefix}\n\n${body}` : body;
   // throws before anything is shown, honest to the wire
   await agentPrompt(dir, blocks ?? [{ type: "text", text: sent }], body);
-  s.entries.push({ kind: "user", text: body, checkpoint: s.pendingCheckpoint ?? undefined });
+  s.entries.push({ kind: "user", rev: 0, text: body, checkpoint: s.pendingCheckpoint ?? undefined });
   s.pendingCheckpoint = null;
   s.turnActive = true;
   s.draft = null;
@@ -1007,7 +1017,7 @@ export function reduceLines(dir: string, lines: unknown[]): AgentSessionState {
   settleStreaming(tmp);
   // asks from an ended session can't be answered anymore
   for (const e of tmp.entries) {
-    if (e.kind === "perm" && !e.outcome) e.outcome = { type: "cancelled" };
+    if (e.kind === "perm" && !e.outcome) { e.outcome = { type: "cancelled" }; touch(e); }
   }
   return tmp;
 }
@@ -1074,6 +1084,7 @@ async function settleRoundPlan(
     checked = stopReason === "cancelled";
   }
   entry.outcome = roundPlanOutcome(stopReason, state);
+  touch(entry);
   setRoundGenerating(dir, false);
   notify();
   await refreshNotes(dir);
@@ -1153,7 +1164,7 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
   };
 
   if (s.phase === "ready" && !s.turnActive) {
-    s.entries.push({ kind: "round-plan", n, total });
+    s.entries.push({ kind: "round-plan", rev: 0, n, total });
     notify();
     try {
       await sendAgentMessage(dir, prompt);
@@ -1180,7 +1191,7 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
   const land = (queued: boolean) => {
     if (landed) return;
     landed = true;
-    agentSessionFor(dir).entries.push({ kind: "round-plan", n, total, queued });
+    agentSessionFor(dir).entries.push({ kind: "round-plan", rev: 0, n, total, queued });
     notify();
   };
   const un = sendWhenPaneIsFree(dir, "round-plan", prompt, {
@@ -1387,6 +1398,7 @@ function unqueueCard(dir: string, kind: "round" | "round-plan"): void {
     const e = entries[i];
     if (e.kind === kind && !e.ended && e.queued) {
       e.queued = false;
+      touch(e);
       notify();
       return;
     }
@@ -1435,7 +1447,7 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
   }
 
   if (s.phase === "ready" && !s.turnActive) {
-    s.entries.push({ kind: "round", n, total });
+    s.entries.push({ kind: "round", rev: 0, n, total });
     notify();
     try {
       await sendAgentMessage(dir, message);
@@ -1453,7 +1465,7 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
   const land = (queued: boolean) => {
     if (landed) return;
     landed = true;
-    agentSessionFor(dir).entries.push({ kind: "round", n, total, queued });
+    agentSessionFor(dir).entries.push({ kind: "round", rev: 0, n, total, queued });
     notify();
   };
   const un = sendWhenPaneIsFree(dir, "round", message, {

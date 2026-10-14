@@ -33,7 +33,7 @@ describe("the installing state and the thread", () => {
     agent.subscribeAgent(() => {});
     await Promise.resolve();
     const s = agent.agentSessionFor(DIR);
-    s.entries = [{ kind: "user", text: "earlier" }, { kind: "assistant", text: "yes", streaming: false }];
+    s.entries = [{ rev: 0, kind: "user", text: "earlier" }, { rev: 0, kind: "assistant", text: "yes", streaming: false }];
     state({ state: "installing", resume: true });
     expect(s.phase).toBe("installing");
     expect(s.entries.map((e) => e.kind)).toEqual(["user", "assistant"]);
@@ -43,7 +43,7 @@ describe("the installing state and the thread", () => {
     agent.subscribeAgent(() => {});
     await Promise.resolve();
     const s = agent.agentSessionFor(DIR);
-    s.entries = [{ kind: "user", text: "earlier" }];
+    s.entries = [{ rev: 0, kind: "user", text: "earlier" }];
     state({ state: "installing" });
     expect(s.entries).toEqual([]);
   });

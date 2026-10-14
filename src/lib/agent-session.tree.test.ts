@@ -26,7 +26,7 @@ const { groupEntries, reduceLines } = await import("./agent-session");
 type Tool = Extract<import("./agent-session").AgentEntry, { kind: "tool" }>;
 
 const tool = (id: string, extra: Partial<Tool> = {}): Tool => ({
-  kind: "tool", toolCallId: id, toolKind: "execute", title: id, status: "completed", detail: id, ...extra,
+  rev: 0, kind: "tool", toolCallId: id, toolKind: "execute", title: id, status: "completed", detail: id, ...extra,
 });
 const task = (id: string, title = "Do a thing"): Tool => tool(id, { toolKind: "think", title, subagent: true });
 
@@ -37,9 +37,9 @@ const call = (id: string, meta: Record<string, unknown>, extra: Record<string, u
 describe("groupEntries", () => {
   it("folds a parent's children under it, in wire order", () => {
     const view = groupEntries([
-      { kind: "user", text: "go" }, task("T1"),
+      { rev: 0, kind: "user", text: "go" }, task("T1"),
       tool("a", { parentId: "T1" }), tool("b", { parentId: "T1" }), tool("c", { parentId: "T1" }),
-      { kind: "assistant", text: "done", streaming: false },
+      { rev: 0, kind: "assistant", text: "done", streaming: false },
     ]);
     expect(view.map((v) => v.kind)).toEqual(["user", "subagent", "assistant"]);
     const g = view[1];

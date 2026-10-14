@@ -31,7 +31,7 @@ const message = (text: string) => update({ sessionUpdate: "agent_message_chunk",
 describe("thoughts", () => {
   it("three chunks become one thought, closed by the message that follows", () => {
     const s = reduceLines("/p", [thought("Let me "), thought("look at "), thought("the code."), message("Here is what I found.")]);
-    expect(s.entries).toEqual([
+    expect(s.entries).toMatchObject([
       { kind: "thought", text: "Let me look at the code.", streaming: false },
       { kind: "assistant", text: "Here is what I found.", streaming: false },
     ]);
