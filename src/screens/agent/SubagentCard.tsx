@@ -51,23 +51,29 @@ export function SubagentCard({ group, dir, readOnly }: { group: Group; dir: stri
         </div>
       </TaskTrigger>
       <TaskContent className="px-[11px] pb-2 [&>div]:mt-1 [&>div]:border-border-hairline [&>div]:pl-3">
-        <div className="space-y-0.5">
-          {children.map((c) => (
-            <ToolCard key={c.toolCallId} tool={c} dir={dir} readOnly={readOnly} />
-          ))}
-          {n === 0 && <div className="px-[11px] py-[5px] text-[12px] text-text-dim">{running ? "Starting…" : "Made no calls."}</div>}
-        </div>
-        {/* Always mounted so a report landing with `running` already false still
-            transitions 0fr -> 1fr. -mt-2 cancels the container's space-y-2 margin
-            under the list, so a closed wrapper adds no height and no margin; the
-            14px (8 + 6) of spacing lives inside the grown block as mt-3.5. */}
-        <div className="wv-grow -mt-2" data-open={Boolean(report && !running)}>
-          <div>
-            {report && !running && (
-              <div data-selectable className="mt-3.5 max-h-24 overflow-y-auto rounded-md bg-surface-input px-3 py-2 font-mono text-[11px] leading-[1.7] text-text-muted">
-                <pre className="whitespace-pre-wrap">{report}</pre>
+        {/* One child, so TaskContent's space-y-2 adds no sibling margin anywhere;
+            the flex column has no gap. The report wrapper is always mounted so a
+            report landing with `running` already false still transitions
+            0fr -> 1fr, and its spacing is padding on a child INSIDE the overflow-hidden grid item
+            (padding on the item itself would hold the row open at 6px), so a
+            closed wrapper (0fr, overflow hidden) contributes zero height. */}
+        <div className="flex flex-col">
+          <div className="space-y-0.5">
+            {children.map((c) => (
+              <ToolCard key={c.toolCallId} tool={c} dir={dir} readOnly={readOnly} />
+            ))}
+            {n === 0 && <div className="px-[11px] py-[5px] text-[12px] text-text-dim">{running ? "Starting…" : "Made no calls."}</div>}
+          </div>
+          <div className="wv-grow" data-open={Boolean(report && !running)}>
+            <div>
+              <div className="pt-1.5">
+                {report && !running && (
+                  <div data-selectable className="max-h-24 overflow-y-auto rounded-md bg-surface-input px-3 py-2 font-mono text-[11px] leading-[1.7] text-text-muted">
+                    <pre className="whitespace-pre-wrap">{report}</pre>
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
         </div>
       </TaskContent>
