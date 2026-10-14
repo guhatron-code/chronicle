@@ -5,7 +5,7 @@
  * ended), and the composer. Session state lives in lib/agent-session.ts —
  * this component only renders and dispatches.
  */
-import { Profiler, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Profiler, memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import {
   agentSessionFor,
@@ -36,6 +36,7 @@ import { Chronigirl, ErrorGlyph, XGlyph } from "@/components/chrome/icons";
 import { BtnPrimary, BtnSecondary, Spinner } from "@/components/chrome/atoms";
 import { cn } from "@/lib/utils";
 import { Composer } from "./Composer";
+import { useStickToBottom } from "./useStickToBottom";
 import { AssistantMessage } from "./AssistantMessage";
 import { AssistantAvatar, TypingDots, UserMessage } from "./rows";
 import { ToolCard } from "./ToolCard";
@@ -46,9 +47,6 @@ import { PermissionCard } from "./PermissionCard";
 /** Projects we've auto-started the agent for this app session — so toggling the
  *  pane's visibility or ending a session never re-triggers auto-start. */
 const autoStarted = new Set<string>();
-
-const reducedMotion = () =>
-  typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 /** One row of the thread as it arrives: it settles in from just below, once,
  *  on mount (index.css `wv-enter`). A replayed thread mounts all its rows at
@@ -485,7 +483,7 @@ export function AgentPane({
   /** a row of chips above the composer's input */
   composerChips?: ReactNode;
 }) {
-  useSyncExternalStore(subscribeAgent, agentVersion, agentVersion);
+  const version = useSyncExternalStore(subscribeAgent, agentVersion, agentVersion);
   const [, bump] = useState(0);
   useEffect(() => subscribeNotesIndex(() => bump((n) => n + 1)), []); // round cards tick with the vault, not with a keystroke
   useEffect(() => () => flushAgentNotifications(), []); // a pane unmounting mid-stream leaves nothing pending
@@ -515,31 +513,10 @@ export function AgentPane({
   }, [dir, variant]);
   const s = agentSessionFor(dir);
 
-  /* stick to the bottom while the thread grows, unless the user scrolled up.
-     A NEW row glides into view; text streaming into the last row jumps, since
-     a smooth scroll restarted on every chunk never lands. */
+  /* stick to the bottom while the thread grows, unless the user scrolled up
+     (useStickToBottom: a jump in a layout effect, one glide on the way back) */
   const scrollRef = useRef<HTMLDivElement>(null);
-  const nearBottom = useRef(true);
-  const rowCount = useRef(0);
-  // A thread that mounts with rows already in it (back from the scorecard or
-  // History) opens at its newest entry before the first paint. Counting the rows
-  // here keeps the effect below from taking the mount for a row that arrived and
-  // gliding across the whole thread while every row is still fading in — which
-  // left the list blank until the next scroll.
-  useLayoutEffect(() => {
-    rowCount.current = s.entries.length;
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, []);
-  useEffect(() => {
-    const el = scrollRef.current;
-    const rows = s.entries.length;
-    const grew = rows !== rowCount.current;
-    rowCount.current = rows;
-    if (!el || !nearBottom.current) return;
-    if (grew && !reducedMotion()) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    else el.scrollTop = el.scrollHeight;
-  });
+  useStickToBottom(scrollRef, [version]);
 
   /* needs-login: run `claude /login` in a terminal tab; when that tab's
      session exits, retry the agent session (the plan's retry contract) */
@@ -718,11 +695,7 @@ export function AgentPane({
         <div
           ref={scrollRef}
           data-agent-thread
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-          }}
-          className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-3"
+          className="thread-scroller flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-3"
         >
           {(() => {
             const body = (
