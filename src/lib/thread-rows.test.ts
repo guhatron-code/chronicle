@@ -4,7 +4,7 @@
  * signature must move when anything the row draws moves, and stay put otherwise.
  */
 import { describe, expect, it } from "vitest";
-import { rowKeys, rowSignature, touch } from "./thread-rows";
+import { rowKeys, rowSignature, sameRow, touch } from "./thread-rows";
 import type { AgentEntry, ThreadItem } from "./agent-session";
 
 const tool = (id: string, extra: Partial<Extract<AgentEntry, { kind: "tool" }>> = {}): Extract<AgentEntry, { kind: "tool" }> =>
@@ -44,5 +44,30 @@ describe("rowKeys", () => {
       { kind: "assistant", text: "c", streaming: false, rev: 0 },
     ];
     expect(rowKeys(items)).toEqual(["user:1", "tool:t1", "assistant:1", "assistant:2"]);
+  });
+});
+
+describe("sameRow", () => {
+  it("two distinct entries with equal signatures are not the same row (resume/view replace the array)", () => {
+    const a: AgentEntry = { kind: "user", text: "old", rev: 0 } as AgentEntry;
+    const b: AgentEntry = { kind: "user", text: "new", rev: 0 } as AgentEntry;
+    expect(sameRow({ sig: rowSignature(a), entry: a }, { sig: rowSignature(b), entry: b })).toBe(false);
+  });
+  it("the same object with an equal signature is the same row", () => {
+    const a: AgentEntry = { kind: "assistant", text: "x", streaming: false, rev: 2 };
+    expect(sameRow({ sig: rowSignature(a), entry: a }, { sig: rowSignature(a), entry: a })).toBe(true);
+  });
+  it("a moved signature is never the same row", () => {
+    const a: AgentEntry = { kind: "assistant", text: "x", streaming: false, rev: 2 };
+    expect(sameRow({ sig: "a", entry: a }, { sig: "b", entry: a })).toBe(false);
+  });
+  it("two rebuilt groups with the same tool object and equal signature are the same row; a different tool is not", () => {
+    const parent = tool("t1", { subagent: true });
+    const g1: ThreadItem = { kind: "subagent", tool: parent, children: [] };
+    const g2: ThreadItem = { kind: "subagent", tool: parent, children: [] };
+    const g3: ThreadItem = { kind: "subagent", tool: tool("t1", { subagent: true }), children: [] };
+    const sig = rowSignature(g1);
+    expect(sameRow({ sig, entry: g1 }, { sig, entry: g2 })).toBe(true);
+    expect(sameRow({ sig, entry: g1 }, { sig, entry: g3 })).toBe(false);
   });
 });

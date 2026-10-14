@@ -24,7 +24,7 @@ import {
   type AgentSessionState,
   type ThreadItem,
 } from "@/lib/agent-session";
-import { rowKeys, rowSignature } from "@/lib/thread-rows";
+import { rowKeys, rowSignature, sameRow } from "@/lib/thread-rows";
 import { profilerOnRender } from "@/lib/perf";
 import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
 import { sendDesignMessage } from "@/lib/design-store";
@@ -400,7 +400,7 @@ const ThreadRow = memo(
     void sig; // only the comparator reads it
     return <Entry {...rest} />;
   },
-  (a, b) => a.sig === b.sig && a.turnActive === b.turnActive && a.readOnly === b.readOnly && a.dir === b.dir,
+  (a, b) => sameRow(a, b) && a.turnActive === b.turnActive && a.readOnly === b.readOnly && a.dir === b.dir,
 );
 
 /** Round cards also read the notes index (done-note counts), which the entry

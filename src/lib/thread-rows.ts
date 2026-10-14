@@ -36,3 +36,13 @@ export function rowSignature(item: ThreadItem): string {
   }
   return `${item.kind}:${item.rev}`;
 }
+
+/** The memo rule. A signature says "unchanged" only for the SAME entry: resume
+ *  and view replace the whole entries array, and a new entry at the same
+ *  position starts at rev 0 with the same signature as the old one. Subagent
+ *  groups are rebuilt every render, so their identity is their tool. */
+export function sameRow(a: { sig: string; entry: ThreadItem }, b: { sig: string; entry: ThreadItem }): boolean {
+  if (a.sig !== b.sig) return false;
+  if (a.entry.kind === "subagent" && b.entry.kind === "subagent") return a.entry.tool === b.entry.tool;
+  return a.entry === b.entry;
+}
