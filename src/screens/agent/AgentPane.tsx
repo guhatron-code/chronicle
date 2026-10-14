@@ -5,7 +5,7 @@
  * ended), and the composer. Session state lives in lib/agent-session.ts —
  * this component only renders and dispatches.
  */
-import { Profiler, memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Profiler, memo, useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 import {
   agentSessionFor,
@@ -515,8 +515,7 @@ export function AgentPane({
 
   /* stick to the bottom while the thread grows, unless the user scrolled up
      (useStickToBottom: a jump in a layout effect, one glide on the way back) */
-  const scrollRef = useRef<HTMLDivElement>(null);
-  useStickToBottom(scrollRef, [version]);
+  const setScroller = useStickToBottom([version]);
 
   /* needs-login: run `claude /login` in a terminal tab; when that tab's
      session exits, retry the agent session (the plan's retry contract) */
@@ -693,7 +692,7 @@ export function AgentPane({
         </div>
       ) : (
         <div
-          ref={scrollRef}
+          ref={setScroller}
           data-agent-thread
           className="thread-scroller flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-3"
         >
