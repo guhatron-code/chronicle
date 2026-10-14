@@ -19,12 +19,16 @@ export function useStickToBottom(deps: unknown[]) {
   const elRef = useRef<HTMLElement | null>(null);
   const teardown = useRef<(() => void) | null>(null);
 
+  const lastTop = useRef(0);
+
   const apply = (el: HTMLElement, userScrolled: boolean) => {
+    const scrolledUp = userScrolled && el.scrollTop < lastTop.current;
+    lastTop.current = el.scrollTop;
     const grew = el.scrollHeight > lastHeight.current;
     if (!userScrolled) lastHeight.current = el.scrollHeight;
     const d = stickDecision({
       pinned: pinned.current, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight,
-      grew, userScrolled, reducedMotion: reducedMotion(),
+      grew, userScrolled, scrolledUp, reducedMotion: reducedMotion(),
     });
     pinned.current = d.pinned;
     if (d.action === "jump") el.scrollTop = el.scrollHeight;
@@ -40,6 +44,7 @@ export function useStickToBottom(deps: unknown[]) {
     pinned.current = true;
     lastHeight.current = el.scrollHeight;
     el.scrollTop = el.scrollHeight;
+    lastTop.current = el.scrollTop;
     const onScroll = () => apply(el, true);
     el.addEventListener("scroll", onScroll, { passive: true });
     const ro = new ResizeObserver(() => apply(el, false));

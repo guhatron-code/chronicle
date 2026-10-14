@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { NEAR_BOTTOM_PX, stickDecision } from "./thread-scroll";
 
-const base = { pinned: true, scrollTop: 1000, scrollHeight: 1600, clientHeight: 600, grew: true, userScrolled: false, reducedMotion: false };
+const base = { pinned: true, scrollTop: 1000, scrollHeight: 1600, clientHeight: 600, grew: true, userScrolled: false, scrolledUp: false, reducedMotion: false };
 
 describe("stickDecision", () => {
   it("pinned + content grew → jump to the bottom, no glide", () => {
@@ -17,7 +17,7 @@ describe("stickDecision", () => {
     expect(stickDecision({ ...base, grew: false })).toEqual({ pinned: true, action: "none" });
   });
   it("the user scrolled up → unpinned, and growth no longer moves them", () => {
-    const away = stickDecision({ ...base, userScrolled: true, scrollTop: 300 });
+    const away = stickDecision({ ...base, userScrolled: true, scrolledUp: true, scrollTop: 300 });
     expect(away).toEqual({ pinned: false, action: "none" });
     expect(stickDecision({ ...base, pinned: false, scrollTop: 300, scrollHeight: 2400 })).toEqual({ pinned: false, action: "none" });
   });
@@ -31,5 +31,12 @@ describe("stickDecision", () => {
   });
   it("a scroll event that lands exactly at the bottom keeps the pin", () => {
     expect(stickDecision({ ...base, userScrolled: true, scrollTop: 1000, grew: false })).toEqual({ pinned: true, action: "none" });
+  });
+  it("a slow upward scroll while near the bottom unpins", () => {
+    expect(stickDecision({ ...base, userScrolled: true, scrolledUp: true, scrollTop: 1000 - 5, grew: false })).toEqual({ pinned: false, action: "none" });
+  });
+  it("a downward scroll back within reach re-pins and glides", () => {
+    const top = 1600 - 600 - 20;
+    expect(stickDecision({ ...base, pinned: false, userScrolled: true, scrolledUp: false, scrollTop: top, grew: false })).toEqual({ pinned: true, action: "glide" });
   });
 });

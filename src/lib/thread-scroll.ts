@@ -14,6 +14,8 @@ export type StickInput = {
   grew: boolean;
   /** this decision follows a scroll event the user caused */
   userScrolled: boolean;
+  /** this user scroll moved scrollTop to a smaller value than the last one */
+  scrolledUp: boolean;
   reducedMotion: boolean;
 };
 export type StickDecision = { pinned: boolean; action: "none" | "jump" | "glide" };
@@ -21,6 +23,8 @@ export type StickDecision = { pinned: boolean; action: "none" | "jump" | "glide"
 export function stickDecision(i: StickInput): StickDecision {
   const gap = i.scrollHeight - i.scrollTop - i.clientHeight;
   if (i.userScrolled) {
+    // direction first: any upward movement leaves the bottom, however close
+    if (i.scrolledUp) return { pinned: false, action: "none" };
     const near = gap < NEAR_BOTTOM_PX;
     if (!near) return { pinned: false, action: "none" };
     if (i.pinned) return { pinned: true, action: "none" };
