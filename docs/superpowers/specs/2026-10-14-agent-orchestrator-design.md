@@ -35,7 +35,7 @@ So this spec has two sub-projects, built in this order:
 | Efficiency | All four axes. Lead: hands off. Chronicle decides; the user is told. |
 | Entry points | All three: from queued notes (replaces "Plan a round"), from an existing `fixes/phase_N_fixes_plan.md`, from any prompt in the chat composer. |
 | What still reaches the user | Only: git push, publish, tag or release (refused outright, never done for them), and scope changes (an item that cannot be done as written). No budget stop; cost is shown, never gated. |
-| Engine | Workflow-native: Claude Code's Dynamic Workflows, shipped as a Chronicle plugin. The Chronicle-native scheduler (one ACP session per lane) is the fallback if the spike in §5 fails. |
+| Engine | **One ACP session per lane, scheduled by Chronicle** (decided by the spike in §5 on 2026-10-14; workflow-native was the original choice and is rejected on evidence). |
 | Judge | Jev (TypeSafe AI's typed decision model), for bounded decisions only. Review verdicts stay on a Claude model. |
 | Research | GitHub and the public specs were searched; nothing embeddable exists (§16). Patterns are borrowed, not code. |
 | Pane problems to fix | All four: starting a session, text streaming, cards and motion, scrolling and layout. |
@@ -204,7 +204,19 @@ directory), and parallel agents in one tree never touch each other's files or th
   on it. The planner is told this rule; validation enforces disjointness. No leases in v1.
 - **Index.** Only Rust runs git write commands, under one mutex. Lanes read freely.
 
-## 5 · Engine: workflow-native, as a Chronicle plugin
+## 5 · Engine: one session per lane, scheduled by Chronicle
+
+> **Amended 2026-10-15.** The spike (result at the end of this section) showed that with adapter 0.75.1 a
+> workflow's lanes reach the client as plain top-level tool calls with no parent id, and that a permission
+> request names no lane, in both client configurations. So the engine is the design this section first
+> called the fallback: **`Lane::Worker { run, k }`**, key `<canon>#w/<run>-<k>`, thread store under the run's
+> folder, one ACP session per lane started by Rust, the reviewer run as a turn in a reviewer session, the
+> planner as a turn in the chat lane. The lifecycle (§3), record, fence (§4), judge (§6) and card (§8) are
+> unchanged. The text below this note describes the rejected workflow-native variant and is kept for the
+> record; Plan B implements the amended design, and lanes run on whichever agent profile the project uses
+> (see `docs/superpowers/specs/2026-10-15-agents-and-providers-design.md`).
+
+### 5a · The rejected variant (kept for the record)
 
 Chronicle ships an **orchestration plugin** beside the design plugin
 (`src-tauri/resources/run-plugin/`): three saved workflows in `workflows/` (one per entry
@@ -282,7 +294,7 @@ the review verdict. The judge never sees whole files; it sees command text, plan
 titles and failing output. Every call and its answer is appended to `decisions` in the run
 record and shown in the thread as a guard entry with the option taken and the probabilities.
 
-**The key.** A new Setup & health row, **Decisions**, takes a TypeSafe key or an OpenRouter
+**The key** (amended 2026-10-15: the judge and the reviewer go through the provider layer of the agents-and-providers spec; the row below is that spec's "Providers" row seen from here). A new Setup & health row, **Decisions**, takes a TypeSafe key or an OpenRouter
 key, stored in the macOS Keychain, never in a repo file. The row says in plain words what leaves
 the machine: command text, plan excerpts, failing output, never whole files. The row is not in
 the required count. Without a key the judge runs the same four decisions on Haiku through the
