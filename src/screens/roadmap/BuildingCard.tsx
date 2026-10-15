@@ -3,10 +3,15 @@
  * stops the session; neutral, never green. The >5min variant swaps the progress bar
  * for reassurance copy and a "View full log" link. Presentational only.
  */
-import { BtnSecondary, MonoMeta, Spinner } from "@/components/chrome/atoms";
+import type { ReactNode } from "react";
+import { BtnSecondary, Eyebrow, MonoMeta, Spinner, StateWord } from "@/components/chrome/atoms";
 import { cn } from "@/lib/utils";
 
-export type BuildingCardProps =
+/** The first-build screen (no roadmap yet): the banner shape, plus the ghost below. */
+type WritingProps = { writing?: boolean; children?: ReactNode };
+
+export type BuildingCardProps = WritingProps &
+  (
   | {
       kind: "running";
       /** Defaults to "Writing your roadmap…" — the fixes flow retitles it. */
@@ -29,9 +34,52 @@ export type BuildingCardProps =
       onCancel?: () => void;
       onViewFullLog?: () => void;
       className?: string;
-    };
+    });
+
+function WritingState(p: BuildingCardProps) {
+  const known = p.kind === "running";
+  const raw = p.activeLine?.trim();
+  const sentence = raw && !/^starting the session/i.test(raw) ? raw : "Reading the folder. Usually a minute or two.";
+  return (
+    <div className={cn("flex flex-col gap-[34px] py-[26px]", p.className)}>
+      <div className="flex flex-col gap-3.5">
+        <Eyebrow>Current state</Eyebrow>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="text-[20px] font-semibold leading-[1.25] tracking-[-0.01em] text-text-primary">
+              Writing the roadmap
+            </span>
+            <StateWord kind="running" className="text-[12px]">working</StateWord>
+          </div>
+          <div className="max-w-[54ch] text-[13.5px] leading-[1.65] text-text-muted">{sentence}</div>
+          <div className="h-[3px] max-w-[420px] overflow-hidden rounded-[2px] bg-fill-hover">
+            {known ? (
+              <div className="h-full rounded-[2px] bg-state-neutral" style={{ width: `${Math.round(p.progress * 100)}%` }} />
+            ) : (
+              <div
+                className="h-full w-[40%] rounded-[2px] bg-state-neutral"
+                style={{ animation: "ch-indeterminate 1.4s ease-in-out infinite" }}
+              />
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={p.onCancel}
+              className="h-7 rounded-md border border-border-hairline px-3 text-[12px] text-text-muted hover:bg-fill-hover hover:text-text-secondary"
+            >
+              Stop
+            </button>
+            <span className="text-[11.5px] text-text-faint">You can keep using the rest of Chronicle meanwhile.</span>
+          </div>
+        </div>
+      </div>
+      {p.children}
+    </div>
+  );
+}
 
 export function BuildingCard(p: BuildingCardProps) {
+  if (p.writing) return <WritingState {...p} />;
   return (
     <div
       className={cn(

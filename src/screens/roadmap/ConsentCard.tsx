@@ -3,8 +3,9 @@
  * the agent and explicitly starts the build. The agent logos are the only brand colour
  * on the page. Presentational only — no IPC.
  */
-import { BtnPrimary, BtnSecondary } from "@/components/chrome/atoms";
-import { ClaudeStar, CodexTile } from "@/components/chrome/icons";
+import type { ReactNode } from "react";
+import { BtnPrimary, Eyebrow } from "@/components/chrome/atoms";
+import { ChevronDownGlyph, ClaudeStar, CodexTile } from "@/components/chrome/icons";
 import { cn } from "@/lib/utils";
 
 export type ConsentAgent = "claude" | "codex";
@@ -15,42 +16,23 @@ export type ConsentCardProps = {
   onBuild?: () => void;
   onRunMyself?: () => void;
   onBasicView?: () => void;
+  /** True only when both Claude and Codex are installed — otherwise no agent chip. */
+  bothAgents?: boolean;
+  /** Rendered below the card, in the same block (the ghosted roadmap). */
+  children?: ReactNode;
   className?: string;
 };
 
-function AgentButton({
-  selected,
-  ariaLabel,
-  label,
-  onClick,
-  children,
-}: {
-  selected: boolean;
-  ariaLabel: string;
-  label: string;
-  onClick?: () => void;
-  children: React.ReactNode;
-}) {
+function LinkButton({ dim, onClick, children }: { dim?: boolean; onClick?: () => void; children: ReactNode }) {
   return (
     <button
-      aria-label={ariaLabel}
       onClick={onClick}
       className={cn(
-        "inline-flex h-[30px] items-center gap-[7px] rounded-md border px-[11px] font-sans",
-        selected
-          ? "border-border-strong bg-fill-hover"
-          : "border-border-hairline bg-transparent hover:bg-fill-hover",
+        "text-[12px] underline decoration-border-strong underline-offset-[3px] hover:text-text-primary",
+        dim ? "text-text-dim" : "text-text-secondary",
       )}
     >
       {children}
-      <span
-        className={cn(
-          "text-[12.5px]",
-          selected ? "font-medium text-text-primary" : "text-text-secondary",
-        )}
-      >
-        {label}
-      </span>
     </button>
   );
 }
@@ -61,54 +43,43 @@ export function ConsentCard({
   onBuild,
   onRunMyself,
   onBasicView,
+  bothAgents,
+  children,
   className,
 }: ConsentCardProps) {
+  const other = agent === "codex" ? "claude" : "codex";
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-3.5 py-[26px]",
-        className,
-      )}
-    >
-      <div className="text-[15px] font-semibold text-text-primary">
-        This folder has no roadmap yet.
+    <div className={cn("flex flex-col gap-[34px] py-[26px]", className)}>
+      <div className="flex flex-col gap-3.5">
+        <Eyebrow>Current state</Eyebrow>
+        <div className="flex flex-col gap-3">
+          <div className="text-[20px] font-semibold leading-[1.25] tracking-[-0.01em] text-text-primary">
+            Your current phase will sit here.
+          </div>
+          <div className="max-w-[54ch] text-[13.5px] leading-[1.65] text-text-muted">
+            I read the files in this folder and write the roadmap: the phases, where you are now,
+            and what needs you. Nothing else changes.
+          </div>
+          <div className="flex flex-wrap items-center gap-3 pt-0.5">
+            <BtnPrimary onClick={onBuild}>Write the roadmap</BtnPrimary>
+            {bothAgents && (
+              <button
+                aria-label={`Run with ${agent === "codex" ? "Codex" : "Claude"}. Switch to ${other === "codex" ? "Codex" : "Claude"}`}
+                onClick={() => onAgentChange?.(other)}
+                className="inline-flex h-[26px] items-center gap-1.5 rounded-lg border border-border-hairline pl-[7px] pr-[9px] text-[11.5px] text-text-muted hover:bg-fill-hover hover:text-text-secondary"
+              >
+                {agent === "codex" ? <CodexTile size={12} /> : <ClaudeStar size={12} />}
+                with {agent === "codex" ? "Codex" : "Claude"}
+                <ChevronDownGlyph size={10} />
+              </button>
+            )}
+            <span className="flex-1" />
+            <LinkButton onClick={onRunMyself}>Copy the instructions instead</LinkButton>
+            <LinkButton dim onClick={onBasicView}>Use the basic view</LinkButton>
+          </div>
+        </div>
       </div>
-      <div className="text-[13px] leading-[1.55] text-text-muted">
-        {agent === "codex" ? "A Codex" : "A Claude"} session will read this folder and write the
-        roadmap — nothing else is changed.
-      </div>
-      <div className="flex items-center gap-2.5">
-        <span className="text-[11.5px] text-text-dim">runs with</span>
-        <AgentButton
-          selected={agent === "claude"}
-          ariaLabel={agent === "claude" ? "Run with Claude — selected" : "Run with Claude"}
-          label="Claude"
-          onClick={() => onAgentChange?.("claude")}
-        >
-          <ClaudeStar size={13} />
-        </AgentButton>
-        <AgentButton
-          selected={agent === "codex"}
-          ariaLabel={agent === "codex" ? "Run with Codex — selected" : "Run with Codex"}
-          label="Codex"
-          onClick={() => onAgentChange?.("codex")}
-        >
-          <CodexTile size={13} />
-        </AgentButton>
-      </div>
-      <div className="flex items-center gap-2.5 pt-1">
-        <BtnPrimary onClick={onBuild}>Build it for me</BtnPrimary>
-        <BtnSecondary onClick={onRunMyself}>I'll run it myself</BtnSecondary>
-        <button
-          onClick={onBasicView}
-          className="h-[33px] rounded-md px-2.5 text-[12.5px] text-text-dim hover:bg-fill-hover hover:text-text-secondary"
-        >
-          Use the basic view
-        </button>
-      </div>
-      <div className="text-[11.5px] text-text-dim">
-        "I'll run it myself" copies the roadmap prompt — paste it in your own terminal.
-      </div>
+      {children}
     </div>
   );
 }

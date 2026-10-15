@@ -5,6 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Roadmap } from "./Roadmap";
+import { RoadmapGhost } from "./RoadmapGhost";
 import { PhaseDetailHost } from "./PhaseDetailHost";
 import {
   adoptManifest,
@@ -26,6 +27,7 @@ import {
   ledgerMark,
   runCommand,
   setDefaultAgent,
+  agentsAvailable,
   setInitConsent,
   type HistoryFacts,
   type StateData,
@@ -94,6 +96,18 @@ export function RoadmapPane({
   /** "Check now" fetched: hand the fresher facts back to the owner. */
   onHistoryFacts: (f: HistoryFacts) => void;
 }) {
+  // the agent chip shows only when both agents are installed
+  const [bothAgents, setBothAgents] = useState(false);
+  useEffect(() => {
+    let dead = false;
+    agentsAvailable()
+      .then((a) => {
+        const o = a as { claude?: unknown; codex?: unknown } | null;
+        if (!dead) setBothAgents(!!o?.claude && !!o?.codex);
+      })
+      .catch(() => {});
+    return () => { dead = true; };
+  }, []);
   const [initRun, setInitRunRaw] = useState<InitRun | null>(null);
   const setInitRun = useCallback((v: InitRun | null | ((prev: InitRun | null) => InitRun | null)) => {
     setInitRunRaw((prev) => {
@@ -572,5 +586,12 @@ export function RoadmapPane({
     },
   };
 
-  return <Roadmap {...mapRoadmap(state, ctx)} />;
+  const props = mapRoadmap(state, ctx);
+  // first open: the roadmap's own shape, ghosted in below the action (or the writing state)
+  if (props.consent) {
+    props.consent = { ...props.consent, bothAgents, children: <RoadmapGhost /> };
+  } else if (props.building && !state.manifest_present) {
+    props.building = { ...props.building, writing: true, children: <RoadmapGhost writing /> };
+  }
+  return <Roadmap {...props} />;
 }
