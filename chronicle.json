@@ -1019,7 +1019,7 @@
     },
     {
       "title": "Part 18 · Runs: hands-off rounds, and a pane that keeps up",
-      "note": "A round of fixes split into lanes that work at the same time, each checked before it counts, closed by Chronicle without asking you. First the chat pane gets faster and smoother, because the run card is built on it. Spec approved 2026-10-14; the boards come next.",
+      "note": "A round of fixes split into lanes that work at the same time, each checked before it counts, closed by Chronicle without asking you. First the chat pane gets faster and smoother, because the run card is built on it. Spec approved 2026-10-14; boards approved the same day. On 2026-10-15 the program became one release: the agents-and-providers work comes before runs, and everything ships as 0.12.0.",
       "phases": [
         {
           "id": "RN-0",
@@ -1047,7 +1047,7 @@
           "status": {
             "done_when": [
               {
-                "commit_subject": "(?i)^docs\\(runs\\):.*approved comps"
+                "commit_subject": "(?i)^docs\\(runs\\): Deck 10 comps"
               }
             ],
             "current_labels": [
@@ -1115,6 +1115,25 @@
           }
         },
         {
+          "id": "RN-4",
+          "name": "Any agent, any provider",
+          "desc": "Pick your agent in Setup — Claude Code, Codex, Gemini CLI or OpenCode — and the pane and the lanes work with it. Chronicle's own reviewing and judging run on whichever provider you have, with keys kept in your Keychain, or on your agent with no key at all.",
+          "items": [
+            "Four agents from the ACP registry, each installed once and launched directly.",
+            "The pane reads one shape for every agent: tool rows, permissions, modes, sign-in.",
+            "A Providers row in Setup: review and decisions on your agent, Anthropic, OpenAI, OpenRouter, TypeSafe or a local server."
+          ],
+          "docs": [
+            { "path": "docs/superpowers/specs/2026-10-15-agents-and-providers-design.md" },
+            { "path": "docs/superpowers/plans/2026-10-15-agents-and-providers.md" }
+          ],
+          "status": {
+            "done_when": [
+              { "commit_subject": "(?i)^docs\\(agents\\): agents live check" }
+            ]
+          }
+        },
+        {
           "id": "RN-3",
           "name": "Runs",
           "desc": "Ask for a round from your notes, a plan or a prompt, and Chronicle splits it into lanes, runs them at once, checks each one, saves the work and closes the round itself.",
@@ -1144,6 +1163,12 @@
               }
             ]
           }
+        },
+        {
+          "id": "RN-5",
+          "name": "Version 0.12.0",
+          "desc": "The faster pane, the new first-open screen, any agent, any provider, and runs — shipped together as one update.",
+          "status": { "done_when": [ { "tag": "v0.12.0" } ] }
         }
       ]
     },
