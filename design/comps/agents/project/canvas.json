@@ -1,0 +1,34 @@
+{
+ "v": 3,
+ "createdOnFiles": {
+  "v": 1,
+  "at": "2026-10-15T12:00:00Z"
+ },
+ "title": "Agents and providers",
+ "launch": {
+  "view": "canvas"
+ },
+ "pages": [],
+ "boards": {
+  "01-Setup-agents-providers.dc.html": {
+   "x": 0,
+   "y": 0,
+   "w": 1440,
+   "h": 1500,
+   "title": "1 \u00b7 Setup & health \u2014 Your agent and Providers"
+  },
+  "02-Pane-on-codex.dc.html": {
+   "x": 1520,
+   "y": 0,
+   "w": 1440,
+   "h": 900,
+   "title": "2 \u00b7 The agent pane running Codex"
+  }
+ },
+ "order": [
+  "01-Setup-agents-providers.dc.html",
+  "02-Pane-on-codex.dc.html"
+ ],
+ "notes": {},
+ "designSystems": []
+}
