@@ -1643,6 +1643,34 @@ In `src/lib/agent-session.warm.test.ts` line 14, the mock answers the new shape:
   agentsAvailable: vi.fn(async () => ({ claude, codex: null, default: claude ? "claude-acp" : "", project: "claude-acp", launchable: !!claude })),
 ```
 
+- [ ] **Step 6b: `agents::project_profile` — the one accessor the Runs plan uses**
+
+Plan B resolves a project's agent through one function. Add to `src-tauri/src/agents/mod.rs`:
+
+```rust
+/// The agent this project runs on: the project's own choice, else the default, else Claude Code —
+/// the same rule as `profiles::chosen_in`, keyed by the project's canonical path.
+pub fn project_profile(project_dir: &std::path::Path) -> &'static AgentProfile {
+    let canon = std::fs::canonicalize(project_dir).unwrap_or_else(|_| project_dir.to_path_buf());
+    profiles::chosen_in(&crate::load_config(), canon.to_str())
+}
+```
+
+Test, in `src-tauri/src/agents/profiles.rs` `mod tests` (it exercises the rule `project_profile` delegates to,
+with a config value rather than the real file):
+
+```rust
+    #[test]
+    fn a_project_choice_beats_the_default_which_beats_claude() {
+        let cfg = json!({ "agent": "codex-acp", "project_agents": { "/p/one": "gemini" } });
+        assert_eq!(chosen_in(&cfg, Some("/p/one")).id, "gemini");
+        assert_eq!(chosen_in(&cfg, Some("/p/two")).id, "codex-acp");
+        assert_eq!(chosen_in(&json!({}), Some("/p/two")).id, "claude-acp");
+    }
+```
+
+Run: `cd src-tauri && cargo test agents::` — expected: passes.
+
 - [ ] **Step 7: Run the TypeScript checks**
 
 Run: `npm run typecheck && npx vitest run src/lib/agent-session.warm.test.ts && npx vitest run`
@@ -5346,6 +5374,66 @@ export const providerKeyRemove = (id: string) => invoke<void>("provider_key_remo
 export const providerRoleSet = (role: "review" | "decisions", provider: string) => invoke<void>("provider_role_set", { role, provider });
 export const providerLocalSet = (baseUrl: string | null) => invoke<void>("provider_local_set", { baseUrl });
 ```
+
+- [ ] **Step 6b: The seam the Runs plan consumes — `for_role` and `agent_calls`**
+
+Plan B (`docs/superpowers/plans/2026-10-15-runs.md`) calls exactly two one-argument helpers from this
+module and never touches `resolve`/`calls_for`/`Keychain`/`CurlTransport` directly. Add them at the end of
+`src-tauri/src/providers/mod.rs`:
+
+```rust
+/// The repo a project dir belongs to: its git toplevel, else the dir itself (a folder with no history).
+fn repo_root(project_dir: &Path) -> PathBuf {
+    std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).current_dir(project_dir).output().ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| PathBuf::from(s.trim()))
+        .filter(|p| p.is_dir())
+        .unwrap_or_else(|| project_dir.to_path_buf())
+}
+
+/// The project's agent as a `Calls`: a one-turn reviewer session on whatever agent the project uses. No key.
+pub fn agent_calls(project_dir: &Path) -> AgentCalls {
+    let profile = crate::agents::project_profile(project_dir);
+    AgentCalls::for_project(profile, repo_root(project_dir), project_dir.to_path_buf())
+}
+
+/// What answers a role for this project right now: the chosen provider when its key or address is there,
+/// else the agent. Reads `config.json` and the Keychain; posts through curl.
+pub fn for_role(role: Role, project_dir: &Path) -> Box<dyn Calls + Send + Sync> {
+    let cfg = crate::load_config();
+    let p = resolve(&cfg, role, &Keychain);
+    calls_for(&p, &cfg, Arc::new(CurlTransport), agent_calls(project_dir))
+}
+```
+
+Two bounds this needs, applied in the same commit: in `src-tauri/src/providers/mod.rs` the trait is declared
+`pub trait Calls: Send + Sync { … }` (Task 13 declared it without the supertraits — add them; every
+implementor already holds only `Arc<dyn … + Send + Sync>`, `String` and `PathBuf`, so nothing else changes),
+and `calls_for` returns `Box<dyn Calls + Send + Sync>` (change its signature and the two tests that name
+the return type).
+
+Test, in the same `mod tests`:
+
+```rust
+    #[test]
+    fn for_role_falls_back_to_the_agent_when_no_key_is_saved() {
+        // a config that chose typesafe for decisions but has no key in the (fake) secrets → the agent answers
+        let cfg = json!({ "providers": { "decisions": "typesafe" } });
+        let p = resolve(&cfg, Role::Decisions, &FakeSecrets::default());
+        assert_eq!(p, Provider::Agent);
+    }
+
+    #[test]
+    fn repo_root_is_the_dir_itself_without_history() {
+        let d = std::env::temp_dir().join(format!("chronicle-norepo-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(repo_root(&d), d);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+```
+
+Run: `cd src-tauri && cargo test providers::` — expected: the two new tests pass with the rest of the module.
 
 - [ ] **Step 7: Run the checks**
 
