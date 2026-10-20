@@ -59,3 +59,6 @@ code task is complete and reviewed. What follows is the closing measurement.
 ## Task 3 · streaming, before/after
 
 Superseded by the closing table above.
+
+## Any agent, any provider (RN-4)
+- 2026-10-15 · boards approved by the user ("looks good"): `design/comps/agents/project/01-Setup-agents-providers.dc.html`, `02-Pane-on-codex.dc.html`. Summary card: not asked for; today's row list stays unless the user says otherwise.
