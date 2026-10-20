@@ -62,3 +62,4 @@ Superseded by the closing table above.
 
 ## Any agent, any provider (RN-4)
 - 2026-10-15 · boards approved by the user ("looks good"): `design/comps/agents/project/01-Setup-agents-providers.dc.html`, `02-Pane-on-codex.dc.html`. Summary card: not asked for; today's row list stays unless the user says otherwise.
+- 2026-10-20 · probe: claude-acp shipped, codex-acp shipped, gemini not yet supported (deferred, needs sign-in), opencode shipped (see the spec, §11 probe result); Claude 0.90.1-preview.15: FAIL

@@ -221,6 +221,32 @@ permission requests, whether `session/load` is offered, and the stderr lines it 
 is written from that evidence; an agent whose probe fails to run on this Mac is shipped as "not yet
 supported" in the Your agent row rather than guessed at.
 
+### Probe result (2026-10-20)
+
+Run on this Mac with `probe.mjs` against a toy repo; every cell below is read from a `summary.json`.
+The four agents were probed in parallel against the same toy repo. Gemini was **deferred**: it answered
+`initialize` with auth methods and refused `session/new` with `{"code":-32000,"message":"Gemini API key is missing or not configured."}`
+(no sign-in was attempted, per the never-wait rule). Codex `authenticate` was not called (it opens a browser),
+so its `Login` is the terminal command, not an observed AuthMethod flow.
+
+| | claude-acp | codex-acp | gemini | opencode |
+|---|---|---|---|---|
+| version run | 0.75.1 | 2.2.3-preview.10 | 0.64.0 (initialize only) | 1.19.0 |
+| authMethods ids | *(none)* | `api-key`, `chat-gpt` | `oauth-personal`, `gemini-api-key`, `vertex-ai`, `gateway` | `opencode-login` |
+| Login | Terminal "claude /login" | Terminal "codex login" | Terminal "gemini" (deferred, not observed) | Terminal "opencode auth login" |
+| availableModes ids | `default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions` | `read-only`, `workspace-write`, `agent`, `agent-full-access` | — (session/new refused) | — (no `modes`; configOption `mode` offers `build`, `plan`, which are agents, not permission stances) |
+| Ask first → | default | read-only | — | — |
+| Execute → | acceptEdits | workspace-write | — | — |
+| Auto → | auto | agent | — | — |
+| Unattended → | bypassPermissions | agent-full-access | — | — |
+| tool_call `_meta` paths | `/_meta/claudeCode/toolName`, `/_meta/claudeCode/toolResponse/*`, `/_meta/claudeCode/title` | `/_meta/terminal_output_delta/data`, `/_meta/terminal_output_delta/terminal_id` | — | none |
+| permission `_meta` paths | none (one request, `kind: edit`, no `_meta`) | none seen (default mode `agent` never asked) | — | none seen (no request) |
+| loadSession | true | true | true (from initialize) | true |
+| credentials file when signed in | Keychain "Claude Code-credentials" | `~/.codex/auth.json` | — | none found (ran on its free models without an auth file) |
+| verdict | shipped | shipped | not yet supported | shipped |
+
+Claude Code 0.90.1-preview.15 (the registry's entry): FAIL — with the registry's `--hide-claude-auth` arg `session/new` is refused with `{"code":-32000,"message":"Authentication required: This integration does not support using claude.ai subscriptions.","data":{"reason":"claude_subscription_not_supported"}}`; run without that flag the turn completes (`end_turn`), `tool_call` `_meta` keeps `claudeCode.toolName`, and the modes keep `default`/`acceptEdits`/`bypassPermissions`; `claudeCode.parentToolUseId` was not seen in either version (the prompt used no subagent).
+
 ## 12 · Choices this spec made on its own (confirm or overturn)
 
 1. **Four agents first**, from the registry's tested set: Claude Code, Codex, Gemini CLI, OpenCode. The
