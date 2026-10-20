@@ -3412,7 +3412,8 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
     let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     let key = session_key(&dir, lane)?;
-    let launch = setup::adapter_launch().ok_or("the agent needs Node.js — install it from Setup & health, then try again")?;
+    let profile = agents::claude();
+    let launch = setup::agent_launch(profile.id).ok_or("the agent needs Node.js — install it from Setup & health, then try again")?;
     let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
     jail_roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
     let emit: acp::Emit = {
@@ -3427,7 +3428,7 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir() }
     } else { acp::LaneExtras::default() };
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, None, acp::adapter_command_for(&launch))?;
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, None, acp::adapter_command_for(&launch, profile))?;
     Ok(json!({ "started": started }))
 }
 
@@ -3438,7 +3439,8 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
     let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     let key = session_key(&dir, lane)?;
-    let launch = setup::adapter_launch().ok_or("the agent needs Node.js — install it from Setup & health, then try again")?;
+    let profile = agents::claude();
+    let launch = setup::agent_launch(profile.id).ok_or("the agent needs Node.js — install it from Setup & health, then try again")?;
     let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
     jail_roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
     let emit: acp::Emit = {
@@ -3453,7 +3455,7 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir() }
     } else { acp::LaneExtras::default() };
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, Some(id), acp::adapter_command_for(&launch))?;
+    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, Some(id), acp::adapter_command_for(&launch, profile))?;
     Ok(json!({ "started": started }))
 }
 
@@ -3890,6 +3892,7 @@ fn main() {
         .setup(|app| {
             // bundled files (the design skills) are found from code with no AppHandle
             if let Ok(res) = app.path().resource_dir() { setup::set_resource_dir(res); }
+            setup::migrate_legacy_adapter(); // tools/adapter → tools/agents/claude-acp, once
             power::install(app.handle().clone()); // main thread: the run-loop source lands on the main loop
             // the menu carries every ⌘ shortcut as a key equivalent, so a chord still
             // reaches us while the Web pane's native page is first responder (menu.rs)

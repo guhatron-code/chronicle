@@ -18,18 +18,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 
-/// The pinned adapter. Zed resolves its claude adapter from the ACP registry
-/// (id `claude-acp`) and deliberately uses a version ceiling; Chronicle skips
-/// the registry and pins the npm package directly.
-/// VERIFIED on the npm registry 2026-07-17: `@zed-industries/claude-code-acp`
-/// is DEPRECATED ("renamed to @agentclientprotocol/claude-agent-acp") — the
-/// rename is the pin: `@agentclientprotocol/claude-agent-acp`, latest 0.59.0,
-/// installed and exercised end-to-end by the gated integration test below.
-/// Exact pin first; loosen to a bounded range only if exact-pin installs prove
-/// flaky under npm min-release-age.
-pub const ADAPTER_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp";
-pub const ADAPTER_VERSION: &str = "0.75.1";
-
 const INIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180); // first npx run downloads the bridge
 const NEW_SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 const AUTH_REQUIRED_CODE: i64 = -32000;
@@ -922,43 +910,42 @@ pub struct AcpSession {
     sessions: Arc<Mutex<HashMap<String, Arc<AcpSession>>>>,
 }
 
-/// How the adapter process is started: the managed install launched by node
-/// directly (0.2 s), or `npx` resolving the pinned package (2 s). Setup
-/// decides which is possible; the command is built the same way either way.
+/// How an agent process is started. Setup decides which is possible
+/// (setup::agent_launch); the command is built the same way for all three.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AdapterLaunch {
-    Direct { node: String, entry: PathBuf },
-    Npx { npx: String },
+    /// A managed npm install, run by node directly (0.2 s).
+    Direct { node: String, entry: PathBuf, args: Vec<String> },
+    /// `npx --yes -- <package> <args>` — the fallback for npm distributions (2 s).
+    Npx { npx: String, package: String, args: Vec<String> },
+    /// A managed binary install, or an npm package whose bin is a native program.
+    Binary { program: PathBuf, args: Vec<String> },
 }
 
-/// Build the pinned adapter spawn: `node <entry>` or `npx --yes -- <package>@<version>`.
-/// ANTHROPIC_API_KEY is blanked so the adapter uses the user's Claude Code
+/// Build the spawn for a launch under a profile. The profile's `blank_env`
+/// (Claude Code: ANTHROPIC_API_KEY) is blanked so the agent uses its own
 /// login (verified: Zed does exactly this).
-pub fn adapter_command_for(launch: &AdapterLaunch) -> std::process::Command {
-    let (program, args): (&str, Vec<String>) = match launch {
-        AdapterLaunch::Direct { node, entry } => (node.as_str(), vec![entry.to_string_lossy().to_string()]),
-        AdapterLaunch::Npx { npx } => (npx.as_str(), vec!["--yes".into(), "--".into(), format!("{ADAPTER_PACKAGE}@{ADAPTER_VERSION}")]),
+pub fn adapter_command_for(launch: &AdapterLaunch, profile: &crate::agents::AgentProfile) -> std::process::Command {
+    let (program, args): (String, Vec<String>) = match launch {
+        AdapterLaunch::Direct { node, entry, args } => (node.clone(), std::iter::once(entry.to_string_lossy().to_string()).chain(args.iter().cloned()).collect()),
+        AdapterLaunch::Npx { npx, package, args } => (npx.clone(), ["--yes".to_string(), "--".to_string(), package.clone()].into_iter().chain(args.iter().cloned()).collect()),
+        AdapterLaunch::Binary { program, args } => (program.to_string_lossy().to_string(), args.clone()),
     };
-    let mut cmd = std::process::Command::new(program);
-    cmd.args(args)
-        .env("ANTHROPIC_API_KEY", "")
-        // the adapter's inner claude refuses to launch when it thinks it's
-        // nested in another Claude Code session — Chronicle's session is a
-        // deliberate, independent child, not a nested one
-        .env_remove("CLAUDECODE")
+    let mut cmd = std::process::Command::new(&program);
+    cmd.args(args);
+    for k in profile.blank_env {
+        cmd.env(k, "");
+    }
+    // the adapter's inner claude refuses to launch when it thinks it's
+    // nested in another Claude Code session — Chronicle's session is a
+    // deliberate, independent child, not a nested one
+    cmd.env_remove("CLAUDECODE")
         // CRUCIAL for a Finder-launched app: our PATH is minimal
         // (/usr/bin:/bin:/usr/sbin:/sbin), but `npx` is a Node script whose
         // `#!/usr/bin/env node` shebang needs `node` ON THE CHILD'S PATH.
-        // Resolving the tool by absolute path is not enough — without this the
-        // adapter dies instantly with `env: node: No such file or directory`
-        // (exit 127) and the pane reports "session ended". Prepend the tool's
-        // own dir (node sits beside npx) + the well-known tool dirs.
-        .env("PATH", child_path(program));
+        // Prepend the tool's own dir (node sits beside npx) + the well-known dirs.
+        .env("PATH", child_path(&program));
     cmd
-}
-
-pub fn adapter_command(npx: &str) -> std::process::Command {
-    adapter_command_for(&AdapterLaunch::Npx { npx: npx.to_string() })
 }
 
 /// Drain `src` to `out`, one stamped line at a time, until EOF. Bytes are read
@@ -2202,23 +2189,37 @@ for line in sys.stdin:
         let _ = std::fs::remove_dir_all(&h.dir);
     }
 
-    #[test]
-    fn a_direct_launch_runs_node_on_the_entry_with_the_same_env_as_npx() {
-        let cmd = adapter_command_for(&AdapterLaunch::Direct { node: "/x/bin/node".into(), entry: PathBuf::from("/x/adapter/dist/index.js") });
-        assert_eq!(cmd.get_program(), std::ffi::OsStr::new("/x/bin/node"));
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
-        assert_eq!(args, vec!["/x/adapter/dist/index.js".to_string()]);
-        let path = cmd.get_envs().find(|(k, _)| *k == std::ffi::OsStr::new("PATH")).and_then(|(_, v)| v).unwrap().to_string_lossy().to_string();
-        assert!(path.starts_with("/x/bin"), "node's own dir leads the PATH: {path}");
-        assert!(cmd.get_envs().any(|(k, v)| k == std::ffi::OsStr::new("ANTHROPIC_API_KEY") && v == Some(std::ffi::OsStr::new(""))));
-        assert!(cmd.get_envs().any(|(k, v)| k == std::ffi::OsStr::new("CLAUDECODE") && v.is_none()));
+    fn args_of(cmd: &std::process::Command) -> Vec<String> {
+        cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect()
+    }
+    fn env_of(cmd: &std::process::Command, key: &str) -> Option<Option<String>> {
+        cmd.get_envs().find(|(k, _)| *k == std::ffi::OsStr::new(key)).map(|(_, v)| v.map(|v| v.to_string_lossy().to_string()))
     }
 
     #[test]
-    fn an_npx_launch_is_unchanged() {
-        let cmd = adapter_command_for(&AdapterLaunch::Npx { npx: "/opt/homebrew/bin/npx".into() });
-        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
-        assert_eq!(args, vec!["--yes".to_string(), "--".to_string(), format!("{ADAPTER_PACKAGE}@{ADAPTER_VERSION}")]);
+    fn a_direct_launch_runs_node_on_the_entry_with_its_args() {
+        let cmd = adapter_command_for(&AdapterLaunch::Direct { node: "/x/bin/node".into(), entry: PathBuf::from("/x/agents/claude-acp/dist/index.js"), args: vec!["--hide-claude-auth".into()] }, crate::agents::claude());
+        assert_eq!(cmd.get_program(), std::ffi::OsStr::new("/x/bin/node"));
+        assert_eq!(args_of(&cmd), vec!["/x/agents/claude-acp/dist/index.js".to_string(), "--hide-claude-auth".to_string()]);
+        assert!(env_of(&cmd, "PATH").flatten().unwrap().starts_with("/x/bin"), "node's own dir leads the PATH");
+        assert_eq!(env_of(&cmd, "ANTHROPIC_API_KEY"), Some(Some(String::new())), "Claude's profile blanks the key");
+        assert_eq!(env_of(&cmd, "CLAUDECODE"), Some(None));
+    }
+
+    #[test]
+    fn an_npx_launch_names_the_package_then_its_args() {
+        let cmd = adapter_command_for(&AdapterLaunch::Npx { npx: "/opt/homebrew/bin/npx".into(), package: "@google/gemini-cli@0.64.0".into(), args: vec!["--acp".into()] }, crate::agents::profile("gemini").unwrap());
+        assert_eq!(args_of(&cmd), vec!["--yes", "--", "@google/gemini-cli@0.64.0", "--acp"]);
+        assert!(env_of(&cmd, "PATH").flatten().unwrap().starts_with("/opt/homebrew/bin"), "npx's own dir leads the PATH, so its node shebang resolves");
+        assert_eq!(env_of(&cmd, "ANTHROPIC_API_KEY"), None, "only Claude's profile touches that variable");
+    }
+
+    #[test]
+    fn a_binary_launch_runs_the_program_itself() {
+        let cmd = adapter_command_for(&AdapterLaunch::Binary { program: PathBuf::from("/t/agents/opencode/opencode"), args: vec!["acp".into()] }, crate::agents::profile("opencode").unwrap());
+        assert_eq!(cmd.get_program(), std::ffi::OsStr::new("/t/agents/opencode/opencode"));
+        assert_eq!(args_of(&cmd), vec!["acp"]);
+        assert_eq!(env_of(&cmd, "CLAUDECODE"), Some(None));
     }
 
     #[test]
@@ -2249,23 +2250,6 @@ for line in sys.stdin:
     #[test]
     fn log_lines_carry_a_millisecond_stamp() {
         assert_eq!(stamp_line(42, "boot"), "[+42] boot\n");
-    }
-
-    #[test]
-    fn adapter_command_puts_node_on_the_child_path() {
-        // the Finder-launched bug: without node's dir on the child PATH, npx's
-        // `#!/usr/bin/env node` shebang fails and the adapter exits 127. The
-        // command MUST carry a PATH that includes npx's own directory so node
-        // (which sits beside it) resolves.
-        let cmd = adapter_command("/opt/homebrew/bin/npx");
-        let path = cmd.get_envs()
-            .find(|(k, _)| *k == std::ffi::OsStr::new("PATH"))
-            .and_then(|(_, v)| v)
-            .map(|v| v.to_string_lossy().to_string())
-            .expect("adapter_command must set PATH");
-        assert!(path.starts_with("/opt/homebrew/bin"), "npx's own dir leads the PATH: {path}");
-        // ANTHROPIC_API_KEY blanked, CLAUDECODE removed — the other spawn seams
-        assert!(cmd.get_envs().any(|(k, v)| k == std::ffi::OsStr::new("ANTHROPIC_API_KEY") && v == Some(std::ffi::OsStr::new(""))));
     }
 
     #[test]
@@ -2722,8 +2706,8 @@ for line in sys.stdin:
             eprintln!("skipped: set CHRONICLE_ACP_TEST=1 to run against the real adapter");
             return;
         }
-        let Some(npx) = crate::find_tool("npx") else {
-            eprintln!("skipped: npx not found");
+        let Some(launch) = crate::setup::agent_launch("claude-acp") else {
+            eprintln!("skipped: no way to launch Claude Code's connector on this Mac");
             return;
         };
         let dir = tmp("real");
@@ -2732,7 +2716,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), None, adapter_command(&npx)).unwrap();
+        start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), None, adapter_command_for(&launch, crate::agents::claude())).unwrap();
 
         let ready = wait_for(&rx, 300, |v| state_is(v, "ready") || state_is(v, "needs-login") || state_is(v, "error"));
         if !state_is(&ready, "ready") {

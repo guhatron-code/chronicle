@@ -421,10 +421,14 @@ pub fn detect(id: &str) -> Value {
             else if let Some(b) = browser_build_in(&browsers_dir()) { return json!({ "id": id, "state": "ready", "detail": format!("chromium · {b}"), "action": "" }); }
             else { ("missing", "", "install") }
         }
-        "connector" => {
-            if resolve("node").is_none() { ("blocked", "Install the engine first.", "") }
-            else if adapter_entry_in(&adapter_dir(), crate::acp::ADAPTER_VERSION).is_some() { return json!({ "id": id, "state": "ready", "detail": crate::acp::ADAPTER_VERSION, "action": "" }); }
-            else { ("missing", "", "install") }
+        "connector" => return connector_row(id),
+        other if other.starts_with("agent:") => {
+            let Some(p) = crate::agents::profile(&other["agent:".len()..]) else { return json!({ "id": id, "state": "unknown" }) };
+            let ready = crate::agents::registry::launch_spec(p).and_then(|s| installed_version(&agent_dir(p.id), &s));
+            return match ready {
+                Some(v) => json!({ "id": id, "agent": p.id, "state": "ready", "detail": v, "action": "" }),
+                None => json!({ "id": id, "agent": p.id, "state": "missing", "detail": "", "action": "install" }),
+            };
         }
         "design_skills" => {
             let found = design_plugin_dir().ok_or_else(|| "the design skills aren't part of this build".to_string()).and_then(|d| crate::designs::plugin::intact(&d));
@@ -661,44 +665,186 @@ fn install_design_browser(emit: &Emit, cancel: &AtomicBool) -> Result<(), String
     }
 }
 
-/* ================= the agent's connector (the ACP adapter) ================= */
+/* ================= agents' connectors (spec §4) ================= */
 
-pub fn adapter_dir() -> PathBuf { tools_dir().join("adapter") }
+use crate::agents::registry::{BinaryTarget, LaunchSpec};
 
-/// The adapter's entry script, only when the install under `dir` is exactly
-/// `version`: a stale install after a pin bump must look like no install.
-pub fn adapter_entry_in(dir: &Path, version: &str) -> Option<PathBuf> {
-    let pkg = dir.join("node_modules").join(crate::acp::ADAPTER_PACKAGE);
-    let manifest = std::fs::read_to_string(pkg.join("package.json")).ok()?;
-    let v: Value = serde_json::from_str(&manifest).ok()?;
-    if v.get("version").and_then(|x| x.as_str()) != Some(version) { return None; }
-    let entry = pkg.join("dist/index.js");
+const VERSION_FILE: &str = ".chronicle-version";
+
+fn agents_dir() -> PathBuf { tools_dir().join("agents") }
+pub fn agent_dir(id: &str) -> PathBuf { agents_dir().join(id) }
+
+/// `"@scope/name@1.2.3"` → `("@scope/name", "1.2.3")`.
+pub fn split_package(spec: &str) -> Option<(&str, &str)> {
+    let at = spec.rfind('@').filter(|&i| i > 0)?;
+    Some((&spec[..at], &spec[at + 1..]))
+}
+
+/// The package's bin entry under an `npm install --prefix <dir>`, only when the
+/// installed version is exactly the spec's: a stale install must look like none.
+pub fn npx_entry_in(dir: &Path, spec: &str) -> Option<PathBuf> {
+    let (name, version) = split_package(spec)?;
+    let pkg = dir.join("node_modules").join(name);
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(pkg.join("package.json")).ok()?).ok()?;
+    if v.get("version").and_then(Value::as_str) != Some(version) { return None; }
+    let short = name.rsplit('/').next().unwrap_or(name);
+    let bin = match v.get("bin")? {
+        Value::String(s) => s.clone(),
+        Value::Object(m) => m.get(short).or_else(|| m.values().next())?.as_str()?.to_string(),
+        _ => return None,
+    };
+    let entry = pkg.join(bin);
     entry.is_file().then_some(entry)
 }
 
-/// Direct when the managed install matches the pin and node resolves; npx otherwise; None without node at all.
-pub fn adapter_launch() -> Option<crate::acp::AdapterLaunch> {
-    if let (Some(node), Some(entry)) = (resolve("node"), adapter_entry_in(&adapter_dir(), crate::acp::ADAPTER_VERSION)) {
-        return Some(crate::acp::AdapterLaunch::Direct { node, entry });
-    }
-    resolve("npx").map(|npx| crate::acp::AdapterLaunch::Npx { npx })
+/// A JavaScript entry (run it with node) rather than a native program.
+fn is_node_script(p: &Path) -> bool {
+    if matches!(p.extension().and_then(|e| e.to_str()), Some("js" | "mjs" | "cjs")) { return true; }
+    let head = std::fs::read(p).map(|b| b.into_iter().take(64).collect::<Vec<u8>>()).unwrap_or_default();
+    let head = String::from_utf8_lossy(&head);
+    head.starts_with("#!") && head.lines().next().unwrap_or("").contains("node")
 }
 
-fn install_adapter(emit: &Emit, _cancel: &AtomicBool) -> Result<(), String> {
-    let npm = resolve("npm").ok_or("the engine isn't installed yet — install it first")?;
-    emit_state(emit, "connector", json!({ "state": "installing", "pct": Value::Null }));
-    std::fs::create_dir_all(adapter_dir()).map_err(|e| e.to_string())?;
-    let out = std::process::Command::new(&npm)
-        .args(["install", "--prefix"]).arg(adapter_dir())
-        .args(["--no-audit", "--no-fund", "--no-package-lock", &format!("{}@{}", crate::acp::ADAPTER_PACKAGE, crate::acp::ADAPTER_VERSION)])
-        .env("PATH", tool_env_path())
-        .stdin(std::process::Stdio::null())
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!("couldn't install the connector: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("npm failed")));
+pub fn binary_entry_in(dir: &Path, version: &str, cmd: &str) -> Option<PathBuf> {
+    if std::fs::read_to_string(dir.join(VERSION_FILE)).ok()?.trim() != version { return None; }
+    let p = dir.join(cmd.trim_start_matches("./"));
+    p.is_file().then_some(p)
+}
+
+pub fn verify_sha256(path: &Path, want: &str) -> Result<(), String> {
+    if want.trim().is_empty() { return Err("this agent publishes no checksum, so Chronicle won't install it".into()); }
+    match sha256_file(path) {
+        Some(got) if got.eq_ignore_ascii_case(want) => Ok(()),
+        Some(_) => Err("the download didn't match its published checksum, so nothing was installed".into()),
+        None => Err("couldn't read the download".into()),
     }
-    adapter_entry_in(&adapter_dir(), crate::acp::ADAPTER_VERSION).map(|_| ()).ok_or_else(|| "installed, but the connector's files aren't where expected".to_string())
+}
+
+/// Check, unpack beside the install, check the program is there, then swap.
+/// A failure at any step leaves the previous install exactly as it was.
+pub fn unpack_verified(archive: &Path, dir: &Path, version: &str, t: &BinaryTarget) -> Result<(), String> {
+    if let Err(e) = verify_sha256(archive, &t.sha256) {
+        let _ = std::fs::remove_file(archive);
+        return Err(e);
+    }
+    let staging = dir.with_extension("staging");
+    let _ = std::fs::remove_dir_all(&staging);
+    let unpacked = if t.archive.ends_with(".zip") { extract_zip(archive, &staging) } else { extract_tar_gz(archive, &staging) };
+    let _ = std::fs::remove_file(archive);
+    if let Err(e) = unpacked {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!("couldn't unpack the download — {e}"));
+    }
+    let program = staging.join(t.cmd.trim_start_matches("./"));
+    if !program.is_file() {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err("the download unpacked, but the agent's program isn't where its listing says".into());
+    }
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755));
+    std::fs::write(staging.join(VERSION_FILE), version).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(dir);
+    if let Some(parent) = dir.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    std::fs::rename(&staging, dir).map_err(|e| e.to_string())
+}
+
+pub fn agent_launch_in(dir: &Path, spec: &LaunchSpec, node: Option<String>, npx: Option<String>) -> Option<crate::acp::AdapterLaunch> {
+    use crate::acp::AdapterLaunch;
+    match spec {
+        LaunchSpec::Npx { package, args } => {
+            if let Some(entry) = npx_entry_in(dir, package) {
+                if !is_node_script(&entry) { return Some(AdapterLaunch::Binary { program: entry, args: args.clone() }); }
+                if let Some(node) = node { return Some(AdapterLaunch::Direct { node, entry, args: args.clone() }); }
+            }
+            npx.map(|npx| AdapterLaunch::Npx { npx, package: package.clone(), args: args.clone() })
+        }
+        LaunchSpec::Binary { version, target } => binary_entry_in(dir, version, &target.cmd)
+            .map(|program| AdapterLaunch::Binary { program, args: target.args.clone() }),
+    }
+}
+
+/// The pane plan installed Claude's adapter at tools/adapter; it now lives with the others.
+fn migrate_legacy_adapter_in(tools: &Path) {
+    let old = tools.join("adapter");
+    let new = tools.join("agents").join("claude-acp");
+    if old.is_dir() && !new.exists() {
+        let _ = std::fs::create_dir_all(tools.join("agents"));
+        let _ = std::fs::rename(&old, &new);
+    }
+}
+
+/// Called once at app start (main's setup hook): never from a lookup, so a
+/// test run never moves the folder the installed app is using.
+pub fn migrate_legacy_adapter() { migrate_legacy_adapter_in(&tools_dir()) }
+
+/// Direct from the managed install, npx as the fallback for npm agents, None otherwise.
+pub fn agent_launch(id: &str) -> Option<crate::acp::AdapterLaunch> {
+    let p = crate::agents::profile(id)?;
+    let spec = crate::agents::registry::launch_spec(p)?;
+    agent_launch_in(&agent_dir(p.id), &spec, resolve("node"), resolve("npx"))
+}
+
+pub fn installed_version(dir: &Path, spec: &LaunchSpec) -> Option<String> {
+    match spec {
+        LaunchSpec::Npx { package, .. } => npx_entry_in(dir, package).and(split_package(package)).map(|(_, v)| v.to_string()),
+        LaunchSpec::Binary { version, target } => binary_entry_in(dir, version, &target.cmd).map(|_| version.clone()),
+    }
+}
+
+fn read_config() -> Value {
+    std::fs::read_to_string(crate::config_dir().join("config.json")).ok()
+        .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_else(|| json!({}))
+}
+
+/// The agent a project runs (its own choice, else the default, else Claude Code).
+pub fn chosen_agent_for(project: Option<&str>) -> &'static crate::agents::AgentProfile {
+    crate::agents::profiles::chosen_in(&read_config(), project)
+}
+pub fn chosen_agent() -> &'static crate::agents::AgentProfile { chosen_agent_for(None) }
+
+/// The "<Agent>'s connector" row: always about the chosen agent.
+fn connector_row(id: &str) -> Value {
+    let p = chosen_agent();
+    let Some(spec) = crate::agents::registry::launch_spec(p) else {
+        return json!({ "id": id, "agent": p.id, "state": "missing", "detail": format!("{} isn't supported on this Mac yet.", p.name), "action": "" });
+    };
+    if matches!(spec, LaunchSpec::Npx { .. }) && resolve("node").is_none() {
+        return json!({ "id": id, "agent": p.id, "state": "blocked", "detail": "Install the engine first.", "action": "" });
+    }
+    match installed_version(&agent_dir(p.id), &spec) {
+        Some(v) => json!({ "id": id, "agent": p.id, "state": "ready", "detail": v, "action": "" }),
+        None => json!({ "id": id, "agent": p.id, "state": "missing", "detail": "", "action": "install" }),
+    }
+}
+
+/// Install one agent's connector; progress is emitted under `check` ("connector" or "agent:<id>").
+fn install_agent(check: &str, agent: &str, emit: &Emit, cancel: &AtomicBool) -> Result<(), String> {
+    let p = crate::agents::profile(agent).ok_or("Chronicle doesn't know that agent")?;
+    let spec = crate::agents::registry::launch_spec(p).ok_or_else(|| format!("{} isn't supported on this Mac yet", p.name))?;
+    let dir = agent_dir(p.id);
+    match &spec {
+        LaunchSpec::Npx { package, .. } => {
+            let npm = resolve("npm").ok_or("the engine isn't installed yet — install it first")?;
+            emit_state(emit, check, json!({ "state": "installing", "pct": Value::Null }));
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            let out = std::process::Command::new(&npm)
+                .args(["install", "--prefix"]).arg(&dir)
+                .args(["--no-audit", "--no-fund", "--no-package-lock", package])
+                .env("PATH", tool_env_path())
+                .stdin(std::process::Stdio::null())
+                .output()
+                .map_err(|e| e.to_string())?;
+            if !out.status.success() {
+                return Err(format!("couldn't install {}'s connector: {}", p.name, String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("npm failed")));
+            }
+            npx_entry_in(&dir, package).map(|_| ()).ok_or_else(|| "installed, but the connector's files aren't where expected".to_string())
+        }
+        LaunchSpec::Binary { version, target } => {
+            let archive = agents_dir().join(format!("{}.download", p.id));
+            download(&target.archive, &archive, check, emit, cancel)?;
+            unpack_verified(&archive, &dir, version, target)
+        }
+    }
 }
 
 /// Run one check's install/repair action. Returns Ok when the check is now
@@ -710,7 +856,8 @@ pub fn install(id: &str, emit: &Emit, cancel: &AtomicBool) -> Result<(), String>
         "github" => install_github(emit, cancel),
         "superpowers" => install_superpowers(emit, cancel),
         "design_browser" => install_design_browser(emit, cancel),
-        "connector" => install_adapter(emit, cancel),
+        "connector" => install_agent("connector", chosen_agent().id, emit, cancel),
+        other if other.starts_with("agent:") => install_agent(other, &other["agent:".len()..], emit, cancel),
         "terminal_path" => fix_terminal_path(),
         _ => Err(format!("{id} isn't installable here")),
     };
@@ -781,6 +928,7 @@ pub fn run_all(state: &SetupState, emit: &Emit) {
 #[cfg(test)]
 mod setup_tests {
     use super::*;
+    use crate::agents::registry::LaunchSpec;
 
     fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("chronicle-setup-{}-{}", name, std::process::id()));
@@ -802,32 +950,126 @@ mod setup_tests {
         let k = detect("design_skills");
         assert_eq!(k["action"], "", "the skills ship with the app: nothing to install");
     }
-    fn fake_adapter(dir: &Path, version: &str) {
-        let pkg = dir.join("node_modules/@agentclientprotocol/claude-agent-acp");
-        std::fs::create_dir_all(pkg.join("dist")).unwrap();
-        std::fs::write(pkg.join("package.json"), format!(r#"{{"name":"@agentclientprotocol/claude-agent-acp","version":"{version}","bin":{{"claude-agent-acp":"dist/index.js"}}}}"#)).unwrap();
-        std::fs::write(pkg.join("dist/index.js"), "#!/usr/bin/env node\n").unwrap();
+    const CLAUDE_PIN: &str = "@agentclientprotocol/claude-agent-acp@0.75.1";
+
+    fn fake_npm_install(dir: &Path, name: &str, version: &str, bin: &str, script: &str) {
+        let pkg = dir.join("node_modules").join(name);
+        std::fs::create_dir_all(pkg.join(bin).parent().unwrap()).unwrap();
+        let short = name.rsplit('/').next().unwrap();
+        std::fs::write(pkg.join("package.json"), format!(r#"{{"name":"{name}","version":"{version}","bin":{{"{short}":"{bin}"}}}}"#)).unwrap();
+        std::fs::write(pkg.join(bin), script).unwrap();
     }
 
     #[test]
-    fn adapter_entry_resolves_the_pinned_install() {
-        let d = std::env::temp_dir().join(format!("chronicle-adapter-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        fake_adapter(&d, crate::acp::ADAPTER_VERSION);
-        let e = adapter_entry_in(&d, crate::acp::ADAPTER_VERSION).expect("the pinned install resolves");
+    fn a_package_spec_splits_at_its_last_at() {
+        assert_eq!(split_package(CLAUDE_PIN), Some(("@agentclientprotocol/claude-agent-acp", "0.75.1")));
+        assert_eq!(split_package("@google/gemini-cli@0.64.0"), Some(("@google/gemini-cli", "0.64.0")));
+        assert_eq!(split_package("@scoped/only"), None);
+    }
+
+    #[test]
+    fn an_npm_install_resolves_its_bin_only_at_the_pinned_version() {
+        let d = tmp("npx-entry");
+        fake_npm_install(&d, "@agentclientprotocol/claude-agent-acp", "0.75.1", "dist/index.js", "#!/usr/bin/env node\n");
+        let e = npx_entry_in(&d, CLAUDE_PIN).expect("the pinned install resolves");
         assert!(e.ends_with("dist/index.js"), "{e:?}");
-        let _ = std::fs::remove_dir_all(&d);
+        // a stale install after a pin bump must look like no install
+        assert!(npx_entry_in(&d, "@agentclientprotocol/claude-agent-acp@0.90.1-preview.15").is_none());
     }
 
     #[test]
-    fn adapter_entry_ignores_a_stale_install() {
-        // a future pin bump must never launch the old adapter: detect says missing,
-        // the spawn falls back to npx of the pinned version
-        let d = std::env::temp_dir().join(format!("chronicle-adapter-stale-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        fake_adapter(&d, "0.0.1");
-        assert!(adapter_entry_in(&d, crate::acp::ADAPTER_VERSION).is_none());
-        let _ = std::fs::remove_dir_all(&d);
+    fn a_node_bin_runs_under_node_and_a_native_bin_runs_as_itself() {
+        let d = tmp("launch-npx");
+        fake_npm_install(&d, "@agentclientprotocol/claude-agent-acp", "0.75.1", "dist/index.js", "#!/usr/bin/env node\n");
+        let spec = LaunchSpec::Npx { package: CLAUDE_PIN.into(), args: vec!["--x".into()] };
+        let l = agent_launch_in(&d, &spec, Some("/n/node".into()), Some("/n/npx".into())).unwrap();
+        assert!(matches!(&l, crate::acp::AdapterLaunch::Direct { node, args, .. } if node == "/n/node" && args == &vec!["--x".to_string()]), "{l:?}");
+        // no managed install: the npx fallback carries the package and args
+        let empty = tmp("launch-npx-empty");
+        let f = agent_launch_in(&empty, &spec, Some("/n/node".into()), Some("/n/npx".into())).unwrap();
+        assert_eq!(f, crate::acp::AdapterLaunch::Npx { npx: "/n/npx".into(), package: CLAUDE_PIN.into(), args: vec!["--x".into()] });
+        assert!(agent_launch_in(&empty, &spec, None, None).is_none(), "no node, no npx, no launch");
+        // a package whose bin is a native program launches as itself, node or not
+        let native = tmp("launch-native");
+        fake_npm_install(&native, "@agentclientprotocol/codex-acp", "2.2.3-preview.10", "bin/codex-acp", "\x7fELF");
+        let nspec = LaunchSpec::Npx { package: "@agentclientprotocol/codex-acp@2.2.3-preview.10".into(), args: vec![] };
+        assert!(matches!(agent_launch_in(&native, &nspec, None, None), Some(crate::acp::AdapterLaunch::Binary { .. })));
+    }
+
+    fn tarball_with(d: &Path, name: &str, body: &str) -> PathBuf {
+        let src = d.join("src");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::write(src.join(name), body).unwrap();
+        let arc = d.join("agent.tar.gz");
+        assert!(std::process::Command::new("tar").args(["-czf"]).arg(&arc).arg("-C").arg(&src).arg(name).output().unwrap().status.success());
+        arc
+    }
+
+    fn target(archive: &str, sha: String) -> crate::agents::registry::BinaryTarget {
+        crate::agents::registry::BinaryTarget { archive: archive.into(), cmd: "./opencode".into(), args: vec!["acp".into()], sha256: sha }
+    }
+
+    #[test]
+    fn a_verified_archive_unpacks_and_launches_as_a_binary() {
+        let d = tmp("unpack-ok");
+        let arc = tarball_with(&d, "opencode", "#!/bin/sh\necho hi\n");
+        let sha = sha256_file(&arc).unwrap();
+        let dir = d.join("agents/opencode");
+        unpack_verified(&arc, &dir, "1.19.0", &target("https://x/opencode.tar.gz", sha.clone())).unwrap();
+        assert!(binary_entry_in(&dir, "1.19.0", "./opencode").is_some());
+        assert!(binary_entry_in(&dir, "1.20.0", "./opencode").is_none(), "another version is not this install");
+        assert!(!arc.exists(), "the archive is removed after unpacking");
+        let spec = LaunchSpec::Binary { version: "1.19.0".into(), target: target("https://x/opencode.tar.gz", sha) };
+        assert!(matches!(agent_launch_in(&dir, &spec, None, None), Some(crate::acp::AdapterLaunch::Binary { args, .. }) if args == vec!["acp".to_string()]));
+    }
+
+    #[test]
+    fn a_checksum_mismatch_installs_nothing_and_keeps_the_old_install() {
+        let d = tmp("unpack-bad");
+        let dir = d.join("agents/opencode");
+        // a good older install is already there
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("opencode"), "old").unwrap();
+        std::fs::write(dir.join(".chronicle-version"), "1.18.0").unwrap();
+        let arc = tarball_with(&d, "opencode", "tampered");
+        let err = unpack_verified(&arc, &dir, "1.19.0", &target("https://x/opencode.tar.gz", "0".repeat(64))).unwrap_err();
+        assert!(err.contains("checksum"), "{err}");
+        assert!(!arc.exists(), "a bad download is deleted");
+        assert!(!dir.with_extension("staging").exists(), "nothing half-unpacked is left");
+        assert_eq!(std::fs::read_to_string(dir.join("opencode")).unwrap(), "old", "the old install survives");
+        assert!(binary_entry_in(&dir, "1.18.0", "./opencode").is_some());
+    }
+
+    #[test]
+    fn an_archive_without_the_listed_program_is_refused() {
+        let d = tmp("unpack-noprog");
+        let arc = tarball_with(&d, "something-else", "x");
+        let sha = sha256_file(&arc).unwrap();
+        let dir = d.join("agents/opencode");
+        let err = unpack_verified(&arc, &dir, "1.19.0", &target("https://x/opencode.tar.gz", sha)).unwrap_err();
+        assert!(err.contains("isn't where"), "{err}");
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn an_archive_with_no_published_checksum_is_never_installed() {
+        let d = tmp("unpack-nosha");
+        let arc = tarball_with(&d, "opencode", "x");
+        let dir = d.join("agents/opencode");
+        let err = unpack_verified(&arc, &dir, "1.19.0", &target("https://x/opencode.tar.gz", String::new())).unwrap_err();
+        assert!(err.contains("checksum"), "{err}");
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn the_legacy_adapter_folder_moves_under_agents() {
+        let tools = tmp("legacy");
+        std::fs::create_dir_all(tools.join("adapter/node_modules")).unwrap();
+        migrate_legacy_adapter_in(&tools);
+        assert!(tools.join("agents/claude-acp/node_modules").is_dir());
+        assert!(!tools.join("adapter").exists());
+        migrate_legacy_adapter_in(&tools); // idempotent
+        assert!(tools.join("agents/claude-acp/node_modules").is_dir());
     }
 
     #[test]
@@ -839,8 +1081,9 @@ mod setup_tests {
         assert_eq!(s["total"], 6);
         assert_eq!(s["checks"].as_array().unwrap().len(), 9);
         let c = detect("connector");
+        assert!(crate::agents::profile(c["agent"].as_str().unwrap()).is_some(), "the row names the agent it is for: {c}");
         assert!(["ready", "missing", "blocked"].contains(&c["state"].as_str().unwrap()));
-        if c["state"] == "missing" { assert_eq!(c["action"], "install"); }
+        if c["state"] == "missing" && crate::agents::registry::launch_spec(crate::agents::profile(c["agent"].as_str().unwrap()).unwrap()).is_some() { assert_eq!(c["action"], "install"); }
     }
 
     #[test]
