@@ -7,6 +7,7 @@
 
 mod acp;
 mod agents;
+mod providers;
 mod setup;
 mod power;
 mod web;
