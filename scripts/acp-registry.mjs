@@ -32,14 +32,20 @@ for (let i = 0; i < args.length; i++) {
 // `registry_version: "…"` occurrences must equal the pins parsed, so a reorder,
 // an escaped quote or an odd layout fails loudly instead of un-pinning an agent.
 const profiles = fs.readFileSync(path.join(root, 'src-tauri/src/agents/profiles.rs'), 'utf8').replace(/\/\/.*$/gm, '')
-const found = [...profiles.matchAll(/id:\s*"([^"]+)",\s*name:\s*"[^"]*",\s*registry_version:\s*"([^"]+)"/g)]
+const found = [...profiles.matchAll(/id:\s*"([^"]+)",\s*name:\s*"[^"]*",\s*registry_version:\s*"([^"]+)",\s*pinned_npx:\s*(?:Some\(PinnedNpx\s*\{\s*package:\s*"([^"]+)"|None)/g)]
 const expected = (profiles.match(/registry_version:\s*"/g) ?? []).length
+const expectedNpx = (profiles.match(/pinned_npx:\s*(?:Some|None)\b/g) ?? []).length
+if (found.length !== expectedNpx) fail(`parsed ${found.length} pins but profiles.rs has ${expectedNpx} pinned_npx fields — has the shape changed?`)
 if (found.length === 0) fail('found no pins in profiles.rs — has its shape changed?')
 if (found.length !== expected) fail(`parsed ${found.length} pins but profiles.rs has ${expected} registry_version entries — has the shape changed?`)
+// A profile with pinned_npx launches from that package@version, so its bundled entry
+// is kept verbatim and no entry at registry_version is required; the others must ship at their pin.
 const pins = new Map()
+const npx = new Map()
 for (const m of found) {
   if (pins.has(m[1])) fail(`duplicate pin for ${m[1]} in profiles.rs`)
   pins.set(m[1], m[2])
+  if (m[3]) npx.set(m[1], m[3])
 }
 for (const id of take) if (!pins.has(id)) console.warn(`warning: --take ${id} is not a pinned agent (its latest entry is taken anyway)`)
 
@@ -64,6 +70,11 @@ const out = latest.agents.map((fresh) => {
   const old = byId.get(fresh.id)
   if (!pin) return fresh
   if (take.has(fresh.id)) { console.log(`${fresh.id}: taken ${fresh.version} (move its pin from ${pin}, then probe it)`); return fresh }
+  if (npx.has(fresh.id)) {
+    if (!old) fail(`${fresh.id}: launched from pinned_npx ${npx.get(fresh.id)} but has no bundled entry`)
+    console.log(`kept bundled entry for ${fresh.id} (launched from pinned_npx ${npx.get(fresh.id)})`)
+    return old
+  }
   if (old && old.version === pin) {
     console.log(fresh.version === pin ? `${fresh.id}: kept ${pin}` : newer(fresh.version, pin) ? `${fresh.id}: kept ${pin} — newer available: ${fresh.version}` : `${fresh.id}: kept ${pin} — registry latest is ${fresh.version}`)
     return old
@@ -72,6 +83,7 @@ const out = latest.agents.map((fresh) => {
 })
 for (const [id, pin] of pins) {
   if (!out.some((a) => a.id === id)) {
+    if (npx.has(id) && !byId.has(id)) fail(`${id}: launched from pinned_npx ${npx.get(id)} but has no bundled entry`)
     if (!byId.has(id)) fail(`${id}: pinned ${pin} but absent from both the bundle and the latest registry`)
     console.log(`${id}: gone from the registry — kept ${pin}`); out.push(byId.get(id))
   }
@@ -80,7 +92,7 @@ for (const [id, pin] of pins) {
 for (const [id, pin] of pins) {
   const e = out.find((a) => a.id === id)
   if (!e) fail(`${id}: pinned ${pin} but missing from the output`)
-  if (e.version !== pin && !take.has(id)) fail(`${id}: pinned ${pin} but the output has ${e.version}`)
+  if (e.version !== pin && !take.has(id) && !npx.has(id)) fail(`${id}: pinned ${pin} but the output has ${e.version}`)
 }
 const next = { ...latest, agents: out }
 if (dry) console.log(`dry run: ${out.length} agents, nothing written`)
