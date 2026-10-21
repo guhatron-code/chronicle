@@ -1413,7 +1413,7 @@ impl AcpSession {
         self.emit_state(json!({
             "state": "needs-login",
             "agent": self.profile.id,
-            "login": crate::agents::profiles::login_json(self.profile.login),
+            "login": crate::setup::login_json_for(self.profile),
             "waiting": waiting,
             "authMethods": methods,
         }));
@@ -2253,7 +2253,7 @@ for line in sys.stdin:
         modes: crate::agents::profiles::Modes { ask: Some("default"), execute: None, auto: None, unattended: None },
         meta: crate::agents::profiles::NO_META,
         extras: crate::agents::profiles::Extras { mcp_servers: true, plugins: false, settings: false },
-        requires_cli: None, blank_env: &[], credentials: crate::agents::profiles::Credentials::Unknown,
+        requires_cli: None, probed_auth_methods: &["oauth-personal"], blank_env: &[], credentials: crate::agents::profiles::Credentials::Unknown,
     };
 
     #[test]

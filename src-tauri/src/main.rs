@@ -507,7 +507,7 @@ fn agent_row(p: &'static agents::AgentProfile) -> Value {
         "launchable": launch.is_some() && missing.is_none(),
         "installed": installed, "missing": missing,
         "signedIn": setup::signed_in(p),
-        "login": agents::profiles::login_json(p.login),
+        "login": setup::login_json_for(p),
     })
 }
 
@@ -3880,20 +3880,29 @@ async fn setup_run_all(app: tauri::AppHandle, setup_state: State<'_, setup::Setu
 /// Terminal's PATH so `claude`/`gh` resolve.
 #[tauri::command]
 async fn setup_open_login(kind: String) -> Result<Value, String> {
-    let agent_cmd = kind.strip_prefix("agent:").and_then(agents::profile).and_then(|p| match p.login {
-        agents::profiles::Login::Terminal { command } => Some((command, p.name)),
-        _ => None,
-    });
-    let (bin_name, args, title): (&str, &str, String) = match (kind.as_str(), agent_cmd) {
-        ("claude", _) => ("claude", "/login", "claude · sign-in".into()),
-        ("github", _) => ("gh", "auth login", "github · sign-in".into()),
+    let agent = kind.strip_prefix("agent:").and_then(agents::profile);
+    // the same resolved command the pane types: a managed binary runs by its absolute path
+    let agent_cmd = match agent {
+        Some(p) if matches!(p.login, agents::profiles::Login::Terminal { .. }) =>
+            setup::login_json_for(p).get("command").and_then(Value::as_str).map(|c| (c.to_string(), p.name)),
+        Some(p) => return Err(format!("{} signs in from the pane", p.name)),
+        None => None,
+    };
+    let (bin_name, args, title): (String, String, String) = match (kind.as_str(), agent_cmd) {
+        ("claude", _) => ("claude".into(), "/login".into(), "claude · sign-in".into()),
+        ("github", _) => ("gh".into(), "auth login".into(), "github · sign-in".into()),
         (_, Some((command, name))) => {
-            let (bin, rest) = command.split_once(' ').unwrap_or((command, ""));
-            (bin, rest, format!("{} · sign-in", name.to_lowercase()))
+            let title = format!("{} · sign-in", name.to_lowercase());
+            match command.split_once(' ') {
+                // already resolved (an absolute or quoted path): run it as it stands
+                _ if command.starts_with('/') || command.starts_with('\'') => (String::new(), command, title),
+                Some((bin, rest)) => (bin.to_string(), rest.to_string(), title),
+                None => (command, String::new(), title),
+            }
         }
         _ => return Err("unknown sign-in".into()),
     };
-    let bin = setup::resolve(bin_name).ok_or("that tool isn't installed yet")?;
+    let bin = if bin_name.is_empty() { String::new() } else { setup::resolve(&bin_name).ok_or_else(|| format!("`{bin_name}` isn't installed yet — install it, then sign in"))? };
     let path = setup::tool_env_path();
     // escape for AppleScript's double-quoted string
     let cmd = format!("PATH=\"{}\" {} {}", path, bin, args).replace('\\', "\\\\").replace('"', "\\\"");

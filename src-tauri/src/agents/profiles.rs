@@ -70,8 +70,13 @@ pub struct AgentProfile {
     pub modes: Modes,
     pub meta: MetaKeys,
     pub extras: Extras,
-    /// The agent's own CLI the adapter needs on this Mac (claude-acp wraps `claude`).
+    /// The agent's own CLI the adapter needs on this Mac (claude-acp wraps `claude`; codex-acp's
+    /// sign-in is `codex login`, and the npm package ships no `codex`).
     pub requires_cli: Option<&'static str>,
+    /// The `authMethods` ids the probe saw in `initialize` (spec §11), as data. Only an id listed
+    /// here may ever become a `Login::AuthMethod`, and only once it is seen working headless.
+    #[allow(dead_code)] // read by the profile tests; the pane passes the live authMethods through
+    pub probed_auth_methods: &'static [&'static str],
     /// Env vars blanked on spawn so the agent uses its own login, never a stray key.
     pub blank_env: &'static [&'static str],
     pub credentials: Credentials,
@@ -113,6 +118,7 @@ pub static PROFILES: [AgentProfile; 4] = [
         },
         extras: ALL_EXTRAS,
         requires_cli: Some("claude"),
+        probed_auth_methods: &[],
         blank_env: &["ANTHROPIC_API_KEY"],
         credentials: Credentials::ClaudeKeychain,
     },
@@ -130,7 +136,10 @@ pub static PROFILES: [AgentProfile; 4] = [
         modes: Modes { ask: Some("read-only"), execute: Some("workspace-write"), auto: Some("agent"), unattended: Some("agent-full-access") },
         meta: NO_META,
         extras: MCP_ONLY,
-        requires_cli: None,
+        // `codex login` is the sign-in; the codex-acp package puts no `codex` on this Mac (ruling R18)
+        requires_cli: Some("codex"),
+        // `chat-gpt` opens a browser from the adapter's side: a Task 19 experiment, not shipped as a Login
+        probed_auth_methods: &["api-key", "chat-gpt"],
         blank_env: &[],
         credentials: Credentials::HomeFile(".codex/auth.json"),
     },
@@ -148,6 +157,7 @@ pub static PROFILES: [AgentProfile; 4] = [
         meta: NO_META,
         extras: MCP_ONLY,
         requires_cli: None,
+        probed_auth_methods: &["oauth-personal", "gemini-api-key", "vertex-ai", "gateway"],
         blank_env: &[],
         credentials: Credentials::HomeFile(".gemini/oauth_creds.json"),
     },
@@ -159,13 +169,17 @@ pub static PROFILES: [AgentProfile; 4] = [
         shipped: true,
         probed: true,
         args_override: None,
-        login: Login::AuthMethod { id: "opencode-login" },
+        // the probe's own authMethods entry says "Run `opencode auth login` in the terminal" (ruling R18);
+        // `opencode` is the managed binary, not on PATH, so the command is resolved to its path at use
+        login: Login::Terminal { command: "opencode auth login" },
         modes: Modes { ask: None, execute: None, auto: None, unattended: None },
         meta: NO_META,
         extras: MCP_ONLY,
         requires_cli: None,
+        probed_auth_methods: &["opencode-login"],
         blank_env: &[],
-        credentials: Credentials::HomeFile(".local/share/opencode/auth.json"),
+        // it ran on its free models with no auth file (probe): Chronicle can't tell signed-in from not
+        credentials: Credentials::Unknown,
     },
 ];
 
@@ -225,6 +239,30 @@ pub fn migrate_roadmap_agent(cfg: &mut Value) -> bool {
     cfg["roadmap_agent"] = json!(roadmap_name(old.as_deref().unwrap_or("claude")));
     if old.is_some() { cfg["agent"] = json!("claude-acp"); }
     true
+}
+
+/// A Terminal login's command with its program resolved: when the agent's managed install is a
+/// binary named like the command's first word (OpenCode's `opencode`), that word becomes the binary's
+/// absolute path, shell-quoted — a managed binary is never on the user's PATH.
+pub fn terminal_command(command: &str, managed_program: Option<&str>) -> String {
+    let (bin, rest) = command.split_once(' ').unwrap_or((command, ""));
+    let Some(program) = managed_program.filter(|p| std::path::Path::new(p).file_name().map(|n| n == bin).unwrap_or(false)) else {
+        return command.to_string();
+    };
+    let quoted = if program.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c)) {
+        program.to_string()
+    } else {
+        format!("'{}'", program.replace('\'', "'\\''"))
+    };
+    if rest.is_empty() { quoted } else { format!("{quoted} {rest}") }
+}
+
+/// `login_json` with a Terminal command resolved against the managed binary (see `terminal_command`).
+pub fn login_json_with(l: Login, managed_program: Option<&str>) -> Value {
+    match l {
+        Login::Terminal { command } => json!({ "kind": "terminal", "command": terminal_command(command, managed_program) }),
+        other => login_json(other),
+    }
 }
 
 pub fn login_json(l: Login) -> Value {
@@ -331,8 +369,9 @@ mod profile_tests {
                 assert!(ids.contains(&m), "{}: mode {m} is not among the probe's {ids:?}", p.id);
             }
             if !ids.is_empty() { assert!(p.modes.ask.is_some(), "{}: the agent has modes, so Ask first maps to one", p.id); }
+            let methods: Vec<&str> = probe["params"]["authMethods"].as_array().map(|a| a.iter().filter_map(|m| m["id"].as_str()).collect()).unwrap_or_default();
+            assert_eq!(p.probed_auth_methods, methods.as_slice(), "{}: the profile records the probe's authMethods", p.id);
             if let Login::AuthMethod { id } = p.login {
-                let methods: Vec<&str> = probe["params"]["authMethods"].as_array().map(|a| a.iter().filter_map(|m| m["id"].as_str()).collect()).unwrap_or_default();
                 assert!(methods.contains(&id), "{}: auth method {id} is not among {methods:?}", p.id);
             }
         }
@@ -441,6 +480,30 @@ mod profile_tests {
         assert_eq!(chosen_in(&cfg, Some("/p/one")).id, "opencode");
         assert_eq!(chosen_in(&cfg, Some("/p/two")).id, "codex-acp");
         assert_eq!(chosen_in(&json!({}), Some("/p/two")).id, "claude-acp");
+    }
+
+    #[test]
+    fn no_shipped_profile_signs_in_through_an_auth_method() {
+        // An AuthMethod login is one the probe saw work headless. None did: Codex's `chat-gpt` opens a
+        // browser from the adapter (a Task 19 experiment), OpenCode's `opencode-login` says to run
+        // `opencode auth login` in a terminal, Claude advertises none. So every shipped agent signs in
+        // through a terminal command; a future AuthMethod must name a probed id (checked above).
+        for p in PROFILES.iter().filter(|p| p.shipped) {
+            assert!(!matches!(p.login, Login::AuthMethod { .. }), "{}: no AuthMethod was seen working headless", p.id);
+            if let Login::AuthMethod { id } = p.login { assert!(p.probed_auth_methods.contains(&id)); }
+        }
+        assert_eq!(profile("opencode").unwrap().login, Login::Terminal { command: "opencode auth login" });
+        assert_eq!(profile("codex-acp").unwrap().requires_cli, Some("codex"), "the Setup row says Needs codex installed first");
+    }
+
+    #[test]
+    fn a_terminal_login_runs_the_managed_binary_by_its_path() {
+        assert_eq!(terminal_command("opencode auth login", Some("/Users/a/.chronicle/tools/agents/opencode/1.19.0/opencode")), "/Users/a/.chronicle/tools/agents/opencode/1.19.0/opencode auth login");
+        assert_eq!(terminal_command("opencode auth login", Some("/Users/A B/it's/opencode")), "'/Users/A B/it'\\''s/opencode' auth login");
+        assert_eq!(terminal_command("codex login", Some("/x/codex-acp")), "codex login", "only a binary named like the command is substituted");
+        assert_eq!(terminal_command("claude /login", None), "claude /login");
+        assert_eq!(login_json_with(Login::Terminal { command: "opencode auth login" }, Some("/t/opencode")), json!({ "kind": "terminal", "command": "/t/opencode auth login" }));
+        assert_eq!(login_json_with(Login::None, Some("/t/opencode")), json!({ "kind": "none" }));
     }
 
     #[test]

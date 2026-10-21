@@ -883,6 +883,13 @@ pub fn installed_version(dir: &Path, spec: &LaunchSpec) -> Option<String> {
     }
 }
 
+/// The profile's sign-in as the pane and Setup use it: a Terminal command whose program is the
+/// agent's managed binary runs that binary by its absolute path (OpenCode's `opencode auth login`).
+pub fn login_json_for(p: &crate::agents::AgentProfile) -> Value {
+    let program = match agent_launch(p.id) { Some(crate::acp::AdapterLaunch::Binary { program, .. }) => Some(program.to_string_lossy().to_string()), _ => None };
+    crate::agents::profiles::login_json_with(p.login, program.as_deref())
+}
+
 /// The one config reader (main's `load_config`), so Setup never sees a config the migrations haven't run on.
 fn read_config() -> Value { crate::load_config() }
 
