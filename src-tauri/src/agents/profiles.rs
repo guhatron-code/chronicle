@@ -60,6 +60,12 @@ pub struct AgentProfile {
     pub pinned_npx: Option<PinnedNpx>,
     /// false: the probe did not pass on this Mac — listed as "not yet supported".
     pub shipped: bool,
+    /// true: the spec §11 probe ran this agent and the fixture `acp-<id>.raw.jsonl` records it.
+    #[allow(dead_code)] // read by the fixture test; the Setup row reads `shipped`
+    pub probed: bool,
+    /// Replaces the registry entry's npx args when present (claude-acp: never `--hide-claude-auth`,
+    /// it refuses claude.ai subscription logins; probed on 0.90.1).
+    pub args_override: Option<&'static [&'static str]>,
     pub login: Login,
     pub modes: Modes,
     pub meta: MetaKeys,
@@ -94,6 +100,8 @@ pub static PROFILES: [AgentProfile; 4] = [
         registry_version: "0.75.1",
         pinned_npx: Some(PinnedNpx { package: "@agentclientprotocol/claude-agent-acp@0.75.1", args: &[] }),
         shipped: true,
+        probed: true,
+        args_override: Some(&[]),
         login: Login::Terminal { command: "claude /login" },
         modes: Modes { ask: Some("default"), execute: Some("acceptEdits"), auto: Some("auto"), unattended: Some("bypassPermissions") },
         meta: MetaKeys {
@@ -114,8 +122,11 @@ pub static PROFILES: [AgentProfile; 4] = [
         registry_version: "2.2.3-preview.10",
         pinned_npx: None,
         shipped: true,
+        probed: true,
+        args_override: None,
         login: Login::Terminal { command: "codex login" },
-        modes: Modes { ask: Some("read-only"), execute: None, auto: Some("auto"), unattended: Some("full-access") },
+        // `agent` is the agent's default and stays unmapped (controller ruling R6).
+        modes: Modes { ask: Some("read-only"), execute: Some("workspace-write"), auto: None, unattended: Some("agent-full-access") },
         meta: NO_META,
         extras: MCP_ONLY,
         requires_cli: None,
@@ -127,7 +138,10 @@ pub static PROFILES: [AgentProfile; 4] = [
         name: "Gemini CLI",
         registry_version: "0.64.0",
         pinned_npx: None,
-        shipped: true,
+        // Deferred probe: session/new needed a key. Values below are unverified, so not shipped.
+        shipped: false,
+        probed: false,
+        args_override: None,
         login: Login::AuthMethod { id: "oauth-personal" },
         modes: Modes { ask: Some("default"), execute: Some("autoEdit"), auto: None, unattended: Some("yolo") },
         meta: NO_META,
@@ -142,7 +156,9 @@ pub static PROFILES: [AgentProfile; 4] = [
         registry_version: "1.19.0",
         pinned_npx: None,
         shipped: true,
-        login: Login::None,
+        probed: true,
+        args_override: None,
+        login: Login::AuthMethod { id: "opencode-login" },
         modes: Modes { ask: None, execute: None, auto: None, unattended: None },
         meta: NO_META,
         extras: MCP_ONLY,
@@ -222,11 +238,14 @@ mod profile_tests {
     use super::*;
     use serde_json::json;
 
-    /// None when the probe fixture has not been recorded yet.
-    fn fixture(id: &str) -> Option<Vec<Value>> {
-        let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../src/lib/__fixtures__/acp-{id}.raw.jsonl"));
-        let text = std::fs::read_to_string(&p).ok()?;
-        Some(text.lines().filter(|l| !l.trim().is_empty()).map(|l| serde_json::from_str(l).unwrap()).collect())
+    fn fixture_path(id: &str) -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../src/lib/__fixtures__/acp-{id}.raw.jsonl"))
+    }
+
+    fn fixture(id: &str) -> Vec<Value> {
+        let p = fixture_path(id);
+        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+            .lines().filter(|l| !l.trim().is_empty()).map(|l| serde_json::from_str(l).unwrap()).collect()
     }
 
     #[test]
@@ -241,18 +260,50 @@ mod profile_tests {
 
     #[test]
     fn every_profile_is_pinned_to_something_it_can_launch() {
-        let reg = crate::agents::registry::bundled();
+        use crate::agents::registry::{bundled, launch_spec_in, LaunchSpec};
+        let reg = bundled();
         for p in PROFILES.iter() {
-            let in_registry = reg.agents.iter().any(|e| e.id == p.id && e.version == p.registry_version);
-            let pinned = p.pinned_npx.map(|n| n.package.ends_with(&format!("@{}", p.registry_version))).unwrap_or(false);
-            assert!(in_registry || pinned, "{}: {} is neither in the bundled registry nor a pinned npx package", p.id, p.registry_version);
+            assert_eq!(reg.agents.iter().filter(|e| e.id == p.id).count(), 1, "{}: exactly one registry entry", p.id);
+            let at_pin = reg.agents.iter().filter(|e| e.id == p.id && e.version == p.registry_version).count();
+            if p.id == "claude-acp" {
+                let n = p.pinned_npx.expect("claude-acp runs its pinned npx");
+                assert!(n.package.ends_with(&format!("@{}", p.registry_version)));
+                assert_eq!(at_pin, 0, "the registry carries a newer claude-acp; the pin is not in it");
+            } else {
+                assert!(p.pinned_npx.is_none(), "{}: only claude-acp pins an npx package", p.id);
+                assert_eq!(at_pin, 1, "{}: the bundled registry has {} exactly once", p.id, p.registry_version);
+            }
+        }
+        for p in PROFILES.iter().filter(|p| p.shipped) {
+            let spec = launch_spec_in(reg, p, "darwin-aarch64").unwrap_or_else(|| panic!("{} launches", p.id));
+            match (p.id, spec) {
+                ("claude-acp", LaunchSpec::Npx { package, args }) => {
+                    assert_eq!(package, "@agentclientprotocol/claude-agent-acp@0.75.1");
+                    assert!(args.is_empty());
+                }
+                ("codex-acp", LaunchSpec::Npx { package, args }) => {
+                    assert_eq!(package, "@agentclientprotocol/codex-acp@2.2.3-preview.10");
+                    assert!(args.is_empty());
+                }
+                ("opencode", LaunchSpec::Binary { version, target }) => {
+                    assert_eq!(version, "1.19.0");
+                    assert_eq!(target.cmd, "./opencode");
+                    assert_eq!(target.args, vec!["acp".to_string()]);
+                }
+                (id, other) => panic!("{id}: unexpected launch {other:?}"),
+            }
         }
     }
 
     #[test]
     fn profiles_agree_with_the_probe_fixtures() {
-        for p in PROFILES.iter().filter(|p| p.shipped) {
-            let Some(lines) = fixture(p.id) else { eprintln!("skip {}: no probe fixture recorded yet", p.id); continue };
+        for p in PROFILES.iter() {
+            if !p.probed {
+                assert!(!fixture_path(p.id).exists(), "{}: a probe fixture exists, so flip `probed` to true and verify the profile", p.id);
+                assert!(!p.shipped, "{}: an unprobed agent is not shipped", p.id);
+                continue;
+            }
+            let lines = fixture(p.id);
             let probe = lines.iter().find(|l| l["method"] == "_chronicle/probe").expect("a probe line");
             assert_eq!(probe["params"]["agent"], p.id);
             let ready = lines.iter().find(|l| l["method"] == "_chronicle/session_state" && l["params"]["state"] == "ready").expect("a ready line");
@@ -266,6 +317,36 @@ mod profile_tests {
                 assert!(methods.contains(&id), "{}: auth method {id} is not among {methods:?}", p.id);
             }
         }
+    }
+
+    #[test]
+    fn claude_meta_pointers_resolve_on_the_fixture() {
+        // The recorded Claude turn carries toolName on a tool_call and `_claude/rateLimit` on a
+        // usage_update. parentToolUseId is NOT in the fixture (the probe prompt used no subagent);
+        // it stays unverified here and is covered by the agent-fanout replay fixture in TypeScript.
+        let m = claude().meta;
+        let updates: Vec<Value> = fixture("claude-acp").iter().filter(|l| l["method"] == "session/update").map(|l| l["params"]["update"].clone()).collect();
+        assert!(updates.iter().any(|u| u.pointer(m.tool_name.unwrap()).and_then(Value::as_str) == Some("Bash")), "toolName resolves");
+        assert!(updates.iter().any(|u| u.pointer(m.rate_limit.unwrap()).map(|v| v["status"] == "allowed").unwrap_or(false)), "rate limit resolves through the ~1 escape");
+    }
+
+    #[test]
+    fn canonical_id_rejects_what_it_does_not_ship() {
+        assert_eq!(canonical_id("amp-acp"), None);
+        assert_eq!(canonical_id(""), None);
+        assert_eq!(canonical_id("Claude"), None);
+    }
+
+    #[test]
+    fn the_stance_maps_follow_the_probe() {
+        let codex = profile("codex-acp").unwrap();
+        assert_eq!(mode_for(codex, Stance::Ask), Some("read-only"));
+        assert_eq!(mode_for(codex, Stance::Execute), Some("workspace-write"));
+        assert_eq!(mode_for(codex, Stance::Auto), None);
+        assert_eq!(mode_for(codex, Stance::Unattended), Some("agent-full-access"));
+        let oc = profile("opencode").unwrap();
+        assert!(Stance::ALL.iter().all(|s| mode_for(oc, *s).is_none()), "opencode advertises no modes");
+        assert!(!profile("gemini").unwrap().probed);
     }
 
     #[test]
@@ -283,12 +364,13 @@ mod profile_tests {
 
     #[test]
     fn the_project_choice_wins_then_the_default_then_claude() {
-        let cfg = json!({ "agent": "gemini", "project_agents": { "/p/a": "codex-acp", "/p/bad": "amp-acp" } });
+        let cfg = json!({ "agent": "opencode", "project_agents": { "/p/a": "codex-acp", "/p/bad": "amp-acp" } });
         assert_eq!(chosen_in(&cfg, Some("/p/a")).id, "codex-acp");
-        assert_eq!(chosen_in(&cfg, Some("/p/other")).id, "gemini");
-        assert_eq!(chosen_in(&cfg, Some("/p/bad")).id, "gemini", "an unknown project choice falls through");
+        assert_eq!(chosen_in(&cfg, Some("/p/other")).id, "opencode");
+        assert_eq!(chosen_in(&cfg, Some("/p/bad")).id, "opencode", "an unknown project choice falls through");
         assert_eq!(chosen_in(&json!({}), None).id, "claude-acp");
         assert_eq!(chosen_in(&json!({ "agent": "codex" }), None).id, "codex-acp", "a legacy name still reads");
+        assert_eq!(chosen_in(&json!({ "agent": "gemini" }), None).id, "claude-acp", "an unshipped agent falls through");
     }
 
     #[test]

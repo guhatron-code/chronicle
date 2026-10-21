@@ -3,4 +3,5 @@
 pub mod profiles;
 pub mod registry;
 
+#[allow(unused_imports)]
 pub use profiles::{claude, profile, AgentProfile, PROFILES};

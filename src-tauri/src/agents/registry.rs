@@ -63,7 +63,8 @@ pub fn platform_key() -> String {
 pub fn launch_spec_in(reg: &Registry, p: &AgentProfile, platform: &str) -> Option<LaunchSpec> {
     if let Some(e) = reg.agents.iter().find(|e| e.id == p.id && e.version == p.registry_version) {
         if let Some(n) = &e.distribution.npx {
-            return Some(LaunchSpec::Npx { package: n.package.clone(), args: n.args.clone() });
+            let args = match p.args_override { Some(a) => a.iter().map(|s| s.to_string()).collect(), None => n.args.clone() };
+            return Some(LaunchSpec::Npx { package: n.package.clone(), args });
         }
         return e.distribution.binary.as_ref()?.get(platform)
             .map(|t| LaunchSpec::Binary { version: e.version.clone(), target: t.clone() });
@@ -130,6 +131,34 @@ mod registry_tests {
         assert_eq!(target.cmd, "./opencode");
         assert_eq!(target.sha256.len(), 64);
         assert!(target.archive.starts_with("https://"));
+    }
+
+    #[test]
+    fn the_args_override_drops_the_registry_args() {
+        let reg = parse(r#"{"version":"x","agents":[{"id":"claude-acp","name":"Claude","version":"0.75.1",
+            "distribution":{"npx":{"package":"@agentclientprotocol/claude-agent-acp@0.75.1","args":["--hide-claude-auth"]}}}]}"#).unwrap();
+        assert_eq!(launch_spec_in(&reg, claude(), "darwin-aarch64"),
+            Some(LaunchSpec::Npx { package: "@agentclientprotocol/claude-agent-acp@0.75.1".into(), args: vec![] }));
+        // without an override the registry's args pass through
+        let gem = parse(r#"{"version":"x","agents":[{"id":"gemini","name":"G","version":"0.64.0",
+            "distribution":{"npx":{"package":"@google/gemini-cli@0.64.0","args":["--acp"]}}}]}"#).unwrap();
+        assert_eq!(launch_spec_in(&gem, profile("gemini").unwrap(), "darwin-aarch64"),
+            Some(LaunchSpec::Npx { package: "@google/gemini-cli@0.64.0".into(), args: vec!["--acp".into()] }));
+    }
+
+    #[test]
+    fn an_unshipped_agent_has_no_launch() {
+        assert_eq!(launch_spec(profile("gemini").unwrap()), None);
+    }
+
+    #[test]
+    fn shipped_binary_targets_carry_a_sha256() {
+        for p in PROFILES.iter().filter(|p| p.shipped) {
+            let e = bundled().agents.iter().find(|e| e.id == p.id).unwrap();
+            for (plat, t) in e.distribution.binary.iter().flatten() {
+                assert!(t.sha256.len() == 64 && t.sha256.chars().all(|c| c.is_ascii_hexdigit()), "{} {plat}: sha256 {:?}", p.id, t.sha256);
+            }
+        }
     }
 
     #[test]
