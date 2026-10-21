@@ -530,7 +530,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       // the adapter's own replay is suppressed, so blanking here would leave
       // the session open on nothing — the empty-thread-after-Resume bug
       const keep = params.resume === true ? s.entries : [];
-      Object.assign(s, blank(), { lane: s.lane, agent: s.agent, phase: "installing" as AgentPhase, draft: s.draft, warm: s.warm, entries: keep });
+      Object.assign(s, blank(), { lane: s.lane, agent: s.agent, stances: s.stances, phase: "installing" as AgentPhase, draft: s.draft, warm: s.warm, entries: keep });
       // the thread and the queue are both gone; a card waiting in that queue
       // must not go on waiting for a prompt that no longer exists (`live`
       // only: a replay must never close the running round's card)
@@ -1083,7 +1083,7 @@ export function closeAgentViewing(dir: string) {
 export async function resumeAgentSession(dir: string, id: string): Promise<void> {
   const entries = await replayTranscript(dir, id);
   const s = agentSessionFor(dir);
-  Object.assign(s, blank(), { lane: s.lane, phase: "installing" as AgentPhase, entries });
+  Object.assign(s, blank(), { lane: s.lane, agent: s.agent, stances: s.stances, phase: "installing" as AgentPhase, entries });
   dropQueueWaiters(dir); // the queue went with the thread
   notify();
   try {

@@ -111,14 +111,15 @@ function ConfigSelect({ dir, optionId, title }: { dir: string; optionId: string;
 /** The permission mode as a dropdown — same shape as the model and effort
  *  selects. The one-time confirms live in `switchMode`, not here. */
 function ModeSelect({
-  current, options, disabled, onPick,
+  current, options, disabled, onPick, fallbackLabel = "Ask first",
 }: {
-  current: string;
+  current: string | null;
+  fallbackLabel?: string;
   options: { value: string; name: string; description: string }[];
   disabled: boolean;
   onPick: (modeId: string) => void;
 }) {
-  const cur = options.find((o) => o.value === current);
+  const cur = current == null ? undefined : options.find((o) => o.value === current);
   return (
     <DropdownMenu>
       <Hint label={cur?.description ?? "How much the agent asks before acting"}>
@@ -129,7 +130,7 @@ function ModeSelect({
             disabled={disabled}
             className="inline-flex h-[26px] shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
           >
-            <span className="max-w-[110px] truncate">{cur?.name ?? "Ask first"}</span>
+            <span className="max-w-[110px] truncate">{cur?.name ?? fallbackLabel}</span>
             <svg className="shrink-0" width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="m3 4.5 3 3 3-3" />
             </svg>
@@ -137,7 +138,7 @@ function ModeSelect({
         </DropdownMenuTrigger>
       </Hint>
       <DropdownMenuContent data-config-menu="mode" align="start" side="top" className="w-[300px]">
-        <DropdownMenuRadioGroup value={current} onValueChange={onPick}>
+        <DropdownMenuRadioGroup value={current ?? ""} onValueChange={onPick}>
           {options.map((o) => (
             <DropdownMenuRadioItem key={o.value} value={o.value} className={CONFIG_ROW}>
               <span className="text-[12.5px] text-text-primary">{o.name}</span>
@@ -448,10 +449,12 @@ export function Composer({
 
   const stances = availableStances(s.stances);
   const current = currentStance(s.stances, s.modes?.currentModeId);
+  // a mode no stance maps to (plan, agent…) shows as itself, never as a false "Ask first"
+  const ownModeName = s.modes?.availableModes.find((m) => m.id === s.modes?.currentModeId)?.name;
 
   const switchStance = (next: string) => {
     const stance = next as Stance;
-    if (stance === current || !stances.includes(stance)) return;
+    if (!stances.includes(stance) || s.stances[stance] === s.modes?.currentModeId) return;
     const apply = () =>
       void setAgentStance(dir, stance).catch((e) => toastError("Couldn't switch the mode", String(e).slice(0, 90)));
     if (stance !== "ask" && stanceNeedsConfirm(stance, s)) onConfirm({ ...CONFIRMS[stance], onConfirm: apply });
@@ -619,6 +622,7 @@ export function Composer({
         {!designLane && stances.length > 1 && (
           <ModeSelect
             current={current}
+            fallbackLabel={ownModeName ?? "Choose a stance"}
             disabled={disabled}
             onPick={switchStance}
             options={stances.map((k) => ({ value: k, ...STANCE_COPY[k] }))}

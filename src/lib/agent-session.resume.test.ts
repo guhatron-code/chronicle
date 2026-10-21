@@ -49,3 +49,17 @@ describe("the installing state and the thread", () => {
     expect(s.entries).toEqual([]);
   });
 });
+
+describe("resuming a thread", () => {
+  it("keeps the agent and its stances until the next ready arrives", async () => {
+    agent.subscribeAgent(() => {});
+    await Promise.resolve();
+    const s = agent.agentSessionFor("/q");
+    s.agent = "codex-acp";
+    s.stances = { ask: "read-only", execute: "workspace-write" };
+    await agent.resumeAgentSession("/q", "sess-1");
+    expect(s.phase).toBe("installing");
+    expect(s.agent).toBe("codex-acp");
+    expect(s.stances).toEqual({ ask: "read-only", execute: "workspace-write" });
+  });
+});

@@ -17,12 +17,21 @@ describe("stances", () => {
 
   it("offers nothing to pick for an agent with no modes", () => {
     expect(availableStances({})).toEqual([]);
-    expect(currentStance({}, null)).toBe("ask");
+    expect(currentStance({}, null)).toBeNull();
   });
 
   it("reads the current stance back from the session's mode id", () => {
     expect(currentStance(claude, "acceptEdits")).toBe("execute");
-    expect(currentStance(claude, "plan")).toBe("ask"); // a mode no stance maps to reads as asking
+  });
+
+  it("reads a mode no stance maps to as no stance, and still offers Ask first", () => {
+    expect(currentStance(claude, "plan")).toBeNull();
+    expect(availableStances(claude)).toContain("ask");
+  });
+
+  it("offers stances even when the session has no modes object", () => {
+    expect(currentStance(claude, undefined)).toBeNull();
+    expect(availableStances(claude)).toEqual(["ask", "execute", "unattended"]);
   });
 
   it("asks once per session before the stances that stop asking", () => {

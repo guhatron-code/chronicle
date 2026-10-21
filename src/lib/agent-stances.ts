@@ -31,9 +31,9 @@ export function availableStances(map: StanceMap): Stance[] {
   return STANCE_ORDER.filter((k) => map[k] != null);
 }
 
-/** The stance the session is in, read back from its current mode id; anything unmapped reads as asking. */
-export function currentStance(map: StanceMap, currentModeId: string | null | undefined): Stance {
-  return STANCE_ORDER.find((k) => currentModeId != null && map[k] === currentModeId) ?? "ask";
+/** The stance the session is in, read back from its current mode id; null when no stance maps to it (the agent's own mode, e.g. plan). */
+export function currentStance(map: StanceMap, currentModeId: string | null | undefined): Stance | null {
+  return STANCE_ORDER.find((k) => currentModeId != null && map[k] === currentModeId) ?? null;
 }
 
 /** The once-per-session confirm before a stance that stops asking. */
