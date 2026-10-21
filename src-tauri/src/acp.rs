@@ -20,6 +20,7 @@ use std::sync::{mpsc, Arc, Mutex};
 
 const INIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180); // first npx run downloads the bridge
 const NEW_SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+const AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300); // a browser sign-in takes a person's time
 const AUTH_REQUIRED_CODE: i64 = -32000;
 
 pub type Emit = Arc<dyn Fn(Value) + Send + Sync>;
@@ -1282,7 +1283,23 @@ impl AcpSession {
                 ("session/new", v)
             }
         };
-        match self.request_blocking(method, params, NEW_SESSION_TIMEOUT) {
+        let is_auth = |e: &str| serde_json::from_str::<Value>(e).ok()
+            .and_then(|v| v.get("code").and_then(|c| c.as_i64())) == Some(AUTH_REQUIRED_CODE);
+        let mut attempt = 0;
+        let outcome = loop {
+            match self.request_blocking(method, params.clone(), NEW_SESSION_TIMEOUT) {
+                Err(e) if is_auth(&e) && attempt == 0 => {
+                    // an AuthMethod profile signs in from here: the adapter opens the
+                    // browser itself; we wait for it, then ask for the session again
+                    let crate::agents::profiles::Login::AuthMethod { id } = self.profile.login else { break Err(e) };
+                    attempt += 1;
+                    self.emit_needs_login(true);
+                    if self.request_blocking("authenticate", json!({ "methodId": id }), AUTH_TIMEOUT).is_err() { break Err(e); }
+                }
+                other => break other,
+            }
+        };
+        match outcome {
             Ok(resp) => {
                 self.suppress_updates.store(false, Ordering::SeqCst);
                 let sid = match &self.resume {
@@ -1323,23 +1340,28 @@ impl AcpSession {
             }
             Err(e) => {
                 self.suppress_updates.store(false, Ordering::SeqCst);
-                // auth_required (-32000): the adapter wants a login run in a
-                // terminal — surface needs-login and end; the frontend opens
-                // `claude /login` in a terminal tab and restarts after it exits.
-                let is_auth = serde_json::from_str::<Value>(&e).ok()
-                    .and_then(|v| v.get("code").and_then(|c| c.as_i64()))
-                    == Some(AUTH_REQUIRED_CODE);
-                if is_auth {
-                    let methods = self.agent_caps.lock().ok()
-                        .and_then(|g| g.get("authMethods").cloned())
-                        .unwrap_or(Value::Null);
-                    self.emit_state(json!({ "state": "needs-login", "authMethods": methods }));
+                // auth_required (-32000): surface needs-login with this agent's own
+                // sign-in (spec §5) and end; a Terminal login restarts the session
+                // when its terminal tab exits.
+                if is_auth(&e) {
+                    self.emit_needs_login(false);
                     self.shutdown(None, None);
                 } else {
                     self.fail_handshake(&e);
                 }
             }
         }
+    }
+
+    fn emit_needs_login(&self, waiting: bool) {
+        let methods = self.agent_caps.lock().ok().and_then(|g| g.get("authMethods").cloned()).unwrap_or(Value::Null);
+        self.emit_state(json!({
+            "state": "needs-login",
+            "agent": self.profile.id,
+            "login": crate::agents::profiles::login_json(self.profile.login),
+            "waiting": waiting,
+            "authMethods": methods,
+        }));
     }
 
     fn fail_handshake(self: &Arc<Self>, err: &str) {
@@ -1945,9 +1967,16 @@ for line in sys.stdin:
     open(os.path.join(sys.argv[1], ".mock-requests.jsonl"), "a").write(json.dumps(msg) + "\n")
     m = msg.get("method")
     if m == "initialize":
+        methods = [{"id":"oauth-personal","name":"Log in with Google"}] if os.path.exists(os.path.join(project, ".needs-auth")) else []
         send({"jsonrpc":"2.0","id":msg["id"],"result":{"protocolVersion":1,
-            "agentCapabilities":{"loadSession":False},"authMethods":[]}})
+            "agentCapabilities":{"loadSession":False},"authMethods":methods}})
+    elif m == "authenticate":
+        state["authed"] = msg["params"].get("methodId")
+        send({"jsonrpc":"2.0","id":msg["id"],"result":{}})
     elif m == "session/new":
+        if os.path.exists(os.path.join(project, ".needs-auth")) and not state.get("authed"):
+            send({"jsonrpc":"2.0","id":msg["id"],"error":{"code":-32000,"message":"Authentication required"}})
+            continue
         send({"jsonrpc":"2.0","id":msg["id"],"result":{"sessionId":"sess-1",
             "modes":{"currentModeId":"default","availableModes":[
                 {"id":"default","name":"Always Ask"},
@@ -2080,6 +2109,58 @@ for line in sys.stdin:
         let designs = if lane == Lane::Design { Some(dir.join(".chronicle/designs")) } else { None };
         assert!(start(&state, emit, key.clone(), lane, profile, dir.clone(), dir.clone(), vec![dir.clone()], designs, extras, None, cmd).unwrap());
         Some(Harness { state, rx, key, dir })
+    }
+
+    fn start_mock_prepped(name: &str, profile: &'static crate::agents::AgentProfile, prep: impl Fn(&Path)) -> Option<Harness> {
+        let py = python3()?;
+        let dir = tmp(name);
+        prep(&dir);
+        let script = dir.join(".mock-agent.py");
+        std::fs::write(&script, MOCK_AGENT).unwrap();
+        let mut cmd = std::process::Command::new(py);
+        cmd.arg(&script).arg(&dir);
+        let (tx, rx) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let state = AcpState::new();
+        let key = dir.to_string_lossy().to_string();
+        assert!(start(&state, emit, key.clone(), Lane::Chat, profile, dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), None, cmd).unwrap());
+        Some(Harness { state, rx, key, dir })
+    }
+
+    static AUTH_AGENT: crate::agents::AgentProfile = crate::agents::AgentProfile {
+        id: "auth-test", name: "Auth Test", registry_version: "0", pinned_npx: None, shipped: true, probed: false, args_override: None,
+        login: crate::agents::profiles::Login::AuthMethod { id: "oauth-personal" },
+        modes: crate::agents::profiles::Modes { ask: Some("default"), execute: None, auto: None, unattended: None },
+        meta: crate::agents::profiles::NO_META,
+        extras: crate::agents::profiles::Extras { mcp_servers: true, plugins: false, settings: false },
+        requires_cli: None, blank_env: &[], credentials: crate::agents::profiles::Credentials::Unknown,
+    };
+
+    #[test]
+    fn a_terminal_login_names_the_agents_command_and_ends() {
+        let Some(h) = start_mock_prepped("login-terminal", crate::agents::claude(), |d| std::fs::write(d.join(".needs-auth"), "").unwrap()) else { return };
+        let ev = wait_for(&h.rx, 20, |v| state_is(v, "needs-login"));
+        assert_eq!(ev.pointer("/message/params/agent").and_then(|v| v.as_str()), Some("claude-acp"));
+        assert_eq!(ev.pointer("/message/params/login/kind").and_then(|v| v.as_str()), Some("terminal"));
+        assert_eq!(ev.pointer("/message/params/login/command").and_then(|v| v.as_str()), Some("claude /login"));
+        assert_eq!(ev.pointer("/message/params/waiting"), Some(&json!(false)));
+        wait_for(&h.rx, 20, |v| state_is(v, "ended"));
+        let log = std::fs::read_to_string(h.dir.join(".mock-requests.jsonl")).unwrap_or_default();
+        assert!(!log.contains("\"authenticate\""), "a terminal login never calls authenticate");
+    }
+
+    #[test]
+    fn an_auth_method_login_authenticates_and_carries_on() {
+        let Some(h) = start_mock_prepped("login-method", &AUTH_AGENT, |d| std::fs::write(d.join(".needs-auth"), "").unwrap()) else { return };
+        let waiting = wait_for(&h.rx, 20, |v| state_is(v, "needs-login"));
+        assert_eq!(waiting.pointer("/message/params/waiting"), Some(&json!(true)));
+        assert_eq!(waiting.pointer("/message/params/login/id").and_then(|v| v.as_str()), Some("oauth-personal"));
+        let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        assert_eq!(ready.pointer("/message/params/agent").and_then(|v| v.as_str()), Some("auth-test"));
+        let log = std::fs::read_to_string(h.dir.join(".mock-requests.jsonl")).unwrap_or_default();
+        let auth = log.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|v| v["method"] == "authenticate").expect("authenticate was sent");
+        assert_eq!(auth["params"]["methodId"], "oauth-personal");
+        h.state.drain();
     }
 
     #[test]

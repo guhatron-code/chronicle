@@ -3817,9 +3817,17 @@ async fn setup_run_all(app: tauri::AppHandle, setup_state: State<'_, setup::Setu
 /// Terminal's PATH so `claude`/`gh` resolve.
 #[tauri::command]
 async fn setup_open_login(kind: String) -> Result<Value, String> {
-    let (bin_name, args, title) = match kind.as_str() {
-        "claude" => ("claude", "/login", "claude · sign-in"),
-        "github" => ("gh", "auth login", "github · sign-in"),
+    let agent_cmd = kind.strip_prefix("agent:").and_then(agents::profile).and_then(|p| match p.login {
+        agents::profiles::Login::Terminal { command } => Some((command, p.name)),
+        _ => None,
+    });
+    let (bin_name, args, title): (&str, &str, String) = match (kind.as_str(), agent_cmd) {
+        ("claude", _) => ("claude", "/login", "claude · sign-in".into()),
+        ("github", _) => ("gh", "auth login", "github · sign-in".into()),
+        (_, Some((command, name))) => {
+            let (bin, rest) = command.split_once(' ').unwrap_or((command, ""));
+            (bin, rest, format!("{} · sign-in", name.to_lowercase()))
+        }
         _ => return Err("unknown sign-in".into()),
     };
     let bin = setup::resolve(bin_name).ok_or("that tool isn't installed yet")?;
