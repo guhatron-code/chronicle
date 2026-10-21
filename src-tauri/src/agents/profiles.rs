@@ -12,8 +12,6 @@ pub enum Login {
     Terminal { command: &'static str },
     /// The adapter's own `authenticate` with this method id works headless.
     AuthMethod { id: &'static str },
-    /// The agent runs on its own keys and config.
-    None,
 }
 
 /// The agent's mode id for each of Chronicle's stances (spec §6). `None`: no such mode.
@@ -40,9 +38,10 @@ pub struct MetaKeys {
 
 pub const NO_META: MetaKeys = MetaKeys { parent_tool_use: None, tool_name: None, subagent: None, subagent_tools: &[], rate_limit: None };
 
-/// What a session may be given beyond the prompt (spec §8).
+/// What a session may be given beyond the prompt (spec §8). `plugins`: Claude Code's `_meta`, which
+/// carries the design plugin and its settings together.
 #[derive(Debug, Clone, Copy)]
-pub struct Extras { pub mcp_servers: bool, pub plugins: bool, pub settings: bool }
+pub struct Extras { pub mcp_servers: bool, pub plugins: bool }
 
 /// Where a signed-in agent leaves its login, for the Setup row (probe-recorded).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,8 +94,8 @@ impl Stance {
     }
 }
 
-const ALL_EXTRAS: Extras = Extras { mcp_servers: true, plugins: true, settings: true };
-const MCP_ONLY: Extras = Extras { mcp_servers: true, plugins: false, settings: false };
+const ALL_EXTRAS: Extras = Extras { mcp_servers: true, plugins: true };
+const MCP_ONLY: Extras = Extras { mcp_servers: true, plugins: false };
 
 pub static PROFILES: [AgentProfile; 4] = [
     AgentProfile {
@@ -269,7 +268,6 @@ pub fn login_json(l: Login) -> Value {
     match l {
         Login::Terminal { command } => json!({ "kind": "terminal", "command": command }),
         Login::AuthMethod { id } => json!({ "kind": "auth_method", "id": id }),
-        Login::None => json!({ "kind": "none" }),
     }
 }
 
@@ -503,13 +501,12 @@ mod profile_tests {
         assert_eq!(terminal_command("codex login", Some("/x/codex-acp")), "codex login", "only a binary named like the command is substituted");
         assert_eq!(terminal_command("claude /login", None), "claude /login");
         assert_eq!(login_json_with(Login::Terminal { command: "opencode auth login" }, Some("/t/opencode")), json!({ "kind": "terminal", "command": "/t/opencode auth login" }));
-        assert_eq!(login_json_with(Login::None, Some("/t/opencode")), json!({ "kind": "none" }));
+        assert_eq!(login_json_with(Login::AuthMethod { id: "x" }, Some("/t/opencode")), json!({ "kind": "auth_method", "id": "x" }));
     }
 
     #[test]
     fn login_json_names_the_kind() {
         assert_eq!(login_json(Login::Terminal { command: "codex login" }), json!({ "kind": "terminal", "command": "codex login" }));
         assert_eq!(login_json(Login::AuthMethod { id: "oauth-personal" }), json!({ "kind": "auth_method", "id": "oauth-personal" }));
-        assert_eq!(login_json(Login::None), json!({ "kind": "none" }));
     }
 }

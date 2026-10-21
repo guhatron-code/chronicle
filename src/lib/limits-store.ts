@@ -1,8 +1,10 @@
 /*
  * Round 9 — the account's rate limits, as the adapter forwards them. Claude
  * Code emits a rate_limit_event after every API response; claude-agent-acp
- * turns it into a usage_update whose _meta["_claude/rateLimit"] carries the
- * binding window. Limits are per ACCOUNT, not per project, so there is one
+ * turns it into a usage_update carrying the binding window, and Rust stamps
+ * that onto the update as `_chronicle.rateLimit` (agents/normalize.rs, from
+ * the profile's `rate_limit` pointer) — the store never reads an agent's own
+ * namespace. Limits are per ACCOUNT, not per project, so there is one
  * reading here and the title bar draws it. The reducer records it only from
  * a live session (agent-session.ts); replay never touches this.
  */
@@ -41,7 +43,7 @@ const num = (v: unknown): number | null => (typeof v === "number" && Number.isFi
 const pct = (v: unknown): number | null => { const n = num(v); return n == null ? null : n <= 1 ? Math.round(n * 1000) / 10 : n; };
 const secsToMs = (v: unknown): number | null => { const n = num(v); return n == null ? null : Math.round(n * 1000); };
 
-/** Normalise one `_claude/rateLimit` payload into the reading and publish it.
+/** Normalise one `_chronicle.rateLimit` payload into the reading and publish it.
  *  Anything that is not an object records nothing and returns null. */
 export function recordRateLimit(meta: unknown, now: number = Date.now()): LimitsReading | null {
   if (!meta || typeof meta !== "object") return null;

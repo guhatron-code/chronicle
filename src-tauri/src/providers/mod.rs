@@ -3,8 +3,10 @@
 //! two calls; `Agent` needs no key and rides the user's agent.
 pub mod agent;
 pub mod config;
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub mod http;
 pub mod keys;
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub mod schema;
 
 use serde::{Deserialize, Serialize};
@@ -23,6 +25,7 @@ pub enum Provider {
     Local { base_url: String },
 }
 
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 impl Provider {
     pub fn id(&self) -> &'static str {
         match self {
@@ -36,26 +39,31 @@ impl Provider {
     }
 }
 
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub struct CompleteRequest { pub system: String, pub prompt: String, pub schema: Value, pub max_tokens: u32 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub enum Criterion {
     Choice { name: String, options: Vec<String> },
     Score { name: String, min: i32, max: i32 },
     Noul { name: String },
 }
 
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 impl Criterion {
     pub fn name(&self) -> &str {
         match self { Criterion::Choice { name, .. } | Criterion::Score { name, .. } | Criterion::Noul { name } => name }
     }
 }
 
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub struct DecisionRequest { pub state: String, pub instructions: String, pub criteria: Vec<Criterion> }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub enum Answer {
     Choice { choice: String, probabilities: HashMap<String, f32>, confidence: f32 },
     Score { value: i32, confidence: f32 },
@@ -63,6 +71,7 @@ pub enum Answer {
 }
 
 #[derive(Debug, Clone, Serialize)]
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub struct Decision {
     pub answers: HashMap<String, Answer>,
     pub model: String,
@@ -72,6 +81,7 @@ pub struct Decision {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub enum CallError {
     /// HTTP 401/403: the saved key no longer works. The caller falls back to the agent.
     KeyRefused(String),
@@ -84,6 +94,7 @@ impl std::fmt::Display for CallError {
     }
 }
 
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub trait Calls: Send + Sync {
     /// One schema-checked JSON answer.
     fn complete_json(&self, req: &CompleteRequest) -> Result<Value, CallError>;
@@ -93,9 +104,11 @@ pub trait Calls: Send + Sync {
     fn model(&self) -> String;
 }
 
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 const DECIDE_SYSTEM: &str = "You make small, bounded decisions for a coding tool. For each named criterion give your answer, a probability for every option, and how confident you are, as numbers from 0 to 1. Answer with JSON only.";
 
 /// A decision through `complete_json`, for every provider without native decisions.
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub fn emulate_decide(c: &dyn Calls, req: &DecisionRequest) -> Result<Decision, CallError> {
     let schema = schema::decision_schema(&req.criteria);
     let v = c.complete_json(&CompleteRequest {
@@ -109,6 +122,7 @@ pub fn emulate_decide(c: &dyn Calls, req: &DecisionRequest) -> Result<Decision, 
 }
 
 /// A refused key (and only that) falls back; the decision says why.
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub fn decide_with_fallback(primary: &dyn Calls, fallback: &dyn Calls, req: &DecisionRequest) -> Result<Decision, CallError> {
     match primary.decide(req) {
         Err(CallError::KeyRefused(why)) => fallback.decide(req).map(|mut d| { d.model = format!("{} ({why})", d.model); d }),
@@ -116,6 +130,7 @@ pub fn decide_with_fallback(primary: &dyn Calls, fallback: &dyn Calls, req: &Dec
     }
 }
 
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub fn complete_with_fallback(primary: &dyn Calls, fallback: &dyn Calls, req: &CompleteRequest) -> Result<(Value, Option<String>), CallError> {
     match primary.complete_json(req) {
         Err(CallError::KeyRefused(why)) => fallback.complete_json(req).map(|v| (v, Some(why))),
@@ -141,7 +156,7 @@ pub fn agent_calls(project_dir: &std::path::Path) -> agent::AgentCalls {
 
 /// What answers a role for this project right now: the chosen provider when its key or address is there,
 /// else the agent. Reads `config.json` and the Keychain; posts through curl.
-#[allow(dead_code)] // the Runs plan's judge and reviewer call it
+#[allow(dead_code)] // consumed by the Runs plan (Plan B): its judge and reviewer call it
 pub fn for_role(role: config::Role, project_dir: &std::path::Path) -> Box<dyn Calls + Send + Sync> {
     let cfg = crate::load_config();
     let p = config::resolve(&cfg, role, &keys::Keychain);

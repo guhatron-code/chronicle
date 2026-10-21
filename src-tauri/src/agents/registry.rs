@@ -6,13 +6,13 @@ use super::profiles::AgentProfile;
 use serde::Deserialize;
 use std::collections::HashMap;
 
+/// Only what Chronicle reads; the registry's other fields (its own version, display names) are ignored.
 #[derive(Debug, Deserialize)]
-pub struct Registry { pub version: String, pub agents: Vec<Entry> }
+pub struct Registry { pub agents: Vec<Entry> }
 
 #[derive(Debug, Deserialize)]
 pub struct Entry {
     pub id: String,
-    pub name: String,
     pub version: String,
     #[serde(default)]
     pub distribution: Distribution,

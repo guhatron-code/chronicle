@@ -1183,6 +1183,9 @@ impl AcpSession {
     }
 
     fn append_transcript(&self, msg: &Value) {
+        // a reviewer turn is one call's prompt (a diff) and its reply: nothing to resume, so nothing
+        // is kept — the Runs judge makes many such calls and they must not pile up in the project
+        if self.lane == Lane::Reviewer { return; }
         if let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) {
             transcript::append(&self.store, &sid, msg);
         }
@@ -2012,7 +2015,7 @@ impl AcpSession {
    (env-gated) the real adapter ================= */
 
 #[cfg(test)]
-mod acp_tests {
+pub(crate) mod acp_tests {
     use super::*;
     use std::time::Duration;
 
@@ -2174,9 +2177,16 @@ for line in sys.stdin:
         dir: PathBuf,
     }
 
-    fn python3() -> Option<String> {
-        ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
-            .iter().find(|p| Path::new(p).exists()).map(|s| s.to_string())
+    /// The mock agents' interpreter. Without one the mock-agent tests skip — and say so, every
+    /// time; CHRONICLE_REQUIRE_PYTHON=1 turns a missing python3 into a failure instead.
+    pub(crate) fn python3() -> Option<String> {
+        let found = ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"]
+            .iter().find(|p| Path::new(p).exists()).map(|s| s.to_string());
+        if found.is_none() {
+            assert!(std::env::var("CHRONICLE_REQUIRE_PYTHON").ok().as_deref() != Some("1"), "CHRONICLE_REQUIRE_PYTHON=1, but no python3 for the mock agents");
+            eprintln!("skip: no python3 at /usr/bin, /opt/homebrew/bin or /usr/local/bin — this mock-agent test did not run");
+        }
+        found
     }
 
     fn start_mock(name: &str) -> Option<Harness> {
@@ -2252,7 +2262,7 @@ for line in sys.stdin:
         login: crate::agents::profiles::Login::AuthMethod { id: "oauth-personal" },
         modes: crate::agents::profiles::Modes { ask: Some("default"), execute: None, auto: None, unattended: None },
         meta: crate::agents::profiles::NO_META,
-        extras: crate::agents::profiles::Extras { mcp_servers: true, plugins: false, settings: false },
+        extras: crate::agents::profiles::Extras { mcp_servers: true, plugins: false },
         requires_cli: None, probed_auth_methods: &["oauth-personal"], blank_env: &[], credentials: crate::agents::profiles::Credentials::Unknown,
     };
 
@@ -3040,6 +3050,17 @@ for line in sys.stdin:
         assert_eq!(answers["502"], "once", "a read is allowed once, never always");
         assert!(!h.dir.join("reviewer-wrote.txt").exists());
         assert!(!saw_checkpoint, "the reviewer takes no checkpoint");
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_reviewer_session_keeps_no_transcript() {
+        let Some(h) = start_mock_as("reviewer-no-transcript", crate::agents::claude(), Lane::Reviewer, LaneExtras::default()) else { return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        h.state.get(&h.key).unwrap().prompt(vec![json!({"type":"text","text":"hello"})], "hello".into()).unwrap();
+        wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/turn_end"));
+        let reviews = Lane::Reviewer.store(&h.dir);
+        assert!(!transcript::path(&reviews, "sess-1").exists(), "no reviewer transcript in {}", reviews.display());
         h.state.drain();
     }
 

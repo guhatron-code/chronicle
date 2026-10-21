@@ -269,6 +269,22 @@ fn extract_zip(archive: &Path, into: &Path) -> Result<(), String> {
     }
 }
 
+/// An agent's zip is listed before anything is unpacked, as the tar path is: a `..` or absolute
+/// name, or any symlink entry, is refused — `ditto` would follow a link it had just created, and the
+/// after-the-fact link check can't undo that write.
+fn extract_zip_checked(archive: &Path, into: &Path) -> Result<(), String> {
+    let refused = || Err("the download tried to write outside its own folder, so it was refused".to_string());
+    let names = std::process::Command::new("zipinfo").arg("-1").arg(archive).output().map_err(|e| e.to_string())?;
+    if !names.status.success() { return Err("couldn't read the download's listing".into()); }
+    if String::from_utf8_lossy(&names.stdout).lines().any(|n| !safe_entry_name(n)) { return refused(); }
+    // the long listing's first column is the entry's mode; `l…` is a symlink
+    let long = std::process::Command::new("zipinfo").arg(archive).output().map_err(|e| e.to_string())?;
+    if !long.status.success() { return Err("couldn't read the download's listing".into()); }
+    let is_mode = |w: &str| w.len() == 10 && w.starts_with('l') && w[1..].chars().all(|c| "rwxsStT-".contains(c));
+    if String::from_utf8_lossy(&long.stdout).lines().any(|l| l.split_whitespace().next().map(is_mode).unwrap_or(false)) { return refused(); }
+    extract_zip(archive, into)
+}
+
 fn symlink_into_bin(target: &Path, name: &str) -> Result<(), String> {
     std::fs::create_dir_all(bin_dir()).map_err(|e| e.to_string())?;
     let link = bin_dir().join(name);
@@ -799,7 +815,7 @@ pub fn unpack_verified(archive: &Path, dir: &Path, version: &str, t: &BinaryTarg
     }
     let staging = dir.with_extension("staging");
     let _ = std::fs::remove_dir_all(&staging);
-    let unpacked = if t.archive.ends_with(".zip") { extract_zip(archive, &staging) } else { extract_tar_gz(archive, &staging) };
+    let unpacked = if t.archive.ends_with(".zip") { extract_zip_checked(archive, &staging) } else { extract_tar_gz(archive, &staging) };
     let _ = std::fs::remove_file(archive);
     if let Err(e) = unpacked {
         let _ = std::fs::remove_dir_all(&staging);
@@ -931,18 +947,24 @@ fn install_agent(check: &str, agent: &str, emit: &Emit, cancel: &AtomicBool) -> 
         LaunchSpec::Npx { package, .. } => {
             let npm = resolve("npm").ok_or("the engine isn't installed yet — install it first")?;
             emit_state(emit, check, json!({ "state": "installing", "pct": Value::Null }));
-            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            // staged like a binary install: a failed install (a bad pin bump) never breaks the working one
+            let staging = dir.with_extension("staging");
+            let _ = std::fs::remove_dir_all(&staging);
+            std::fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
             let out = std::process::Command::new(&npm)
-                .args(["install", "--prefix"]).arg(&dir)
+                .args(["install", "--prefix"]).arg(&staging)
                 .args(["--no-audit", "--no-fund", "--no-package-lock", package])
                 .env("PATH", tool_env_path())
                 .stdin(std::process::Stdio::null())
                 .output()
-                .map_err(|e| e.to_string())?;
-            if !out.status.success() {
-                return Err(format!("couldn't install {}'s connector: {}", p.name, String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("npm failed")));
-            }
-            npx_entry_in(&dir, package).map(|_| ()).ok_or_else(|| "installed, but the connector's files aren't where expected".to_string())
+                .map_err(|e| e.to_string());
+            let staged = match out {
+                Ok(o) if o.status.success() => npx_entry_in(&staging, package).map(|_| ()).ok_or_else(|| "installed, but the connector's files aren't where expected".to_string()),
+                Ok(o) => Err(format!("couldn't install {}'s connector: {}", p.name, String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("npm failed"))),
+                Err(e) => Err(e),
+            };
+            if let Err(e) = staged { let _ = std::fs::remove_dir_all(&staging); return Err(e); }
+            swap_in(&staging, &dir)
         }
         LaunchSpec::Binary { version, target } => {
             fetch_and_install(&agents_dir().join(format!("{}.download", p.id)), &dir, version, target, check, emit, cancel)
@@ -1229,6 +1251,24 @@ mod setup_tests {
         if !matches!(made, Ok(s) if s.success()) { eprintln!("skip: python3 unavailable"); return; }
         let _ = extract_zip(&d.join("e.zip"), &d.join("out"));
         assert!(!d.join("evil").exists(), "the .. entry did not land outside the folder");
+    }
+
+    #[test]
+    fn an_agent_zip_is_listed_and_refused_before_it_unpacks() {
+        let d = tmp("zipguard");
+        let mk = |name: &str, py: &str| {
+            let made = std::process::Command::new("python3").arg("-I").arg("-c").arg(py).arg(d.join(name)).status();
+            matches!(made, Ok(s) if s.success()).then(|| d.join(name))
+        };
+        let Some(dotdot) = mk("dd.zip", "import sys,zipfile\nz=zipfile.ZipFile(sys.argv[1],'w')\nz.writestr('../evil','x')\nz.close()") else { eprintln!("skip: python3 unavailable"); return };
+        assert!(extract_zip_checked(&dotdot, &d.join("o1")).unwrap_err().contains("outside"));
+        assert!(!d.join("o1").exists(), "nothing unpacked");
+        let link = mk("ln.zip", "import sys,zipfile,stat\nz=zipfile.ZipFile(sys.argv[1],'w')\ni=zipfile.ZipInfo('a')\ni.create_system=3\ni.external_attr=(stat.S_IFLNK|0o777)<<16\nz.writestr(i,'/etc')\nz.writestr('a/passwd','x')\nz.close()").unwrap();
+        assert!(extract_zip_checked(&link, &d.join("o2")).unwrap_err().contains("outside"));
+        assert!(!d.join("o2").exists(), "nothing unpacked");
+        let ok = mk("ok.zip", "import sys,zipfile\nz=zipfile.ZipFile(sys.argv[1],'w')\nz.writestr('opencode','x')\nz.close()").unwrap();
+        extract_zip_checked(&ok, &d.join("o3")).unwrap();
+        assert!(d.join("o3/opencode").exists());
     }
 
     #[test]

@@ -23,6 +23,7 @@ fn spawn_from(profile: &'static AgentProfile, find: impl Fn(&str) -> Option<acp:
     })
 }
 
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub struct AgentCalls {
     pub profile: &'static AgentProfile,
     pub repo: PathBuf,
@@ -31,6 +32,7 @@ pub struct AgentCalls {
     pub timeout: Duration,
 }
 
+#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 impl AgentCalls {
     /// The project's agent, launched from the bundled pin like the pane's own session.
     pub fn for_project(profile: &'static AgentProfile, repo: PathBuf, project_dir: PathBuf) -> AgentCalls {
@@ -81,6 +83,9 @@ impl AgentCalls {
                         s.prompt(vec![json!({ "type": "text", "text": text })], "Chronicle review".into()).map_err(CallError::Failed)?;
                         prompted = true;
                     }
+                    // waiting: the agent's own authenticate is running (a browser sign-in); its outcome
+                    // arrives as ready or as a second needs-login, within the same deadline
+                    Some("needs-login") if params.get("waiting").and_then(Value::as_bool) == Some(true) => {}
                     Some("needs-login") => return Err(CallError::Failed(format!("{name} isn't signed in — sign in from the agent pane, then try again"))),
                     Some("error") => return Err(CallError::Failed(format!("{name} couldn't start: {}", params.get("message").and_then(Value::as_str).unwrap_or("no detail")))),
                     Some("ended") => return Err(CallError::Failed(format!("{name} ended before it answered"))),
@@ -183,7 +188,7 @@ for line in sys.stdin:
     }
 
     fn mock_as(name: &str, reply: &str, mode: &str, profile: &'static AgentProfile) -> Option<AgentCalls> {
-        let py = ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"].iter().find(|p| std::path::Path::new(p).exists())?.to_string();
+        let py = crate::acp::acp_tests::python3()?;
         let dir = std::env::temp_dir().join(format!("chronicle-review-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

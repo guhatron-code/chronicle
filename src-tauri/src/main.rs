@@ -468,9 +468,20 @@ fn set_roadmap_agent(agent: String) -> Result<(), String> {
     save_config(&cfg)
 }
 
+/// A stored agent name → a profile Chronicle ships; an unshipped one (Gemini CLI) is refused, never
+/// stored where `chosen_in` would silently ignore it.
+fn shipped_id(agent: &str) -> Result<&'static str, String> {
+    let id = agents::profiles::canonical_id(agent).ok_or_else(|| format!("Chronicle doesn't know an agent called {agent}"))?;
+    match agents::profile(id) {
+        Some(p) if p.shipped => Ok(id),
+        Some(p) => Err(format!("{} isn't supported yet", p.name)),
+        None => Err(format!("Chronicle doesn't know an agent called {agent}")),
+    }
+}
+
 #[tauri::command]
 fn set_default_agent(agent: String) -> Result<(), String> {
-    let id = agents::profiles::canonical_id(&agent).ok_or_else(|| format!("Chronicle doesn't know an agent called {agent}"))?;
+    let id = shipped_id(&agent)?;
     let mut cfg = load_config();
     if let Some(obj) = cfg.as_object_mut() { obj.insert("agent".into(), json!(id)); }
     save_config(&cfg)
@@ -481,7 +492,7 @@ fn write_project_agent(cfg: &mut Value, key: &str, agent: Option<&str>) -> Resul
     if !cfg.get("project_agents").map(Value::is_object).unwrap_or(false) { cfg["project_agents"] = json!({}); }
     let map = cfg["project_agents"].as_object_mut().ok_or("bad config")?;
     match agent {
-        Some(a) => { let id = agents::profiles::canonical_id(a).ok_or_else(|| format!("Chronicle doesn't know an agent called {a}"))?; map.insert(key.into(), json!(id)); }
+        Some(a) => { let id = shipped_id(a)?; map.insert(key.into(), json!(id)); }
         None => { map.remove(key); }
     }
     Ok(())
@@ -554,19 +565,6 @@ async fn provider_local_set(base_url: Option<String>) -> Result<(), String> {
     let mut cfg = load_config();
     providers::config::set_local(&mut cfg, base_url.as_deref())?;
     save_config(&cfg)
-}
-
-/// The role's provider for a project, and its agent to fall back to on a
-/// refused key. The agent is `agents::project_profile` — the same answer the
-/// pane and the reviewer give, not a second reading of the config.
-#[allow(dead_code)]
-pub(crate) fn provider_calls(p: &Project, dir: &str, role: providers::config::Role) -> (Box<dyn providers::Calls>, Box<dyn providers::Calls>) {
-    let cfg = load_config();
-    let profile = agents::project_profile(Path::new(dir));
-    let agent = || providers::agent::AgentCalls::for_project(profile, p.repo.clone(), p.dir.clone());
-    let chosen = providers::config::resolve(&cfg, role, &providers::keys::Keychain);
-    let t: Arc<dyn providers::http::Transport> = Arc::new(providers::http::CurlTransport);
-    (providers::config::calls_for(&chosen, &cfg, t, agent()), Box::new(agent()))
 }
 
 /// Codex has no skill system, so the whole task travels inline as the prompt.
@@ -3527,7 +3525,9 @@ fn session_profile(dir: &str, lane: acp::Lane) -> Result<&'static agents::AgentP
         agents::project_profile(Path::new(dir))
     };
     if let Some(cli) = profile.requires_cli.filter(|c| setup::resolve(c).is_none()) {
-        return Err(format!("{} needs `{cli}` installed first — Setup & health can install it", profile.name));
+        // Setup & health installs Claude Code; the codex CLI is the user's own install
+        let how = if cli == "claude" { " — Setup & health can install it" } else { ", then start the session again" };
+        return Err(format!("{} needs `{cli}` installed first{how}", profile.name));
     }
     Ok(profile)
 }
@@ -3633,9 +3633,10 @@ async fn agent_history_read(roots: State<'_, OpenRoots>, dir: String, id: String
     let p = project_for(&roots, &dir)?;
     if id.contains('/') || id.contains("..") { return Err("bad session id".into()); }
     let mut lines = acp::transcript::read(&lane.store(&p.dir), &id);
-    // transcripts written before the agents update are Claude Code's and carry
-    // only its own namespace; stamping is idempotent, so new lines pass through
-    for l in lines.iter_mut() { agents::normalize::normalize(l, agents::claude()); }
+    // each thread is read as the agent that made it (its first ready line; Claude Code for a
+    // transcript from before the agents update); stamping is idempotent, so new lines pass through
+    let made_by = agents::profile(agents::normalize::transcript_agent(&lines)).unwrap_or_else(agents::claude);
+    for l in lines.iter_mut() { agents::normalize::normalize(l, made_by); }
     Ok(json!({ "lines": lines }))
 }
 
@@ -5746,6 +5747,9 @@ mod agents_choice_tests {
         write_project_agent(&mut cfg, "/p/one", Some("codex")).unwrap();
         assert_eq!(cfg["project_agents"]["/p/one"], "codex-acp", "old names are stored as ids");
         assert!(write_project_agent(&mut cfg, "/p/one", Some("amp-acp")).is_err(), "only the four");
+        let e = write_project_agent(&mut cfg, "/p/one", Some("gemini")).unwrap_err();
+        assert_eq!(e, "Gemini CLI isn't supported yet", "an unshipped agent is refused, not stored");
+        assert!(shipped_id("gemini").is_err() && shipped_id("codex").is_ok());
         write_project_agent(&mut cfg, "/p/one", None).unwrap();
         assert!(cfg["project_agents"].get("/p/one").is_none());
     }
