@@ -195,12 +195,51 @@ fn sha256_file(path: &Path) -> Option<String> {
     Some(format!("{:x}", h.finalize()))
 }
 
+/// Refuse an archive that would write outside its folder: `..` or absolute names
+/// (checked from the listing, before anything is written).
+fn safe_entry_name(name: &str) -> bool {
+    !name.starts_with('/') && !name.split('/').any(|c| c == "..")
+}
+
+/// After unpacking: no symlink may point outside `root`. Removes `root` and errs if one does.
+fn reject_escaping_links(root: &Path) -> Result<(), String> {
+    fn walk(dir: &Path, root: &Path) -> bool {
+        let Ok(rd) = std::fs::read_dir(dir) else { return true };
+        for e in rd.flatten() {
+            let p = e.path();
+            let Ok(md) = std::fs::symlink_metadata(&p) else { continue };
+            if md.file_type().is_symlink() {
+                let Ok(target) = std::fs::read_link(&p) else { return false };
+                let resolved = if target.is_absolute() { target } else { p.parent().unwrap_or(root).join(target) };
+                // lexical normalisation: the target need not exist
+                let mut out = PathBuf::new();
+                for c in resolved.components() {
+                    match c { std::path::Component::ParentDir => { out.pop(); } std::path::Component::CurDir => {} c => out.push(c) }
+                }
+                let root_n = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+                let out_n = out.canonicalize().unwrap_or(out);
+                if !out_n.starts_with(&root_n) && !out_n.starts_with(root) { return false; }
+            } else if md.is_dir() && !walk(&p, root) { return false; }
+        }
+        true
+    }
+    if walk(root, root) { Ok(()) } else {
+        let _ = std::fs::remove_dir_all(root);
+        Err("the download tried to write outside its own folder, so it was refused".into())
+    }
+}
+
 fn extract_tar_gz(archive: &Path, into: &Path) -> Result<(), String> {
+    let list = std::process::Command::new("tar").arg("-tzf").arg(archive).output().map_err(|e| e.to_string())?;
+    if !list.status.success() { return Err(String::from_utf8_lossy(&list.stderr).trim().to_string()); }
+    if String::from_utf8_lossy(&list.stdout).lines().any(|n| !safe_entry_name(n)) {
+        return Err("the download tried to write outside its own folder, so it was refused".into());
+    }
     std::fs::create_dir_all(into).map_err(|e| e.to_string())?;
     let out = std::process::Command::new("tar")
         .arg("-xzf").arg(archive).arg("-C").arg(into)
         .output().map_err(|e| e.to_string())?;
-    if out.status.success() { Ok(()) } else {
+    if out.status.success() { reject_escaping_links(into) } else {
         Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
 }
@@ -211,7 +250,7 @@ fn extract_zip(archive: &Path, into: &Path) -> Result<(), String> {
     let out = std::process::Command::new("ditto")
         .args(["-x", "-k"]).arg(archive).arg(into)
         .output().map_err(|e| e.to_string())?;
-    if out.status.success() { Ok(()) } else {
+    if out.status.success() { reject_escaping_links(into) } else {
         Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
     }
 }
@@ -423,11 +462,9 @@ pub fn detect(id: &str) -> Value {
         }
         "connector" => return connector_row(id),
         other if other.starts_with("agent:") => {
-            let Some(p) = crate::agents::profile(&other["agent:".len()..]) else { return json!({ "id": id, "state": "unknown" }) };
-            let ready = crate::agents::registry::launch_spec(p).and_then(|s| installed_version(&agent_dir(p.id), &s));
-            return match ready {
-                Some(v) => json!({ "id": id, "agent": p.id, "state": "ready", "detail": v, "action": "" }),
-                None => json!({ "id": id, "agent": p.id, "state": "missing", "detail": "", "action": "install" }),
+            return match crate::agents::profile(&other["agent:".len()..]) {
+                Some(p) => agent_row(id, p),
+                None => json!({ "id": id, "state": "unknown" }),
             };
         }
         "design_skills" => {
@@ -711,10 +748,18 @@ pub fn binary_entry_in(dir: &Path, version: &str, cmd: &str) -> Option<PathBuf> 
     p.is_file().then_some(p)
 }
 
+const NO_CHECKSUM: &str = "this agent publishes no checksum, so Chronicle won't install it";
+
+/// A target with no published checksum is never downloaded, let alone unpacked.
+fn require_checksum(t: &BinaryTarget) -> Result<(), String> {
+    if t.sha256.trim().is_empty() { Err(NO_CHECKSUM.into()) } else { Ok(()) }
+}
+
 pub fn verify_sha256(path: &Path, want: &str) -> Result<(), String> {
-    if want.trim().is_empty() { return Err("this agent publishes no checksum, so Chronicle won't install it".into()); }
+    if want.trim().is_empty() { return Err(NO_CHECKSUM.into()); }
     match sha256_file(path) {
         Some(got) if got.eq_ignore_ascii_case(want) => Ok(()),
+        Some(_) if want.len() == 64 && std::fs::metadata(path).map(|m| m.len() == 0).unwrap_or(false) => Err("the download was incomplete, so nothing was installed".into()),
         Some(_) => Err("the download didn't match its published checksum, so nothing was installed".into()),
         None => Err("couldn't read the download".into()),
     }
@@ -742,10 +787,32 @@ pub fn unpack_verified(archive: &Path, dir: &Path, version: &str, t: &BinaryTarg
     }
     use std::os::unix::fs::PermissionsExt;
     let _ = std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755));
-    std::fs::write(staging.join(VERSION_FILE), version).map_err(|e| e.to_string())?;
-    let _ = std::fs::remove_dir_all(dir);
+    if let Err(e) = std::fs::write(staging.join(VERSION_FILE), version) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e.to_string());
+    }
+    swap_in(&staging, dir)
+}
+
+/// Replace `dir` with `staging` so that a failure at any step leaves the old install in place.
+fn swap_in(staging: &Path, dir: &Path) -> Result<(), String> {
     if let Some(parent) = dir.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
-    std::fs::rename(&staging, dir).map_err(|e| e.to_string())
+    let old = dir.with_extension("old");
+    let _ = std::fs::remove_dir_all(&old);
+    let had_old = dir.exists();
+    if had_old {
+        if let Err(e) = std::fs::rename(dir, &old) {
+            let _ = std::fs::remove_dir_all(staging);
+            return Err(e.to_string());
+        }
+    }
+    if let Err(e) = std::fs::rename(staging, dir) {
+        if had_old { let _ = std::fs::rename(&old, dir); }
+        let _ = std::fs::remove_dir_all(staging);
+        return Err(e.to_string());
+    }
+    let _ = std::fs::remove_dir_all(&old);
+    Ok(())
 }
 
 pub fn agent_launch_in(dir: &Path, spec: &LaunchSpec, node: Option<String>, npx: Option<String>) -> Option<crate::acp::AdapterLaunch> {
@@ -803,8 +870,9 @@ pub fn chosen_agent_for(project: Option<&str>) -> &'static crate::agents::AgentP
 pub fn chosen_agent() -> &'static crate::agents::AgentProfile { chosen_agent_for(None) }
 
 /// The "<Agent>'s connector" row: always about the chosen agent.
-fn connector_row(id: &str) -> Value {
-    let p = chosen_agent();
+fn connector_row(id: &str) -> Value { agent_row(id, chosen_agent()) }
+
+fn agent_row(id: &str, p: &'static crate::agents::AgentProfile) -> Value {
     let Some(spec) = crate::agents::registry::launch_spec(p) else {
         return json!({ "id": id, "agent": p.id, "state": "missing", "detail": format!("{} isn't supported on this Mac yet.", p.name), "action": "" });
     };
@@ -840,6 +908,7 @@ fn install_agent(check: &str, agent: &str, emit: &Emit, cancel: &AtomicBool) -> 
             npx_entry_in(&dir, package).map(|_| ()).ok_or_else(|| "installed, but the connector's files aren't where expected".to_string())
         }
         LaunchSpec::Binary { version, target } => {
+            require_checksum(target)?; // before any bytes are fetched
             let archive = agents_dir().join(format!("{}.download", p.id));
             download(&target.archive, &archive, check, emit, cancel)?;
             unpack_verified(&archive, &dir, version, target)
@@ -1058,7 +1127,49 @@ mod setup_tests {
         let dir = d.join("agents/opencode");
         let err = unpack_verified(&arc, &dir, "1.19.0", &target("https://x/opencode.tar.gz", String::new())).unwrap_err();
         assert!(err.contains("checksum"), "{err}");
+        // and install_agent refuses before any download: its archive path is never created
+        let none = crate::agents::registry::BinaryTarget { archive: "https://invalid.invalid/x.tar.gz".into(), cmd: "./x".into(), args: vec![], sha256: String::new() };
+        assert!(require_checksum(&none).unwrap_err().contains("checksum"), "refused before any download");
+        assert!(require_checksum(&target("https://x/o.tar.gz", "ab".repeat(32))).is_ok());
         assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_failed_swap_puts_the_old_install_back() {
+        let d = tmp("swap");
+        let dir = d.join("agents/opencode");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("opencode"), "old").unwrap();
+        // staging does not exist, so the second rename fails after the first moved the old install aside
+        let err = swap_in(&d.join("agents/opencode.staging"), &dir);
+        assert!(err.is_err());
+        assert_eq!(std::fs::read_to_string(dir.join("opencode")).unwrap(), "old", "the old install is back");
+        assert!(!dir.with_extension("old").exists());
+        // and a good swap replaces it and leaves no .old
+        let st = d.join("agents/opencode.staging");
+        std::fs::create_dir_all(&st).unwrap();
+        std::fs::write(st.join("opencode"), "new").unwrap();
+        swap_in(&st, &dir).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("opencode")).unwrap(), "new");
+        assert!(!dir.with_extension("old").exists() && !st.exists());
+    }
+
+    #[test]
+    fn an_archive_that_escapes_its_folder_is_refused() {
+        let d = tmp("escape");
+        let mk = |name: &str, py: &str| {
+            let arc = d.join(name);
+            assert!(std::process::Command::new("python3").arg("-I").arg("-c").arg(py).arg(&arc).status().unwrap().success());
+            arc
+        };
+        let dotdot = mk("dd.tar.gz", "import sys,tarfile,io\nt=tarfile.open(sys.argv[1],'w:gz')\ni=tarfile.TarInfo('../evil');i.size=1\nt.addfile(i,io.BytesIO(b'x'))\nt.close()");
+        let e = extract_tar_gz(&dotdot, &d.join("out1")).unwrap_err();
+        assert!(e.contains("outside"), "{e}");
+        assert!(!d.join("evil").exists());
+        let link = mk("ln.tar.gz", "import sys,tarfile\nt=tarfile.open(sys.argv[1],'w:gz')\ni=tarfile.TarInfo('l');i.type=tarfile.SYMTYPE;i.linkname='/etc'\nt.addfile(i)\nt.close()");
+        let e = extract_tar_gz(&link, &d.join("out2")).unwrap_err();
+        assert!(e.contains("outside"), "{e}");
+        assert!(!d.join("out2").exists(), "nothing left behind");
     }
 
     #[test]
