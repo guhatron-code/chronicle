@@ -21,7 +21,9 @@ import {
 } from "@/lib/agent-session";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { toastError } from "@/overlays/toasts";
-import { Chronigirl, HistoryClockGlyph } from "@/components/chrome/icons";
+import { HistoryClockGlyph } from "@/components/chrome/icons";
+import { AgentMark } from "@/components/chrome/AgentMark";
+import { agentMeta } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Hint } from "@/components/ui/tooltip";
@@ -167,8 +169,8 @@ export function AgentSection({
         onClick={onToggleCollapsed}
         className="flex h-7 shrink-0 items-center gap-2 border-b border-divider px-3 text-left hover:bg-fill-subtle"
       >
-        <Chronigirl size={15} />
-        <span className="text-[11.5px] font-medium text-text-secondary">Chronigirl</span>
+        <AgentMark agent={s.agent} size={15} />
+        <span className="text-[11.5px] font-medium text-text-secondary">{agentMeta(s.agent).headerName}</span>
         <span key={word} className={cn("wv-word inline-flex items-center gap-1 whitespace-nowrap text-[11px]", c.text)}>
           <span className={cn("size-1 shrink-0 rounded-full", c.dot)} />
           {word}
@@ -184,8 +186,8 @@ export function AgentSection({
   return (
     <div data-agent-section className="relative flex min-h-0 flex-1 flex-col">
       <div data-chrome className="flex h-9 shrink-0 items-center gap-2 border-b border-divider px-3">
-        <Chronigirl size={16} />
-        <span className="text-[12.5px] font-medium text-text-primary">Chronigirl</span>
+        <AgentMark agent={s.agent} size={16} />
+        <span data-agent-name className="text-[12.5px] font-medium text-text-primary">{agentMeta(s.agent).headerName}</span>
         <span key={word} data-agent-state className={cn("wv-word inline-flex items-center gap-[5px] whitespace-nowrap text-xs", c.text)}>
           <span
             className={cn("size-[5px] shrink-0 rounded-full", c.dot)}

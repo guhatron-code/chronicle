@@ -474,7 +474,7 @@ export async function spawnTerm(dir: string, opts: SpawnOpts = {}): Promise<Term
   sessions.set(id, session);
   activeByDir.set(dir, id); // a fresh session takes the spotlight
   term.onData((d) => void ptyWrite(id, d).catch(() => {}));
-  const typed = opts.autoType ?? (opts.agent ? `${opts.agent}\n` : null);
+  const typed = opts.autoType ?? (opts.agent === "claude" || opts.agent === "codex" ? `${opts.agent}\n` : null);
   if (typed) {
     // legacy timing: let the shell prompt settle first
     setTimeout(() => void ptyWrite(id, typed.endsWith("\n") ? typed : `${typed}\n`).catch(() => {}), 650); // timer-ok: one-shot, lets the shell prompt settle before autotyping

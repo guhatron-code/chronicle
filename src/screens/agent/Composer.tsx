@@ -34,7 +34,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Hint } from "@/components/ui/tooltip";
-import { agentAttach, agentAttachPath, IMG_MIME } from "@/lib/ipc";
+import { agentAttach, agentAttachPath, agentsStatus, IMG_MIME, type AgentsStatus } from "@/lib/ipc";
+import { switchProjectAgent } from "@/lib/agents-store";
+import { AgentMark } from "@/components/chrome/AgentMark";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Autocomplete, findTrigger, handleKey, type PickerItem } from "./Autocomplete";
 import { commandRows, LOCAL_COMMANDS } from "@/lib/composer-commands";
@@ -100,6 +102,42 @@ function ConfigSelect({ dir, optionId, title }: { dir: string; optionId: string;
             <DropdownMenuRadioItem key={o.value} value={o.value} className={CONFIG_ROW}>
               <span className="text-[12.5px] text-text-primary">{o.name}</span>
               {o.description && <span className="text-[11px] leading-snug text-text-dim">{o.description}</span>}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/** The project's agent (spec §3). Lists the agents this Mac can run; picking
+ *  one switches the project (asking first when a session is live). */
+function AgentPicker({ projectDir, current, onConfirm }: { projectDir: string; current: string; onConfirm: (spec: ConfirmSpec) => void }) {
+  const [status, setStatus] = useState<AgentsStatus | null>(null);
+  useEffect(() => { void agentsStatus(projectDir).then(setStatus).catch(() => {}); }, [projectDir, current]);
+  const choices = (status?.agents ?? []).filter((a) => a.supported);
+  if (choices.length < 2) return null; // one agent on this Mac: nothing to pick
+  const cur = choices.find((a) => a.id === current);
+  return (
+    <DropdownMenu>
+      <Hint label="The agent that works in this project">
+        <DropdownMenuTrigger asChild>
+          <button data-agent-picker className="inline-flex h-[26px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border border-border-strong px-2 text-[11.5px] text-text-primary">
+            <AgentMark agent={current} size={12} />
+            <span className="max-w-[110px] truncate">{cur?.name ?? current}</span>
+            <svg className="shrink-0" width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="m3 4.5 3 3 3-3" /></svg>
+          </button>
+        </DropdownMenuTrigger>
+      </Hint>
+      <DropdownMenuContent data-config-menu="agent-picker" align="start" side="top" className="w-[260px]">
+        <DropdownMenuRadioGroup
+          value={current}
+          onValueChange={(id) => void switchProjectAgent(projectDir, id, onConfirm).catch((e) => toastError("Couldn't switch the agent", String(e).slice(0, 90)))}
+        >
+          {choices.map((a) => (
+            <DropdownMenuRadioItem key={a.id} value={a.id} disabled={!a.launchable} className={CONFIG_ROW}>
+              <span className="text-[12.5px] text-text-primary">{a.name}</span>
+              <span className="text-[11px] leading-snug text-text-dim">{a.launchable ? (a.signedIn === false ? "needs you to sign in" : "ready") : "set it up in Setup & health first"}</span>
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
@@ -608,6 +646,7 @@ export function Composer({
             </button>
           </Hint>
         )}
+        {!designLane && <AgentPicker projectDir={projectDir} current={s.agent} onConfirm={onConfirm} />}
         {designLane && stances.includes("ask") && (
           <ModeSelect
             current="ask"

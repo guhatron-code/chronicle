@@ -35,7 +35,8 @@ import { CheckGlyph } from "@/components/chrome/icons";
 import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term-sessions";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { toastError } from "@/overlays/toasts";
-import { Chronigirl, ErrorGlyph, XGlyph } from "@/components/chrome/icons";
+import { ErrorGlyph, XGlyph } from "@/components/chrome/icons";
+import { AgentMark } from "@/components/chrome/AgentMark";
 import { BtnPrimary, BtnSecondary, Spinner } from "@/components/chrome/atoms";
 import { cn } from "@/lib/utils";
 import { Composer } from "./Composer";
@@ -358,7 +359,7 @@ function Entry({
         )}
       </div>
     );
-  if (entry.kind === "assistant") return <AssistantMessage text={entry.text} streaming={entry.streaming} />;
+  if (entry.kind === "assistant") return <AssistantMessage text={entry.text} streaming={entry.streaming} agent={agentSessionFor(dir).agent} />;
   if (entry.kind === "thought")
     return (
       <div className="px-3.5 py-0.5">
@@ -527,7 +528,7 @@ export function AgentPane({
     onRevealTerminal();
     // terminals belong to the project, not to a session lane
     const projectDir = splitLaneKey(dir).dir;
-    spawnTerm(projectDir, { title: "sign-in", agent: s.agent, autoType: login.command })
+    spawnTerm(projectDir, { title: "sign-in", agent: s.agent === "claude-acp" ? "claude" : s.agent === "codex-acp" ? "codex" : undefined, autoType: login.command })
       .then((sess) => {
         setActiveTermFor(projectDir, sess.id);
         setLoginTermId(sess.id);
@@ -674,7 +675,7 @@ export function AgentPane({
     <div className="flex min-h-0 flex-1 flex-col">
       {empty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[9px] p-5 text-center">
-          <span className="mb-1.5"><Chronigirl size={48} /></span>
+          <span className="mb-1.5"><AgentMark agent={s.agent} size={44} /></span>
           {variant === "design" ? (
             <span className="max-w-[34ch] text-[13px] leading-[1.55] text-text-muted [text-wrap:pretty]">
               Describe a change, or start a design.
@@ -683,7 +684,7 @@ export function AgentPane({
             <>
               <span className="text-[15px] font-semibold text-text-primary">Ask for anything.</span>
               <span className="max-w-[34ch] text-[12.5px] leading-[1.55] text-text-muted [text-wrap:pretty]">
-                Chronicle asks before Chronigirl touches your project.
+                {`Chronicle asks before ${agentMeta(s.agent).headerName} touches your project.`}
               </span>
               {s.warm && (s.phase === "installing" || s.phase === "starting") && (
                 <span className="text-[11px] text-text-faint">Ready in a moment — you can type now</span>
@@ -714,7 +715,7 @@ export function AgentPane({
                   looks stalled — the classic chat typing signal */}
               {s.turnActive && s.entries.at(-1)?.kind !== "assistant" && (
                 <div className="wv-enter flex gap-2.5 px-3.5 pb-1 pt-2">
-                  <AssistantAvatar />
+                  <AssistantAvatar agent={s.agent} />
                   <div className="pt-1.5"><TypingDots /></div>
                 </div>
               )}

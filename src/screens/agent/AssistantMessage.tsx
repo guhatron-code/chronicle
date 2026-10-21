@@ -5,13 +5,14 @@
  */
 import { Streamdown } from "streamdown";
 import { assistantMarkdownProps } from "@/lib/assistant-markdown";
+import { agentMeta } from "@/lib/agents";
 import { AssistantAvatar, MessageRow, TypingDots } from "./rows";
 
 const props = assistantMarkdownProps();
 
-export function AssistantMessage({ text, streaming }: { text: string; streaming: boolean }) {
+export function AssistantMessage({ text, streaming, agent }: { text: string; streaming: boolean; agent: string }) {
   return (
-    <MessageRow who="Chronigirl" avatar={<AssistantAvatar />}>
+    <MessageRow who={agentMeta(agent).headerName} avatar={<AssistantAvatar agent={agent} />}>
       <span data-streaming={streaming || undefined}>
         {streaming && !text.trim() ? (
           <TypingDots />

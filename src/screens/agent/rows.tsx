@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
-import { Chronigirl } from "@/components/chrome/icons";
+import { AgentMark } from "@/components/chrome/AgentMark";
 
 /** Speaker marks — the single biggest "this is a conversation" signal. */
-export function AssistantAvatar() {
+export function AssistantAvatar({ agent = "claude-acp" }: { agent?: string }) {
   return (
     <span className="flex size-[26px] shrink-0 items-center justify-center rounded-full border border-border-hairline bg-surface-card-raised">
-      <Chronigirl size={17} />
+      <AgentMark agent={agent} size={agent === "claude-acp" ? 17 : 14} />
     </span>
   );
 }
