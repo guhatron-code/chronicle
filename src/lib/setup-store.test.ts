@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agentsRowFor, agentsRowForError } from "./setup-store";
-import type { AgentsAccessStatus } from "./ipc";
+import { agentRows, agentsRowFor, agentsRowForError, connectorName } from "./setup-store";
+import type { AgentsAccessStatus, AgentsStatus, AgentStatusRow, SetupCheck } from "./ipc";
 
 const status = (mcp: boolean): AgentsAccessStatus => ({ mcp, skill: "installed", command: "/x/chronicle" });
 
@@ -60,4 +60,60 @@ it("the connector row exists, installs, and never counts toward ready", async ()
   // it sits right after the engine it needs
   const ids = m.CHECK_META.map((c) => c.id);
   expect(ids.indexOf("connector")).toBe(ids.indexOf("node") + 1);
+});
+
+const row = (over: Partial<AgentStatusRow>): AgentStatusRow => ({
+  id: "codex-acp", name: "Codex", supported: true, launchable: true, installed: true, missing: null, signedIn: true,
+  login: { kind: "terminal", command: "codex login" }, ...over,
+});
+const agentStatus = (agents: AgentStatusRow[], def = "claude-acp"): AgentsStatus => ({ agents, default: def, project: def });
+const none = () => undefined;
+
+describe("agentRows", () => {
+  it("is empty until the status arrives", () => {
+    expect(agentRows(null, none)).toEqual([]);
+  });
+
+  it("marks the chosen agent and keeps the registry order", () => {
+    const rows = agentRows(agentStatus([row({ id: "opencode", name: "OpenCode" }), row({ id: "claude-acp", name: "Claude Code", login: { kind: "terminal", command: "claude /login" } })]), none);
+    expect(rows.map((r) => r.id)).toEqual(["claude-acp", "opencode"]);
+    expect(rows[0].chosen).toBe(true);
+    expect(rows[1].chosen).toBe(false);
+  });
+
+  it("asks a signed-out terminal agent to sign in, naming its command", () => {
+    const [r] = agentRows(agentStatus([row({ signedIn: false })]), none);
+    expect(r).toMatchObject({ state: "needs_you", word: "needs you", action: "signin", detail: "Installed. Sign in with codex login." });
+  });
+
+  it("offers Install for an agent not on this Mac", () => {
+    const [r] = agentRows(agentStatus([row({ installed: false })]), none);
+    expect(r).toMatchObject({ state: "missing", action: "install", word: "missing" });
+    expect(r.detail).toContain("Not on this Mac yet.");
+  });
+
+  it("an agent with no build for this Mac is not yet supported, with nothing to press and nothing to choose", () => {
+    const [r] = agentRows(agentStatus([row({ id: "opencode", name: "OpenCode", supported: false, installed: false, launchable: false })]), none);
+    expect(r).toMatchObject({ state: "unsupported", word: "not yet supported", action: "", selectable: false });
+  });
+
+  it("says which of the agent's own tools is missing", () => {
+    const [r] = agentRows(agentStatus([row({ id: "claude-acp", name: "Claude Code", missing: "claude", launchable: false })]), none);
+    expect(r).toMatchObject({ state: "blocked", action: "", detail: "Anthropic’s agent. The default for new projects. Needs claude installed first." });
+  });
+
+  it("shows an install in progress from its setup-update events", () => {
+    const progress = (id: string): SetupCheck | undefined => (id === "agent:gemini" ? { id, state: "installing", pct: 40 } : undefined);
+    const [r] = agentRows(agentStatus([row({ id: "gemini", name: "Gemini CLI", installed: false, login: { kind: "auth_method", id: "oauth-personal" } })]), progress);
+    expect(r).toMatchObject({ state: "installing", word: "installing", pct: 40, action: "" });
+  });
+
+  it("a browser sign-in agent says it signs in from the pane", () => {
+    const [r] = agentRows(agentStatus([row({ id: "gemini", name: "Gemini CLI", signedIn: false, login: { kind: "auth_method", id: "oauth-personal" } })]), none);
+    expect(r).toMatchObject({ state: "needs_you", action: "", detail: "Installed. Signs in from the pane the first time you use it." });
+  });
+
+  it("names the connector after its agent", () => {
+    expect(connectorName("Claude Code")).toBe("Claude Code’s connector");
+  });
 });

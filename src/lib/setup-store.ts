@@ -8,7 +8,9 @@ import {
   agentsAccessDisable,
   agentsAccessEnable,
   agentsAccessStatus,
+  agentsStatus,
   onSetupUpdate,
+  setDefaultAgent,
   setupCancel,
   setupFixTerminalPath,
   setupInstall,
@@ -16,9 +18,11 @@ import {
   setupRunAll,
   setupStatus,
   type AgentsAccessStatus,
+  type AgentsStatus,
   type SetupCheck,
 } from "./ipc";
 import { every } from "./scheduler";
+import { AGENT_ORDER, agentMeta } from "./agents";
 
 /** The row order + plain-language identity the screen renders. Names live here
  *  so the store, not the JSX, is the source of truth for what each check is. */
@@ -199,6 +203,94 @@ export function cancelSignins(): void {
 
 export function waitingSignin(id: string): boolean {
   return state.waitingSignins.has(id);
+}
+
+/* ---------- the Your agent group (spec §3-§4, board 1) ----------
+ * Fetched with the open project's dir, like the agents row; mapped here so the
+ * mapping is testable without a Tauri runtime. Installs report through the
+ * ordinary setup-update stream under the check id `agent:<id>`. */
+
+export interface AgentRowView {
+  id: string;
+  name: string;
+  blurb: string;
+  chosen: boolean;
+  selectable: boolean;
+  state: "ready" | "needs_you" | "missing" | "blocked" | "unsupported" | "installing";
+  word: string;
+  detail: string;
+  action: "install" | "signin" | "";
+  pct: number | null;
+}
+
+export const connectorName = (agentName: string) => `${agentName}’s connector`;
+
+export function agentRows(status: AgentsStatus | null, progress: (checkId: string) => SetupCheck | undefined): AgentRowView[] {
+  if (!status) return [];
+  const order = (id: string) => { const i = (AGENT_ORDER as readonly string[]).indexOf(id); return i < 0 ? 99 : i; };
+  return [...status.agents].sort((a, b) => order(a.id) - order(b.id)).map((a) => {
+    const meta = agentMeta(a.id);
+    const base = { id: a.id, name: a.name, blurb: meta.blurb, chosen: a.id === status.default, selectable: a.supported, pct: null as number | null };
+    const live = progress(`agent:${a.id}`);
+    if (!a.supported) return { ...base, state: "unsupported", word: "not yet supported", detail: `${meta.blurb} Not supported on this Mac yet.`, action: "" };
+    if (live?.state === "installing") return { ...base, state: "installing", word: "installing", detail: meta.blurb, action: "", pct: live.pct ?? null };
+    if (a.missing) return { ...base, state: "blocked", word: "needs you", detail: `${meta.blurb} Needs ${a.missing} installed first.`, action: "" };
+    if (!a.installed) return { ...base, state: "missing", word: "missing", detail: `${meta.blurb} Not on this Mac yet.`, action: "install" };
+    if (a.signedIn === false) {
+      if (a.login.kind === "terminal") return { ...base, state: "needs_you", word: "needs you", detail: `Installed. Sign in with ${a.login.command}.`, action: "signin" };
+      if (a.login.kind === "auth_method") return { ...base, state: "needs_you", word: "needs you", detail: "Installed. Signs in from the pane the first time you use it.", action: "" };
+      return { ...base, state: "needs_you", word: "needs you", detail: "Installed. It signs in with its own setup.", action: "" };
+    }
+    return { ...base, state: "ready", word: "ready", detail: a.signedIn ? `${meta.blurb} Signed in.` : meta.blurb, action: "" };
+  }) as AgentRowView[];
+}
+
+let agents: AgentsStatus | null = null;
+export function agentsState(): AgentsStatus | null {
+  return agents;
+}
+
+export async function refreshAgentsStatus(dir: string | null): Promise<void> {
+  try {
+    agents = await agentsStatus(dir);
+  } catch {
+    /* keep the last-known rows */
+  }
+  notify();
+}
+
+export async function chooseDefaultAgent(id: string, dir: string | null): Promise<void> {
+  await setDefaultAgent(id);
+  await refreshAgentsStatus(dir);
+  await refreshDoctor(); // the connector row follows the chosen agent
+}
+
+export async function installAgent(id: string, dir: string | null): Promise<void> {
+  await installCheck(`agent:${id}`);
+  await refreshAgentsStatus(dir);
+}
+
+/** Open Terminal with the agent's own sign-in command and poll until it reads signed in. */
+export async function signInAgent(id: string, dir: string | null): Promise<void> {
+  const key = `agent:${id}`;
+  await setupOpenLogin(key);
+  state.waitingSignins.add(key);
+  notify();
+  const started = Date.now();
+  signinStops.get(key)?.();
+  let stop: () => void = () => {};
+  const finish = () => {
+    stop();
+    signinStops.delete(key);
+    state.waitingSignins.delete(key);
+    notify();
+  };
+  stop = every(3500, async () => {
+    await refreshAgentsStatus(dir);
+    if (agents?.agents.find((a) => a.id === id)?.signedIn) { finish(); return; }
+    if (Date.now() - started > 5 * 60_000) finish();
+  });
+  signinStops.set(key, finish);
 }
 
 /* ---------- the "agents" row (src-tauri/src/main.rs: agents_access_*) ----------
