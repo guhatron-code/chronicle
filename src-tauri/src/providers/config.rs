@@ -90,6 +90,13 @@ pub fn set_role(cfg: &mut Value, role: Role, id: &str, secrets: &dyn Secrets) ->
     Ok(())
 }
 
+/// Remove a key from the store, then (only if that worked) put its roles back on the agent.
+/// A failed removal leaves the roles alone: the key is still there.
+pub fn remove_key(cfg: &mut Value, id: &str, secrets: &dyn Secrets) -> Result<bool, String> {
+    secrets.remove(id)?;
+    Ok(forget_key(cfg, id))
+}
+
 /// A key (or the local address) went away: every role that used it is the agent again.
 pub fn forget_key(cfg: &mut Value, id: &str) -> bool {
     let mut changed = false;
@@ -104,6 +111,8 @@ pub fn forget_key(cfg: &mut Value, id: &str) -> bool {
 
 pub fn set_local(cfg: &mut Value, base: Option<&str>) -> Result<(), String> {
     match base.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(b) if b.split('/').nth(2).map(|h| h.contains('@')).unwrap_or(false) && (b.starts_with("http://") || b.starts_with("https://")) =>
+            Err("leave the user name and password out of the address; a local server doesn't need them here".into()),
         Some(b) if b.starts_with("http://") || b.starts_with("https://") => { providers_obj(cfg).insert("local_base_url".into(), json!(b)); Ok(()) }
         Some(_) => Err("the address starts with http:// — for example http://localhost:11434".into()),
         None => { providers_obj(cfg).remove("local_base_url"); forget_key(cfg, "local"); Ok(()) }
@@ -188,6 +197,29 @@ mod config_tests {
         assert!(matches!(resolve(&cfg, Role::Decisions, &s), crate::providers::Provider::Local { base_url } if base_url == "http://localhost:11434"));
         set_local(&mut cfg, None).unwrap();
         assert_eq!(role_choice(&cfg, Role::Decisions), "agent", "clearing the address falls the role back");
+    }
+
+    #[test]
+    fn a_failed_removal_leaves_the_roles_alone() {
+        struct Stuck;
+        impl Secrets for Stuck {
+            fn get(&self, _: &str) -> Option<String> { Some("k".into()) }
+            fn set(&self, _: &str, _: &str) -> Result<(), String> { Ok(()) }
+            fn remove(&self, _: &str) -> Result<(), String> { Err("denied".into()) }
+        }
+        let mut cfg = json!({ "providers": { "review": "openai" } });
+        assert!(remove_key(&mut cfg, "openai", &Stuck).is_err());
+        assert_eq!(cfg["providers"]["review"], "openai");
+        let f = FakeSecrets::new();
+        f.set("openai", "k").unwrap();
+        assert_eq!(remove_key(&mut cfg, "openai", &f), Ok(true));
+        assert_eq!(cfg["providers"]["review"], "agent");
+    }
+
+    #[test]
+    fn a_local_address_with_a_password_is_refused() {
+        let mut cfg = json!({});
+        assert!(set_local(&mut cfg, Some("http://me:pw@localhost:1234")).unwrap_err().contains("password"));
     }
 
     #[test]

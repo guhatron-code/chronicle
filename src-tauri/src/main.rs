@@ -522,10 +522,8 @@ async fn provider_key_set(id: String, key: String) -> Result<(), String> {
 /// Removing a key falls every role that used it back to the agent (spec §9).
 #[tauri::command]
 async fn provider_key_remove(id: String) -> Result<(), String> {
-    use providers::keys::Secrets;
-    providers::keys::Keychain.remove(&id)?;
     let mut cfg = load_config();
-    if providers::config::forget_key(&mut cfg, &id) { save_config(&cfg)?; }
+    if providers::config::remove_key(&mut cfg, &id, &providers::keys::Keychain)? { save_config(&cfg)?; }
     Ok(())
 }
 
