@@ -33,7 +33,7 @@ const usage = (extra: Record<string, unknown>) => ({
   method: "session/update",
   params: { update: { sessionUpdate: "usage_update", used: 1000, size: 200000, ...extra } },
 });
-const rateLimited = usage({ _meta: { "_claude/rateLimit": { status: "allowed_warning", utilization: 71, resetsAt: 1_800_000_600, rateLimitType: "five_hour" } } });
+const rateLimited = usage({ _chronicle: { agent: "claude-acp", rateLimit: { status: "allowed_warning", utilization: 71, resetsAt: 1_800_000_600, rateLimitType: "five_hour" } } });
 
 describe("limits and cost off usage_update", () => {
   beforeEach(() => { resetLimits(); agent.subscribeAgent(() => {})(); });

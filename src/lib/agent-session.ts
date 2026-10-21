@@ -105,7 +105,7 @@ export type AgentEntry = { rev: number } & (
       output?: string;
       /** the user said no to this call's permission ask */
       rejected?: boolean;
-      /** the call a subagent made: `_meta.claudeCode.parentToolUseId` — the
+      /** the call a subagent made: `_chronicle.parentId` — the
        *  Task card it belongs under (round 9). Grouping is a view, see
        *  `groupEntries`; the thread itself stays flat and in wire order */
       parentId?: string;
@@ -160,6 +160,8 @@ export type AgentEntry = { rev: number } & (
 export interface AgentSessionState {
   /** which lane this state belongs to — set once, from the key it was created under */
   lane: Lane;
+  /** the agent this session runs (a registry id: "claude-acp" | "codex-acp" | "gemini" | "opencode") */
+  agent: string;
   phase: AgentPhase;
   sessionId: string | null;
   modes: { currentModeId: string; availableModes: AgentMode[] } | null;
@@ -217,6 +219,7 @@ export interface AgentSessionState {
 
 const blank = (): AgentSessionState => ({
   lane: "chat",
+  agent: "claude-acp",
   phase: "none",
   sessionId: null,
   modes: null,
@@ -448,18 +451,15 @@ function applyToolContent(dir: string, entry: Extract<AgentEntry, { kind: "tool"
   }
 }
 
-/** The linkage the adapter stamps on every tool update: which Task a call
- *  belongs to, and whether the call IS a Task. Read from `_meta.claudeCode`
- *  (claude-agent-acp ≥ 0.75), ignored when absent. */
+/** The linkage Rust stamps on every tool update (`_chronicle`, from the
+ *  agent's profile — spec §7): which subagent card a call belongs to, and
+ *  whether the call IS one. Absent for an agent whose wire names no parent:
+ *  its thread is a flat list. */
 function applyLinkage(entry: Extract<AgentEntry, { kind: "tool" }>, tc: Raw) {
-  const meta = (tc._meta ?? {}) as Raw;
-  const cc = (meta.claudeCode ?? {}) as Raw;
-  const parent = str(cc.parentToolUseId);
-  // the adapter stamps a Task's own progress updates with the Task's own id;
-  // a card is never its own parent
+  const ch = (tc._chronicle ?? {}) as Raw;
+  const parent = str(ch.parentId);
   if (parent && parent !== entry.toolCallId) entry.parentId = parent;
-  const name = str(cc.toolName);
-  if (cc.subagent === true || name === "Agent" || name === "Task") entry.subagent = true;
+  if (ch.subagent === true) entry.subagent = true;
 }
 
 /** One item of the thread as the pane draws it: an entry, or a Task card with
@@ -526,7 +526,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       // the adapter's own replay is suppressed, so blanking here would leave
       // the session open on nothing — the empty-thread-after-Resume bug
       const keep = params.resume === true ? s.entries : [];
-      Object.assign(s, blank(), { lane: s.lane, phase: "installing" as AgentPhase, draft: s.draft, warm: s.warm, entries: keep });
+      Object.assign(s, blank(), { lane: s.lane, agent: s.agent, phase: "installing" as AgentPhase, draft: s.draft, warm: s.warm, entries: keep });
       // the thread and the queue are both gone; a card waiting in that queue
       // must not go on waiting for a prompt that no longer exists (`live`
       // only: a replay must never close the running round's card)
@@ -538,6 +538,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       s.warm = false;
       s.sessionId = str(params.sessionId) || null;
       s.endedReason = null;
+      s.agent = str(params.agent) || s.agent;
       const modes = params.modes as Raw | null;
       s.modes = modes
         ? {
@@ -802,8 +803,8 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       if (cost && typeof cost.amount === "number") s.cost = cost.amount;
       // the account's limits ride along on the rate-limit flavour of this
       // update; only a LIVE reading may paint the title bar (limits-store.ts)
-      const meta = (update._meta ?? {}) as Raw;
-      if (live && meta["_claude/rateLimit"]) recordRateLimit(meta["_claude/rateLimit"]);
+      const ch = (update._chronicle ?? {}) as Raw;
+      if (live && ch.rateLimit) recordRateLimit(ch.rateLimit);
     } else if (kind === "plan") {
       const raw = Array.isArray(update.entries) ? (update.entries as Raw[]) : [];
       const items = raw.map((e) => {
@@ -898,6 +899,7 @@ export async function adoptAgentSession(dir: string): Promise<void> {
       const raw = st as Record<string, unknown>;
       s.phase = "ready";
       s.sessionId = (raw.sessionId as string) ?? null;
+      s.agent = str(raw.agent) || s.agent;
       const modes = raw.modes as Raw | null;
       if (modes && modes.currentModeId != null) {
         s.modes = {

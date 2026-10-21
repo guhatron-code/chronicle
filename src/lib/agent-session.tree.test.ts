@@ -32,8 +32,16 @@ const tool = (id: string, extra: Partial<Tool> = {}): Tool => ({
 const task = (id: string, title = "Do a thing"): Tool => tool(id, { toolKind: "think", title, subagent: true });
 
 const update = (u: Record<string, unknown>) => ({ method: "session/update", params: { update: u } });
-const call = (id: string, meta: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
-  update({ sessionUpdate: "tool_call", toolCallId: id, kind: "execute", title: id, status: "pending", _meta: { claudeCode: meta }, ...extra });
+type Linkage = { toolName?: string; parentToolUseId?: string; subagent?: boolean };
+/** What Rust's normalize.rs stamps for Claude Code: the shape the reducer reads. */
+const stamped = (id: string, m: Linkage) => ({
+  agent: "claude-acp",
+  ...(m.parentToolUseId && m.parentToolUseId !== id ? { parentId: m.parentToolUseId } : {}),
+  ...(m.subagent || m.toolName === "Agent" || m.toolName === "Task" ? { subagent: true } : {}),
+  ...(m.toolName ? { toolName: m.toolName } : {}),
+});
+const call = (id: string, meta: Linkage, extra: Record<string, unknown> = {}) =>
+  update({ sessionUpdate: "tool_call", toolCallId: id, kind: "execute", title: id, status: "pending", _chronicle: stamped(id, meta), ...extra });
 
 describe("groupEntries", () => {
   it("folds a parent's children under it, in wire order", () => {
@@ -80,12 +88,12 @@ describe("groupEntries", () => {
   });
 });
 
-describe("the reducer reads the linkage the adapter puts in _meta", () => {
+describe("the reducer reads the linkage Rust stamps in _chronicle", () => {
   it("marks a Task call as a subagent and its children with their parent", () => {
     const s = reduceLines("/p", [
       call("T1", { toolName: "Agent", subagent: true }, { kind: "think", title: "Task" }),
       call("a", { toolName: "Bash", parentToolUseId: "T1" }),
-      update({ sessionUpdate: "tool_call_update", toolCallId: "T1", title: "Map the code", _meta: { claudeCode: { toolName: "Agent", subagent: true } } }),
+      update({ sessionUpdate: "tool_call_update", toolCallId: "T1", title: "Map the code", _chronicle: stamped("T1", { toolName: "Agent", subagent: true }) }),
     ]);
     const tools = s.entries.filter((e): e is Tool => e.kind === "tool");
     expect(tools[0]).toMatchObject({ toolCallId: "T1", subagent: true, title: "Map the code" });
@@ -96,7 +104,7 @@ describe("the reducer reads the linkage the adapter puts in _meta", () => {
   it("ignores a parent id equal to the call's own id (a Task's progress update)", () => {
     const s = reduceLines("/p", [
       call("T3", { toolName: "Agent", subagent: true }, { kind: "think", title: "Task" }),
-      update({ sessionUpdate: "tool_call_update", toolCallId: "T3", _meta: { claudeCode: { toolName: "Agent", parentToolUseId: "T3" } } }),
+      update({ sessionUpdate: "tool_call_update", toolCallId: "T3", _chronicle: stamped("T3", { toolName: "Agent", parentToolUseId: "T3" }) }),
     ]);
     expect(s.entries[0]).toMatchObject({ toolCallId: "T3", subagent: true });
     expect("parentId" in s.entries[0]).toBe(false);
