@@ -3462,8 +3462,7 @@ fn session_profile(dir: &str, lane: acp::Lane) -> Result<&'static agents::AgentP
     let profile = if lane == acp::Lane::Design {
         agents::claude()
     } else {
-        let key = canon_key(dir).ok().map(|(k, _)| k);
-        setup::chosen_agent_for(key.as_deref())
+        agents::project_profile(Path::new(dir))
     };
     if let Some(cli) = profile.requires_cli.filter(|c| setup::resolve(c).is_none()) {
         return Err(format!("{} needs `{cli}` installed first — Setup & health can install it", profile.name));
@@ -3513,8 +3512,10 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
     let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     let key = session_key(&dir, lane)?;
-    let profile = session_profile(&dir, lane)?;
-    let launch = setup::agent_launch(profile.id).ok_or_else(|| launch_refusal(profile))?;
+    if id.contains('/') || id.contains("..") { return Err("bad session id".into()); }
+    // resume runs the agent that made the thread, not whichever the project uses now
+    let profile = resume_profile(&lane.store(&p.dir), &id, lane)?;
+    let launch = setup::agent_launch(profile.id).ok_or_else(|| resume_refusal(profile))?;
     let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
     jail_roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
     let emit: acp::Emit = {
@@ -3531,6 +3532,23 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
     } else { acp::LaneExtras::default() };
     let started = acp::start(&agents, emit, key, lane, profile, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, Some(id), acp::adapter_command_for(&launch, profile))?;
     Ok(json!({ "started": started }))
+}
+
+/// The profile a stored thread resumes with: the agent that made it. The design
+/// lane is always Claude Code.
+fn resume_profile(store: &Path, id: &str, lane: acp::Lane) -> Result<&'static agents::AgentProfile, String> {
+    if lane == acp::Lane::Design { return Ok(agents::claude()); }
+    let made_by = acp::transcript::agent_id(store, id);
+    let p = agents::profile(&made_by).filter(|p| p.shipped)
+        .ok_or_else(|| "This thread was made with an agent Chronicle doesn't ship, so it can't be resumed.".to_string())?;
+    if setup::agent_launch(p.id).is_none() || p.requires_cli.map(|c| setup::resolve(c).is_none()).unwrap_or(false) {
+        return Err(resume_refusal(p));
+    }
+    Ok(p)
+}
+
+fn resume_refusal(p: &agents::AgentProfile) -> String {
+    format!("This thread was made with {}, which isn't installed — Setup & health can install it.", p.name)
 }
 
 /// Previous sessions from the transcript store, newest first.
@@ -3552,7 +3570,11 @@ async fn agent_history_read(roots: State<'_, OpenRoots>, dir: String, id: String
     let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     if id.contains('/') || id.contains("..") { return Err("bad session id".into()); }
-    Ok(json!({ "lines": acp::transcript::read(&lane.store(&p.dir), &id) }))
+    let mut lines = acp::transcript::read(&lane.store(&p.dir), &id);
+    // transcripts written before the agents update are Claude Code's and carry
+    // only its own namespace; stamping is idempotent, so new lines pass through
+    for l in lines.iter_mut() { agents::normalize::normalize(l, agents::claude()); }
+    Ok(json!({ "lines": lines }))
 }
 
 fn project_roots(p: &Project) -> Vec<PathBuf> {

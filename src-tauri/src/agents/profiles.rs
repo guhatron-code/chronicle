@@ -374,6 +374,14 @@ mod profile_tests {
     }
 
     #[test]
+    fn a_project_choice_beats_the_default_which_beats_claude() {
+        let cfg = json!({ "agent": "codex-acp", "project_agents": { "/p/one": "opencode" } });
+        assert_eq!(chosen_in(&cfg, Some("/p/one")).id, "opencode");
+        assert_eq!(chosen_in(&cfg, Some("/p/two")).id, "codex-acp");
+        assert_eq!(chosen_in(&json!({}), Some("/p/two")).id, "claude-acp");
+    }
+
+    #[test]
     fn login_json_names_the_kind() {
         assert_eq!(login_json(Login::Terminal { command: "codex login" }), json!({ "kind": "terminal", "command": "codex login" }));
         assert_eq!(login_json(Login::AuthMethod { id: "oauth-personal" }), json!({ "kind": "auth_method", "id": "oauth-personal" }));
