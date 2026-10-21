@@ -2,7 +2,9 @@
 //! verdict and the judge's bounded decisions. Every provider answers the same
 //! two calls; `Agent` needs no key and rides the user's agent.
 pub mod agent;
+pub mod config;
 pub mod http;
+pub mod keys;
 pub mod schema;
 
 use serde::{Deserialize, Serialize};
@@ -121,10 +123,50 @@ pub fn complete_with_fallback(primary: &dyn Calls, fallback: &dyn Calls, req: &C
     }
 }
 
+/// The repo a project dir belongs to: its git toplevel, else the dir itself (a folder with no history).
+fn repo_root(project_dir: &std::path::Path) -> std::path::PathBuf {
+    std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).current_dir(project_dir).output().ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| std::path::PathBuf::from(s.trim()))
+        .filter(|p| p.is_dir())
+        .unwrap_or_else(|| project_dir.to_path_buf())
+}
+
+/// The project's agent as a `Calls`: a one-turn reviewer session on whatever agent the project uses. No key.
+pub fn agent_calls(project_dir: &std::path::Path) -> agent::AgentCalls {
+    let profile = crate::agents::project_profile(project_dir);
+    agent::AgentCalls::for_project(profile, repo_root(project_dir), project_dir.to_path_buf())
+}
+
+/// What answers a role for this project right now: the chosen provider when its key or address is there,
+/// else the agent. Reads `config.json` and the Keychain; posts through curl.
+#[allow(dead_code)] // the Runs plan's judge and reviewer call it
+pub fn for_role(role: config::Role, project_dir: &std::path::Path) -> Box<dyn Calls + Send + Sync> {
+    let cfg = crate::load_config();
+    let p = config::resolve(&cfg, role, &keys::Keychain);
+    config::calls_for(&p, &cfg, std::sync::Arc::new(http::CurlTransport), agent_calls(project_dir))
+}
+
 #[cfg(test)]
 mod provider_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn for_role_falls_back_to_the_agent_when_no_key_is_saved() {
+        let cfg = json!({ "providers": { "decisions": "typesafe" } });
+        let p = config::resolve(&cfg, config::Role::Decisions, &keys::FakeSecrets::new());
+        assert!(matches!(p, Provider::Agent));
+    }
+
+    #[test]
+    fn repo_root_is_the_dir_itself_without_history() {
+        let d = std::env::temp_dir().join(format!("chronicle-norepo-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(repo_root(&d), d);
+        let _ = std::fs::remove_dir_all(&d);
+    }
 
     struct Canned { reply: Result<Value, CallError>, name: &'static str }
     impl Calls for Canned {

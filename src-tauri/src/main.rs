@@ -507,6 +507,56 @@ async fn agents_status(dir: Option<String>) -> Value {
     json!({ "agents": rows, "default": agents::profiles::chosen_in(&cfg, None).id, "project": agents::profiles::chosen_in(&cfg, key.as_deref()).id })
 }
 
+#[tauri::command]
+async fn providers_status() -> Value {
+    providers::config::status(&load_config(), &providers::keys::Keychain)
+}
+
+#[tauri::command]
+async fn provider_key_set(id: String, key: String) -> Result<(), String> {
+    use providers::keys::Secrets;
+    if !providers::config::KEY_PROVIDERS.iter().any(|(p, _)| *p == id) { return Err(format!("there's no provider called {id}")); }
+    providers::keys::Keychain.set(&id, &key)
+}
+
+/// Removing a key falls every role that used it back to the agent (spec §9).
+#[tauri::command]
+async fn provider_key_remove(id: String) -> Result<(), String> {
+    use providers::keys::Secrets;
+    providers::keys::Keychain.remove(&id)?;
+    let mut cfg = load_config();
+    if providers::config::forget_key(&mut cfg, &id) { save_config(&cfg)?; }
+    Ok(())
+}
+
+#[tauri::command]
+async fn provider_role_set(role: String, provider: String) -> Result<(), String> {
+    let role = providers::config::Role::parse(&role).ok_or_else(|| format!("there's no role called {role}"))?;
+    let mut cfg = load_config();
+    providers::config::set_role(&mut cfg, role, &provider, &providers::keys::Keychain)?;
+    save_config(&cfg)
+}
+
+#[tauri::command]
+async fn provider_local_set(base_url: Option<String>) -> Result<(), String> {
+    let mut cfg = load_config();
+    providers::config::set_local(&mut cfg, base_url.as_deref())?;
+    save_config(&cfg)
+}
+
+/// The role's provider for a project, and its agent to fall back to on a
+/// refused key. The agent is `agents::project_profile` — the same answer the
+/// pane and the reviewer give, not a second reading of the config.
+#[allow(dead_code)]
+pub(crate) fn provider_calls(p: &Project, dir: &str, role: providers::config::Role) -> (Box<dyn providers::Calls>, Box<dyn providers::Calls>) {
+    let cfg = load_config();
+    let profile = agents::project_profile(Path::new(dir));
+    let agent = || providers::agent::AgentCalls::for_project(profile, p.repo.clone(), p.dir.clone());
+    let chosen = providers::config::resolve(&cfg, role, &providers::keys::Keychain);
+    let t: Arc<dyn providers::http::Transport> = Arc::new(providers::http::CurlTransport);
+    (providers::config::calls_for(&chosen, &cfg, t, agent()), Box::new(agent()))
+}
+
 /// Codex has no skill system, so the whole task travels inline as the prompt.
 /// Appended when the user explicitly asks to REBUILD: the skill's refresh mode
 /// (diff-and-patch) must not kick in — the manifest is re-derived from evidence.
@@ -4150,6 +4200,7 @@ fn main() {
             set_window_background,
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
             init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent, agents_status, set_project_agent,
+            providers_status, provider_key_set, provider_key_remove, provider_role_set, provider_local_set,
             agent_attach, agent_attach_path,
             agents_access_status, agents_access_enable, agents_access_disable,
             notes::notes_index, notes::notes_read, notes::notes_write, notes::notes_move,

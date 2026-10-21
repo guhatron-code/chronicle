@@ -185,6 +185,14 @@ export interface AgentStatusRow {
 export interface AgentsStatus { agents: AgentStatusRow[]; default: string; project: string }
 export const agentsStatus = (dir: string | null) => invoke<AgentsStatus>("agents_status", { dir });
 export const setProjectAgent = (dir: string, agent: string | null) => invoke<void>("set_project_agent", { dir, agent });
+/** Rust providers::config::status — whether a key is saved, never the key. */
+export interface ProviderRow { id: "anthropic" | "openai" | "openrouter" | "typesafe" | "local"; name: string; saved: boolean; address?: string | null }
+export interface ProvidersStatus { roles: { review: string; decisions: string }; providers: ProviderRow[] }
+export const providersStatus = () => invoke<ProvidersStatus>("providers_status");
+export const providerKeySet = (id: string, key: string) => invoke<void>("provider_key_set", { id, key });
+export const providerKeyRemove = (id: string) => invoke<void>("provider_key_remove", { id });
+export const providerRoleSet = (role: "review" | "decisions", provider: string) => invoke<void>("provider_role_set", { role, provider });
+export const providerLocalSet = (baseUrl: string | null) => invoke<void>("provider_local_set", { baseUrl });
 export const getPicker = () => invoke<PickerData>("get_picker");
 export const createProject = (name: string) =>
   invoke<string>("create_project", { name });
