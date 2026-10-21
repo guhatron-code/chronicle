@@ -136,7 +136,7 @@ export interface SessionStatusEvent extends InitStatusData {
   kind: SessionKind;
   cancelled?: boolean;
 }
-export type AgentsData = unknown; // agents_available → { claude, codex, default, project, launchable }
+export type AgentsData = unknown; // agents_available → { claude, codex, default, project, launchable, asksFirst, roadmap }
 export interface GitStatusFile {
   path: string;
   code: string; // porcelain letter: M A D R C ? …
@@ -166,6 +166,9 @@ export interface DirEntry {
 export const agentsAvailable = (dir?: string) => invoke<AgentsData>("agents_available", { dir: dir ?? null });
 export const setDefaultAgent = (agent: string) =>
   invoke<void>("set_default_agent", { agent });
+/** The roadmap writer's own CLI ("claude" | "codex") — never the pane's agent. */
+export const setRoadmapAgent = (agent: "claude" | "codex") =>
+  invoke<void>("set_roadmap_agent", { agent });
 
 /** One agent as Setup's Your agent row and the composer's picker see it (Rust `agent_row`). */
 export interface AgentStatusRow {

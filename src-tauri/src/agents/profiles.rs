@@ -209,6 +209,24 @@ pub fn migrate_config(cfg: &mut Value) -> bool {
     }
 }
 
+/// The roadmap writer's CLI for a stored name or id: it runs `claude` or `codex`, nothing else.
+pub fn roadmap_name(s: &str) -> &'static str {
+    if canonical_id(s) == Some("codex-acp") { "codex" } else { "claude" }
+}
+
+/// Ruling R17: before this release `agent` could only mean the roadmap writer's CLI (the "runs with"
+/// chip set it), and the pane ran Claude Code. Once, while `roadmap_agent` is absent, the old value
+/// moves to `roadmap_agent` and the pane's `agent` becomes `claude-acp` — so nothing a user saw
+/// changes. A config with no `agent` gets `roadmap_agent: "claude"`, so the migration never runs
+/// again over an `agent` the Setup radio writes later. `project_agents` is never touched.
+pub fn migrate_roadmap_agent(cfg: &mut Value) -> bool {
+    if !cfg.is_object() || cfg.get("roadmap_agent").is_some() { return false; }
+    let old = cfg.get("agent").and_then(Value::as_str).map(String::from);
+    cfg["roadmap_agent"] = json!(roadmap_name(old.as_deref().unwrap_or("claude")));
+    if old.is_some() { cfg["agent"] = json!("claude-acp"); }
+    true
+}
+
 pub fn login_json(l: Login) -> Value {
     match l {
         Login::Terminal { command } => json!({ "kind": "terminal", "command": command }),
@@ -378,6 +396,32 @@ mod profile_tests {
         assert_eq!(c2["agent"], "claude-acp");
         let mut empty = json!({});
         assert!(!migrate_config(&mut empty));
+    }
+
+    #[test]
+    fn the_old_agent_value_becomes_the_roadmap_writers_and_the_pane_stays_on_claude() {
+        let mut cfg = json!({ "agent": "codex", "project_agents": { "/p/a": "opencode" }, "recents": 1 });
+        assert!(migrate_roadmap_agent(&mut cfg));
+        assert_eq!(cfg, json!({ "agent": "claude-acp", "roadmap_agent": "codex", "project_agents": { "/p/a": "opencode" }, "recents": 1 }));
+        assert!(!migrate_roadmap_agent(&mut cfg), "once only");
+        let mut claude = json!({ "agent": "claude" });
+        assert!(migrate_roadmap_agent(&mut claude));
+        assert_eq!(claude, json!({ "agent": "claude-acp", "roadmap_agent": "claude" }));
+        let mut id = json!({ "agent": "codex-acp" });
+        assert!(migrate_roadmap_agent(&mut id));
+        assert_eq!(id, json!({ "agent": "claude-acp", "roadmap_agent": "codex" }), "an id moves too");
+        let mut fresh = json!({});
+        assert!(migrate_roadmap_agent(&mut fresh));
+        assert_eq!(fresh, json!({ "roadmap_agent": "claude" }), "no agent: the pane keeps its default, the marker is set");
+    }
+
+    #[test]
+    fn a_config_that_already_has_both_keys_is_untouched() {
+        let mut cfg = json!({ "agent": "opencode", "roadmap_agent": "codex", "project_agents": {} });
+        let before = cfg.clone();
+        assert!(!migrate_roadmap_agent(&mut cfg));
+        assert!(!migrate_config(&mut cfg));
+        assert_eq!(cfg, before);
     }
 
     #[test]

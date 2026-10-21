@@ -9,9 +9,11 @@ const started: string[] = [];
 type Update = { dir: string; message: { method: string; params?: Record<string, unknown> } };
 let onUpdate: ((u: Update) => void) | null = null;
 let claude: string | null = "/usr/local/bin/claude";
+let project = "claude-acp";
+let launchable: boolean | null = null; // null: follows claude
 vi.mock("./ipc", () => ({
   onAcpUpdate: vi.fn(async (cb: (u: Update) => void) => { onUpdate = cb; return () => {}; }),
-  agentsAvailable: vi.fn(async () => ({ claude, codex: null, default: claude ? "claude-acp" : "", project: "claude-acp", launchable: !!claude })),
+  agentsAvailable: vi.fn(async () => ({ claude, codex: null, default: claude ? "claude-acp" : "", project, launchable: launchable ?? !!claude, asksFirst: project !== "opencode" })),
   agentSessionStart: vi.fn(async (dir: string) => { started.push(dir); }),
   agentSessionState: vi.fn(async () => null),
   agentPrompt: vi.fn(async () => {}), roundRunMessage: vi.fn(async () => ""), roundPlanBegin: vi.fn(),
@@ -29,7 +31,7 @@ vi.mock("@/overlays/toasts", () => ({ toastAction: vi.fn(), toastError: vi.fn() 
 const agent = await import("./agent-session");
 
 describe("warmAgentSession", () => {
-  beforeEach(() => { started.length = 0; claude = "/usr/local/bin/claude"; });
+  beforeEach(() => { started.length = 0; claude = "/usr/local/bin/claude"; project = "claude-acp"; launchable = null; });
 
   it("starts the session once and says warming until it is ready", async () => {
     const dir = "/warm-a";
@@ -50,6 +52,27 @@ describe("warmAgentSession", () => {
     expect(started).toEqual([]);
     expect(agent.agentSessionFor(dir).phase).toBe("none");
     expect(agent.agentStateWord(agent.agentSessionFor(dir)).word).toBe("idle");
+  });
+
+  it("with no session live, the pane names the project's own agent, not Claude", async () => {
+    project = "codex-acp";
+    launchable = false; // can't start on this Mac yet: nothing is live
+    const dir = "/warm-e";
+    await agent.warmAgentSession(dir);
+    expect(started).toEqual([]);
+    const s = agent.agentSessionFor(dir);
+    expect(s.phase).toBe("none");
+    expect(s.agent).toBe("codex-acp");
+    expect(s.asksFirst).toBe(true);
+  });
+
+  it("a started session carries the project's agent from the first frame", async () => {
+    project = "opencode";
+    const dir = "/warm-f";
+    await agent.startAgentSession(dir);
+    const s = agent.agentSessionFor(dir);
+    expect(s.agent).toBe("opencode");
+    expect(s.asksFirst).toBe(false);
   });
 
   it("does not warm a session that was explicitly ended", async () => {

@@ -883,10 +883,8 @@ pub fn installed_version(dir: &Path, spec: &LaunchSpec) -> Option<String> {
     }
 }
 
-fn read_config() -> Value {
-    std::fs::read_to_string(crate::config_dir().join("config.json")).ok()
-        .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_else(|| json!({}))
-}
+/// The one config reader (main's `load_config`), so Setup never sees a config the migrations haven't run on.
+fn read_config() -> Value { crate::load_config() }
 
 /// The agent a project runs (its own choice, else the default, else Claude Code).
 pub fn chosen_agent_for(project: Option<&str>) -> &'static crate::agents::AgentProfile {

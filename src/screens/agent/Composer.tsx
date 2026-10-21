@@ -19,6 +19,7 @@ import {
   setAgentDraft,
   setAgentStance,
   splitLaneKey,
+  type AgentPhase,
 } from "@/lib/agent-session";
 import { availableStances, currentStance, ownSettingsChip, stanceNeedsConfirm, STANCE_COPY, type Stance } from "@/lib/agent-stances";
 import { XGlyph, PaperclipGlyph, ImageGlyph, ArrowRightGlyph } from "@/components/chrome/icons";
@@ -35,7 +36,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Hint } from "@/components/ui/tooltip";
 import { agentAttach, agentAttachPath, agentsStatus, IMG_MIME, type AgentsStatus } from "@/lib/ipc";
-import { switchProjectAgent } from "@/lib/agents-store";
+import { pickerCurrent, switchProjectAgent } from "@/lib/agents-store";
 import { agentMeta } from "@/lib/agents";
 import { AgentMark } from "@/components/chrome/AgentMark";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -113,9 +114,11 @@ function ConfigSelect({ dir, optionId, title }: { dir: string; optionId: string;
 
 /** The project's agent (spec §3). Lists the agents this Mac can run; picking
  *  one switches the project (asking first when a session is live). */
-function AgentPicker({ projectDir, current, onConfirm }: { projectDir: string; current: string; onConfirm: (spec: ConfirmSpec) => void }) {
+function AgentPicker({ projectDir, sessionAgent, phase, onConfirm }: { projectDir: string; sessionAgent: string; phase: AgentPhase; onConfirm: (spec: ConfirmSpec) => void }) {
   const [status, setStatus] = useState<AgentsStatus | null>(null);
-  useEffect(() => { void agentsStatus(projectDir).then(setStatus).catch(() => {}); }, [projectDir, current]);
+  useEffect(() => { void agentsStatus(projectDir).then(setStatus).catch(() => {}); }, [projectDir, sessionAgent, phase]);
+  // outside a live session, the project's saved choice — never the session state's default
+  const current = pickerCurrent(phase, sessionAgent, status?.project);
   const choices = (status?.agents ?? []).filter((a) => a.supported);
   if (choices.length < 2) return null; // one agent on this Mac: nothing to pick
   const cur = choices.find((a) => a.id === current);
@@ -647,7 +650,7 @@ export function Composer({
             </button>
           </Hint>
         )}
-        {!designLane && <AgentPicker projectDir={projectDir} current={s.agent} onConfirm={onConfirm} />}
+        {!designLane && <AgentPicker projectDir={projectDir} sessionAgent={s.agent} phase={s.phase} onConfirm={onConfirm} />}
         {designLane && stances.includes("ask") && (
           <ModeSelect
             current="ask"

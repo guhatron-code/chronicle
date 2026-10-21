@@ -26,7 +26,7 @@ import {
   initStatus,
   ledgerMark,
   runCommand,
-  setDefaultAgent,
+  setRoadmapAgent,
   agentsAvailable,
   setInitConsent,
   type HistoryFacts,
@@ -394,7 +394,7 @@ export function RoadmapPane({
     handlers: {
       onAgentChange: (a) => {
         onAgentChange(a);
-        void setDefaultAgent(a).catch(() => {});
+        void setRoadmapAgent(a).catch(() => {}); // the writer's own key; the pane's agent is untouched
       },
       onBuild: () => {
         setConsentLocal("auto");

@@ -3,17 +3,28 @@
  * session is never re-pointed: it ends after a confirm and the new agent's
  * session starts. Rust keeps each session's own profile until it ends.
  */
-import { setProjectAgent } from "./ipc";
+import { agentsStatus, setProjectAgent } from "./ipc";
 import { agentSessionFor, endAgentSession, startAgentSession, type AgentPhase } from "./agent-session";
 import { agentMeta } from "./agents";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 
 export type SwitchPlan = "noop" | "start" | "confirm-restart";
 
+/** A session is live (or on its way): its own agent is the one running. */
+export function sessionIsLive(phase: AgentPhase): boolean {
+  return phase === "installing" || phase === "starting" || phase === "ready";
+}
+
 export function agentSwitchPlan(input: { phase: AgentPhase; current: string; next: string }): SwitchPlan {
   if (input.next === input.current) return "noop";
-  if (input.phase === "installing" || input.phase === "starting" || input.phase === "ready") return "confirm-restart";
+  if (sessionIsLive(input.phase)) return "confirm-restart";
   return "start";
+}
+
+/** The project's agent as the picker shows it: the live session's own agent, else the project's
+ *  saved choice — the session state's agent is only a default when nothing is live. */
+export function pickerCurrent(phase: AgentPhase, sessionAgent: string, projectAgent: string | null | undefined): string {
+  return sessionIsLive(phase) || !projectAgent ? sessionAgent : projectAgent;
 }
 
 /** Runs the switch in order: save the choice, end the old session, start the new one.
@@ -43,7 +54,8 @@ async function applySwitch(dir: string, next: string, endFirst: boolean, onError
 
 export async function switchProjectAgent(dir: string, next: string, confirm: (spec: ConfirmSpec) => void, onError: (message: string) => void): Promise<void> {
   const s = agentSessionFor(dir);
-  const plan = agentSwitchPlan({ phase: s.phase, current: s.agent, next });
+  const project = sessionIsLive(s.phase) ? null : await agentsStatus(dir).then((st) => st.project).catch(() => null);
+  const plan = agentSwitchPlan({ phase: s.phase, current: pickerCurrent(s.phase, s.agent, project), next });
   if (plan === "noop") return;
   if (plan === "start") return applySwitch(dir, next, false, onError);
   const to = agentMeta(next).name;

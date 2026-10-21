@@ -874,11 +874,24 @@ function markRejected(s: AgentSessionState, perm: Extract<AgentEntry, { kind: "p
 
 /* ---------- actions ---------- */
 
-export async function startAgentSession(dir: string, opts: { warm?: boolean } = {}): Promise<void> {
+/** What `agents_available` says about the project's agent; the chat lane's state starts from it. */
+type Available = { launchable?: boolean; project?: string; asksFirst?: boolean } | null;
+
+/** Before a session says who it is, the chat lane shows the project's own agent — never the blank
+ *  state's Claude default (the design lane is always Claude Code). */
+function seedAgent(s: AgentSessionState, dir: string, a: Available): void {
+  if (splitKey(dir).lane !== "chat" || !a) return;
+  if (typeof a.project === "string" && a.project) s.agent = a.project;
+  if (typeof a.asksFirst === "boolean") s.asksFirst = a.asksFirst;
+}
+
+export async function startAgentSession(dir: string, opts: { warm?: boolean; available?: Available } = {}): Promise<void> {
   const s = agentSessionFor(dir);
   Object.assign(s, blank(), { lane: s.lane, agent: s.agent, stances: s.stances, asksFirst: s.asksFirst, phase: "installing" as AgentPhase, draft: s.draft, warm: !!opts.warm });
   dropQueueWaiters(dir); // the queue went with the thread
   notify();
+  const a = opts.available !== undefined ? opts.available : splitKey(dir).lane === "chat" ? ((await agentsAvailable(splitKey(dir).dir).catch(() => null)) as Available) : null;
+  if (s.phase === "installing") { seedAgent(s, dir, a); notify(); }
   try {
     await agentSessionStart(dir);
   } catch (e) {
@@ -903,11 +916,13 @@ export async function warmAgentSession(dir: string): Promise<void> {
   if (warmed.has(dir)) return;
   const s = agentSessionFor(dir);
   if (s.phase !== "none") return;
-  const a = (await agentsAvailable(splitKey(dir).dir).catch(() => null)) as { launchable?: boolean } | null;
-  if (!a?.launchable) return; // the project's agent can't start on this Mac yet: no banner, no spinner
+  const a = (await agentsAvailable(splitKey(dir).dir).catch(() => null)) as Available;
   if (agentSessionFor(dir).phase !== "none") return; // re-check across the await
+  seedAgent(s, dir, a); // the header and the empty pane name the project's agent even when it can't start
+  notify();
+  if (!a?.launchable) return; // the project's agent can't start on this Mac yet: no banner, no spinner
   warmed.add(dir);
-  await startAgentSession(dir, { warm: true }).catch(() => { s.warm = false; });
+  await startAgentSession(dir, { warm: true, available: a }).catch(() => { s.warm = false; });
 }
 
 /** Re-sync after a reload: a live backend session re-adopts its state (the

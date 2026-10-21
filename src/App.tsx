@@ -605,8 +605,9 @@ function AppShell() {
     refreshPicker();
     agentsAvailable()
       .then((a) => {
-        const d = (a as { default?: string } | null)?.default;
-        if (d) setAgent(d === "codex-acp" || d === "codex" ? "codex" : "claude");
+        // the roadmap writer's own choice (ruling R17), never the pane's default agent
+        const r = (a as { roadmap?: string } | null)?.roadmap;
+        if (r) setAgent(r === "codex" ? "codex" : "claude");
       })
       .catch(() => {});
     const onFocus = () => { refreshPicker(); for (const dir of projectsRef.current.keys()) void pollOne(dir); };

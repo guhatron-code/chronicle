@@ -428,12 +428,14 @@ fn agents_access_disable_in(dir: &Path, home: &Path, exe: &Path) -> Result<Value
     Ok(agents_access_status_in(dir, home, exe))
 }
 
-fn load_config() -> Value {
+pub(crate) fn load_config() -> Value {
     let mut cfg = std::fs::read_to_string(config_dir().join("config.json"))
         .ok().and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_else(|| json!({}));
-    // "claude"/"codex" -> the registry ids, once, on the first read after the update
-    if agents::profiles::migrate_config(&mut cfg) { let _ = save_config(&cfg); }
+    // the old `agent` was the roadmap writer's (ruling R17), then "claude"/"codex" -> the registry ids;
+    // once each, on the first read after the update
+    let moved = agents::profiles::migrate_roadmap_agent(&mut cfg);
+    if agents::profiles::migrate_config(&mut cfg) || moved { let _ = save_config(&cfg); }
     cfg
 }
 
@@ -453,7 +455,17 @@ fn agents_available(dir: Option<String>) -> Value {
     let project = agents::profiles::chosen_in(&cfg, dir.as_deref().and_then(project_key).as_deref());
     let cli_ok = project.requires_cli.map(|c| setup::resolve(c).is_some()).unwrap_or(true);
     let launchable = cli_ok && setup::agent_launch(project.id).is_some();
-    json!({ "claude": claude, "codex": codex, "default": default.id, "project": project.id, "launchable": launchable, "asksFirst": project.modes.ask.is_some() })
+    let roadmap = cfg.get("roadmap_agent").and_then(Value::as_str).map(agents::profiles::roadmap_name).unwrap_or("claude");
+    json!({ "claude": claude, "codex": codex, "default": default.id, "project": project.id, "launchable": launchable, "asksFirst": project.modes.ask.is_some(), "roadmap": roadmap })
+}
+
+/// The roadmap writer's "runs with" chip: its own key, never the pane's `agent` (ruling R17).
+#[tauri::command]
+fn set_roadmap_agent(agent: String) -> Result<(), String> {
+    if !matches!(agent.as_str(), "claude" | "codex") { return Err(format!("the roadmap can't be written with {agent}")); }
+    let mut cfg = load_config();
+    if let Some(obj) = cfg.as_object_mut() { obj.insert("roadmap_agent".into(), json!(agent)); }
+    save_config(&cfg)
 }
 
 #[tauri::command]
@@ -4222,7 +4234,7 @@ fn main() {
             design_outside_files, design_outside_undo,
             agent_session_resume, agent_sessions_list, agent_history_read,
             setup_status, setup_install, setup_fix_terminal_path, setup_cancel,
-            setup_run_all, setup_open_login,
+            setup_run_all, setup_open_login, set_roadmap_agent,
             journal_append, journal_read, ledger_mark, notify, draft_save_message,
             agent_action_reply, agent_bridge_ready,
             global_search, status_report,

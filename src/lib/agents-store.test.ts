@@ -9,14 +9,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const calls: string[] = [];
 const fail = { set: false, end: false, start: false };
 let phase = "none";
-vi.mock("./ipc", () => ({ setProjectAgent: vi.fn(async (_d: string, a: string | null) => { if (fail.set) throw new Error("boom"); calls.push(`set:${a}`); }) }));
+let project = "claude-acp"; // the project's saved agent, as agents_status reports it
+vi.mock("./ipc", () => ({
+  setProjectAgent: vi.fn(async (_d: string, a: string | null) => { if (fail.set) throw new Error("boom"); calls.push(`set:${a}`); }),
+  agentsStatus: vi.fn(async () => ({ agents: [], default: "claude-acp", project })),
+}));
 vi.mock("./agent-session", () => ({
   agentSessionFor: () => ({ phase, agent: "claude-acp", turnActive: false }),
   startAgentSession: vi.fn(async () => { if (fail.start) throw new Error("boom"); calls.push("start"); }),
   endAgentSession: vi.fn(async () => { if (fail.end) throw new Error("boom"); calls.push("end"); }),
 }));
 
-const { agentSwitchPlan, switchProjectAgent } = await import("./agents-store");
+const { agentSwitchPlan, pickerCurrent, switchProjectAgent } = await import("./agents-store");
 
 describe("agentSwitchPlan", () => {
   it("does nothing for the agent already running", () => {
@@ -30,15 +34,37 @@ describe("agentSwitchPlan", () => {
   });
 });
 
+describe("pickerCurrent", () => {
+  it("is the live session's agent while one is live, else the project's choice", () => {
+    expect(pickerCurrent("ready", "claude-acp", "codex-acp")).toBe("claude-acp");
+    expect(pickerCurrent("starting", "opencode", "codex-acp")).toBe("opencode");
+    for (const p of ["none", "ended", "error", "needs-login"] as const) expect(pickerCurrent(p, "claude-acp", "codex-acp")).toBe("codex-acp");
+    expect(pickerCurrent("none", "claude-acp", null)).toBe("claude-acp"); // status not loaded yet
+  });
+});
+
 describe("switchProjectAgent", () => {
-  beforeEach(() => { calls.length = 0; fail.set = fail.end = fail.start = false; });
+  beforeEach(() => { calls.length = 0; fail.set = fail.end = fail.start = false; project = "claude-acp"; });
 
   it("sets and starts when nothing is live", async () => {
     phase = "none";
+    project = "claude-acp";
     const confirm = vi.fn();
     await switchProjectAgent("/p", "codex-acp", confirm, vi.fn());
     expect(confirm).not.toHaveBeenCalled();
     expect(calls).toEqual(["set:codex-acp", "start"]);
+  });
+
+  it("with nothing live, reads the project's own agent — not the session state's Claude default", async () => {
+    phase = "ended";
+    project = "codex-acp"; // the session state still says claude-acp (its blank default)
+    const confirm = vi.fn();
+    await switchProjectAgent("/p", "claude-acp", confirm, vi.fn());
+    expect(confirm).not.toHaveBeenCalled();
+    expect(calls).toEqual(["set:claude-acp", "start"]); // a real switch, never a no-op
+    calls.length = 0;
+    await switchProjectAgent("/p", "codex-acp", confirm, vi.fn());
+    expect(calls).toEqual([]); // already the project's agent
   });
 
   it("asks first, and only on yes ends the old session and starts the new one", async () => {
