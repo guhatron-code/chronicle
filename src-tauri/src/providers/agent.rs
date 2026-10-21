@@ -13,6 +13,16 @@ use std::time::{Duration, Instant};
 /// How the adapter process is built; tests inject a mock agent.
 pub type Spawn = Arc<dyn Fn() -> Result<std::process::Command, String> + Send + Sync>;
 
+/// The spawn for a profile: the launch comes from `find` (setup's bundled-pin lookup in
+/// production), the command from `adapter_command_for`, which blanks the profile's
+/// `blank_env` and removes `CLAUDECODE` so the agent's own login does the work.
+fn spawn_from(profile: &'static AgentProfile, find: impl Fn(&str) -> Option<acp::AdapterLaunch> + Send + Sync + 'static) -> Spawn {
+    Arc::new(move || {
+        let launch = find(profile.id).ok_or_else(|| format!("{} isn't installed — set it up in Setup first", profile.name))?;
+        Ok(acp::adapter_command_for(&launch, profile))
+    })
+}
+
 pub struct AgentCalls {
     pub profile: &'static AgentProfile,
     pub repo: PathBuf,
@@ -24,12 +34,7 @@ pub struct AgentCalls {
 impl AgentCalls {
     /// The project's agent, launched from the bundled pin like the pane's own session.
     pub fn for_project(profile: &'static AgentProfile, repo: PathBuf, project_dir: PathBuf) -> AgentCalls {
-        let spawn: Spawn = Arc::new(move || {
-            let launch = crate::setup::agent_launch(profile.id)
-                .ok_or_else(|| format!("{} isn't installed — set it up in Setup first", profile.name))?;
-            Ok(acp::adapter_command_for(&launch, profile))
-        });
-        AgentCalls { profile, repo, project_dir, spawn, timeout: Duration::from_secs(300) }
+        AgentCalls { profile, repo, project_dir, spawn: spawn_from(profile, crate::setup::agent_launch), timeout: Duration::from_secs(300) }
     }
 
     /// One reviewer turn: the prompt out, the assistant's text back.
@@ -58,12 +63,18 @@ impl AgentCalls {
         let mut reply = String::new();
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
-            let ev = rx.recv_timeout(left).map_err(|_| CallError::Failed(format!("{name} took too long to answer")))?;
+            let ev = rx.recv_timeout(left).map_err(|e| CallError::Failed(match e {
+                mpsc::RecvTimeoutError::Disconnected => format!("{name} ended before it answered"),
+                mpsc::RecvTimeoutError::Timeout if !prompted => format!("{name} never got ready to answer"),
+                mpsc::RecvTimeoutError::Timeout => format!("{name} took too long to answer"),
+            }))?;
             let m = ev.get("message").unwrap_or(&Value::Null);
             let params = m.get("params").unwrap_or(&Value::Null);
             match m.get("method").and_then(Value::as_str) {
                 Some("_chronicle/session_state") => match params.get("state").and_then(Value::as_str) {
                     Some("ready") if !prompted => {
+                        // The session sets Ask mode on a thread that may race this prompt; that is harmless
+                        // because the reviewer's permission asks are answered in Rust (reads once, all else rejected).
                         let s = state.get(&key).ok_or_else(|| CallError::Failed(format!("{name} ended before it could answer")))?;
                         s.prompt(vec![json!({ "type": "text", "text": text })], "Chronicle review".into()).map_err(CallError::Failed)?;
                         prompted = true;
@@ -80,6 +91,10 @@ impl AgentCalls {
                     if let Some(e) = params.get("error") {
                         let why = e.get("message").and_then(Value::as_str).unwrap_or("no detail");
                         return Err(CallError::Failed(format!("{name} couldn't finish the turn: {why}")));
+                    }
+                    let stop = params.get("stopReason").and_then(Value::as_str).unwrap_or("end_turn");
+                    if matches!(stop, "cancelled" | "refusal" | "max_tokens" | "max_turn_requests") {
+                        return Err(CallError::Failed(format!("{name} stopped early ({stop})")));
                     }
                     return Ok(reply);
                 }
@@ -113,7 +128,8 @@ mod agent_provider_tests {
 
     const MOCK_REVIEWER: &str = r#"
 import sys, json
-reply, mode = sys.argv[1], sys.argv[2]
+reply, mode, project = sys.argv[1], sys.argv[2], sys.argv[3]
+waiting = set(); answers = {}; pid = None
 def send(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 for line in sys.stdin:
@@ -127,9 +143,23 @@ for line in sys.stdin:
             send({"jsonrpc":"2.0","id":m["id"],"result":{"sessionId":"r1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask"}]}}})
     elif meth == "session/set_mode":
         send({"jsonrpc":"2.0","id":m["id"],"result":{}})
+    elif meth == "session/prompt" and mode == "hang":
+        pass
+    elif meth == "session/prompt" and mode == "fence":
+        opts = [{"optionId":"once","name":"Allow","kind":"allow_once"},{"optionId":"always","name":"Always","kind":"allow_always"},{"optionId":"no","name":"Reject","kind":"reject_once"}]
+        send({"jsonrpc":"2.0","id":500,"method":"fs/write_text_file","params":{"sessionId":"r1","path":project+"/reviewer-wrote.txt","content":"no"}})
+        send({"jsonrpc":"2.0","id":501,"method":"session/request_permission","params":{"sessionId":"r1","toolCall":{"toolCallId":"r1","kind":"edit","title":"Edit a file"},"options":opts}})
+        waiting = {"500","501"}; pid = m["id"]
+    elif meth is None and str(m.get("id")) in waiting:
+        rid = str(m["id"]); waiting.discard(rid)
+        answers[rid] = m["error"]["message"] if "error" in m else m["result"]["outcome"].get("optionId")
+        if not waiting:
+            json.dump(answers, open(project + "/.answers.json", "w"))
+            send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"r1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":reply}}}})
+            send({"jsonrpc":"2.0","id":pid,"result":{"stopReason":"end_turn"}})
     elif meth == "session/prompt":
         send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"r1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":reply}}}})
-        send({"jsonrpc":"2.0","id":m["id"],"result":{"stopReason":"end_turn"}})
+        send({"jsonrpc":"2.0","id":m["id"],"result":{"stopReason":"max_tokens" if mode == "cut" else "end_turn"}})
 "#;
 
     fn mock(name: &str, reply: &str, mode: &str) -> Option<AgentCalls> {
@@ -140,12 +170,12 @@ for line in sys.stdin:
         let dir = dir.canonicalize().unwrap();
         let script = dir.join(".mock-reviewer.py");
         std::fs::write(&script, MOCK_REVIEWER).unwrap();
-        let (reply, mode) = (reply.to_string(), mode.to_string());
+        let (reply, mode, pdir) = (reply.to_string(), mode.to_string(), dir.to_string_lossy().to_string());
         Some(AgentCalls {
             profile: crate::agents::claude(),
             repo: dir.clone(),
             project_dir: dir,
-            spawn: std::sync::Arc::new(move || { let mut c = std::process::Command::new(&py); c.arg(&script).arg(&reply).arg(&mode); Ok(c) }),
+            spawn: std::sync::Arc::new(move || { let mut c = std::process::Command::new(&py); c.arg(&script).arg(&reply).arg(&mode).arg(&pdir); Ok(c) }),
             timeout: std::time::Duration::from_secs(20),
         })
     }
@@ -179,5 +209,43 @@ for line in sys.stdin:
         let Some(a) = mock("bad", "{\"verdict\":3}", "ok") else { return };
         let schema = json!({ "type": "object", "required": ["verdict"], "properties": { "verdict": { "type": "string" } } });
         assert!(a.complete_json(&CompleteRequest { system: String::new(), prompt: "x".into(), schema, max_tokens: 100 }).is_err());
+    }
+
+    #[test]
+    fn the_reviewer_fence_holds_and_the_reply_still_arrives() {
+        let Some(a) = mock("fence", "{\"ok\":true}", "fence") else { return };
+        let v = a.complete_json(&CompleteRequest { system: String::new(), prompt: "x".into(), schema: json!({ "type": "object" }), max_tokens: 100 }).unwrap();
+        assert_eq!(v["ok"], true);
+        let answers: Value = serde_json::from_str(&std::fs::read_to_string(a.repo.join(".answers.json")).unwrap()).unwrap();
+        assert!(answers["500"].as_str().unwrap_or("").contains("reads only"), "the write is refused: {answers}");
+        assert_eq!(answers["501"], "no", "an edit ask is rejected once, never allowed always");
+        assert!(!a.repo.join("reviewer-wrote.txt").exists());
+    }
+
+    #[test]
+    fn a_turn_that_never_ends_times_out_and_says_so() {
+        let Some(mut a) = mock("hang", "{}", "hang") else { return };
+        a.timeout = std::time::Duration::from_secs(2);
+        let e = a.complete_json(&CompleteRequest { system: String::new(), prompt: "x".into(), schema: json!({ "type": "object" }), max_tokens: 100 }).unwrap_err();
+        assert!(matches!(&e, CallError::Failed(m) if m.contains("took too long")), "{e}");
+    }
+
+    #[test]
+    fn a_cut_short_turn_is_an_error_not_a_partial_reply() {
+        let Some(a) = mock("cut", "{\"a\":", "cut") else { return };
+        let e = a.complete_json(&CompleteRequest { system: String::new(), prompt: "x".into(), schema: json!({ "type": "object" }), max_tokens: 100 }).unwrap_err();
+        assert!(e.to_string().contains("stopped early (max_tokens)"), "{e}");
+    }
+
+    #[test]
+    fn the_spawn_blanks_the_agents_key_and_names_a_missing_install() {
+        let p = crate::agents::claude();
+        let launch = crate::acp::AdapterLaunch::Binary { program: "/bin/echo".into(), args: vec![] };
+        let cmd = (spawn_from(p, move |_| Some(launch.clone())))().unwrap();
+        let env: std::collections::HashMap<_, _> = cmd.get_envs().map(|(k, v)| (k.to_string_lossy().to_string(), v.map(|x| x.to_string_lossy().to_string()))).collect();
+        assert_eq!(env.get("ANTHROPIC_API_KEY"), Some(&Some(String::new())), "the key is blanked");
+        assert_eq!(env.get("CLAUDECODE"), Some(&None), "CLAUDECODE is removed");
+        let e = (spawn_from(p, |_| None))().unwrap_err();
+        assert!(e.contains(p.name) && e.contains("isn't installed"), "{e}");
     }
 }
