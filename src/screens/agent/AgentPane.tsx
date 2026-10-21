@@ -24,6 +24,8 @@ import {
   type AgentSessionState,
   type ThreadItem,
 } from "@/lib/agent-session";
+import { loginBanner } from "@/lib/agent-login";
+import { agentMeta } from "@/lib/agents";
 import { rowKeys, rowSignature, sameRow } from "@/lib/thread-rows";
 import { profilerOnRender } from "@/lib/perf";
 import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
@@ -504,7 +506,7 @@ export function AgentPane({
      (useStickToBottom: a jump in a layout effect, one glide on the way back) */
   const setScroller = useStickToBottom([version]);
 
-  /* needs-login: run `claude /login` in a terminal tab; when that tab's
+  /* needs-login: run the agent's own sign-in command in a terminal tab; when that tab's
      session exits, retry the agent session (the plan's retry contract) */
   const [loginTermId, setLoginTermId] = useState<number | null>(null);
   useEffect(() => {
@@ -519,11 +521,13 @@ export function AgentPane({
   }, [loginTermId, dir]);
 
   const start = () => void startAgentSession(dir).catch((e) => toastError("Couldn't start the agent", String(e).slice(0, 110)));
+  const login = loginBanner({ name: agentMeta(s.agent).name, login: s.login, waiting: s.loginWaiting, authMethods: s.authMethods });
   const signIn = () => {
+    if (!login.command) return;
     onRevealTerminal();
     // terminals belong to the project, not to a session lane
     const projectDir = splitLaneKey(dir).dir;
-    spawnTerm(projectDir, { title: "sign-in", agent: "claude", autoType: "claude /login" })
+    spawnTerm(projectDir, { title: "sign-in", agent: s.agent, autoType: login.command })
       .then((sess) => {
         setActiveTermFor(projectDir, sess.id);
         setLoginTermId(sess.id);
@@ -578,20 +582,27 @@ export function AgentPane({
                 <rect x="2.5" y="5" width="7" height="5.5" rx="1" />
                 <path d="M4 5V3.6a2 2 0 0 1 4 0V5" />
               </svg>
-              Claude Code isn't signed in
+              {login.title}
             </span>
             <span className="flex-1" />
-            {loginTermId == null && (
-              <BtnPrimary size="sm" onClick={signIn} className="whitespace-nowrap">
-                Sign in — opens a terminal
-              </BtnPrimary>
+            {login.action === "terminal" && loginTermId == null && (
+              <BtnPrimary size="sm" onClick={signIn} className="whitespace-nowrap">Open a terminal</BtnPrimary>
+            )}
+            {login.action === "none" && (
+              <BtnSecondary size="sm" onClick={start} className="whitespace-nowrap">Check again</BtnSecondary>
             )}
           </div>
-          {loginTermId != null && (
+          <span className="text-[11.5px] leading-[1.5] text-text-muted">{login.body}</span>
+          {login.command && loginTermId == null && (
+            <span data-selectable className="w-max rounded-xs bg-surface-input px-1.5 font-mono text-[11.5px] text-text-primary">{login.command}</span>
+          )}
+          {(loginTermId != null || login.action === "wait") && (
             <div className="flex items-center gap-2">
               <Spinner size={11} />
-              <span className="text-[11.5px] text-text-muted">Waiting for the sign-in to finish in</span>
-              <span className="rounded-xs bg-fill-subtle px-1.5 font-mono text-[10.5px] text-text-subtle">claude · sign-in</span>
+              <span className="text-[11.5px] text-text-muted">{login.action === "wait" ? "Waiting for the browser" : "Waiting for the sign-in to finish in"}</span>
+              {loginTermId != null && (
+                <span className="rounded-xs bg-fill-subtle px-1.5 font-mono text-[10.5px] text-text-subtle">{agentMeta(s.agent).name.toLowerCase()} · sign-in</span>
+              )}
             </div>
           )}
         </div>

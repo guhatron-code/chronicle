@@ -32,6 +32,7 @@ import {
 } from "./ipc";
 import { clearRunningRound, markRunningRound, runningRoundFor } from "./round-log";
 import { indexFor, refreshNotes, roundGenerating, roundNotesFor, setRoundGenerating } from "./notes-store";
+import { parseAuthMethods, parseLogin, type AgentLogin, type AuthMethod } from "./agent-login";
 import { parseStances, type Stance, type StanceMap } from "./agent-stances";
 import { endNewestRoundCard, roundPlanOutcome } from "./notes-model";
 import { announce } from "./journal";
@@ -181,6 +182,11 @@ export interface AgentSessionState {
   cost: number | null;
   entries: AgentEntry[];
   errorMessage: string | null;
+  /** how this agent signs in, from the needs-login event (null until one arrives) */
+  login: AgentLogin | null;
+  /** Rust is running the agent's own authenticate (an AuthMethod login): the browser is open */
+  loginWaiting: boolean;
+  authMethods: AuthMethod[];
   /** the Works-freely confirm is per SESSION — reset on every new session */
   worksFreelyConfirmed: boolean;
   /** the Full-auto confirm is per SESSION — reset on every new session */
@@ -233,6 +239,9 @@ const blank = (): AgentSessionState => ({
   cost: null,
   entries: [],
   errorMessage: null,
+  login: null,
+  loginWaiting: false,
+  authMethods: [],
   worksFreelyConfirmed: false,
   fullAutoConfirmed: false,
   autoConfirmed: false,
@@ -563,10 +572,15 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     } else if (state === "needs-login") {
       s.phase = "needs-login";
       s.turnActive = false;
-      // nothing queued is going anywhere until someone signs in and the session
-      // is restarted, and a restart drops the queue: the card ends now rather
-      // than reading "waiting for the pane" for the rest of the session
-      if (live && lane === "chat") dropQueuedPrompts(s, dir);
+      s.agent = str(params.agent) || s.agent;
+      s.login = parseLogin(params.login);
+      s.loginWaiting = params.waiting === true;
+      s.authMethods = parseAuthMethods(params.authMethods);
+      // waiting: Rust is signing in by itself and the session carries on when it
+      // succeeds, so the queue stands. Otherwise nothing queued is going anywhere
+      // until someone signs in and the session is restarted, and a restart drops
+      // the queue: the card ends now rather than reading "waiting for the pane"
+      if (!s.loginWaiting && live && lane === "chat") dropQueuedPrompts(s, dir);
     } else if (state === "error") {
       s.phase = "error";
       s.errorMessage = str(params.message) || "The agent bridge stopped.";

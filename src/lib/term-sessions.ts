@@ -425,7 +425,7 @@ function registerTermLinks(term: Terminal, dir: string) {
 
 export interface SpawnOpts {
   title?: string;
-  agent?: "claude" | "codex";
+  agent?: string;
   /** Typed into the session after the shell settles (the agent launch or a command). */
   autoType?: string;
 }
@@ -464,7 +464,8 @@ export async function spawnTerm(dir: string, opts: SpawnOpts = {}): Promise<Term
     dir,
     title: opts.title ?? `Shell ${counter}`,
     autoNamed: !opts.title,
-    agent: opts.agent,
+    // the tab's mark knows only the two shells-with-an-agent; any other id is just a label
+    agent: opts.agent === "claude" || opts.agent === "codex" ? opts.agent : undefined,
     dead: false,
     term,
     fit,

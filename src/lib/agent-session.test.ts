@@ -145,3 +145,43 @@ describe("a round prompt waiting in the composer queue", () => {
     expect(prompts).toEqual(["first"]); // nothing left to send
   });
 });
+
+describe("needs-login and the queue", () => {
+  const needsLogin = (waiting: boolean) =>
+    onUpdate!({
+      dir: DIR,
+      message: {
+        method: "_chronicle/session_state",
+        params: { state: "needs-login", agent: "gemini", login: { kind: "auth_method", id: "oauth-personal" }, waiting, authMethods: null },
+      },
+    });
+  beforeEach(() => {
+    prompts.length = 0;
+    clearRunningRound(DIR);
+    Object.assign(agent.agentSessionFor(DIR), { phase: "ready", turnActive: true, entries: [], queue: [] });
+  });
+
+  it("keeps a queued round while Rust signs in by itself, and records the login", async () => {
+    agent.enqueueAgentMessage(DIR, "look at this first");
+    await agent.startRoundInPane(DIR, 7, 2);
+    turnEnds();
+    expect(agent.agentSessionFor(DIR).queue).toEqual(["RUN 7"]);
+    needsLogin(true);
+    const s = agent.agentSessionFor(DIR);
+    expect(s).toMatchObject({ phase: "needs-login", agent: "gemini", loginWaiting: true, login: { kind: "auth_method", id: "oauth-personal" }, authMethods: [] });
+    expect(s.queue).toEqual(["RUN 7"]);
+    expect(roundCard()).toMatchObject({ queued: true });
+  });
+
+  it("drops a queued round when the sign-in is not going to finish by itself", async () => {
+    agent.enqueueAgentMessage(DIR, "look at this first");
+    await agent.startRoundInPane(DIR, 9, 2);
+    turnEnds();
+    expect(agent.agentSessionFor(DIR).queue).toEqual(["RUN 9"]);
+    needsLogin(false);
+    const s = agent.agentSessionFor(DIR);
+    expect(s.loginWaiting).toBe(false);
+    expect(s.queue).toEqual([]);
+    expect(roundCard()).toMatchObject({ ended: true });
+  });
+});
