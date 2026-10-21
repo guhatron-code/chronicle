@@ -90,6 +90,14 @@ picker (the current "runs with" chips move there); the pane header shows the age
 instead of "Chronigirl" when the agent is not Claude. Switching an agent while a session is live ends the
 session after a confirm, then starts the new one.
 
+**Amended 2026-10-22 (ruling R17).** The roadmap writer keeps its own "runs with" chip, which writes
+`config.json` `roadmap_agent` (`"claude"` | `"codex"`), never `agent`. Migration, once, while
+`roadmap_agent` is absent: an old top-level `agent` value (an old name `claude`/`codex` or any id) moves to
+`roadmap_agent`, and the pane's `agent` becomes `claude-acp` — before this release that key could only
+mean the roadmap writer's CLI and the pane ran Claude Code, so nothing a user saw changes. A config with
+no `agent` gets `roadmap_agent: "claude"`. `project_agents` is untouched; `agents_available` returns the
+writer's choice as `roadmap`.
+
 ## 4 · Installing an agent
 
 The connector row from the pane plan generalises: **"The agent's connector"** becomes one row per chosen
@@ -112,12 +120,20 @@ ACP's `initialize` reply lists `authMethods`; an `authenticate` request runs one
 
 ```rust
 pub enum Login {
-    Terminal { command: &'static str },   // claude-acp: "claude /login"; codex-acp: "codex login"
+    Terminal { command: &'static str },   // claude-acp: "claude /login"; codex-acp: "codex login";
+                                          // opencode: "opencode auth login"
     AuthMethod { id: &'static str },      // when the adapter's authenticate works headless (gemini's
                                           // OAuth opens a browser from the adapter's side)
-    None,                                 // opencode: keys/config handled by the agent
 }
 ```
+
+**Amended 2026-10-22 (ruling R18).** OpenCode signs in with `Terminal "opencode auth login"` (its own
+authMethods entry says so); `opencode` is the managed binary, never on PATH, so the command is built at
+use time from the binary's absolute path (`setup::agent_launch`), in the pane's banner and in Setup's
+Sign in alike. Codex's `codex login` needs the `codex` CLI, which the codex-acp package does not ship:
+its profile requires it, and the Your agent row reads "Needs codex installed first". Each profile records
+the probe's `authMethods` ids as data (Codex: `api-key`, `chat-gpt`); no shipped agent signs in through an
+`AuthMethod` — Codex's `chat-gpt` is a Task 19 experiment. The `None` variant is gone: no agent needs it.
 
 The pane's `needs-login` banner and the Setup sign-in rows use the profile: a `Terminal` login types that
 command into a terminal tab (today's flow, generalised); an `AuthMethod` login calls `authenticate` and
@@ -135,8 +151,12 @@ commands ask), **Unattended**. Each profile maps them to the agent's mode ids:
 | Execute | `acceptEdits` | *(probe)* | *(probe)* | *(probe)* |
 | Unattended | `bypassPermissions` | *(probe)* | *(probe)* | *(probe)* |
 
-A stance an agent has no mode for is hidden in the composer for that agent; Ask first always exists
-(every ACP agent asks through `session/request_permission`). The store keeps the stance, not the id;
+A stance an agent has no mode for is hidden in the composer for that agent. **Amended 2026-10-22
+(rulings R15, R16):** Ask first exists only where the profile maps it — the probe showed OpenCode never
+asks and Codex's default `agent` mode edits without asking. Every chat session is walked to Ask first
+before `ready` where the agent offers it, and Codex's `agent` mode is its Auto. An agent with no Ask mode
+(OpenCode) gets a static "Its own settings" chip in place of the stance control, and the pane says it
+doesn't ask before changing files. The store keeps the stance, not the id;
 `agent_set_mode` translates. Runs' lanes run in Ask first with Chronicle answering by policy, which is
 agent-independent.
 
@@ -190,7 +210,11 @@ Two roles, chosen separately in Setup, both defaulting to `Agent`:
 - **Decisions**: the Runs judge's four bounded decisions.
 
 `Agent` runs a one-turn ACP session (a reviewer session, `Lane::Reviewer`, Ask-first with reads only) and
-parses the JSON the agent returns; it needs no key and rides the user's login. `TypeSafe` answers
+parses the JSON the agent returns; it needs no key and rides the user's login. **Amended 2026-10-22
+(ruling R15):** the reviewer is put in the profile's Ask mode synchronously, before `ready`, and a failure
+fails the session; an agent with no Ask mode can't be the reviewer — the call fails before anything is
+spawned ("OpenCode can't review without changing files — choose a provider for Review in Setup") and the
+Providers group says so in place of "sends nothing new". A reviewer turn keeps no transcript. `TypeSafe` answers
 `decide` natively (Choice / Score / Noul with probabilities and confidence). Every other provider
 emulates `decide` through `complete_json` with a schema `{ choice, probabilities, confidence }`, and the
 run record marks such confidences `self_reported: true` so the REFLEX bands (Runs spec §6) treat them as
@@ -233,7 +257,7 @@ so its `Login` is the terminal command, not an observed AuthMethod flow.
 |---|---|---|---|---|
 | version run | 0.75.1 | 2.2.3-preview.10 | 0.64.0 (initialize only) | 1.19.0 |
 | authMethods ids | *(none)* | `api-key`, `chat-gpt` | `oauth-personal`, `gemini-api-key`, `vertex-ai`, `gateway` | `opencode-login` |
-| Login † | Terminal "claude /login" | Terminal "codex login" | Terminal "gemini" (deferred, not observed) | Terminal "opencode auth login" |
+| Login † | Terminal "claude /login" | Terminal "codex login" (needs the `codex` CLI) | Terminal "gemini" (deferred, not observed) | Terminal "opencode auth login", run as the managed binary's absolute path (R18) |
 | availableModes ids | `default`, `acceptEdits`, `plan`, `auto`, `bypassPermissions` | `read-only`, `workspace-write`, `agent`, `agent-full-access` | — (session/new refused) | — (no `modes`; configOption `mode` offers `build`, `plan`, which are agents, not permission stances) |
 | Ask first → † | default | read-only | — | — |
 | Execute → † | acceptEdits | workspace-write | — | — |
