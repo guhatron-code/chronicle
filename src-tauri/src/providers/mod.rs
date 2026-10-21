@@ -2,6 +2,7 @@
 //! verdict and the judge's bounded decisions. Every provider answers the same
 //! two calls; `Agent` needs no key and rides the user's agent.
 // agent.rs (the Agent provider) lands as Task 13b once Lane::Reviewer and start(profile) exist
+pub mod http;
 pub mod schema;
 
 use serde::{Deserialize, Serialize};

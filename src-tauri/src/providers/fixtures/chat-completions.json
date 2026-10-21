@@ -1,0 +1,1 @@
+{"id":"gen-probe","object":"chat.completion","model":"openai/gpt-5","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"{\"outside\":{\"yes\":0.3}}"}}],"usage":{"prompt_tokens":180,"completion_tokens":11}}
