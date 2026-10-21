@@ -869,6 +869,9 @@ pub struct AcpSession {
     extras: LaneExtras,
     /// Which of the project's two sessions this is (chat or design).
     lane: Lane,
+    /// The agent this session runs, fixed for its whole life (spec §3): the
+    /// project switching agents ends this session first, never re-profiles it.
+    profile: &'static crate::agents::AgentProfile,
     /// The lane's record store — transcripts, ledger, `current` pointer.
     store: PathBuf,
     /// The CHAT lane's store for this project: the design lane's turn-end
@@ -1012,6 +1015,7 @@ pub fn start(
     emit: Emit,
     key: String,
     lane: Lane,
+    profile: &'static crate::agents::AgentProfile,
     cwd: PathBuf,
     project_dir: PathBuf,
     roots: Vec<PathBuf>,
@@ -1059,6 +1063,7 @@ pub fn start(
         designs_root,
         extras,
         lane,
+        profile,
         store: lane.store(&project_dir),
         chat_store: Lane::Chat.store(&project_dir),
         roots,
@@ -1128,6 +1133,8 @@ fn session_log_path(key: &str) -> PathBuf {
 }
 
 impl AcpSession {
+    pub fn profile(&self) -> &'static crate::agents::AgentProfile { self.profile }
+
     fn is_alive(&self) -> bool {
         match self.child.lock() {
             Ok(mut g) => match g.as_mut() {
@@ -1247,8 +1254,9 @@ impl AcpSession {
                 // the adapter replays history during load; our transcript is
                 // the UI's source, so the replay stays suppressed
                 self.suppress_updates.store(true, Ordering::SeqCst);
-                let mut load = json!({ "sessionId": old_sid, "cwd": cwd, "mcpServers": self.extras.mcp_servers });
-                if let Some(root) = &self.designs_root {
+                let servers = if self.profile.extras.mcp_servers { self.extras.mcp_servers.clone() } else { Vec::new() };
+                let mut load = json!({ "sessionId": old_sid, "cwd": cwd, "mcpServers": servers });
+                if let (Some(root), true) = (&self.designs_root, self.profile.extras.plugins) {
                     load["_meta"] = Value::Object(crate::designs::prompt::design_session_meta(root, self.extras.plugin_dir.as_deref()));
                 }
                 ("session/load", load)
@@ -1261,10 +1269,10 @@ impl AcpSession {
                     Ok(v) => v,
                     Err(e) => return self.fail_handshake(&e.to_string()),
                 };
-                if !self.extras.mcp_servers.is_empty() {
+                if self.profile.extras.mcp_servers && !self.extras.mcp_servers.is_empty() {
                     v["mcpServers"] = Value::Array(self.extras.mcp_servers.clone());
                 }
-                if let Some(root) = &self.designs_root {
+                if let (Some(root), true) = (&self.designs_root, self.profile.extras.plugins) {
                     v["_meta"] = Value::Object(crate::designs::prompt::design_session_meta(root, self.extras.plugin_dir.as_deref()));
                 }
                 ("session/new", v)
@@ -1285,6 +1293,7 @@ impl AcpSession {
                 checkpoint::prune_old(&self.repo);
                 self.emit_state(json!({
                     "state": "ready",
+                    "agent": self.profile.id,
                     "sessionId": sid,
                     "resumed": self.resume.is_some(),
                     "modes": resp.get("modes").cloned().unwrap_or(Value::Null),
@@ -1883,6 +1892,7 @@ impl AcpSession {
     pub fn current_state(&self) -> Value {
         json!({
             "alive": self.is_alive(),
+            "agent": self.profile.id,
             "sessionId": self.session_id.lock().ok().and_then(|g| g.clone()),
             "modes": self.modes.lock().map(|g| g.clone()).unwrap_or(Value::Null),
             "configOptions": self.config_options.lock().map(|g| g.clone()).unwrap_or(Value::Null),
@@ -2041,8 +2051,50 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        assert!(start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), None, cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), Lane::Chat, crate::agents::claude(), dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), None, cmd).unwrap());
         Some(Harness { state, rx, key, dir })
+    }
+
+    fn start_mock_as(name: &str, profile: &'static crate::agents::AgentProfile, lane: Lane, extras: LaneExtras) -> Option<Harness> {
+        let py = python3()?;
+        let dir = tmp(name);
+        let script = dir.join(".mock-agent.py");
+        std::fs::write(&script, MOCK_AGENT).unwrap();
+        let mut cmd = std::process::Command::new(py);
+        cmd.arg(&script).arg(&dir);
+        let (tx, rx) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let state = AcpState::new();
+        let key = lane.key(&dir.to_string_lossy());
+        let designs = if lane == Lane::Design { Some(dir.join(".chronicle/designs")) } else { None };
+        assert!(start(&state, emit, key.clone(), lane, profile, dir.clone(), dir.clone(), vec![dir.clone()], designs, extras, None, cmd).unwrap());
+        Some(Harness { state, rx, key, dir })
+    }
+
+    #[test]
+    fn a_live_session_keeps_its_own_agent() {
+        let codex = crate::agents::profile("codex-acp").unwrap();
+        let Some(h) = start_mock_as("own-agent", codex, Lane::Chat, LaneExtras::default()) else { return };
+        let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        assert_eq!(ready.pointer("/message/params/agent").and_then(|v| v.as_str()), Some("codex-acp"));
+        let s = h.state.get(&h.key).unwrap();
+        assert_eq!(s.profile().id, "codex-acp");
+        // whatever the config says from now on, this session's agent is fixed until it ends
+        assert_eq!(s.current_state()["agent"], "codex-acp");
+        h.state.drain();
+    }
+
+    #[test]
+    fn an_agent_without_plugins_never_gets_claudes_meta() {
+        let codex = crate::agents::profile("codex-acp").unwrap();
+        let extras = LaneExtras { mcp_servers: vec![json!({ "name": "x", "command": "/usr/bin/true", "args": [], "env": [] })], plugin_dir: Some(PathBuf::from("/nowhere/design-plugin")) };
+        let Some(h) = start_mock_as("no-plugins", codex, Lane::Design, extras) else { return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        let log = std::fs::read_to_string(h.dir.join(".mock-requests.jsonl")).unwrap_or_default();
+        let new_req = log.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|v| v["method"] == "session/new").unwrap();
+        assert!(new_req["params"].get("_meta").is_none(), "plugins and settings are Claude-only: {new_req}");
+        assert_eq!(new_req["params"]["mcpServers"][0]["name"], "x", "MCP servers are standard ACP");
+        h.state.drain();
     }
 
     /// Pull events until `pred` matches (or fail loudly after `secs`).
@@ -2281,6 +2333,7 @@ for line in sys.stdin:
             roots: vec![dir.clone()],
             repo: dir.clone(),
             lane: Lane::Chat,
+            profile: crate::agents::claude(),
             store: ledger::agent_dir(&dir),
             chat_store: ledger::agent_dir(&dir),
             last_checkpoint: Mutex::new(None),
@@ -2457,6 +2510,7 @@ for line in sys.stdin:
             roots: vec![d.clone()],
             repo: d.clone(),
             lane: Lane::Design,
+            profile: crate::agents::claude(),
             store: Lane::Design.store(&d),
             chat_store: Lane::Chat.store(&d),
             last_checkpoint: Mutex::new(None),
@@ -2521,6 +2575,7 @@ for line in sys.stdin:
             roots: vec![d.clone()],
             repo: d.clone(),
             lane: Lane::Chat,
+            profile: crate::agents::claude(),
             store: ledger::agent_dir(&d),
             chat_store: ledger::agent_dir(&d),
             last_checkpoint: Mutex::new(None),
@@ -2716,7 +2771,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = dir.to_string_lossy().to_string();
-        start(&state, emit, key.clone(), Lane::Chat, dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), None, adapter_command_for(&launch, crate::agents::claude())).unwrap();
+        start(&state, emit, key.clone(), Lane::Chat, crate::agents::claude(), dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), None, adapter_command_for(&launch, crate::agents::claude())).unwrap();
 
         let ready = wait_for(&rx, 300, |v| state_is(v, "ready") || state_is(v, "needs-login") || state_is(v, "error"));
         if !state_is(&ready, "ready") {
@@ -2854,7 +2909,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = Lane::Design.key(&dir.to_string_lossy());
-        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), Lane::Design, crate::agents::claude(), dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
         wait_for(&rx, 20, |v| state_is(v, "ready"));
         state.get(&key).unwrap().prompt(vec![json!({"type":"text","text":"DESIGN-FENCE"})], "DESIGN-FENCE".into()).unwrap();
         let guards: Vec<Value> = (0..3).map(|_| wait_for(&rx, 20, |v| method_is(v, "_chronicle/guard"))["message"]["params"].clone()).collect();
@@ -2880,7 +2935,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = Lane::Design.key(&dir.to_string_lossy());
-        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), Lane::Design, crate::agents::claude(), dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
         wait_for(&rx, 20, |v| state_is(v, "ready"));
 
         // the real path waits DESIGN_IDLE — call the stop path directly instead
@@ -2986,6 +3041,7 @@ for line in sys.stdin:
             roots: vec![d.to_path_buf()],
             repo: d.to_path_buf(),
             lane: Lane::Design,
+            profile: crate::agents::claude(),
             store: Lane::Design.store(d),
             chat_store: Lane::Chat.store(d),
             last_checkpoint: Mutex::new(None),
@@ -3100,7 +3156,7 @@ for line in sys.stdin:
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let state = AcpState::new();
         let key = Lane::Design.key(&dir.to_string_lossy());
-        assert!(start(&state, emit, key.clone(), Lane::Design, dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
+        assert!(start(&state, emit, key.clone(), Lane::Design, crate::agents::claude(), dir.clone(), dir.clone(), vec![dir.clone()], Some(dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
         wait_for(&rx, 20, |v| state_is(v, "ready"));
         state.get(&key).unwrap().prompt(vec![json!({"type":"text","text":"EXIT-PLAN"})], "EXIT-PLAN".into()).unwrap();
         let guard = wait_for(&rx, 20, |v| method_is(v, "_chronicle/guard"));
@@ -3129,7 +3185,7 @@ for line in sys.stdin:
         let (tx, rx2) = mpsc::channel::<Value>();
         let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
         let dkey = Lane::Design.key(&h.key);
-        assert!(start(&h.state, emit, dkey.clone(), Lane::Design, h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], Some(h.dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
+        assert!(start(&h.state, emit, dkey.clone(), Lane::Design, crate::agents::claude(), h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], Some(h.dir.join(".chronicle/designs")), LaneExtras::default(), None, cmd).unwrap());
         let chat_ready = wait_for(&h.rx, 20, |v| state_is(v, "ready"));
         let design_ready = wait_for(&rx2, 20, |v| state_is(v, "ready"));
         assert_eq!(chat_ready["lane"], "chat");
@@ -3179,7 +3235,7 @@ for line in sys.stdin:
             mcp_servers: vec![json!({ "name": "playwright", "command": "/usr/bin/true", "args": ["--headless"], "env": [] })],
             plugin_dir: Some(PathBuf::from("/Applications/Chronicle.app/Contents/Resources/design-plugin")),
         };
-        assert!(start(&h.state, emit, dkey.clone(), Lane::Design, h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], Some(h.dir.join(".chronicle/designs")), extras, None, cmd).unwrap());
+        assert!(start(&h.state, emit, dkey.clone(), Lane::Design, crate::agents::claude(), h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], Some(h.dir.join(".chronicle/designs")), extras, None, cmd).unwrap());
         let _ = wait_for(&rx2, 20, |v| state_is(v, "ready"));
         // both lanes ready ⇒ both session/new requests are already logged
         let _ = wait_for(&h.rx, 20, |v| state_is(v, "ready"));

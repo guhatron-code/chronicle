@@ -3406,6 +3406,30 @@ fn pty_kill(pty: State<PtyState>, id: u32) -> Result<(), String> {
 
 /* ================= the agent pane (ACP — see acp.rs for the seam) ================= */
 
+/// The agent a lane runs: the design lane is Claude Code's alone (spec §8);
+/// the chat lane runs the project's chosen agent. Refuses an agent whose own
+/// CLI is missing, before any process is spawned.
+fn session_profile(dir: &str, lane: acp::Lane) -> Result<&'static agents::AgentProfile, String> {
+    let profile = if lane == acp::Lane::Design {
+        agents::claude()
+    } else {
+        let key = canon_key(dir).ok().map(|(k, _)| k);
+        setup::chosen_agent_for(key.as_deref())
+    };
+    if let Some(cli) = profile.requires_cli.filter(|c| setup::resolve(c).is_none()) {
+        return Err(format!("{} needs `{cli}` installed first — Setup & health can install it", profile.name));
+    }
+    Ok(profile)
+}
+
+fn launch_refusal(p: &agents::AgentProfile) -> String {
+    match agents::registry::launch_spec(p) {
+        None => format!("{} isn't supported on this Mac yet", p.name),
+        Some(agents::registry::LaunchSpec::Binary { .. }) => format!("{} isn't installed yet — install it from Setup & health, then try again", p.name),
+        Some(_) => "the agent needs Node.js — install it from Setup & health, then try again".into(),
+    }
+}
+
 /// Start (or reuse) the project's one live agent session. Progress arrives as
 /// `acp-update` events (installing → starting → ready | needs-login | error).
 #[tauri::command]
@@ -3413,8 +3437,8 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
     let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     let key = session_key(&dir, lane)?;
-    let profile = agents::claude();
-    let launch = setup::agent_launch(profile.id).ok_or("the agent needs Node.js — install it from Setup & health, then try again")?;
+    let profile = session_profile(&dir, lane)?;
+    let launch = setup::agent_launch(profile.id).ok_or_else(|| launch_refusal(profile))?;
     let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
     jail_roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
     let emit: acp::Emit = {
@@ -3429,7 +3453,7 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir() }
     } else { acp::LaneExtras::default() };
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, None, acp::adapter_command_for(&launch, profile))?;
+    let started = acp::start(&agents, emit, key, lane, profile, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, None, acp::adapter_command_for(&launch, profile))?;
     Ok(json!({ "started": started }))
 }
 
@@ -3440,8 +3464,8 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
     let lane = acp::Lane::parse(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     let key = session_key(&dir, lane)?;
-    let profile = agents::claude();
-    let launch = setup::agent_launch(profile.id).ok_or("the agent needs Node.js — install it from Setup & health, then try again")?;
+    let profile = session_profile(&dir, lane)?;
+    let launch = setup::agent_launch(profile.id).ok_or_else(|| launch_refusal(profile))?;
     let mut jail_roots = vec![p.repo.clone(), p.dir.clone()];
     jail_roots.extend(p.extras.iter().map(|(_, b)| b.clone()));
     let emit: acp::Emit = {
@@ -3456,7 +3480,7 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir() }
     } else { acp::LaneExtras::default() };
-    let started = acp::start(&agents, emit, key, lane, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, Some(id), acp::adapter_command_for(&launch, profile))?;
+    let started = acp::start(&agents, emit, key, lane, profile, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, Some(id), acp::adapter_command_for(&launch, profile))?;
     Ok(json!({ "started": started }))
 }
 
