@@ -13,7 +13,10 @@ pub trait Transport: Send + Sync {
     fn post_json(&self, url: &str, headers: &[(&str, String)], body: &Value) -> Result<HttpReply, String>;
 }
 
-fn q(s: &str) -> String { s.replace('\\', "\\\\").replace('"', "\\\"") }
+/// A curl config string: control characters are escaped so a value can't end its line or add a directive.
+fn q(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t")
+}
 
 pub fn curl_config(url: &str, headers: &[(&str, String)], body_file: &Path) -> String {
     let mut c = format!("url = \"{}\"\nrequest = \"POST\"\nsilent\nshow-error\nmax-time = 120\nwrite-out = \"\\n%{{http_code}}\"\n", q(url));
@@ -26,8 +29,22 @@ pub fn curl_config(url: &str, headers: &[(&str, String)], body_file: &Path) -> S
 pub fn parse_curl_output(out: &str) -> Result<HttpReply, String> {
     let (body, code) = out.rsplit_once('\n').ok_or("the provider sent nothing back")?;
     let status: u16 = code.trim().parse().map_err(|_| "the provider's answer had no status".to_string())?;
+    if status == 0 { return Err("no connection was made".into()); }
     let body = serde_json::from_str(body).unwrap_or_else(|_| json!({ "error": { "message": body.trim().chars().take(200).collect::<String>() } }));
     Ok(HttpReply { status, body })
+}
+
+/// curl's stdout and stderr → a reply, or why no reply came. A failed connection still
+/// writes "\n000", so status 0 is the signal, and curl's stderr says why.
+fn curl_result(url: &str, stdout: &str, stderr: &str) -> Result<HttpReply, String> {
+    match parse_curl_output(stdout) {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            let host = url.split("://").nth(1).unwrap_or(url).split('/').next().unwrap_or(url);
+            let why = stderr.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or(&e);
+            Err(format!("couldn't reach {host}: {why}"))
+        }
+    }
 }
 
 pub struct CurlTransport;
@@ -37,20 +54,18 @@ impl Transport for CurlTransport {
         use std::os::unix::fs::OpenOptionsExt;
         let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
         let path = std::env::temp_dir().join(format!("chronicle-provider-{}-{n}.json", std::process::id()));
-        {
+        let write = || -> Result<(), String> {
             let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path).map_err(|e| e.to_string())?;
-            f.write_all(serde_json::to_string(body).map_err(|e| e.to_string())?.as_bytes()).map_err(|e| e.to_string())?;
-        }
+            f.write_all(serde_json::to_string(body).map_err(|e| e.to_string())?.as_bytes()).map_err(|e| e.to_string())
+        };
+        if let Err(e) = write() { let _ = std::fs::remove_file(&path); return Err(e); }
         let run = || -> Result<HttpReply, String> {
             let mut child = std::process::Command::new("curl").args(["-K", "-"])
                 .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped())
                 .spawn().map_err(|e| format!("couldn't run curl: {e}"))?;
             child.stdin.take().ok_or("no stdin")?.write_all(curl_config(url, headers, &path).as_bytes()).map_err(|e| e.to_string())?;
             let out = child.wait_with_output().map_err(|e| e.to_string())?;
-            if out.stdout.is_empty() {
-                return Err(format!("couldn't reach the provider: {}", String::from_utf8_lossy(&out.stderr).trim()));
-            }
-            parse_curl_output(&String::from_utf8_lossy(&out.stdout))
+            curl_result(url, &String::from_utf8_lossy(&out.stdout), &String::from_utf8_lossy(&out.stderr))
         };
         let r = run();
         let _ = std::fs::remove_file(&path);
@@ -61,12 +76,13 @@ impl Transport for CurlTransport {
 fn check_status(r: &HttpReply, who: &str) -> Result<(), CallError> {
     match r.status {
         200..=299 => Ok(()),
-        401 | 403 => Err(CallError::KeyRefused(format!("{who} refused the saved key"))),
+        401 => Err(CallError::KeyRefused(format!("{who} refused the saved key"))),
         s => Err(CallError::Failed(format!("{who} answered {s}: {}", r.body.pointer("/error/message").and_then(Value::as_str).unwrap_or("no detail")))),
     }
 }
 
-fn finish(text: &str, req: &CompleteRequest) -> Result<Value, CallError> {
+fn finish(text: &str, who: &str, req: &CompleteRequest) -> Result<Value, CallError> {
+    if text.trim().is_empty() { return Err(CallError::Failed(format!("{who} returned no text"))); }
     let v = schema::extract_json(text).map_err(CallError::Failed)?;
     schema::check_schema(&v, &req.schema).map_err(CallError::Failed)?;
     Ok(v)
@@ -90,7 +106,7 @@ impl Calls for AnthropicCalls {
         if r.body["stop_reason"] == "refusal" { return Err(CallError::Failed("Anthropic declined to answer this one".into())); }
         let text: String = r.body["content"].as_array().into_iter().flatten()
             .filter(|b| b["type"] == "text").filter_map(|b| b["text"].as_str()).collect();
-        finish(&text, req)
+        finish(&text, "Anthropic", req)
     }
     fn decide(&self, req: &DecisionRequest) -> Result<Decision, CallError> { emulate_decide(self, req) }
     fn model(&self) -> String { format!("anthropic/{}", self.model) }
@@ -115,7 +131,7 @@ impl Calls for OpenAICalls {
             .filter(|o| o["type"] == "message")
             .flat_map(|o| o["content"].as_array().cloned().unwrap_or_default())
             .filter(|c| c["type"] == "output_text").filter_map(|c| c["text"].as_str().map(String::from)).collect();
-        finish(&text, req)
+        finish(&text, "OpenAI", req)
     }
     fn decide(&self, req: &DecisionRequest) -> Result<Decision, CallError> { emulate_decide(self, req) }
     fn model(&self) -> String { format!("openai/{}", self.model) }
@@ -144,7 +160,7 @@ impl Calls for ChatCompatCalls {
         let who = if self.label == "local" { "The local server" } else { "OpenRouter" };
         let r = self.t.post_json(&self.url, &headers, &body).map_err(CallError::Failed)?;
         check_status(&r, who)?;
-        finish(r.body.pointer("/choices/0/message/content").and_then(Value::as_str).unwrap_or(""), req)
+        finish(r.body.pointer("/choices/0/message/content").and_then(Value::as_str).unwrap_or(""), who, req)
     }
     fn decide(&self, req: &DecisionRequest) -> Result<Decision, CallError> { emulate_decide(self, req) }
     fn model(&self) -> String { format!("{}/{}", self.label, self.model) }
@@ -293,6 +309,38 @@ mod http_tests {
         assert!(c.contains("header = \"authorization: Bearer a\\\"b\""));
         assert!(c.contains("data-binary = \"@/tmp/body.json\""));
         assert!(c.contains("write-out = \"\\n%{http_code}\""));
+    }
+
+    #[test]
+    fn the_curl_config_cannot_be_broken_or_extended_by_a_control_character() {
+        let c = curl_config("https://x/y\n", &[("authorization", "Bearer a\nurl = \"evil\"".into()), ("x", "a\\b".into())], std::path::Path::new("/tmp/b.json"));
+        assert!(c.contains("url = \"https://x/y\\n\"\n"));
+        assert!(c.contains("header = \"authorization: Bearer a\\nurl = \\\"evil\\\"\"\n"));
+        assert!(c.contains("header = \"x: a\\\\b\""));
+        assert!(c.lines().all(|l| l.is_empty() || l.starts_with("url") || l.starts_with("header") || l.starts_with("data-binary") || l.starts_with("request") || ["silent", "show-error"].contains(&l) || l.starts_with("max-time") || l.starts_with("write-out")));
+        assert_eq!(c.lines().filter(|l| l.starts_with("url")).count(), 1);
+    }
+
+    #[test]
+    fn a_failed_connection_says_why_not_answered_zero() {
+        assert!(parse_curl_output("\n000").is_err());
+        let e = curl_result("http://localhost:11434/v1/chat/completions", "\n000", "curl: (7) Failed to connect to localhost port 11434\n").err().unwrap();
+        assert_eq!(e, "couldn't reach localhost:11434: curl: (7) Failed to connect to localhost port 11434");
+        assert_eq!(curl_result("https://x/y", "{}\n200", "").map(|r| r.status), Ok(200));
+    }
+
+    #[test]
+    fn only_a_401_is_a_refused_key() {
+        let t = Fake::new(403, r#"{"error":{"message":"region not supported"}}"#);
+        let c = AnthropicCalls { key: "k".into(), model: "m".into(), t };
+        assert!(matches!(c.decide(&noul()), Err(CallError::Failed(m)) if m.contains("403") && m.contains("region not supported")));
+    }
+
+    #[test]
+    fn an_empty_reply_says_no_text() {
+        let t = Fake::new(200, r#"{"choices":[]}"#);
+        let c = ChatCompatCalls { url: local_url("http://localhost:1/"), key: None, model: "m".into(), label: "local", t };
+        assert!(matches!(c.decide(&noul()), Err(CallError::Failed(m)) if m.contains("returned no text")));
     }
 
     #[test]
