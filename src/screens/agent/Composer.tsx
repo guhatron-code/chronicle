@@ -1,11 +1,11 @@
 /*
  * F32 — the composer: multiline input (Enter sends, Shift+Enter for a
  * newline), Stop replaces Send while the agent works (input stays
- * editable), the three-state mode control
- * (Asks first / Works freely / Full auto — modes are the AGENT'S OWN ids
- * read from the session), and the quiet usage meter
+ * editable), the stance control
+ * (Ask first / Execute / Auto / Unattended — each offered only when the
+ * agent's profile maps it to a mode the session advertised), and the quiet usage meter
  * that is hidden entirely when the agent sends no usage data. Switching to
- * Works freely or Full auto is confirmed once per session, with copy that
+ * Execute, Auto or Unattended is confirmed once per session, with copy that
  * states exactly what it covers.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
@@ -17,9 +17,10 @@ import {
   sendAgentMessage,
   setAgentConfigOption,
   setAgentDraft,
-  setAgentMode,
+  setAgentStance,
   splitLaneKey,
 } from "@/lib/agent-session";
+import { availableStances, currentStance, stanceNeedsConfirm, STANCE_COPY, type Stance } from "@/lib/agent-stances";
 import { XGlyph, PaperclipGlyph, ImageGlyph, ArrowRightGlyph } from "@/components/chrome/icons";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { Kbd } from "@/components/chrome/atoms";
@@ -128,7 +129,7 @@ function ModeSelect({
             disabled={disabled}
             className="inline-flex h-[26px] shrink-0 items-center gap-1 whitespace-nowrap rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted hover:text-text-primary disabled:opacity-50"
           >
-            <span className="max-w-[110px] truncate">{cur?.name ?? "Plan"}</span>
+            <span className="max-w-[110px] truncate">{cur?.name ?? "Ask first"}</span>
             <svg className="shrink-0" width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
               <path d="m3 4.5 3 3 3-3" />
             </svg>
@@ -424,47 +425,38 @@ export function Composer({
     void cancelAgentTurn(dir).catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)));
   };
 
-  const switchMode = (modeId: string) => {
-    if (!s.modes || s.modes.currentModeId === modeId) return;
-    const apply = () =>
-      void setAgentMode(dir, modeId).catch((e) => toastError("Couldn't switch the mode", String(e).slice(0, 90)));
-    if (modeId === "acceptEdits" && !s.worksFreelyConfirmed) {
-      onConfirm({
-        title: "Switch to Execute?",
-        body:
-          "File edits happen without asking, for the rest of this session. Commands still ask every time. Every change stays reviewable and undoable. This lasts for this session only — the next session starts in Plan again.",
-        cancelLabel: "Stay in Plan",
-        confirmLabel: "Execute this session",
-        onConfirm: apply,
-      });
-    } else if (modeId === "auto" && !s.autoConfirmed) {
-      onConfirm({
-        title: "Turn on Auto?",
-        body:
-          "The agent approves routine edits and commands itself and still asks about anything risky. Every change stays reviewable and undoable. This lasts for this session only — the next session starts in Plan again.",
-        cancelLabel: "Keep confirming",
-        confirmLabel: "Turn on Auto",
-        onConfirm: apply,
-      });
-    } else if (modeId === "bypassPermissions" && !s.fullAutoConfirmed) {
-      onConfirm({
-        title: "Turn on Unattended?",
-        body:
-          "Edits and commands both run without asking — nothing is confirmed, not even risky commands. Every change still stays reviewable and undoable. This lasts for this session only — the next session starts in Plan again.",
-        cancelLabel: "Keep confirming",
-        confirmLabel: "Turn on Unattended",
-        onConfirm: apply,
-      });
-    } else apply();
+  const CONFIRMS: Record<Exclude<Stance, "ask">, { title: string; body: string; cancelLabel: string; confirmLabel: string }> = {
+    execute: {
+      title: "Switch to Execute?",
+      body: "File edits happen without asking, for the rest of this session. Commands still ask every time. Every change stays reviewable and undoable. This lasts for this session only — the next session starts in Ask first again.",
+      cancelLabel: "Stay in Ask first",
+      confirmLabel: "Execute this session",
+    },
+    auto: {
+      title: "Turn on Auto?",
+      body: "The agent approves routine edits and commands itself and still asks about anything risky. Every change stays reviewable and undoable. This lasts for this session only — the next session starts in Ask first again.",
+      cancelLabel: "Keep confirming",
+      confirmLabel: "Turn on Auto",
+    },
+    unattended: {
+      title: "Turn on Unattended?",
+      body: "Edits and commands both run without asking — nothing is confirmed, not even risky commands. Every change still stays reviewable and undoable. This lasts for this session only — the next session starts in Ask first again.",
+      cancelLabel: "Keep confirming",
+      confirmLabel: "Turn on Unattended",
+    },
   };
 
-  const asksFirst = s.modes?.availableModes.find((m) => m.id === "default");
-  const worksFreely = s.modes?.availableModes.find((m) => m.id === "acceptEdits");
-  const fullAuto = s.modes?.availableModes.find((m) => m.id === "bypassPermissions");
-  // Claude Code's classifier-driven mode: routine actions are approved by the
-  // agent itself, risky ones still ask. Only offered when the adapter lists it.
-  const autoMode = s.modes?.availableModes.find((m) => m.id === "auto");
-  const current = s.modes?.currentModeId;
+  const stances = availableStances(s.stances);
+  const current = currentStance(s.stances, s.modes?.currentModeId);
+
+  const switchStance = (next: string) => {
+    const stance = next as Stance;
+    if (stance === current || !stances.includes(stance)) return;
+    const apply = () =>
+      void setAgentStance(dir, stance).catch((e) => toastError("Couldn't switch the mode", String(e).slice(0, 90)));
+    if (stance !== "ask" && stanceNeedsConfirm(stance, s)) onConfirm({ ...CONFIRMS[stance], onConfirm: apply });
+    else apply();
+  };
 
   return (
     <div
@@ -613,29 +605,23 @@ export function Composer({
             </button>
           </Hint>
         )}
-        {designLane && asksFirst && (
+        {designLane && stances.includes("ask") && (
           <ModeSelect
-            current={current ?? "default"}
+            current="ask"
             disabled={disabled}
-            onPick={switchMode}
+            onPick={switchStance}
             options={[
-              // ask-first only: every other mode (plan included, which exits into
-              // an elevated one) would take the design session past its fence
-              { value: "default", name: "Ask first", description: "The design session asks before running commands. It never changes files outside the designs folder." },
+              // ask-first only: every other mode would take the design session past its fence
+              { value: "ask", name: "Ask first", description: "The design session asks before running commands. It never changes files outside the designs folder." },
             ]}
           />
         )}
-        {!designLane && asksFirst && worksFreely && (
+        {!designLane && stances.length > 1 && (
           <ModeSelect
-            current={current ?? "default"}
+            current={current}
             disabled={disabled}
-            onPick={switchMode}
-            options={[
-              { value: "default", name: "Plan", description: "The agent asks before editing files or running commands." },
-              { value: "acceptEdits", name: "Execute", description: "File edits happen without asking. Commands still ask." },
-              ...(autoMode ? [{ value: "auto", name: "Auto", description: "The agent approves routine edits and commands itself and still asks about risky ones." }] : []),
-              ...(fullAuto ? [{ value: "bypassPermissions", name: "Unattended", description: "Edits and commands both run without asking — nothing is confirmed." }] : []),
-            ]}
+            onPick={switchStance}
+            options={stances.map((k) => ({ value: k, ...STANCE_COPY[k] }))}
           />
         )}
         {!disabled && <ConfigSelect dir={dir} optionId="model" title="The model the agent uses" />}

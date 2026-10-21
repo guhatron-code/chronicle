@@ -32,6 +32,7 @@ import {
 } from "./ipc";
 import { clearRunningRound, markRunningRound, runningRoundFor } from "./round-log";
 import { indexFor, refreshNotes, roundGenerating, roundNotesFor, setRoundGenerating } from "./notes-store";
+import { parseStances, type Stance, type StanceMap } from "./agent-stances";
 import { endNewestRoundCard, roundPlanOutcome } from "./notes-model";
 import { announce } from "./journal";
 import { touch } from "./thread-rows";
@@ -165,6 +166,8 @@ export interface AgentSessionState {
   phase: AgentPhase;
   sessionId: string | null;
   modes: { currentModeId: string; availableModes: AgentMode[] } | null;
+  /** stance → this agent's mode id, for the modes the session advertised (Rust profiles.rs) */
+  stances: StanceMap;
   /** the agent's config options — the model picker reads the "model" one */
   configOptions: AgentConfigOption[];
   /** the config options the user picked by hand this session (ids) — a default set by the app never overrides one */
@@ -223,6 +226,7 @@ const blank = (): AgentSessionState => ({
   phase: "none",
   sessionId: null,
   modes: null,
+  stances: {},
   loadSession: false,
   turnActive: false,
   usage: null,
@@ -553,6 +557,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
           }
         : null;
       s.configOptions = parseConfigOptions(params.configOptions);
+      s.stances = parseStances(params.stances);
       const caps = params.agentCaps as Raw | null;
       s.loadSession = Boolean((caps?.agentCapabilities as Raw | undefined)?.loadSession);
     } else if (state === "needs-login") {
@@ -853,7 +858,7 @@ function markRejected(s: AgentSessionState, perm: Extract<AgentEntry, { kind: "p
 
 export async function startAgentSession(dir: string, opts: { warm?: boolean } = {}): Promise<void> {
   const s = agentSessionFor(dir);
-  Object.assign(s, blank(), { lane: s.lane, phase: "installing" as AgentPhase, draft: s.draft, warm: !!opts.warm });
+  Object.assign(s, blank(), { lane: s.lane, agent: s.agent, stances: s.stances, phase: "installing" as AgentPhase, draft: s.draft, warm: !!opts.warm });
   dropQueueWaiters(dir); // the queue went with the thread
   notify();
   try {
@@ -910,6 +915,7 @@ export async function adoptAgentSession(dir: string): Promise<void> {
         };
       }
       s.configOptions = parseConfigOptions(raw.configOptions);
+      s.stances = parseStances(raw.stances);
       s.turnActive = Boolean(raw.turnActive);
       notify();
     }
@@ -955,13 +961,14 @@ export async function cancelAgentTurn(dir: string): Promise<void> {
   // the stop lands via _chronicle/turn_end (stop reason cancelled)
 }
 
-export async function setAgentMode(dir: string, modeId: string): Promise<void> {
+export async function setAgentStance(dir: string, stance: Stance): Promise<void> {
   const s = agentSessionFor(dir);
-  await agentSetMode(dir, modeId);
-  if (s.modes) s.modes.currentModeId = modeId;
-  if (modeId === "acceptEdits") s.worksFreelyConfirmed = true;
-  if (modeId === "bypassPermissions") s.fullAutoConfirmed = true;
-  if (modeId === "auto") s.autoConfirmed = true;
+  await agentSetMode(dir, stance);
+  const id = s.stances[stance];
+  if (s.modes && id) s.modes.currentModeId = id;
+  if (stance === "execute") s.worksFreelyConfirmed = true;
+  if (stance === "auto") s.autoConfirmed = true;
+  if (stance === "unattended") s.fullAutoConfirmed = true;
   notify();
 }
 

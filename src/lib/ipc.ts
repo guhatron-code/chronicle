@@ -571,7 +571,8 @@ export const agentSessionState = (dir: string) => invoke<Record<string, unknown>
 export const agentPrompt = (dir: string, blocks: unknown[], display: string) =>
   invoke("agent_prompt", { ...laneArgs(dir), blocks, display });
 export const agentCancel = (dir: string) => invoke("agent_cancel", laneArgs(dir));
-export const agentSetMode = (dir: string, mode: string) => invoke("agent_set_mode", { ...laneArgs(dir), mode });
+/** `stance` is a stance word (ask | execute | auto | unattended); Rust maps it to the agent's own mode id. */
+export const agentSetMode = (dir: string, stance: string) => invoke("agent_set_mode", { ...laneArgs(dir), mode: stance });
 export const agentSetConfigOption = (dir: string, configId: string, value: string) =>
   invoke("agent_set_config_option", { ...laneArgs(dir), configId, value });
 export const agentRespondPermission = (dir: string, requestId: string, option: string | null) =>
