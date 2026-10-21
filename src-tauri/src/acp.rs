@@ -730,14 +730,24 @@ fn permission_tool_name(params: &Value) -> Option<&str> {
 /// thinking are allowed once; everything else is rejected once; with no
 /// once-only option the ask is cancelled. Never an "always".
 pub fn reviewer_outcome(params: &Value) -> Value {
-    let kind = params.pointer("/toolCall/kind").and_then(|v| v.as_str()).unwrap_or("other");
-    let reads = matches!(kind, "read" | "search" | "fetch" | "think");
+    let reads = reviewer_reads(params);
     let options = params.get("options").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let pick = |k: &str| options.iter().find(|o| o["kind"] == k).and_then(|o| o["optionId"].as_str()).map(String::from);
     match pick(if reads { "allow_once" } else { "reject_once" }) {
         Some(option_id) => json!({ "outcome": "selected", "optionId": option_id }),
         None => json!({ "outcome": "cancelled" }),
     }
+}
+
+/// The one list of tool kinds the reviewer lets through: reads, searches, fetches and thinking.
+fn reviewer_reads(params: &Value) -> bool {
+    matches!(params.pointer("/toolCall/kind").and_then(|v| v.as_str()).unwrap_or("other"), "read" | "search" | "fetch" | "think")
+}
+
+/// What a reviewer session for this agent can't do, as the sentence that says so: an agent with no
+/// Ask mode edits and runs commands without asking (the probe saw OpenCode do both), so it can't review.
+pub fn reviewer_refusal(p: &crate::agents::AgentProfile) -> Option<String> {
+    p.modes.ask.is_none().then(|| format!("{} can't review without changing files — choose a provider for Review in Setup", p.name))
 }
 
 /// The `allow_once` option id for a permission ask from one of the design
@@ -1331,11 +1341,37 @@ impl AcpSession {
                     ledger::set_current_session(&self.store, &sid);
                     checkpoint::prune_old(&self.repo);
                 }
+                // Ask first before ready, so no prompt ever runs in another mode: the reviewer must
+                // be read-only (Codex's default `agent` mode edits without asking), and a chat
+                // session starts in Ask first wherever the agent has one. set_mode blocks on the
+                // agent's answer; the reader thread delivers it, so this thread may wait.
+                let ask = crate::agents::profiles::mode_for(self.profile, crate::agents::profiles::Stance::Ask);
+                let current = resp.pointer("/modes/currentModeId").and_then(|v| v.as_str());
+                let name = self.profile.name;
+                if self.lane == Lane::Reviewer {
+                    let Some(ask) = ask else {
+                        return self.fail_handshake(&reviewer_refusal(self.profile).unwrap_or_default());
+                    };
+                    if current != Some(ask) && self.set_mode(ask).is_err() {
+                        return self.fail_handshake(&format!("{name} couldn't be put in Ask first, so it can't review read-only"));
+                    }
+                }
+                if self.lane == Lane::Chat {
+                    // only where the session offers it: a session with no such mode has nothing to walk
+                    let offered = |a: &str| resp.pointer("/modes/availableModes").and_then(|v| v.as_array())
+                        .map(|l| l.iter().any(|m| m.get("id").and_then(|i| i.as_str()) == Some(a))).unwrap_or(false);
+                    if let Some(ask) = ask.filter(|a| current != Some(*a) && offered(a)) {
+                        if self.set_mode(ask).is_err() {
+                            return self.fail_handshake(&format!("{name} couldn't be put in Ask first, so the session didn't start — start it again"));
+                        }
+                    }
+                }
+                let modes_now = self.modes.lock().map(|g| g.clone()).unwrap_or(Value::Null);
                 let mut ready = json!({ "method": "_chronicle/session_state", "params": {
                     "state": "ready",
                     "sessionId": sid,
                     "resumed": self.resume.is_some(),
-                    "modes": resp.get("modes").cloned().unwrap_or(Value::Null),
+                    "modes": modes_now,
                     "configOptions": resp.get("configOptions").cloned().unwrap_or(Value::Null),
                     "agentCaps": caps,
                 } });
@@ -1354,15 +1390,6 @@ impl AcpSession {
                     if current != Some("default") {
                         let ms = self.clone();
                         std::thread::spawn(move || { let _ = ms.set_mode("default"); });
-                    }
-                }
-                // the reviewer runs in Ask first, so every non-read reaches reviewer_outcome
-                if self.lane == Lane::Reviewer {
-                    if let Some(ask) = crate::agents::profiles::mode_for(self.profile, crate::agents::profiles::Stance::Ask) {
-                        if resp.pointer("/modes/currentModeId").and_then(|v| v.as_str()) != Some(ask) {
-                            let ms = self.clone();
-                            std::thread::spawn(move || { let _ = ms.set_mode(ask); });
-                        }
                     }
                 }
             }
@@ -1528,7 +1555,7 @@ impl AcpSession {
                 if self.lane == Lane::Reviewer {
                     let tool_call_id = params.pointer("/toolCall/toolCallId").cloned().unwrap_or(Value::Null);
                     let outcome = reviewer_outcome(&params);
-                    let allowed = outcome.get("optionId").is_some() && matches!(params.pointer("/toolCall/kind").and_then(|v| v.as_str()), Some("read" | "search" | "fetch" | "think"));
+                    let allowed = outcome.get("optionId").is_some() && reviewer_reads(&params);
                     self.respond_ok(&id, json!({ "outcome": outcome }));
                     let guard = json!({ "method": "_chronicle/guard", "params": {
                         "toolCallId": tool_call_id, "allowed": allowed, "path": "", "reason": if allowed { "" } else { "The reviewer reads only." } } });
@@ -2022,8 +2049,9 @@ for line in sys.stdin:
         if os.path.exists(os.path.join(project, ".needs-auth")) and not state.get("authed"):
             send({"jsonrpc":"2.0","id":msg["id"],"error":{"code":-32000,"message":"Authentication required"}})
             continue
+        start_mode = open(os.path.join(project, ".start-mode")).read() if os.path.exists(os.path.join(project, ".start-mode")) else "default"
         send({"jsonrpc":"2.0","id":msg["id"],"result":{"sessionId":"sess-1",
-            "modes":{"currentModeId":"default","availableModes":[
+            "modes":{"currentModeId":start_mode,"availableModes":[
                 {"id":"default","name":"Always Ask"},
                 {"id":"acceptEdits","name":"Accept Edits"},
                 {"id":"bypassPermissions","name":"Bypass"}]}}})
@@ -2086,8 +2114,10 @@ for line in sys.stdin:
                 "options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}})
             state["waiting"] = {"200"}
     elif m == "session/set_mode":
-        with open(project + "/.set-mode.json", "w") as f:
+        # written whole, then renamed: a reader that sees the file sees all of it
+        with open(project + "/.set-mode.json.tmp", "w") as f:
             json.dump(msg["params"], f)
+        os.replace(project + "/.set-mode.json.tmp", project + "/.set-mode.json")
         send({"jsonrpc":"2.0","id":msg["id"],"result":{}})
     elif m == "session/cancel":
         state["cancelled"] = True
@@ -2193,6 +2223,27 @@ for line in sys.stdin:
         let key = dir.to_string_lossy().to_string();
         assert!(start(&state, emit, key.clone(), Lane::Chat, profile, dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), None, cmd).unwrap());
         Some(Harness { state, rx, key, dir })
+    }
+
+    #[test]
+    fn a_chat_session_that_starts_outside_ask_first_is_walked_there_before_ready() {
+        let Some(h) = start_mock_prepped("chat-walk", crate::agents::claude(), |d| std::fs::write(d.join(".start-mode"), "acceptEdits").unwrap()) else { return };
+        let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert!(state_is(&ready, "ready"), "{ready}");
+        assert_eq!(ready.pointer("/message/params/modes/currentModeId").and_then(|v| v.as_str()), Some("default"), "ready already reads Ask first");
+        // set_mode was answered before ready went out, so the file is there now
+        let set: Value = serde_json::from_str(&std::fs::read_to_string(h.dir.join(".set-mode.json")).unwrap()).unwrap();
+        assert_eq!(set["modeId"], "default");
+        assert_eq!(h.state.get(&h.key).unwrap().current_state().pointer("/modes/currentModeId").and_then(|v| v.as_str()), Some("default"));
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_chat_session_already_in_ask_first_is_left_alone() {
+        let Some(h) = start_mock("chat-no-walk") else { return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        assert!(!h.dir.join(".set-mode.json").exists(), "no set_mode when the session starts in Ask first");
+        h.state.drain();
     }
 
     static AUTH_AGENT: crate::agents::AgentProfile = crate::agents::AgentProfile {

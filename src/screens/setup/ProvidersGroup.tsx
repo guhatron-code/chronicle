@@ -84,8 +84,8 @@ function KeyForm({ row, onDone }: { row: ProviderRowView; onDone: () => void }) 
   );
 }
 
-export function ProvidersGroup() {
-  useEffect(() => { void refreshProviders(); }, []);
+export function ProvidersGroup({ dir }: { dir: string | null }) {
+  useEffect(() => { void refreshProviders(dir); }, [dir]);
   const [open, setOpen] = useState<string | null>(null);
   const s = providersState();
   const rows = providerRows(s);
@@ -100,8 +100,8 @@ export function ProvidersGroup() {
         <RoleRow role="review" title="Review" blurb="Who looks over a round’s result." />
         <RoleRow role="decisions" title="Decisions" blurb="Who answers the agent’s small questions during a run." />
         <div className="mt-0.5 flex flex-col gap-1 rounded-md bg-fill-subtle px-2.5 py-2 text-[11.5px] leading-[1.5] text-text-muted">
-          <span>{leavesSentence("review", s.roles.review)}</span>
-          <span>{leavesSentence("decisions", s.roles.decisions)}</span>
+          <span>{leavesSentence("review", s.roles.review, s.agent?.refusal)}</span>
+          <span>{leavesSentence("decisions", s.roles.decisions, s.agent?.refusal)}</span>
         </div>
       </div>
       <div className="flex flex-col">

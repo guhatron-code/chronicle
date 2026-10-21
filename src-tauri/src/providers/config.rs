@@ -130,13 +130,23 @@ pub fn calls_for(p: &Provider, cfg: &Value, t: Arc<dyn Transport>, agent: AgentC
     }
 }
 
-/// What the Providers rows show. Says whether a key is saved — never the key.
-pub fn status(cfg: &Value, secrets: &dyn Secrets) -> Value {
+/// What the Providers rows show. Says whether a key is saved — never the key. `agent` is the
+/// project's agent: when it has no Ask mode it can't answer either role read-only, and the
+/// group says so in place of "sends nothing new".
+pub fn status(cfg: &Value, secrets: &dyn Secrets, agent: &crate::agents::AgentProfile) -> Value {
     let mut rows: Vec<Value> = KEY_PROVIDERS.iter().map(|(id, name)| json!({ "id": id, "name": name, "saved": secrets.has(id) })).collect();
     rows.push(json!({ "id": "local", "name": "Local", "saved": local_base(cfg).is_some(), "address": local_base(cfg) }));
     json!({
         "roles": { "review": effective_choice(cfg, Role::Review, secrets), "decisions": effective_choice(cfg, Role::Decisions, secrets) },
         "providers": rows,
+        "agent": {
+            "id": agent.id,
+            "name": agent.name,
+            "refusal": crate::acp::reviewer_refusal(agent).map(|_| json!({
+                "review": format!("{} can't review without changing files — choose a provider for Review.", agent.name),
+                "decisions": format!("{} can't answer decisions without changing files — choose a provider for Decisions.", agent.name),
+            })),
+        },
     })
 }
 
@@ -232,13 +242,23 @@ mod config_tests {
     fn the_status_lists_five_providers_and_never_a_key() {
         let s = FakeSecrets::new();
         s.set("openrouter", "or-secret").unwrap();
-        let st = status(&json!({ "providers": { "local_base_url": "http://localhost:1234" } }), &s);
+        let st = status(&json!({ "providers": { "local_base_url": "http://localhost:1234" } }), &s, crate::agents::claude());
         let ids: Vec<&str> = st["providers"].as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap()).collect();
         assert_eq!(ids, ["anthropic", "openai", "openrouter", "typesafe", "local"]);
         assert_eq!(st["providers"][2]["saved"], true);
         assert_eq!(st["providers"][4]["address"], "http://localhost:1234");
         assert!(!st.to_string().contains("or-secret"), "a key never leaves Rust");
         assert_eq!(st["roles"], json!({ "review": "agent", "decisions": "agent" }));
+        assert_eq!(st["agent"], json!({ "id": "claude-acp", "name": "Claude Code", "refusal": null }));
+    }
+
+    #[test]
+    fn the_status_says_an_agent_with_no_ask_mode_cant_review() {
+        let st = status(&json!({}), &FakeSecrets::new(), crate::agents::profile("opencode").unwrap());
+        assert_eq!(st["agent"]["refusal"]["review"], "OpenCode can't review without changing files — choose a provider for Review.");
+        assert_eq!(st["agent"]["refusal"]["decisions"], "OpenCode can't answer decisions without changing files — choose a provider for Decisions.");
+        let codex = status(&json!({}), &FakeSecrets::new(), crate::agents::profile("codex-acp").unwrap());
+        assert_eq!(codex["agent"]["refusal"], Value::Null, "Codex reviews in its read-only mode");
     }
 
     /// Live: one decision from every provider that has a key saved on this Mac.

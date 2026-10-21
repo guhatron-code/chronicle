@@ -40,6 +40,8 @@ impl AgentCalls {
     /// One reviewer turn: the prompt out, the assistant's text back.
     fn turn(&self, text: String) -> Result<String, CallError> {
         let fail = |m: String| CallError::Failed(m);
+        // refused before anything is spawned: an agent with no Ask mode would change files
+        if let Some(why) = acp::reviewer_refusal(self.profile) { return Err(fail(why)); }
         let cmd = (self.spawn)().map_err(fail)?;
         let (tx, rx) = mpsc::channel::<Value>();
         let tx = Mutex::new(tx);
@@ -54,6 +56,7 @@ impl AgentCalls {
     }
 
     fn run(&self, state: &AcpState, emit: Emit, rx: &mpsc::Receiver<Value>, key: String, text: String, cmd: std::process::Command) -> Result<String, CallError> {
+        if let Some(why) = acp::reviewer_refusal(self.profile) { return Err(CallError::Failed(why)); }
         let deadline = Instant::now() + self.timeout;
         let name = self.profile.name;
         acp::start(state, emit, key.clone(), Lane::Reviewer, self.profile, self.repo.clone(), self.project_dir.clone(),
@@ -73,8 +76,7 @@ impl AgentCalls {
             match m.get("method").and_then(Value::as_str) {
                 Some("_chronicle/session_state") => match params.get("state").and_then(Value::as_str) {
                     Some("ready") if !prompted => {
-                        // The session sets Ask mode on a thread that may race this prompt; that is harmless
-                        // because the reviewer's permission asks are answered in Rust (reads once, all else rejected).
+                        // ready comes only after the handshake has put the session in Ask first (acp.rs).
                         let s = state.get(&key).ok_or_else(|| CallError::Failed(format!("{name} ended before it could answer")))?;
                         s.prompt(vec![json!({ "type": "text", "text": text })], "Chronicle review".into()).map_err(CallError::Failed)?;
                         prompted = true;
@@ -129,7 +131,7 @@ mod agent_provider_tests {
     const MOCK_REVIEWER: &str = r#"
 import sys, json
 reply, mode, project = sys.argv[1], sys.argv[2], sys.argv[3]
-waiting = set(); answers = {}; pid = None
+waiting = set(); answers = {}; pid = None; cur = "default"
 def send(o):
     sys.stdout.write(json.dumps(o) + "\n"); sys.stdout.flush()
 for line in sys.stdin:
@@ -139,10 +141,24 @@ for line in sys.stdin:
     elif meth == "session/new":
         if mode == "signed-out":
             send({"jsonrpc":"2.0","id":m["id"],"error":{"code":-32000,"message":"Authentication required"}})
+        elif mode in ("writer", "stuck"):
+            # Codex's shape: the default mode is its own `agent`, which no stance maps to
+            cur = "agent"
+            send({"jsonrpc":"2.0","id":m["id"],"result":{"sessionId":"r1","modes":{"currentModeId":"agent","availableModes":[{"id":"read-only"},{"id":"workspace-write"},{"id":"agent"},{"id":"agent-full-access"}]}}})
         else:
             send({"jsonrpc":"2.0","id":m["id"],"result":{"sessionId":"r1","modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Ask"}]}}})
+    elif meth == "session/set_mode" and mode == "stuck":
+        send({"jsonrpc":"2.0","id":m["id"],"error":{"code":-32603,"message":"no"}})
     elif meth == "session/set_mode":
+        cur = m["params"]["modeId"]
         send({"jsonrpc":"2.0","id":m["id"],"result":{}})
+    elif meth == "session/prompt" and mode in ("writer", "stuck"):
+        # an agent that writes through its own tools, never asking, unless it is in its Ask mode
+        open(project + "/.prompt-mode", "w").write(cur)
+        if cur != "read-only":
+            open(project + "/reviewer-wrote.txt", "w").write("wrote")
+        send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"r1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":reply}}}})
+        send({"jsonrpc":"2.0","id":m["id"],"result":{"stopReason":"end_turn"}})
     elif meth == "session/prompt" and mode == "hang":
         pass
     elif meth == "session/prompt" and mode == "fence":
@@ -163,6 +179,10 @@ for line in sys.stdin:
 "#;
 
     fn mock(name: &str, reply: &str, mode: &str) -> Option<AgentCalls> {
+        mock_as(name, reply, mode, crate::agents::claude())
+    }
+
+    fn mock_as(name: &str, reply: &str, mode: &str, profile: &'static AgentProfile) -> Option<AgentCalls> {
         let py = ["/usr/bin/python3", "/opt/homebrew/bin/python3", "/usr/local/bin/python3"].iter().find(|p| std::path::Path::new(p).exists())?.to_string();
         let dir = std::env::temp_dir().join(format!("chronicle-review-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -172,7 +192,7 @@ for line in sys.stdin:
         std::fs::write(&script, MOCK_REVIEWER).unwrap();
         let (reply, mode, pdir) = (reply.to_string(), mode.to_string(), dir.to_string_lossy().to_string());
         Some(AgentCalls {
-            profile: crate::agents::claude(),
+            profile,
             repo: dir.clone(),
             project_dir: dir,
             spawn: std::sync::Arc::new(move || { let mut c = std::process::Command::new(&py); c.arg(&script).arg(&reply).arg(&mode).arg(&pdir); Ok(c) }),
@@ -220,6 +240,63 @@ for line in sys.stdin:
         assert!(answers["500"].as_str().unwrap_or("").contains("reads only"), "the write is refused: {answers}");
         assert_eq!(answers["501"], "no", "an edit ask is rejected once, never allowed always");
         assert!(!a.repo.join("reviewer-wrote.txt").exists());
+    }
+
+    #[test]
+    fn an_agent_whose_default_mode_writes_is_put_in_ask_first_before_the_prompt() {
+        // Codex's profile maps Ask first to `read-only`; the mock starts in `agent` and writes on
+        // any prompt that arrives in another mode — so a prompt sent before Ask first lands would show.
+        let codex = crate::agents::profile("codex-acp").unwrap();
+        let Some(a) = mock_as("writer", "{\"ok\":true}", "writer", codex) else { return };
+        let v = a.complete_json(&CompleteRequest { system: String::new(), prompt: "x".into(), schema: json!({ "type": "object" }), max_tokens: 100 }).unwrap();
+        assert_eq!(v["ok"], true);
+        assert_eq!(std::fs::read_to_string(a.repo.join(".prompt-mode")).unwrap(), "read-only", "the prompt ran in Ask first");
+        assert!(!a.repo.join("reviewer-wrote.txt").exists(), "the reviewer never wrote");
+    }
+
+    #[test]
+    fn an_agent_that_wont_go_to_ask_first_never_gets_the_prompt() {
+        let codex = crate::agents::profile("codex-acp").unwrap();
+        let Some(a) = mock_as("stuck", "{}", "stuck", codex) else { return };
+        let e = a.complete_json(&CompleteRequest { system: String::new(), prompt: "x".into(), schema: json!({ "type": "object" }), max_tokens: 100 }).unwrap_err();
+        assert!(e.to_string().contains("Codex couldn't be put in Ask first, so it can't review read-only"), "{e}");
+        assert!(!a.repo.join(".prompt-mode").exists(), "no prompt was sent");
+        assert!(!a.repo.join("reviewer-wrote.txt").exists());
+    }
+
+    #[test]
+    fn an_agent_with_no_ask_mode_is_refused_before_anything_spawns() {
+        let opencode = crate::agents::profile("opencode").unwrap();
+        assert!(opencode.modes.ask.is_none());
+        let Some(mut a) = mock_as("no-ask", "{}", "writer", opencode) else { return };
+        let spawned = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let inner = a.spawn.clone();
+        let flag = spawned.clone();
+        let counted = inner.clone();
+        a.spawn = Arc::new(move || { flag.store(true, std::sync::atomic::Ordering::SeqCst); counted() });
+        let e = a.complete_json(&CompleteRequest { system: String::new(), prompt: "x".into(), schema: json!({ "type": "object" }), max_tokens: 100 }).unwrap_err();
+        assert_eq!(e, CallError::Failed("OpenCode can't review without changing files — choose a provider for Review in Setup".into()));
+        assert!(!spawned.load(std::sync::atomic::Ordering::SeqCst), "nothing was spawned");
+        assert!(!a.repo.join("reviewer-wrote.txt").exists());
+        // the handshake refuses it too, should anything reach it
+        let cmd = (inner)().unwrap();
+        let (tx, rx) = mpsc::channel::<Value>();
+        let tx = Mutex::new(tx);
+        let emit: Emit = Arc::new(move |v| { if let Ok(t) = tx.lock() { let _ = t.send(v); } });
+        let state = AcpState::new();
+        let key = Lane::Reviewer.key(&a.repo.to_string_lossy());
+        acp::start(&state, emit, key.clone(), Lane::Reviewer, opencode, a.repo.clone(), a.repo.clone(), vec![a.repo.clone()], None, LaneExtras::default(), None, cmd).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let mut saw = None;
+        while let Ok(ev) = rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            let st = ev.pointer("/message/params/state").and_then(Value::as_str).map(String::from);
+            if matches!(st.as_deref(), Some("ready") | Some("error")) { saw = Some(ev); break; }
+        }
+        let saw = saw.expect("the handshake finished");
+        assert_eq!(saw.pointer("/message/params/state").and_then(Value::as_str), Some("error"), "never ready: {saw}");
+        assert!(saw.pointer("/message/params/message").and_then(Value::as_str).unwrap_or("").contains("can't review without changing files"));
+        if let Some(s) = state.get(&key) { s.stop(false); }
+        state.drain();
     }
 
     #[test]

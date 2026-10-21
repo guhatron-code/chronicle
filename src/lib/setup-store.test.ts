@@ -156,4 +156,12 @@ describe("the Providers group", () => {
     expect(leavesSentence("review", "agent")).toBe("Review with your agent sends nothing new: it rides the agent you already chose.");
     expect(leavesSentence("decisions", "local")).toBe("Nothing leaves your Mac: the server on this Mac answers.");
   });
+
+  it("never says your agent sends nothing new when it has no Ask mode", () => {
+    const refusal = { review: "OpenCode can't review without changing files — choose a provider for Review.", decisions: "OpenCode can't answer decisions without changing files — choose a provider for Decisions." };
+    expect(leavesSentence("review", "agent", refusal)).toBe(refusal.review);
+    expect(leavesSentence("decisions", "agent", refusal)).toBe(refusal.decisions);
+    expect(leavesSentence("review", "anthropic", refusal)).toContain("A provider receives only the text");
+    expect(leavesSentence("review", "agent", null)).toContain("sends nothing new");
+  });
 });

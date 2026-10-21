@@ -187,8 +187,13 @@ export const agentsStatus = (dir: string | null) => invoke<AgentsStatus>("agents
 export const setProjectAgent = (dir: string, agent: string | null) => invoke<void>("set_project_agent", { dir, agent });
 /** Rust providers::config::status — whether a key is saved, never the key. */
 export interface ProviderRow { id: "anthropic" | "openai" | "openrouter" | "typesafe" | "local"; name: string; saved: boolean; address?: string | null }
-export interface ProvidersStatus { roles: { review: string; decisions: string }; providers: ProviderRow[] }
-export const providersStatus = () => invoke<ProvidersStatus>("providers_status");
+export interface ProvidersStatus {
+  roles: { review: string; decisions: string };
+  providers: ProviderRow[];
+  /** the project's agent; `refusal` is set when it has no Ask mode, so it can't answer a role read-only */
+  agent?: { id: string; name: string; refusal: { review: string; decisions: string } | null };
+}
+export const providersStatus = (dir: string | null = null) => invoke<ProvidersStatus>("providers_status", { dir });
 export const providerKeySet = (id: string, key: string) => invoke<void>("provider_key_set", { id, key });
 export const providerKeyRemove = (id: string) => invoke<void>("provider_key_remove", { id });
 export const providerRoleSet = (role: "review" | "decisions", provider: string) => invoke<void>("provider_role_set", { role, provider });

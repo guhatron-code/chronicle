@@ -416,8 +416,11 @@ export function roleOptions(status: ProvidersStatus | null, role: Role): { value
   return [{ value: "agent", label: "with your agent" }, ...saved.map((p) => ({ value: p.id, label: p.name }))];
 }
 
-export function leavesSentence(role: Role, provider: string): string {
+/** `refusal`: Rust's sentences for an agent with no Ask mode — it can't answer read-only, so
+ *  "sends nothing new" would be false for it. */
+export function leavesSentence(role: Role, provider: string, refusal?: { review: string; decisions: string } | null): string {
   if (provider === "local") return "Nothing leaves your Mac: the server on this Mac answers.";
+  if (provider === "agent" && refusal) return refusal[role];
   if (provider === "agent")
     return role === "review"
       ? "Review with your agent sends nothing new: it rides the agent you already chose."
@@ -428,13 +431,16 @@ export function leavesSentence(role: Role, provider: string): string {
 }
 
 let providers: ProvidersStatus | null = null;
+/** the project the group was last shown for: its agent decides whether "with your agent" can answer */
+let providersDir: string | null = null;
 export function providersState(): ProvidersStatus | null {
   return providers;
 }
 
-export async function refreshProviders(): Promise<void> {
+export async function refreshProviders(dir?: string | null): Promise<void> {
+  if (dir !== undefined) providersDir = dir;
   try {
-    providers = await providersStatus();
+    providers = await providersStatus(providersDir);
   } catch {
     /* keep the last-known rows */
   }

@@ -508,8 +508,10 @@ async fn agents_status(dir: Option<String>) -> Value {
 }
 
 #[tauri::command]
-async fn providers_status() -> Value {
-    providers::config::status(&load_config(), &providers::keys::Keychain)
+async fn providers_status(dir: Option<String>) -> Value {
+    let cfg = load_config();
+    let agent = agents::profiles::chosen_in(&cfg, dir.as_deref().and_then(project_key).as_deref());
+    providers::config::status(&cfg, &providers::keys::Keychain, agent)
 }
 
 #[tauri::command]
