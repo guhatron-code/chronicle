@@ -515,6 +515,14 @@ pub mod transcript {
         out
     }
 
+    /// The agent that made a stored session (see `normalize::transcript_agent`);
+    /// scans from the start, so a long thread's cap never hides its first line.
+    pub fn agent_id(store: &Path, sid: &str) -> String {
+        let Ok(body) = std::fs::read_to_string(path(store, sid)) else { return "claude-acp".into() };
+        let lines: Vec<Value> = body.lines().filter(|l| l.contains("session_state")).filter_map(|l| serde_json::from_str(l).ok()).collect();
+        crate::agents::normalize::transcript_agent(&lines).to_string()
+    }
+
     /// The stored lines for one session (capped — a runaway transcript must
     /// not freeze the pane). The frontend replays them through its reducer.
     pub fn read(store: &Path, sid: &str) -> Vec<Value> {
@@ -709,11 +717,9 @@ pub struct LaneExtras {
 /// tools write outside the designs folder, so they always ask.
 const AUTO_MCP_PREFIXES: [&str; 3] = ["mcp__playwright__", "mcp__shadcn__", "mcp__chronicle-designs__"];
 
-/// The tool a permission ask is for: the call's `name`, or the adapter's `_meta` tool name.
+/// The tool a permission ask is for: the call's `name`, or the name Rust stamped from the agent's own `_meta`.
 fn permission_tool_name(params: &Value) -> Option<&str> {
-    let call = params.get("toolCall")?;
-    call.get("name").and_then(|v| v.as_str())
-        .or_else(|| call.pointer("/_meta/claudeCode/toolName").and_then(|v| v.as_str()))
+    crate::agents::normalize::tool_name(params.get("toolCall")?)
 }
 
 /// The `allow_once` option id for a permission ask from one of the design
@@ -793,8 +799,7 @@ fn strictly_inside(p: &Path, root: &Path) -> bool {
 /// with no once-only option the ask is cancelled — it fails closed.
 pub fn design_write_decision(params: &Value, designs_root: &Path) -> Option<WriteDecision> {
     let call = params.get("toolCall")?;
-    let name = call.get("name").and_then(|v| v.as_str())
-        .or_else(|| call.pointer("/_meta/claudeCode/toolName").and_then(|v| v.as_str()))?;
+    let name = crate::agents::normalize::tool_name(call)?;
     if !WRITE_TOOLS.contains(&name) { return None; }
     let path = write_target(call);
     let options = params.get("options").and_then(|v| v.as_array()).cloned().unwrap_or_default();
@@ -814,8 +819,7 @@ pub fn design_write_decision(params: &Value, designs_root: &Path) -> Option<Writ
 /// the reject option (or cancels when there is none) — never shown.
 pub fn design_exit_plan_outcome(params: &Value) -> Option<Value> {
     let call = params.get("toolCall")?;
-    let name = call.get("name").and_then(|v| v.as_str())
-        .or_else(|| call.pointer("/_meta/claudeCode/toolName").and_then(|v| v.as_str()))?;
+    let name = crate::agents::normalize::tool_name(call)?;
     if name != "ExitPlanMode" { return None; }
     let options = params.get("options").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let by_kind = |k: &str| options.iter().find(|o| o["kind"] == k).and_then(|o| o["optionId"].as_str()).map(String::from);
@@ -1291,15 +1295,18 @@ impl AcpSession {
                 if let Ok(mut g) = self.config_options.lock() { *g = resp.get("configOptions").cloned().unwrap_or(Value::Null); }
                 ledger::set_current_session(&self.store, &sid);
                 checkpoint::prune_old(&self.repo);
-                self.emit_state(json!({
+                let mut ready = json!({ "method": "_chronicle/session_state", "params": {
                     "state": "ready",
-                    "agent": self.profile.id,
                     "sessionId": sid,
                     "resumed": self.resume.is_some(),
                     "modes": resp.get("modes").cloned().unwrap_or(Value::Null),
                     "configOptions": resp.get("configOptions").cloned().unwrap_or(Value::Null),
                     "agentCaps": caps,
-                }));
+                } });
+                crate::agents::normalize::ready_extras(&mut ready, self.profile);
+                // the thread remembers which agent made it: resume must run that one
+                self.append_transcript(&ready);
+                self.emit_state(ready["params"].take());
                 // design lane mode lock: the fence in handle_fs_write and
                 // design_write_decision only holds while the session stays
                 // in ask-first mode — an agent that starts (or resumes) in
@@ -1379,6 +1386,9 @@ impl AcpSession {
             let Ok(line) = line else { break };
             if line.trim().is_empty() { continue; }
             let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+            let mut msg = msg;
+            // one shape for every agent, before anything stores or forwards it (spec §7)
+            crate::agents::normalize::normalize(&mut msg, self.profile);
             let has_id = msg.get("id").is_some();
             let has_method = msg.get("method").is_some();
             if has_method && has_id {
@@ -3140,6 +3150,7 @@ for line in sys.stdin:
         assert_eq!(none, json!({ "outcome": "cancelled" }));
         let mut via_meta = ask(json!([]));
         via_meta["toolCall"] = json!({ "toolCallId": "p2", "_meta": { "claudeCode": { "toolName": "ExitPlanMode" } } });
+        crate::agents::normalize::normalize_permission(&mut via_meta, crate::agents::claude());
         assert!(design_exit_plan_outcome(&via_meta).is_some());
         assert!(design_exit_plan_outcome(&perm("Write", "/tmp/x")).is_none(), "other tools are not decided here");
     }
@@ -3213,8 +3224,9 @@ for line in sys.stdin:
         assert!(design_mcp_decision(&ask("mcp__chronicle__chronicle_round_start")).is_none(), "the full chronicle server always asks");
         assert!(design_mcp_decision(&ask("mcp__figma__get_design_context")).is_none(), "unknown servers still ask");
         assert!(design_mcp_decision(&ask("Bash")).is_none());
-        let via_meta = json!({ "toolCall": { "toolCallId": "m2", "_meta": { "claudeCode": { "toolName": "mcp__playwright__browser_snapshot" } } },
+        let mut via_meta = json!({ "toolCall": { "toolCallId": "m2", "_meta": { "claudeCode": { "toolName": "mcp__playwright__browser_snapshot" } } },
             "options": [ { "optionId": "ok", "kind": "allow_once" } ] });
+        crate::agents::normalize::normalize_permission(&mut via_meta, crate::agents::claude());
         assert_eq!(design_mcp_decision(&via_meta).as_deref(), Some("ok"));
         let no_once = json!({ "toolCall": { "toolCallId": "m3", "name": "mcp__playwright__browser_click" },
             "options": [ { "optionId": "always", "kind": "allow_always" } ] });
