@@ -71,6 +71,8 @@ pub fn ready_extras(msg: &mut Value, p: &AgentProfile) {
     let Some(params) = msg.get_mut("params") else { return };
     if params.get("state").and_then(Value::as_str) != Some("ready") { return; }
     params["agent"] = json!(p.id);
+    let modes = params.get("modes").cloned().unwrap_or(Value::Null);
+    params["stances"] = super::profiles::stances(p, &modes);
 }
 
 /// The agent that made a stored thread: the first `ready` state line's `agent`.
@@ -156,6 +158,13 @@ mod normalize_tests {
         let mut stamped = ready(None);
         ready_extras(&mut stamped, profile("codex-acp").unwrap());
         assert_eq!(transcript_agent(&[stamped]), "codex-acp");
+    }
+
+    #[test]
+    fn the_ready_line_carries_the_stance_map() {
+        let mut msg = json!({ "method": "_chronicle/session_state", "params": { "state": "ready", "modes": { "availableModes": [ { "id": "default" }, { "id": "bypassPermissions" } ] } } });
+        ready_extras(&mut msg, profile("claude-acp").unwrap());
+        assert_eq!(msg["params"]["stances"], json!({ "ask": "default", "unattended": "bypassPermissions" }));
     }
 
     fn fixtures() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/lib/__fixtures__") }

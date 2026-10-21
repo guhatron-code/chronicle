@@ -3726,7 +3726,11 @@ async fn agent_cancel(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpSta
 #[tauri::command]
 async fn agent_set_mode(roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, mode: String, lane: Option<String>) -> Result<(), String> {
     let lane = acp::Lane::parse(lane.as_deref())?;
-    agent_for(&roots, &agents, &dir, lane)?.set_mode(&mode)
+    let s = agent_for(&roots, &agents, &dir, lane)?;
+    // The store keeps the stance; the session's own profile translates it to the agent's mode id.
+    let stance = agents::profiles::Stance::parse(&mode).ok_or_else(|| format!("there's no stance called {mode}"))?;
+    let id = agents::profiles::mode_for(s.profile(), stance).ok_or_else(|| format!("{} has no mode for that", s.profile().name))?;
+    s.set_mode(id)
 }
 
 /// Set a session config option (the model picker). `config_id`/`value` are the

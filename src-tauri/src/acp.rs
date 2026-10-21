@@ -1903,6 +1903,7 @@ impl AcpSession {
         json!({
             "alive": self.is_alive(),
             "agent": self.profile.id,
+            "stances": crate::agents::profiles::stances(self.profile, &self.modes.lock().map(|g| g.clone()).unwrap_or(Value::Null)),
             "sessionId": self.session_id.lock().ok().and_then(|g| g.clone()),
             "modes": self.modes.lock().map(|g| g.clone()).unwrap_or(Value::Null),
             "configOptions": self.config_options.lock().map(|g| g.clone()).unwrap_or(Value::Null),
@@ -2091,6 +2092,7 @@ for line in sys.stdin:
         assert_eq!(s.profile().id, "codex-acp");
         // whatever the config says from now on, this session's agent is fixed until it ends
         assert_eq!(s.current_state()["agent"], "codex-acp");
+        assert_eq!(s.current_state()["stances"], ready["message"]["params"]["stances"], "a reload sees the same stance map the ready line carried");
         h.state.drain();
     }
 

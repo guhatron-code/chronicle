@@ -338,6 +338,23 @@ mod profile_tests {
     }
 
     #[test]
+    fn stances_are_the_advertised_modes_only() {
+        let modes = json!({ "currentModeId": "default", "availableModes": [ { "id": "default" }, { "id": "acceptEdits" }, { "id": "plan" } ] });
+        assert_eq!(stances(claude(), &modes), json!({ "ask": "default", "execute": "acceptEdits" }), "no auto or bypass when the session didn't offer them");
+        assert_eq!(mode_for(claude(), Stance::Unattended), Some("bypassPermissions"));
+        assert_eq!(Stance::parse("unattended"), Some(Stance::Unattended));
+        assert_eq!(Stance::parse("plan"), None);
+    }
+
+    #[test]
+    fn an_agent_with_no_modes_offers_no_stances() {
+        assert_eq!(stances(claude(), &Value::Null), json!({}));
+        assert_eq!(stances(claude(), &json!({ "availableModes": [] })), json!({}));
+        let none = profile("opencode").unwrap();
+        if none.modes.ask.is_none() { assert_eq!(stances(none, &json!({ "availableModes": [ { "id": "build" } ] })), json!({})); }
+    }
+
+    #[test]
     fn the_stance_maps_follow_the_probe() {
         let codex = profile("codex-acp").unwrap();
         assert_eq!(mode_for(codex, Stance::Ask), Some("read-only"));
