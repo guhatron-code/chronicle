@@ -3707,6 +3707,7 @@ fn agent_for(roots: &OpenRoots, agents: &acp::AcpState, dir: &str, lane: acp::La
     agents.get(&key).ok_or_else(|| match lane {
         acp::Lane::Chat => "there's no agent session running for this project".to_string(),
         acp::Lane::Design => "the design session isn't running".to_string(),
+        acp::Lane::Reviewer => "the review session isn't running".to_string(),
     })
 }
 

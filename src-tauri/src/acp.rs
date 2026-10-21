@@ -25,11 +25,13 @@ const AUTH_REQUIRED_CODE: i64 = -32000;
 
 pub type Emit = Arc<dyn Fn(Value) + Send + Sync>;
 
-/// Which of a project's two agent sessions a key belongs to. The chat lane keeps
-/// the historic key (the canonical project path) and `.chronicle/agent/`; the
-/// design lane gets `<path>#design` and keeps its records beside the designs.
+/// Which of a project's agent sessions a key belongs to: the chat lane, the
+/// design lane, and the reviewer — a one-turn, read-only session the provider
+/// layer opens (spec §9). The chat lane keeps the historic key (the canonical
+/// project path) and `.chronicle/agent/`; the design lane gets `<path>#design`
+/// and keeps its records beside the designs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Lane { Chat, Design }
+pub enum Lane { Chat, Design, Reviewer }
 
 impl Lane {
     pub fn parse(s: Option<&str>) -> Result<Lane, String> {
@@ -39,15 +41,16 @@ impl Lane {
             Some(other) => Err(format!("there's no agent lane called {other}")),
         }
     }
-    pub fn as_str(self) -> &'static str { match self { Lane::Chat => "chat", Lane::Design => "design" } }
+    pub fn as_str(self) -> &'static str { match self { Lane::Chat => "chat", Lane::Design => "design", Lane::Reviewer => "review" } }
     pub fn key(self, canon: &str) -> String {
-        match self { Lane::Chat => canon.to_string(), Lane::Design => format!("{canon}#design") }
+        match self { Lane::Chat => canon.to_string(), Lane::Design => format!("{canon}#design"), Lane::Reviewer => format!("{canon}#review") }
     }
     /// Where this lane's transcripts, ledger and `current` pointer live.
     pub fn store(self, project: &Path) -> PathBuf {
         match self {
             Lane::Chat => ledger::agent_dir(project),
             Lane::Design => crate::designs::designs_root(project).join(".threads"),
+            Lane::Reviewer => ledger::agent_dir(project).join("reviews"),
         }
     }
 }
@@ -723,6 +726,20 @@ fn permission_tool_name(params: &Value) -> Option<&str> {
     crate::agents::normalize::tool_name(params.get("toolCall")?)
 }
 
+/// The reviewer's permission answer (spec §9): reads, searches, fetches and
+/// thinking are allowed once; everything else is rejected once; with no
+/// once-only option the ask is cancelled. Never an "always".
+pub fn reviewer_outcome(params: &Value) -> Value {
+    let kind = params.pointer("/toolCall/kind").and_then(|v| v.as_str()).unwrap_or("other");
+    let reads = matches!(kind, "read" | "search" | "fetch" | "think");
+    let options = params.get("options").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    let pick = |k: &str| options.iter().find(|o| o["kind"] == k).and_then(|o| o["optionId"].as_str()).map(String::from);
+    match pick(if reads { "allow_once" } else { "reject_once" }) {
+        Some(option_id) => json!({ "outcome": "selected", "optionId": option_id }),
+        None => json!({ "outcome": "cancelled" }),
+    }
+}
+
 /// The `allow_once` option id for a permission ask from one of the design
 /// session's own MCP servers; `None` for any other tool, or when no once-only
 /// option exists (the ask then reaches the user as usual).
@@ -1151,7 +1168,7 @@ impl AcpSession {
     }
 
     fn emit_msg(&self, message: Value) {
-        let dir = self.key.strip_suffix("#design").unwrap_or(&self.key);
+        let dir = self.key.strip_suffix("#design").or_else(|| self.key.strip_suffix("#review")).unwrap_or(&self.key);
         (self.emit)(json!({ "dir": dir, "lane": self.lane.as_str(), "message": message }));
     }
 
@@ -1310,8 +1327,10 @@ impl AcpSession {
                 if let Ok(mut g) = self.session_id.lock() { *g = Some(sid.clone()); }
                 if let Ok(mut g) = self.modes.lock() { *g = resp.get("modes").cloned().unwrap_or(Value::Null); }
                 if let Ok(mut g) = self.config_options.lock() { *g = resp.get("configOptions").cloned().unwrap_or(Value::Null); }
-                ledger::set_current_session(&self.store, &sid);
-                checkpoint::prune_old(&self.repo);
+                if self.lane != Lane::Reviewer {
+                    ledger::set_current_session(&self.store, &sid);
+                    checkpoint::prune_old(&self.repo);
+                }
                 let mut ready = json!({ "method": "_chronicle/session_state", "params": {
                     "state": "ready",
                     "sessionId": sid,
@@ -1335,6 +1354,15 @@ impl AcpSession {
                     if current != Some("default") {
                         let ms = self.clone();
                         std::thread::spawn(move || { let _ = ms.set_mode("default"); });
+                    }
+                }
+                // the reviewer runs in Ask first, so every non-read reaches reviewer_outcome
+                if self.lane == Lane::Reviewer {
+                    if let Some(ask) = crate::agents::profiles::mode_for(self.profile, crate::agents::profiles::Stance::Ask) {
+                        if resp.pointer("/modes/currentModeId").and_then(|v| v.as_str()) != Some(ask) {
+                            let ms = self.clone();
+                            std::thread::spawn(move || { let _ = ms.set_mode(ask); });
+                        }
                     }
                 }
             }
@@ -1467,7 +1495,8 @@ impl AcpSession {
                 if let Ok(mut g) = self.last_activity.lock() { *g = std::time::Instant::now(); }
                 // a turn ending always resolves any ask still on screen
                 self.cancel_all_perms();
-                if self.designs_root.is_some() { self.reconcile_design_turn_end(); } else { self.reconcile_turn_end(); }
+                if self.designs_root.is_some() { self.reconcile_design_turn_end(); }
+                else if self.lane != Lane::Reviewer { self.reconcile_turn_end(); }
                 let end = match outcome {
                     Ok(result) => json!({
                         "method": "_chronicle/turn_end",
@@ -1496,6 +1525,17 @@ impl AcpSession {
             "fs/read_text_file" => self.handle_fs_read(&id, params),
             "fs/write_text_file" => self.handle_fs_write(&id, params),
             "session/request_permission" => {
+                if self.lane == Lane::Reviewer {
+                    let tool_call_id = params.pointer("/toolCall/toolCallId").cloned().unwrap_or(Value::Null);
+                    let outcome = reviewer_outcome(&params);
+                    let allowed = outcome.get("optionId").is_some() && matches!(params.pointer("/toolCall/kind").and_then(|v| v.as_str()), Some("read" | "search" | "fetch" | "think"));
+                    self.respond_ok(&id, json!({ "outcome": outcome }));
+                    let guard = json!({ "method": "_chronicle/guard", "params": {
+                        "toolCallId": tool_call_id, "allowed": allowed, "path": "", "reason": if allowed { "" } else { "The reviewer reads only." } } });
+                    self.append_transcript(&guard);
+                    self.emit_msg(guard);
+                    return;
+                }
                 if self.designs_root.is_some() {
                     if let Some(outcome) = design_exit_plan_outcome(&params) {
                         let tool_call_id = params.pointer("/toolCall/toolCallId").cloned().unwrap_or(Value::Null);
@@ -1625,6 +1665,9 @@ impl AcpSession {
             Ok(r) => r,
             Err(e) => return self.respond_err(id, -32602, &e.to_string()),
         };
+        if self.lane == Lane::Reviewer {
+            return self.respond_err(id, -32602, "the reviewer reads only — it can't change files");
+        }
         // jailed AND ledgered BEFORE the write lands — law 5
         let full = match self.jail_abs(&req.path.to_string_lossy()) {
             Ok(f) => f,
@@ -1683,13 +1726,15 @@ impl AcpSession {
         }
         // the checkpoint precedes every user message; a non-repo project just
         // doesn't get one (the row won't render — never a hang, never a lie)
-        match checkpoint::create_as(&self.repo, &sid, self.lane.as_str()) {
-            Ok(id) => {
-                if let Ok(mut g) = self.last_checkpoint.lock() { *g = Some(id.clone()); }
-                self.emit_msg(json!({ "method": "_chronicle/checkpoint", "params": { "id": id } }));
-            }
-            Err(e) => {
-                self.emit_msg(json!({ "method": "_chronicle/checkpoint", "params": { "error": e } }));
+        if self.lane != Lane::Reviewer {
+            match checkpoint::create_as(&self.repo, &sid, self.lane.as_str()) {
+                Ok(id) => {
+                    if let Ok(mut g) = self.last_checkpoint.lock() { *g = Some(id.clone()); }
+                    self.emit_msg(json!({ "method": "_chronicle/checkpoint", "params": { "id": id } }));
+                }
+                Err(e) => {
+                    self.emit_msg(json!({ "method": "_chronicle/checkpoint", "params": { "error": e } }));
+                }
             }
         }
         self.append_transcript(&json!({
@@ -1997,6 +2042,19 @@ for line in sys.stdin:
                            {"optionId":"exit_plan_default","name":"Yes, manually approve edits","kind":"allow_once"},
                            {"optionId":"reject","name":"No, keep planning","kind":"reject_once"}]}})
             state["waiting"] = {"400"}
+        elif "REVIEWER-FENCE" in text:
+            turn -= 1
+            send({"jsonrpc":"2.0","id":500,"method":"fs/write_text_file","params":{
+                "sessionId":sid,"path":project+"/reviewer-wrote.txt","content":"no"}})
+            opts = [{"optionId":"once","name":"Allow","kind":"allow_once"},
+                    {"optionId":"always","name":"Always","kind":"allow_always"},
+                    {"optionId":"no","name":"Reject","kind":"reject_once"}]
+            send({"jsonrpc":"2.0","id":501,"method":"session/request_permission","params":{
+                "sessionId":sid,"toolCall":{"toolCallId":"r1","kind":"edit","title":"Edit a file"},"options":opts}})
+            send({"jsonrpc":"2.0","id":502,"method":"session/request_permission","params":{
+                "sessionId":sid,"toolCall":{"toolCallId":"r2","kind":"read","title":"Read a file"},"options":opts}})
+            state["waiting"] = {"500","501","502"}
+            state["review"] = {}
         elif "DESIGN-FENCE" in text:
             turn -= 1
             opts = [{"optionId":"allow","name":"Allow","kind":"allow_once"},
@@ -2049,6 +2107,16 @@ for line in sys.stdin:
                 if not w:
                     with open(project + "/.fence-answers.json", "w") as f:
                         json.dump(state["fence"], f)
+                    send({"jsonrpc":"2.0","id":state["prompt_id"],"result":{"stopReason":"end_turn"}})
+                continue
+            if rid in ("500", "501", "502"):
+                state["review"][rid] = msg.get("error", {}).get("message") if rid == "500" else msg.get("result", {}).get("outcome", {}).get("optionId")
+                w.discard(rid)
+                if not w:
+                    with open(project + "/.reviewer-answers.json", "w") as f:
+                        json.dump(state["review"], f)
+                    send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"sess-1",
+                        "update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"{\"ok\":true}"}}}})
                     send({"jsonrpc":"2.0","id":state["prompt_id"],"result":{"stopReason":"end_turn"}})
                 continue
             if rid == "102":
@@ -2899,6 +2967,37 @@ for line in sys.stdin:
         s.stop(true);
         wait_for(&rx, 30, |v| state_is(v, "ended"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_reviewer_lane_reads_and_never_writes() {
+        let Some(h) = start_mock_as("reviewer", crate::agents::claude(), Lane::Reviewer, LaneExtras::default()) else { return };
+        let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        assert_eq!(ready.pointer("/lane").and_then(|v| v.as_str()), Some("review"));
+        let s = h.state.get(&h.key).unwrap();
+        s.prompt(vec![json!({ "type": "text", "text": "REVIEWER-FENCE" })], "review".into()).unwrap();
+        let mut saw_checkpoint = false;
+        loop {
+            let v = h.rx.recv_timeout(Duration::from_secs(20)).expect("the review turn ends");
+            if method_is(&v, "_chronicle/checkpoint") { saw_checkpoint = true; }
+            if method_is(&v, "_chronicle/turn_end") { break; }
+        }
+        let answers: Value = serde_json::from_str(&std::fs::read_to_string(h.dir.join(".reviewer-answers.json")).unwrap()).unwrap();
+        assert!(answers["500"].as_str().unwrap_or("").contains("reads only"), "the write is refused: {answers}");
+        assert_eq!(answers["501"], "no", "an edit ask is rejected once, never shown");
+        assert_eq!(answers["502"], "once", "a read is allowed once, never always");
+        assert!(!h.dir.join("reviewer-wrote.txt").exists());
+        assert!(!saw_checkpoint, "the reviewer takes no checkpoint");
+        h.state.drain();
+    }
+
+    #[test]
+    fn reviewer_outcomes_by_kind() {
+        let ask = |kind: &str, opts: Value| json!({ "toolCall": { "toolCallId": "t", "kind": kind }, "options": opts });
+        let both = json!([{ "optionId": "y", "kind": "allow_once" }, { "optionId": "a", "kind": "allow_always" }, { "optionId": "n", "kind": "reject_once" }]);
+        assert_eq!(reviewer_outcome(&ask("search", both.clone())), json!({ "outcome": "selected", "optionId": "y" }));
+        assert_eq!(reviewer_outcome(&ask("execute", both.clone())), json!({ "outcome": "selected", "optionId": "n" }));
+        assert_eq!(reviewer_outcome(&ask("read", json!([{ "optionId": "a", "kind": "allow_always" }]))), json!({ "outcome": "cancelled" }), "never an always");
     }
 
     #[test]
