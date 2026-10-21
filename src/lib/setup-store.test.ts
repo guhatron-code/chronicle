@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agentRows, agentsRowFor, agentsRowForError, connectorName } from "./setup-store";
-import type { AgentsAccessStatus, AgentsStatus, AgentStatusRow, SetupCheck } from "./ipc";
+import { agentRows, agentsRowFor, agentsRowForError, connectorName, leavesSentence, providerRows, roleOptions } from "./setup-store";
+import type { AgentsAccessStatus, AgentsStatus, AgentStatusRow, ProvidersStatus, SetupCheck } from "./ipc";
 
 const status = (mcp: boolean): AgentsAccessStatus => ({ mcp, skill: "installed", command: "/x/chronicle" });
 
@@ -115,5 +115,45 @@ describe("agentRows", () => {
 
   it("names the connector after its agent", () => {
     expect(connectorName("Claude Code")).toBe("Claude Code’s connector");
+  });
+});
+
+const prov = (saved: Partial<Record<string, boolean>>, address: string | null = null, roles = { review: "agent", decisions: "agent" }): ProvidersStatus => ({
+  roles,
+  providers: [
+    { id: "anthropic", name: "Anthropic", saved: !!saved.anthropic },
+    { id: "openai", name: "OpenAI", saved: !!saved.openai },
+    { id: "openrouter", name: "OpenRouter", saved: !!saved.openrouter },
+    { id: "typesafe", name: "TypeSafe", saved: !!saved.typesafe },
+    { id: "local", name: "Local", saved: !!address, address },
+  ],
+});
+
+describe("the Providers group", () => {
+  it("lists your agent first, then the five providers", () => {
+    const rows = providerRows(prov({}));
+    expect(rows.map((r) => r.id)).toEqual(["agent", "anthropic", "openai", "openrouter", "typesafe", "local"]);
+    expect(rows[0]).toMatchObject({ word: "ready", action: "", blurb: "No key needed — it rides your sign-in." });
+    expect(rows[1]).toMatchObject({ word: "optional", tone: "optional", action: "add_key" });
+    expect(rows[5]).toMatchObject({ action: "add_address" });
+  });
+
+  it("a saved key reads as saved and offers its removal", () => {
+    const rows = providerRows(prov({ typesafe: true }, "http://localhost:11434"));
+    expect(rows.find((r) => r.id === "typesafe")).toMatchObject({ word: "key saved", tone: "ready", action: "remove_key" });
+    expect(rows.find((r) => r.id === "local")).toMatchObject({ word: "address saved", action: "remove_address" });
+  });
+
+  it("offers a role only the providers that can answer it", () => {
+    const s = prov({ anthropic: true, typesafe: true }, "http://localhost:11434");
+    expect(roleOptions(s, "review").map((o) => o.value)).toEqual(["agent", "anthropic", "local"]);
+    expect(roleOptions(s, "decisions").map((o) => o.value)).toEqual(["agent", "anthropic", "typesafe", "local"]);
+    expect(roleOptions(s, "review")[0].label).toBe("with your agent");
+  });
+
+  it("says in one line what leaves the Mac, per role and provider", () => {
+    expect(leavesSentence("decisions", "typesafe")).toBe("Only the agent’s small questions leave your Mac — a command’s text, a line from the plan, a failing check’s output. Never your files.");
+    expect(leavesSentence("review", "agent")).toBe("Review with your agent sends nothing new: it rides the agent you already chose.");
+    expect(leavesSentence("decisions", "local")).toBe("Nothing leaves your Mac: the server on this Mac answers.");
   });
 });

@@ -10,6 +10,11 @@ import {
   agentsAccessStatus,
   agentsStatus,
   onSetupUpdate,
+  providerKeyRemove,
+  providerKeySet,
+  providerLocalSet,
+  providerRoleSet,
+  providersStatus,
   setDefaultAgent,
   setupCancel,
   setupFixTerminalPath,
@@ -19,6 +24,7 @@ import {
   setupStatus,
   type AgentsAccessStatus,
   type AgentsStatus,
+  type ProvidersStatus,
   type SetupCheck,
 } from "./ipc";
 import { every } from "./scheduler";
@@ -360,4 +366,90 @@ export async function disableAgentAccess(dir: string): Promise<void> {
   } finally {
     await refreshAgentsRow(dir);
   }
+}
+
+/* ---------- the Providers group (spec §9, board 1) ----------
+ * Two roles (review, decisions), each answered by your agent unless a
+ * provider with a saved key or address is chosen. Keys go straight to the
+ * Keychain through Rust; this store only ever learns "saved" or not. */
+
+export type Role = "review" | "decisions";
+
+export interface ProviderRowView {
+  id: string;
+  name: string;
+  blurb: string;
+  word: string;
+  tone: "ready" | "optional";
+  action: "add_key" | "remove_key" | "add_address" | "remove_address" | "";
+}
+
+const PROVIDER_BLURB: Record<string, string> = {
+  anthropic: "Claude models, with your own key.",
+  openai: "GPT models, with your own key.",
+  openrouter: "Many models through one key.",
+  typesafe: "A small, fast model for the agent’s small questions.",
+  local: "A model running on this Mac, at an address like http://localhost:11434.",
+};
+
+export function providerRows(status: ProvidersStatus | null): ProviderRowView[] {
+  if (!status) return [];
+  const agent: ProviderRowView = { id: "agent", name: "Your agent", blurb: "No key needed — it rides your sign-in.", word: "ready", tone: "ready", action: "" };
+  return [
+    agent,
+    ...status.providers.map((p): ProviderRowView => {
+      const local = p.id === "local";
+      return {
+        id: p.id,
+        name: p.name,
+        blurb: PROVIDER_BLURB[p.id] ?? "",
+        word: p.saved ? (local ? "address saved" : "key saved") : "optional",
+        tone: p.saved ? "ready" : "optional",
+        action: p.saved ? (local ? "remove_address" : "remove_key") : local ? "add_address" : "add_key",
+      };
+    }),
+  ];
+}
+
+export function roleOptions(status: ProvidersStatus | null, role: Role): { value: string; label: string }[] {
+  const saved = (status?.providers ?? []).filter((p) => p.saved && !(role === "review" && p.id === "typesafe"));
+  return [{ value: "agent", label: "with your agent" }, ...saved.map((p) => ({ value: p.id, label: p.name }))];
+}
+
+export function leavesSentence(role: Role, provider: string): string {
+  if (provider === "local") return "Nothing leaves your Mac: the server on this Mac answers.";
+  if (provider === "agent")
+    return role === "review"
+      ? "Review with your agent sends nothing new: it rides the agent you already chose."
+      : "Decisions with your agent send nothing new: they ride the agent you already chose.";
+  return role === "review"
+    ? "A provider receives only the text of what it is asked to review — a diff and a check’s output. Never your whole project."
+    : "Only the agent’s small questions leave your Mac — a command’s text, a line from the plan, a failing check’s output. Never your files.";
+}
+
+let providers: ProvidersStatus | null = null;
+export function providersState(): ProvidersStatus | null {
+  return providers;
+}
+
+export async function refreshProviders(): Promise<void> {
+  try {
+    providers = await providersStatus();
+  } catch {
+    /* keep the last-known rows */
+  }
+  notify();
+}
+
+export async function saveProviderKey(id: string, key: string): Promise<void> {
+  try { await providerKeySet(id, key); } finally { await refreshProviders(); }
+}
+export async function removeProviderKey(id: string): Promise<void> {
+  try { await providerKeyRemove(id); } finally { await refreshProviders(); }
+}
+export async function chooseRole(role: Role, provider: string): Promise<void> {
+  try { await providerRoleSet(role, provider); } finally { await refreshProviders(); }
+}
+export async function saveLocalAddress(url: string | null): Promise<void> {
+  try { await providerLocalSet(url); } finally { await refreshProviders(); }
 }

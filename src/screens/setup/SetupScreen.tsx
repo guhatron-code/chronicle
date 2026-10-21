@@ -29,6 +29,7 @@ import {
 } from "@/lib/setup-store";
 import { CheckRow } from "./CheckRow";
 import { AgentGroup } from "./AgentGroup";
+import { ProvidersGroup } from "./ProvidersGroup";
 import { toastError } from "@/overlays/toasts";
 import { TrafficLights } from "@/components/chrome/TitleBar";
 import { BrandGlyph } from "@/components/chrome/icons";
@@ -99,6 +100,7 @@ function Checklist({ dir }: { dir: string | null }) {
       </div>
       <div className="flex flex-col">{CHECK_META.filter((m) => !DESIGN_META.includes(m) && m.id !== "connector").map((m) => rowFor(m.id))}</div>
       <AgentGroup dir={dir} />
+      <ProvidersGroup />
       {DESIGN_PANE && (
       <div className="flex flex-col gap-0.5" data-setup-group="design">
         <div className="flex items-baseline gap-2.5 pb-1.5">
