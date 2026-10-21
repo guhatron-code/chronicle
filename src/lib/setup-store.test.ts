@@ -98,8 +98,11 @@ describe("agentRows", () => {
   });
 
   it("says which of the agent's own tools is missing", () => {
-    const [r] = agentRows(agentStatus([row({ id: "claude-acp", name: "Claude Code", missing: "claude", launchable: false })]), none);
+    const [r] = agentRows(agentStatus([row({ id: "claude-acp", name: "Claude Code", missing: "claude", signedIn: false })]), none);
     expect(r).toMatchObject({ state: "blocked", action: "", detail: "Anthropic’s agent. The default for new projects. Needs claude installed first." });
+    // signed in already: the CLI is only for signing in, so the agent is ready without it (R20)
+    const [ok] = agentRows(agentStatus([row({ id: "codex-acp", name: "Codex", missing: "codex", signedIn: true, launchable: true })]), none);
+    expect(ok).toMatchObject({ state: "ready", word: "ready" });
   });
 
   it("shows an install in progress from its setup-update events", () => {

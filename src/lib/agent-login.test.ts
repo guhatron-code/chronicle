@@ -34,4 +34,10 @@ describe("sign-in, per agent", () => {
   it("an unknown login still reads as a plain sign-in for that agent", () => {
     expect(loginBanner({ name: "Claude Code", login: null, waiting: false, authMethods: [] }).title).toBe("Claude Code isn't signed in");
   });
+  it("says when the sign-in needs the agent's own CLI first", () => {
+    expect(parseLogin({ kind: "terminal", command: "codex login", needs: "codex" })).toEqual({ kind: "terminal", command: "codex login", needs: "codex" });
+    const b = loginBanner({ name: "Codex", login: { kind: "terminal", command: "codex login", needs: "codex" }, waiting: false, authMethods: [] });
+    expect(b.body).toContain("needs codex installed first");
+    expect(b.command).toBe("codex login");
+  });
 });

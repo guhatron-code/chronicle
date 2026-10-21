@@ -903,7 +903,8 @@ pub fn installed_version(dir: &Path, spec: &LaunchSpec) -> Option<String> {
 /// agent's managed binary runs that binary by its absolute path (OpenCode's `opencode auth login`).
 pub fn login_json_for(p: &crate::agents::AgentProfile) -> Value {
     let program = match agent_launch(p.id) { Some(crate::acp::AdapterLaunch::Binary { program, .. }) => Some(program.to_string_lossy().to_string()), _ => None };
-    crate::agents::profiles::login_json_with(p.login, program.as_deref())
+    let missing = p.requires_cli.filter(|c| resolve(c).is_none());
+    crate::agents::profiles::login_json_with(p.login, program.as_deref(), missing)
 }
 
 /// The one config reader (main's `load_config`), so Setup never sees a config the migrations haven't run on.

@@ -240,8 +240,9 @@ export function agentRows(status: AgentsStatus | null, progress: (checkId: strin
     const live = progress(`agent:${a.id}`);
     if (!a.supported) return { ...base, state: "unsupported", word: "not yet supported", detail: `${meta.blurb} Not supported on this Mac yet.`, action: "" };
     if (live?.state === "installing") return { ...base, state: "installing", word: "installing", detail: meta.blurb, action: "", pct: live.pct ?? null };
-    if (a.missing) return { ...base, state: "blocked", word: "needs you", detail: `${meta.blurb} Needs ${a.missing} installed first.`, action: "" };
     if (!a.installed) return { ...base, state: "missing", word: "missing", detail: `${meta.blurb} Not on this Mac yet.`, action: "install" };
+    // the agent's own CLI is needed only to sign in (ruling R20): signed in, it runs without it
+    if (a.missing && a.signedIn !== true) return { ...base, state: "blocked", word: "needs you", detail: `${meta.blurb} Needs ${a.missing} installed first.`, action: "" };
     if (a.signedIn === false) {
       if (a.login.kind === "terminal") return { ...base, state: "needs_you", word: "needs you", detail: `Installed. Sign in with ${a.login.command}.`, action: "signin" };
       if (a.login.kind === "auth_method") return { ...base, state: "needs_you", word: "needs you", detail: "Installed. Signs in from the pane the first time you use it.", action: "" };

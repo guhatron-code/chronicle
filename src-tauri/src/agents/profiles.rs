@@ -257,9 +257,15 @@ pub fn terminal_command(command: &str, managed_program: Option<&str>) -> String 
 }
 
 /// `login_json` with a Terminal command resolved against the managed binary (see `terminal_command`).
-pub fn login_json_with(l: Login, managed_program: Option<&str>) -> Value {
+/// `missing_cli`: the agent's own CLI the command needs and this Mac lacks — the sign-in says
+/// `needs`, and only the sign-in waits on it (ruling R20).
+pub fn login_json_with(l: Login, managed_program: Option<&str>, missing_cli: Option<&str>) -> Value {
     match l {
-        Login::Terminal { command } => json!({ "kind": "terminal", "command": terminal_command(command, managed_program) }),
+        Login::Terminal { command } => {
+            let mut v = json!({ "kind": "terminal", "command": terminal_command(command, managed_program) });
+            if let Some(cli) = missing_cli { v["needs"] = json!(cli); }
+            v
+        }
         other => login_json(other),
     }
 }
@@ -500,8 +506,8 @@ mod profile_tests {
         assert_eq!(terminal_command("opencode auth login", Some("/Users/A B/it's/opencode")), "'/Users/A B/it'\\''s/opencode' auth login");
         assert_eq!(terminal_command("codex login", Some("/x/codex-acp")), "codex login", "only a binary named like the command is substituted");
         assert_eq!(terminal_command("claude /login", None), "claude /login");
-        assert_eq!(login_json_with(Login::Terminal { command: "opencode auth login" }, Some("/t/opencode")), json!({ "kind": "terminal", "command": "/t/opencode auth login" }));
-        assert_eq!(login_json_with(Login::AuthMethod { id: "x" }, Some("/t/opencode")), json!({ "kind": "auth_method", "id": "x" }));
+        assert_eq!(login_json_with(Login::Terminal { command: "opencode auth login" }, Some("/t/opencode"), None), json!({ "kind": "terminal", "command": "/t/opencode auth login" }));
+        assert_eq!(login_json_with(Login::AuthMethod { id: "x" }, Some("/t/opencode"), Some("x")), json!({ "kind": "auth_method", "id": "x" }));
     }
 
     #[test]

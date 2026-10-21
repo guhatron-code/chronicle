@@ -183,7 +183,8 @@ export interface AgentStatusRow {
   missing: string | null;
   /** null: Chronicle can't tell */
   signedIn: boolean | null;
-  login: { kind: "terminal"; command: string } | { kind: "auth_method"; id: string } | { kind: "none" };
+  /** `needs`: the agent's own CLI the sign-in command needs and this Mac lacks (ruling R20) */
+  login: { kind: "terminal"; command: string; needs?: string } | { kind: "auth_method"; id: string } | { kind: "none" };
 }
 export interface AgentsStatus { agents: AgentStatusRow[]; default: string; project: string }
 export const agentsStatus = (dir: string | null) => invoke<AgentsStatus>("agents_status", { dir });

@@ -1350,8 +1350,8 @@ impl AcpSession {
                 // agent's answer; the reader thread delivers it, so this thread may wait.
                 let ask = crate::agents::profiles::mode_for(self.profile, crate::agents::profiles::Stance::Ask);
                 let current = resp.pointer("/modes/currentModeId").and_then(|v| v.as_str());
-                let name = self.profile.name;
                 if self.lane == Lane::Reviewer {
+                    let name = self.profile.name;
                     let Some(ask) = ask else {
                         return self.fail_handshake(&reviewer_refusal(self.profile).unwrap_or_default());
                     };
@@ -1363,10 +1363,15 @@ impl AcpSession {
                     // only where the session offers it: a session with no such mode has nothing to walk
                     let offered = |a: &str| resp.pointer("/modes/availableModes").and_then(|v| v.as_array())
                         .map(|l| l.iter().any(|m| m.get("id").and_then(|i| i.as_str()) == Some(a))).unwrap_or(false);
-                    if let Some(ask) = ask.filter(|a| current != Some(*a) && offered(a)) {
-                        if self.set_mode(ask).is_err() {
-                            return self.fail_handshake(&format!("{name} couldn't be put in Ask first, so the session didn't start — start it again"));
-                        }
+                    // a resumed session the user left in a stance stays there; only a fresh one, or a
+                    // resumed one in a mode no stance maps to (plan, Codex's old unmapped modes), is walked
+                    let in_a_stance = current.map(|c| crate::agents::profiles::Stance::ALL.iter()
+                        .any(|s| crate::agents::profiles::mode_for(self.profile, *s) == Some(c))).unwrap_or(false);
+                    let walk = self.resume.is_none() || !in_a_stance;
+                    if let Some(ask) = ask.filter(|a| walk && current != Some(*a) && offered(a)) {
+                        // best-effort (ruling R21): a refused switch leaves the session in the agent's own
+                        // mode, which the ready line and the stance chip then show as it is
+                        let _ = self.set_mode(ask);
                     }
                 }
                 let modes_now = self.modes.lock().map(|g| g.clone()).unwrap_or(Value::Null);
@@ -2045,7 +2050,7 @@ for line in sys.stdin:
     if m == "initialize":
         methods = [{"id":"oauth-personal","name":"Log in with Google"}] if os.path.exists(os.path.join(project, ".needs-auth")) else []
         send({"jsonrpc":"2.0","id":msg["id"],"result":{"protocolVersion":1,
-            "agentCapabilities":{"loadSession":False},"authMethods":methods}})
+            "agentCapabilities":{"loadSession":os.path.exists(os.path.join(project, ".can-load"))},"authMethods":methods}})
     elif m == "authenticate":
         state["authed"] = msg["params"].get("methodId")
         send({"jsonrpc":"2.0","id":msg["id"],"result":{}})
@@ -2117,6 +2122,15 @@ for line in sys.stdin:
                 "sessionId":sid,"toolCall":{"toolCallId":"t2","title":"Delete everything"},
                 "options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}})
             state["waiting"] = {"200"}
+    elif m == "session/load":
+        start_mode = open(os.path.join(project, ".start-mode")).read() if os.path.exists(os.path.join(project, ".start-mode")) else "default"
+        send({"jsonrpc":"2.0","id":msg["id"],"result":{
+            "modes":{"currentModeId":start_mode,"availableModes":[
+                {"id":"default","name":"Always Ask"},
+                {"id":"acceptEdits","name":"Accept Edits"},
+                {"id":"bypassPermissions","name":"Bypass"}]}}})
+    elif m == "session/set_mode" and os.path.exists(os.path.join(project, ".refuse-set-mode")):
+        send({"jsonrpc":"2.0","id":msg["id"],"error":{"code":-32603,"message":"no"}})
     elif m == "session/set_mode":
         # written whole, then renamed: a reader that sees the file sees all of it
         with open(project + "/.set-mode.json.tmp", "w") as f:
@@ -2246,6 +2260,80 @@ for line in sys.stdin:
         let set: Value = serde_json::from_str(&std::fs::read_to_string(h.dir.join(".set-mode.json")).unwrap()).unwrap();
         assert_eq!(set["modeId"], "default");
         assert_eq!(h.state.get(&h.key).unwrap().current_state().pointer("/modes/currentModeId").and_then(|v| v.as_str()), Some("default"));
+        h.state.drain();
+    }
+
+    /// A mock session on any lane, resumed or fresh, with the project prepared first.
+    fn start_mock_full(name: &str, profile: &'static crate::agents::AgentProfile, lane: Lane, resume: Option<&str>, prep: impl Fn(&Path)) -> Option<Harness> {
+        let py = python3()?;
+        let dir = tmp(name);
+        prep(&dir);
+        let script = dir.join(".mock-agent.py");
+        std::fs::write(&script, MOCK_AGENT).unwrap();
+        let mut cmd = std::process::Command::new(py);
+        cmd.arg(&script).arg(&dir);
+        let (tx, rx) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let state = AcpState::new();
+        let key = lane.key(&dir.to_string_lossy());
+        assert!(start(&state, emit, key.clone(), lane, profile, dir.clone(), dir.clone(), vec![dir.clone()], None, LaneExtras::default(), resume.map(String::from), cmd).unwrap());
+        Some(Harness { state, rx, key, dir })
+    }
+
+    fn ready_mode(v: &Value) -> Option<&str> { v.pointer("/message/params/modes/currentModeId").and_then(|m| m.as_str()) }
+
+    #[test]
+    fn a_fresh_session_in_a_mode_no_stance_maps_is_walked_to_ask_first() {
+        let Some(h) = start_mock_full("walk-plan", crate::agents::claude(), Lane::Chat, None, |d| std::fs::write(d.join(".start-mode"), "plan").unwrap()) else { return };
+        let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert_eq!(ready_mode(&ready), Some("default"), "{ready}");
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_resumed_session_left_in_execute_stays_there() {
+        let Some(h) = start_mock_full("resume-execute", crate::agents::claude(), Lane::Chat, Some("sess-1"), |d| {
+            std::fs::write(d.join(".can-load"), "").unwrap();
+            std::fs::write(d.join(".start-mode"), "acceptEdits").unwrap();
+        }) else { return };
+        let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert_eq!(ready_mode(&ready), Some("acceptEdits"), "the user left it in Execute: {ready}");
+        assert!(!h.dir.join(".set-mode.json").exists(), "no set_mode on a resumed stance");
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_resumed_session_in_an_unmapped_mode_is_walked() {
+        let Some(h) = start_mock_full("resume-plan", crate::agents::claude(), Lane::Chat, Some("sess-1"), |d| {
+            std::fs::write(d.join(".can-load"), "").unwrap();
+            std::fs::write(d.join(".start-mode"), "plan").unwrap();
+        }) else { return };
+        let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert_eq!(ready_mode(&ready), Some("default"), "{ready}");
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_refused_switch_on_the_chat_lane_starts_in_the_agents_own_mode() {
+        let Some(h) = start_mock_full("chat-refused", crate::agents::claude(), Lane::Chat, None, |d| {
+            std::fs::write(d.join(".start-mode"), "acceptEdits").unwrap();
+            std::fs::write(d.join(".refuse-set-mode"), "").unwrap();
+        }) else { return };
+        let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert!(state_is(&ready, "ready"), "best-effort: no failure: {ready}");
+        assert_eq!(ready_mode(&ready), Some("acceptEdits"), "the ready line shows the mode it is really in");
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_refused_switch_on_the_reviewer_fails_the_handshake() {
+        let Some(h) = start_mock_full("review-refused", crate::agents::claude(), Lane::Reviewer, None, |d| {
+            std::fs::write(d.join(".start-mode"), "acceptEdits").unwrap();
+            std::fs::write(d.join(".refuse-set-mode"), "").unwrap();
+        }) else { return };
+        let end = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert!(state_is(&end, "error"), "never ready: {end}");
+        assert_eq!(end.pointer("/message/params/message").and_then(|m| m.as_str()), Some("Claude Code couldn't be put in Ask first, so it can't review read-only"));
         h.state.drain();
     }
 

@@ -453,8 +453,8 @@ fn agents_available(dir: Option<String>) -> Value {
     let cfg = load_config();
     let default = agents::profiles::chosen_in(&cfg, None);
     let project = agents::profiles::chosen_in(&cfg, dir.as_deref().and_then(project_key).as_deref());
-    let cli_ok = project.requires_cli.map(|c| setup::resolve(c).is_some()).unwrap_or(true);
-    let launchable = cli_ok && setup::agent_launch(project.id).is_some();
+    // the agent's own CLI is for signing in, never for launching (ruling R20)
+    let launchable = setup::agent_launch(project.id).is_some();
     let roadmap = cfg.get("roadmap_agent").and_then(Value::as_str).map(agents::profiles::roadmap_name).unwrap_or("claude");
     json!({ "claude": claude, "codex": codex, "default": default.id, "project": project.id, "launchable": launchable, "asksFirst": project.modes.ask.is_some(), "roadmap": roadmap })
 }
@@ -509,16 +509,21 @@ fn set_project_agent(dir: String, agent: Option<String>) -> Result<(), String> {
 /// One agent as the Your agent row and the composer's picker see it.
 /// (setup.rs's `agent_row` is a different shape: an install-state row for the Setup detect list.)
 fn agent_row(p: &'static agents::AgentProfile) -> Value {
-    let supported = agents::registry::launch_spec(p).is_some();
-    let launch = setup::agent_launch(p.id);
-    let installed = matches!(launch, Some(acp::AdapterLaunch::Direct { .. }) | Some(acp::AdapterLaunch::Binary { .. }));
     let missing = p.requires_cli.filter(|c| setup::resolve(c).is_none());
+    agent_row_with(p, setup::agent_launch(p.id), missing, setup::signed_in(p), setup::login_json_for(p))
+}
+
+/// Pure: the row from what this Mac has. `missing` (the agent's own CLI) gates the sign-in only,
+/// never the launch (ruling R20): a Codex user signed in without the codex CLI still runs Codex.
+fn agent_row_with(p: &'static agents::AgentProfile, launch: Option<acp::AdapterLaunch>, missing: Option<&str>, signed_in: Option<bool>, login: Value) -> Value {
+    let supported = agents::registry::launch_spec(p).is_some();
+    let installed = matches!(launch, Some(acp::AdapterLaunch::Direct { .. }) | Some(acp::AdapterLaunch::Binary { .. }));
     json!({
         "id": p.id, "name": p.name, "supported": supported,
-        "launchable": launch.is_some() && missing.is_none(),
+        "launchable": launch.is_some(),
         "installed": installed, "missing": missing,
-        "signedIn": setup::signed_in(p),
-        "login": setup::login_json_for(p),
+        "signedIn": signed_in,
+        "login": login,
     })
 }
 
@@ -3516,19 +3521,16 @@ fn pty_kill(pty: State<PtyState>, id: u32) -> Result<(), String> {
 /* ================= the agent pane (ACP — see acp.rs for the seam) ================= */
 
 /// The agent a lane runs: the design lane is Claude Code's alone (spec §8);
-/// the chat lane runs the project's chosen agent. Refuses an agent whose own
-/// CLI is missing, before any process is spawned.
+/// the chat lane runs the project's chosen agent. The agent's own CLI is never
+/// checked here: it is needed only to sign in (ruling R20).
 fn session_profile(dir: &str, lane: acp::Lane) -> Result<&'static agents::AgentProfile, String> {
     let profile = if lane == acp::Lane::Design {
         agents::claude()
     } else {
         agents::project_profile(Path::new(dir))
     };
-    if let Some(cli) = profile.requires_cli.filter(|c| setup::resolve(c).is_none()) {
-        // Setup & health installs Claude Code; the codex CLI is the user's own install
-        let how = if cli == "claude" { " — Setup & health can install it" } else { ", then start the session again" };
-        return Err(format!("{} needs `{cli}` installed first{how}", profile.name));
-    }
+    // `requires_cli` gates the sign-in only (ruling R20): a signed-in agent launches without it, and a
+    // signed-out one reaches needs-login, whose login says the CLI is needed first
     Ok(profile)
 }
 
@@ -3603,7 +3605,7 @@ fn resume_profile(store: &Path, id: &str, lane: acp::Lane) -> Result<&'static ag
     let made_by = acp::transcript::agent_id(store, id);
     let p = agents::profile(&made_by).filter(|p| p.shipped)
         .ok_or_else(|| "This thread was made with an agent Chronicle doesn't ship, so it can't be resumed.".to_string())?;
-    if setup::agent_launch(p.id).is_none() || p.requires_cli.map(|c| setup::resolve(c).is_none()).unwrap_or(false) {
+    if setup::agent_launch(p.id).is_none() {
         return Err(resume_refusal(p));
     }
     Ok(p)
@@ -5739,6 +5741,19 @@ mod agents_choice_tests {
         }
         assert_eq!(row["login"]["kind"], "terminal");
         assert_eq!(row["login"]["command"], "claude /login");
+    }
+
+    #[test]
+    fn a_missing_cli_gates_the_sign_in_never_the_launch() {
+        let codex = agents::profile("codex-acp").unwrap();
+        assert_eq!(codex.requires_cli, Some("codex"));
+        assert!(agents::registry::launch_spec(codex).is_some(), "Codex has a launch spec whatever the CLI");
+        let launch = acp::AdapterLaunch::Npx { npx: "/usr/bin/npx".into(), package: "@agentclientprotocol/codex-acp@2.2.3-preview.10".into(), args: vec![] };
+        let login = agents::profiles::login_json_with(codex.login, None, Some("codex"));
+        let row = agent_row_with(codex, Some(launch), Some("codex"), Some(true), login);
+        assert_eq!(row["launchable"], true, "signed in without the CLI still launches: {row}");
+        assert_eq!(row["missing"], "codex");
+        assert_eq!(row["login"], json!({ "kind": "terminal", "command": "codex login", "needs": "codex" }), "the sign-in says the CLI comes first");
     }
 
     #[test]
