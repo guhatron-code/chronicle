@@ -1997,6 +1997,7 @@ impl AcpSession {
         json!({
             "alive": self.is_alive(),
             "agent": self.profile.id,
+            "asksFirst": self.profile.modes.ask.is_some(),
             "stances": crate::agents::profiles::stances(self.profile, &self.modes.lock().map(|g| g.clone()).unwrap_or(Value::Null)),
             "sessionId": self.session_id.lock().ok().and_then(|g| g.clone()),
             "modes": self.modes.lock().map(|g| g.clone()).unwrap_or(Value::Null),

@@ -26,6 +26,7 @@ import {
 } from "@/lib/agent-session";
 import { loginBanner } from "@/lib/agent-login";
 import { agentMeta } from "@/lib/agents";
+import { askFirstLine } from "@/lib/agent-stances";
 import { rowKeys, rowSignature, sameRow } from "@/lib/thread-rows";
 import { profilerOnRender } from "@/lib/perf";
 import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
@@ -684,7 +685,7 @@ export function AgentPane({
             <>
               <span className="text-[15px] font-semibold text-text-primary">Ask for anything.</span>
               <span className="max-w-[34ch] text-[12.5px] leading-[1.55] text-text-muted [text-wrap:pretty]">
-                {`Chronicle asks before ${agentMeta(s.agent).headerName} touches your project.`}
+                {askFirstLine(agentMeta(s.agent), s.asksFirst)}
               </span>
               {s.warm && (s.phase === "installing" || s.phase === "starting") && (
                 <span className="text-[11px] text-text-faint">Ready in a moment — you can type now</span>

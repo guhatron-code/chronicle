@@ -20,7 +20,7 @@ import {
   setAgentStance,
   splitLaneKey,
 } from "@/lib/agent-session";
-import { availableStances, currentStance, stanceNeedsConfirm, STANCE_COPY, type Stance } from "@/lib/agent-stances";
+import { availableStances, currentStance, ownSettingsChip, stanceNeedsConfirm, STANCE_COPY, type Stance } from "@/lib/agent-stances";
 import { XGlyph, PaperclipGlyph, ImageGlyph, ArrowRightGlyph } from "@/components/chrome/icons";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { Kbd } from "@/components/chrome/atoms";
@@ -36,6 +36,7 @@ import {
 import { Hint } from "@/components/ui/tooltip";
 import { agentAttach, agentAttachPath, agentsStatus, IMG_MIME, type AgentsStatus } from "@/lib/ipc";
 import { switchProjectAgent } from "@/lib/agents-store";
+import { agentMeta } from "@/lib/agents";
 import { AgentMark } from "@/components/chrome/AgentMark";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Autocomplete, findTrigger, handleKey, type PickerItem } from "./Autocomplete";
@@ -658,7 +659,18 @@ export function Composer({
             ]}
           />
         )}
-        {!designLane && stances.length > 1 && (
+        {!designLane && s.asksFirst === false && (() => {
+          // no Ask mode: nothing to pick, and nothing that would pretend it asks
+          const chip = ownSettingsChip(agentMeta(s.agent).name);
+          return (
+            <Hint label={chip.hint}>
+              <span data-mode-control="own" className="inline-flex h-[26px] shrink-0 items-center whitespace-nowrap rounded-md border border-border-hairline px-2 text-[11.5px] text-text-muted">
+                {chip.label}
+              </span>
+            </Hint>
+          );
+        })()}
+        {!designLane && s.asksFirst !== false && stances.length > 1 && (
           <ModeSelect
             current={current}
             fallbackLabel={ownModeName ?? "Choose a stance"}

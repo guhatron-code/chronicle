@@ -169,6 +169,8 @@ export interface AgentSessionState {
   modes: { currentModeId: string; availableModes: AgentMode[] } | null;
   /** stance → this agent's mode id, for the modes the session advertised (Rust profiles.rs) */
   stances: StanceMap;
+  /** false: the agent has no Ask mode, so it never asks before changing files (OpenCode); null until Rust says */
+  asksFirst: boolean | null;
   /** the agent's config options — the model picker reads the "model" one */
   configOptions: AgentConfigOption[];
   /** the config options the user picked by hand this session (ids) — a default set by the app never overrides one */
@@ -233,6 +235,7 @@ const blank = (): AgentSessionState => ({
   sessionId: null,
   modes: null,
   stances: {},
+  asksFirst: null,
   loadSession: false,
   turnActive: false,
   usage: null,
@@ -539,7 +542,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
       // the adapter's own replay is suppressed, so blanking here would leave
       // the session open on nothing — the empty-thread-after-Resume bug
       const keep = params.resume === true ? s.entries : [];
-      Object.assign(s, blank(), { lane: s.lane, agent: s.agent, stances: s.stances, phase: "installing" as AgentPhase, draft: s.draft, warm: s.warm, entries: keep });
+      Object.assign(s, blank(), { lane: s.lane, agent: s.agent, stances: s.stances, asksFirst: s.asksFirst, phase: "installing" as AgentPhase, draft: s.draft, warm: s.warm, entries: keep });
       // the thread and the queue are both gone; a card waiting in that queue
       // must not go on waiting for a prompt that no longer exists (`live`
       // only: a replay must never close the running round's card)
@@ -567,6 +570,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
         : null;
       s.configOptions = parseConfigOptions(params.configOptions);
       s.stances = parseStances(params.stances);
+      if (typeof params.asksFirst === "boolean") s.asksFirst = params.asksFirst;
       const caps = params.agentCaps as Raw | null;
       s.loadSession = Boolean((caps?.agentCapabilities as Raw | undefined)?.loadSession);
     } else if (state === "needs-login") {
@@ -872,7 +876,7 @@ function markRejected(s: AgentSessionState, perm: Extract<AgentEntry, { kind: "p
 
 export async function startAgentSession(dir: string, opts: { warm?: boolean } = {}): Promise<void> {
   const s = agentSessionFor(dir);
-  Object.assign(s, blank(), { lane: s.lane, agent: s.agent, stances: s.stances, phase: "installing" as AgentPhase, draft: s.draft, warm: !!opts.warm });
+  Object.assign(s, blank(), { lane: s.lane, agent: s.agent, stances: s.stances, asksFirst: s.asksFirst, phase: "installing" as AgentPhase, draft: s.draft, warm: !!opts.warm });
   dropQueueWaiters(dir); // the queue went with the thread
   notify();
   try {
@@ -930,6 +934,7 @@ export async function adoptAgentSession(dir: string): Promise<void> {
       }
       s.configOptions = parseConfigOptions(raw.configOptions);
       s.stances = parseStances(raw.stances);
+      if (typeof raw.asksFirst === "boolean") s.asksFirst = raw.asksFirst;
       s.turnActive = Boolean(raw.turnActive);
       notify();
     }
@@ -1097,7 +1102,7 @@ export function closeAgentViewing(dir: string) {
 export async function resumeAgentSession(dir: string, id: string): Promise<void> {
   const entries = await replayTranscript(dir, id);
   const s = agentSessionFor(dir);
-  Object.assign(s, blank(), { lane: s.lane, agent: s.agent, stances: s.stances, phase: "installing" as AgentPhase, entries });
+  Object.assign(s, blank(), { lane: s.lane, agent: s.agent, stances: s.stances, asksFirst: s.asksFirst, phase: "installing" as AgentPhase, entries });
   dropQueueWaiters(dir); // the queue went with the thread
   notify();
   try {

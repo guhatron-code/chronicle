@@ -71,6 +71,8 @@ pub fn ready_extras(msg: &mut Value, p: &AgentProfile) {
     let Some(params) = msg.get_mut("params") else { return };
     if params.get("state").and_then(Value::as_str) != Some("ready") { return; }
     params["agent"] = json!(p.id);
+    // false: the agent has no Ask mode, so it never asks before changing files (OpenCode)
+    params["asksFirst"] = json!(p.modes.ask.is_some());
     let modes = params.get("modes").cloned().unwrap_or(Value::Null);
     params["stances"] = super::profiles::stances(p, &modes);
 }

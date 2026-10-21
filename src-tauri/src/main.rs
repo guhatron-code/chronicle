@@ -453,7 +453,7 @@ fn agents_available(dir: Option<String>) -> Value {
     let project = agents::profiles::chosen_in(&cfg, dir.as_deref().and_then(project_key).as_deref());
     let cli_ok = project.requires_cli.map(|c| setup::resolve(c).is_some()).unwrap_or(true);
     let launchable = cli_ok && setup::agent_launch(project.id).is_some();
-    json!({ "claude": claude, "codex": codex, "default": default.id, "project": project.id, "launchable": launchable })
+    json!({ "claude": claude, "codex": codex, "default": default.id, "project": project.id, "launchable": launchable, "asksFirst": project.modes.ask.is_some() })
 }
 
 #[tauri::command]

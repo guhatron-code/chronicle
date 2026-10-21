@@ -46,3 +46,16 @@ export function stanceNeedsConfirm(
   if (stance === "unattended") return !s.fullAutoConfirmed;
   return false;
 }
+
+/** The empty pane's promise. An agent with no Ask mode never asks before changing files
+ *  (`asksFirst` false, from Rust), so the pane must not say Chronicle asks first for it. */
+export function askFirstLine(agent: { name: string; headerName: string }, asksFirst: boolean | null): string {
+  return asksFirst === false
+    ? `${agent.name} runs on its own settings — it doesn't ask before changing files. Every change stays reviewable.`
+    : `Chronicle asks before ${agent.headerName} touches your project.`;
+}
+
+/** The static chip shown in place of the stance control for an agent with no Ask mode. */
+export function ownSettingsChip(name: string): { label: string; hint: string } {
+  return { label: "Its own settings", hint: `${name} doesn't ask before changing files. Every change stays reviewable.` };
+}

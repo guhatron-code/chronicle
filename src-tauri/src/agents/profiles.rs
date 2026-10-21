@@ -125,8 +125,9 @@ pub static PROFILES: [AgentProfile; 4] = [
         probed: true,
         args_override: None,
         login: Login::Terminal { command: "codex login" },
-        // `agent` is the agent's default and stays unmapped (controller ruling R6).
-        modes: Modes { ask: Some("read-only"), execute: Some("workspace-write"), auto: None, unattended: Some("agent-full-access") },
+        // `agent` is Codex's default: its own judgment mode, the same shape as Claude's auto (ruling R16,
+        // which partly overturns R6). Sessions are walked to Ask first (`read-only`) before ready.
+        modes: Modes { ask: Some("read-only"), execute: Some("workspace-write"), auto: Some("agent"), unattended: Some("agent-full-access") },
         meta: NO_META,
         extras: MCP_ONLY,
         requires_cli: None,
@@ -359,7 +360,7 @@ mod profile_tests {
         let codex = profile("codex-acp").unwrap();
         assert_eq!(mode_for(codex, Stance::Ask), Some("read-only"));
         assert_eq!(mode_for(codex, Stance::Execute), Some("workspace-write"));
-        assert_eq!(mode_for(codex, Stance::Auto), None);
+        assert_eq!(mode_for(codex, Stance::Auto), Some("agent"), "Codex's own default is reachable again as Auto (R16)");
         assert_eq!(mode_for(codex, Stance::Unattended), Some("agent-full-access"));
         let oc = profile("opencode").unwrap();
         assert!(Stance::ALL.iter().all(|s| mode_for(oc, *s).is_none()), "opencode advertises no modes");
