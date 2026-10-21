@@ -872,15 +872,15 @@ const warmed = new Set<string>();
 
 /** Start the project's session the moment the project is open, so the first
  *  word is answered without the handshake in the way. Adopts a live backend
- *  session first; otherwise starts one, once, and only when Claude is
- *  installed — an unconfigured Mac must not open into an error banner. */
+ *  session first; otherwise starts one, once, and only when the project's
+ *  agent can launch — an unconfigured Mac must not open into an error banner. */
 export async function warmAgentSession(dir: string): Promise<void> {
   await adoptAgentSession(dir);
   if (warmed.has(dir)) return;
   const s = agentSessionFor(dir);
   if (s.phase !== "none") return;
-  const a = (await agentsAvailable().catch(() => null)) as { claude?: string | null } | null;
-  if (!a?.claude) return;
+  const a = (await agentsAvailable(splitKey(dir).dir).catch(() => null)) as { launchable?: boolean } | null;
+  if (!a?.launchable) return; // the project's agent can't start on this Mac yet: no banner, no spinner
   if (agentSessionFor(dir).phase !== "none") return; // re-check across the await
   warmed.add(dir);
   await startAgentSession(dir, { warm: true }).catch(() => { s.warm = false; });

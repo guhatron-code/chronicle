@@ -136,7 +136,7 @@ export interface SessionStatusEvent extends InitStatusData {
   kind: SessionKind;
   cancelled?: boolean;
 }
-export type AgentsData = unknown; // agents_available → { claude, codex, default }
+export type AgentsData = unknown; // agents_available → { claude, codex, default, project, launchable }
 export interface GitStatusFile {
   path: string;
   code: string; // porcelain letter: M A D R C ? …
@@ -163,9 +163,28 @@ export interface DirEntry {
 }
 
 /* ---------- agents / project lifecycle ---------- */
-export const agentsAvailable = () => invoke<AgentsData>("agents_available");
+export const agentsAvailable = (dir?: string) => invoke<AgentsData>("agents_available", { dir: dir ?? null });
 export const setDefaultAgent = (agent: string) =>
   invoke<void>("set_default_agent", { agent });
+
+/** One agent as Setup's Your agent row and the composer's picker see it (Rust `agent_row`). */
+export interface AgentStatusRow {
+  id: string;
+  name: string;
+  /** false: no launch for this Mac (not pinned, not probed, or no build for this platform) */
+  supported: boolean;
+  launchable: boolean;
+  /** a managed install exists (npm agents can still run through npx without one) */
+  installed: boolean;
+  /** the agent's own CLI the connector needs, when it is missing */
+  missing: string | null;
+  /** null: Chronicle can't tell */
+  signedIn: boolean | null;
+  login: { kind: "terminal"; command: string } | { kind: "auth_method"; id: string } | { kind: "none" };
+}
+export interface AgentsStatus { agents: AgentStatusRow[]; default: string; project: string }
+export const agentsStatus = (dir: string | null) => invoke<AgentsStatus>("agents_status", { dir });
+export const setProjectAgent = (dir: string, agent: string | null) => invoke<void>("set_project_agent", { dir, agent });
 export const getPicker = () => invoke<PickerData>("get_picker");
 export const createProject = (name: string) =>
   invoke<string>("create_project", { name });

@@ -606,7 +606,7 @@ function AppShell() {
     agentsAvailable()
       .then((a) => {
         const d = (a as { default?: string } | null)?.default;
-        if (d) setAgent(d === "codex" ? "codex" : "claude");
+        if (d) setAgent(d === "codex-acp" || d === "codex" ? "codex" : "claude");
       })
       .catch(() => {});
     const onFocus = () => { refreshPicker(); for (const dir of projectsRef.current.keys()) void pollOne(dir); };

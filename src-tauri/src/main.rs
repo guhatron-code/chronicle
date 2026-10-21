@@ -429,33 +429,82 @@ fn agents_access_disable_in(dir: &Path, home: &Path, exe: &Path) -> Result<Value
 }
 
 fn load_config() -> Value {
-    std::fs::read_to_string(config_dir().join("config.json"))
+    let mut cfg = std::fs::read_to_string(config_dir().join("config.json"))
         .ok().and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| json!({}))
+        .unwrap_or_else(|| json!({}));
+    // "claude"/"codex" -> the registry ids, once, on the first read after the update
+    if agents::profiles::migrate_config(&mut cfg) { let _ = save_config(&cfg); }
+    cfg
 }
 
+fn save_config(cfg: &Value) -> Result<(), String> {
+    let _ = std::fs::create_dir_all(config_dir());
+    std::fs::write(config_dir().join("config.json"), serde_json::to_string_pretty(cfg).unwrap_or_default()).map_err(|e| e.to_string())
+}
+
+/// The canonical key a project's own agent choice is stored under (the same key `session_profile` reads).
+fn project_key(dir: &str) -> Option<String> { canon_key(dir).ok().map(|(k, _)| k) }
+
 #[tauri::command]
-fn agents_available() -> Value {
+fn agents_available(dir: Option<String>) -> Value {
     let (claude, codex) = agent_paths();
     let cfg = load_config();
-    let pref = cfg.get("agent").and_then(|v| v.as_str()).unwrap_or("");
-    let default = match pref {
-        "codex" if codex.is_some() => "codex",
-        "claude" if claude.is_some() => "claude",
-        _ if claude.is_some() => "claude",
-        _ if codex.is_some() => "codex",
-        _ => "",
-    };
-    json!({ "claude": claude, "codex": codex, "default": default })
+    let default = agents::profiles::chosen_in(&cfg, None);
+    let project = agents::profiles::chosen_in(&cfg, dir.as_deref().and_then(project_key).as_deref());
+    let cli_ok = project.requires_cli.map(|c| setup::resolve(c).is_some()).unwrap_or(true);
+    let launchable = cli_ok && setup::agent_launch(project.id).is_some();
+    json!({ "claude": claude, "codex": codex, "default": default.id, "project": project.id, "launchable": launchable })
 }
 
 #[tauri::command]
 fn set_default_agent(agent: String) -> Result<(), String> {
+    let id = agents::profiles::canonical_id(&agent).ok_or_else(|| format!("Chronicle doesn't know an agent called {agent}"))?;
     let mut cfg = load_config();
-    if let Some(obj) = cfg.as_object_mut() { obj.insert("agent".into(), json!(agent)); }
-    let _ = std::fs::create_dir_all(config_dir());
-    std::fs::write(config_dir().join("config.json"),
-        serde_json::to_string_pretty(&cfg).unwrap_or_default()).map_err(|e| e.to_string())
+    if let Some(obj) = cfg.as_object_mut() { obj.insert("agent".into(), json!(id)); }
+    save_config(&cfg)
+}
+
+/// Pure: set or clear one project's agent in the config value.
+fn write_project_agent(cfg: &mut Value, key: &str, agent: Option<&str>) -> Result<(), String> {
+    if !cfg.get("project_agents").map(Value::is_object).unwrap_or(false) { cfg["project_agents"] = json!({}); }
+    let map = cfg["project_agents"].as_object_mut().ok_or("bad config")?;
+    match agent {
+        Some(a) => { let id = agents::profiles::canonical_id(a).ok_or_else(|| format!("Chronicle doesn't know an agent called {a}"))?; map.insert(key.into(), json!(id)); }
+        None => { map.remove(key); }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn set_project_agent(dir: String, agent: Option<String>) -> Result<(), String> {
+    let key = project_key(&dir).ok_or("that project can't be found")?;
+    let mut cfg = load_config();
+    write_project_agent(&mut cfg, &key, agent.as_deref())?;
+    save_config(&cfg)
+}
+
+/// One agent as the Your agent row and the composer's picker see it.
+/// (setup.rs's `agent_row` is a different shape: an install-state row for the Setup detect list.)
+fn agent_row(p: &'static agents::AgentProfile) -> Value {
+    let supported = agents::registry::launch_spec(p).is_some();
+    let launch = setup::agent_launch(p.id);
+    let installed = matches!(launch, Some(acp::AdapterLaunch::Direct { .. }) | Some(acp::AdapterLaunch::Binary { .. }));
+    let missing = p.requires_cli.filter(|c| setup::resolve(c).is_none());
+    json!({
+        "id": p.id, "name": p.name, "supported": supported,
+        "launchable": launch.is_some() && missing.is_none(),
+        "installed": installed, "missing": missing,
+        "signedIn": setup::signed_in(p),
+        "login": agents::profiles::login_json(p.login),
+    })
+}
+
+#[tauri::command]
+async fn agents_status(dir: Option<String>) -> Value {
+    let cfg = load_config();
+    let key = dir.as_deref().and_then(project_key);
+    let rows: Vec<Value> = agents::PROFILES.iter().map(agent_row).collect();
+    json!({ "agents": rows, "default": agents::profiles::chosen_in(&cfg, None).id, "project": agents::profiles::chosen_in(&cfg, key.as_deref()).id })
 }
 
 /// Codex has no skill system, so the whole task travels inline as the prompt.
@@ -1570,7 +1619,7 @@ async fn init_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, init: St
     let errf = logf.try_clone().map_err(|e| e.to_string())?;
     // full auto mode either way: the session must finish without a single prompt.
     let (claude_bin, codex_bin) = agent_paths();
-    let use_codex = agent.as_deref() == Some("codex")
+    let use_codex = matches!(agent.as_deref(), Some("codex") | Some("codex-acp"))
         || (agent.is_none() && claude_bin.is_none() && codex_bin.is_some());
     let note = note.filter(|n| !n.trim().is_empty())
         .map(|n| format!("REFRESH MODE. Since this roadmap was written the repo moved on. Update only what changed, never drop a phase the plan still contains, and recompute every generatedFrom hash. What changed: {n}"));
@@ -4065,7 +4114,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             set_window_background,
             get_picker, open_project, create_project, remove_recent, adopt_manifest, get_state,
-            init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent,
+            init_start, init_status, init_cancel, set_init_consent, agents_available, set_default_agent, agents_status, set_project_agent,
             agent_attach, agent_attach_path,
             agents_access_status, agents_access_enable, agents_access_disable,
             notes::notes_index, notes::notes_read, notes::notes_write, notes::notes_move,
@@ -5567,5 +5616,30 @@ mod history_tests {
         });
         assert_eq!(spawns, 2, "rev-parse @{{u}} and one rev-list for the counts");
         assert_eq!(k, "ok");
+    }
+}
+
+#[cfg(test)]
+mod agents_choice_tests {
+    use super::*;
+
+    #[test]
+    fn an_agent_row_says_what_the_ui_needs() {
+        let row = agent_row(agents::claude());
+        for k in ["id", "name", "supported", "launchable", "installed", "missing", "signedIn", "login"] {
+            assert!(row.get(k).is_some(), "{k} in {row}");
+        }
+        assert_eq!(row["login"]["kind"], "terminal");
+        assert_eq!(row["login"]["command"], "claude /login");
+    }
+
+    #[test]
+    fn a_project_choice_is_written_and_cleared_by_canonical_path() {
+        let mut cfg = json!({ "agent": "claude-acp" });
+        write_project_agent(&mut cfg, "/p/one", Some("codex")).unwrap();
+        assert_eq!(cfg["project_agents"]["/p/one"], "codex-acp", "old names are stored as ids");
+        assert!(write_project_agent(&mut cfg, "/p/one", Some("amp-acp")).is_err(), "only the four");
+        write_project_agent(&mut cfg, "/p/one", None).unwrap();
+        assert!(cfg["project_agents"].get("/p/one").is_none());
     }
 }

@@ -11,7 +11,7 @@ let onUpdate: ((u: Update) => void) | null = null;
 let claude: string | null = "/usr/local/bin/claude";
 vi.mock("./ipc", () => ({
   onAcpUpdate: vi.fn(async (cb: (u: Update) => void) => { onUpdate = cb; return () => {}; }),
-  agentsAvailable: vi.fn(async () => ({ claude, codex: null, default: claude ? "claude" : "" })),
+  agentsAvailable: vi.fn(async () => ({ claude, codex: null, default: claude ? "claude-acp" : "", project: "claude-acp", launchable: !!claude })),
   agentSessionStart: vi.fn(async (dir: string) => { started.push(dir); }),
   agentSessionState: vi.fn(async () => null),
   agentPrompt: vi.fn(async () => {}), roundRunMessage: vi.fn(async () => ""), roundPlanBegin: vi.fn(),

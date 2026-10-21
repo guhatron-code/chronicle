@@ -436,6 +436,17 @@ fn claude_signed_in() -> bool {
     false
 }
 
+/// Is this agent signed in? `None` when Chronicle can't tell (the pane's own
+/// needs-login flow is the safety net, so "can't tell" never nags).
+pub fn signed_in(p: &crate::agents::AgentProfile) -> Option<bool> {
+    use crate::agents::profiles::Credentials;
+    match p.credentials {
+        Credentials::ClaudeKeychain => resolve("claude").map(|_| claude_signed_in()),
+        Credentials::HomeFile(rel) => Some(home().join(rel).exists()),
+        Credentials::Unknown => None,
+    }
+}
+
 /// Detect one check's state, as the row renders it.
 ///   { id, state: ready|missing|needs_you, detail, action }
 pub fn detect(id: &str) -> Value {
