@@ -132,7 +132,7 @@ function AgentPicker({ projectDir, current, onConfirm }: { projectDir: string; c
       <DropdownMenuContent data-config-menu="agent-picker" align="start" side="top" className="w-[260px]">
         <DropdownMenuRadioGroup
           value={current}
-          onValueChange={(id) => void switchProjectAgent(projectDir, id, onConfirm).catch((e) => toastError("Couldn't switch the agent", String(e).slice(0, 90)))}
+          onValueChange={(id) => void switchProjectAgent(projectDir, id, onConfirm, (m) => toastError("Couldn't switch the agent", m)).catch((e) => toastError("Couldn't switch the agent", String(e).slice(0, 90)))}
         >
           {choices.map((a) => (
             <DropdownMenuRadioItem key={a.id} value={a.id} disabled={!a.launchable} className={CONFIG_ROW}>

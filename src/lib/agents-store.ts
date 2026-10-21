@@ -16,15 +16,36 @@ export function agentSwitchPlan(input: { phase: AgentPhase; current: string; nex
   return "start";
 }
 
-export async function switchProjectAgent(dir: string, next: string, confirm: (spec: ConfirmSpec) => void): Promise<void> {
+/** Runs the switch in order: save the choice, end the old session, start the new one.
+ *  A failure is reported through `onError` with where the project now stands. */
+async function applySwitch(dir: string, next: string, endFirst: boolean, onError: (message: string) => void): Promise<void> {
+  const to = agentMeta(next).name;
+  try {
+    await setProjectAgent(dir, next);
+  } catch (e) {
+    onError(`The choice wasn't saved, so the project still uses its current agent. ${String(e).slice(0, 90)}`);
+    return;
+  }
+  if (endFirst) {
+    try {
+      await endAgentSession(dir);
+    } catch (e) {
+      onError(`The project now uses ${to}, but the old session couldn't be ended — stop it from the header. ${String(e).slice(0, 90)}`);
+      return;
+    }
+  }
+  try {
+    await startAgentSession(dir);
+  } catch (e) {
+    onError(`The project now uses ${to}, but it couldn't start — press Start in the composer. ${String(e).slice(0, 90)}`);
+  }
+}
+
+export async function switchProjectAgent(dir: string, next: string, confirm: (spec: ConfirmSpec) => void, onError: (message: string) => void): Promise<void> {
   const s = agentSessionFor(dir);
   const plan = agentSwitchPlan({ phase: s.phase, current: s.agent, next });
   if (plan === "noop") return;
-  if (plan === "start") {
-    await setProjectAgent(dir, next);
-    await startAgentSession(dir);
-    return;
-  }
+  if (plan === "start") return applySwitch(dir, next, false, onError);
   const to = agentMeta(next).name;
   confirm({
     title: `Switch to ${to}?`,
@@ -33,10 +54,6 @@ export async function switchProjectAgent(dir: string, next: string, confirm: (sp
       : `This ends the current session. Changes it made are kept and stay reviewable. The new session starts fresh with ${to}.`,
     cancelLabel: `Keep ${agentMeta(s.agent).name}`,
     confirmLabel: `Switch to ${to}`,
-    onConfirm: async () => {
-      await setProjectAgent(dir, next);
-      await endAgentSession(dir);
-      await startAgentSession(dir);
-    },
+    onConfirm: () => applySwitch(dir, next, true, onError),
   });
 }
