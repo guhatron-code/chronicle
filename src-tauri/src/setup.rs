@@ -201,29 +201,43 @@ fn safe_entry_name(name: &str) -> bool {
     !name.starts_with('/') && !name.split('/').any(|c| c == "..")
 }
 
-/// After unpacking: no symlink may point outside `root`. Removes `root` and errs if one does.
+/// After unpacking: no symlink may resolve outside `root`. Each target is resolved physically,
+/// one component at a time (so `b/..` through a link to `.` lands where the disk says).
+/// Removes `root` and errs if one escapes.
 fn reject_escaping_links(root: &Path) -> Result<(), String> {
-    fn walk(dir: &Path, root: &Path) -> bool {
+    fn resolve_physical(start: &Path, target: &Path) -> Option<PathBuf> {
+        use std::path::Component;
+        let mut cur = if target.is_absolute() { PathBuf::from("/") } else { start.canonicalize().ok()? };
+        for c in target.components() {
+            match c {
+                Component::RootDir | Component::Prefix(_) | Component::CurDir => {}
+                Component::ParentDir => { cur.pop(); }
+                Component::Normal(n) => {
+                    cur.push(n);
+                    if cur.exists() { cur = cur.canonicalize().ok()?; }
+                }
+            }
+        }
+        Some(cur)
+    }
+    fn walk(dir: &Path, root_c: &Path) -> bool {
         let Ok(rd) = std::fs::read_dir(dir) else { return true };
         for e in rd.flatten() {
             let p = e.path();
             let Ok(md) = std::fs::symlink_metadata(&p) else { continue };
             if md.file_type().is_symlink() {
                 let Ok(target) = std::fs::read_link(&p) else { return false };
-                let resolved = if target.is_absolute() { target } else { p.parent().unwrap_or(root).join(target) };
-                // lexical normalisation: the target need not exist
-                let mut out = PathBuf::new();
-                for c in resolved.components() {
-                    match c { std::path::Component::ParentDir => { out.pop(); } std::path::Component::CurDir => {} c => out.push(c) }
+                let Some(parent) = p.parent() else { return false };
+                match resolve_physical(parent, &target) {
+                    Some(r) if r.starts_with(root_c) => {}
+                    _ => return false,
                 }
-                let root_n = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
-                let out_n = out.canonicalize().unwrap_or(out);
-                if !out_n.starts_with(&root_n) && !out_n.starts_with(root) { return false; }
-            } else if md.is_dir() && !walk(&p, root) { return false; }
+            } else if md.is_dir() && !walk(&p, root_c) { return false; }
         }
         true
     }
-    if walk(root, root) { Ok(()) } else {
+    let ok = root.canonicalize().map(|c| walk(root, &c)).unwrap_or(false);
+    if ok { Ok(()) } else {
         let _ = std::fs::remove_dir_all(root);
         Err("the download tried to write outside its own folder, so it was refused".into())
     }
@@ -760,7 +774,7 @@ pub fn verify_sha256(path: &Path, want: &str) -> Result<(), String> {
     match sha256_file(path) {
         Some(got) if got.eq_ignore_ascii_case(want) => Ok(()),
         Some(_) if want.len() == 64 && std::fs::metadata(path).map(|m| m.len() == 0).unwrap_or(false) => Err("the download was incomplete, so nothing was installed".into()),
-        Some(_) => Err("the download didn't match its published checksum, so nothing was installed".into()),
+        Some(_) => Err("the download didn't match its published checksum — it may be incomplete; try again. Nothing was installed".into()),
         None => Err("couldn't read the download".into()),
     }
 }
@@ -886,6 +900,13 @@ fn agent_row(id: &str, p: &'static crate::agents::AgentProfile) -> Value {
 }
 
 /// Install one agent's connector; progress is emitted under `check` ("connector" or "agent:<id>").
+/// The Binary arm: the checksum is required before any byte is fetched.
+fn fetch_and_install(archive: &Path, dir: &Path, version: &str, target: &BinaryTarget, check: &str, emit: &Emit, cancel: &AtomicBool) -> Result<(), String> {
+    require_checksum(target)?;
+    download(&target.archive, archive, check, emit, cancel)?;
+    unpack_verified(archive, dir, version, target)
+}
+
 fn install_agent(check: &str, agent: &str, emit: &Emit, cancel: &AtomicBool) -> Result<(), String> {
     let p = crate::agents::profile(agent).ok_or("Chronicle doesn't know that agent")?;
     let spec = crate::agents::registry::launch_spec(p).ok_or_else(|| format!("{} isn't supported on this Mac yet", p.name))?;
@@ -908,10 +929,7 @@ fn install_agent(check: &str, agent: &str, emit: &Emit, cancel: &AtomicBool) -> 
             npx_entry_in(&dir, package).map(|_| ()).ok_or_else(|| "installed, but the connector's files aren't where expected".to_string())
         }
         LaunchSpec::Binary { version, target } => {
-            require_checksum(target)?; // before any bytes are fetched
-            let archive = agents_dir().join(format!("{}.download", p.id));
-            download(&target.archive, &archive, check, emit, cancel)?;
-            unpack_verified(&archive, &dir, version, target)
+            fetch_and_install(&agents_dir().join(format!("{}.download", p.id)), &dir, version, target, check, emit, cancel)
         }
     }
 }
@@ -1130,6 +1148,11 @@ mod setup_tests {
         // and install_agent refuses before any download: its archive path is never created
         let none = crate::agents::registry::BinaryTarget { archive: "https://invalid.invalid/x.tar.gz".into(), cmd: "./x".into(), args: vec![], sha256: String::new() };
         assert!(require_checksum(&none).unwrap_err().contains("checksum"), "refused before any download");
+        let dl = d.join("fresh/agents/opencode.download");
+        let emit: Emit = Arc::new(|_| {});
+        let err = fetch_and_install(&dl, &dir, "1.19.0", &none, "agent:opencode", &emit, &AtomicBool::new(false)).unwrap_err();
+        assert!(err.contains("checksum"), "{err}");
+        assert!(!dl.exists() && !dl.parent().unwrap().exists(), "download() never ran: no file, no folder");
         assert!(require_checksum(&target("https://x/o.tar.gz", "ab".repeat(32))).is_ok());
         assert!(!dir.exists());
     }
@@ -1170,6 +1193,26 @@ mod setup_tests {
         let e = extract_tar_gz(&link, &d.join("out2")).unwrap_err();
         assert!(e.contains("outside"), "{e}");
         assert!(!d.join("out2").exists(), "nothing left behind");
+        // a chained link: b -> . is fine alone, but a -> b/../etc resolves to root's parent
+        let chain = mk("ch.tar.gz", "import sys,tarfile\nt=tarfile.open(sys.argv[1],'w:gz')\nfor n,l in (('b','.'),('a','b/../etc')):\n i=tarfile.TarInfo(n);i.type=tarfile.SYMTYPE;i.linkname=l;t.addfile(i)\nt.close()");
+        let e = extract_tar_gz(&chain, &d.join("out3")).unwrap_err();
+        assert!(e.contains("outside"), "{e}");
+        assert!(!d.join("out3").exists());
+        // a link that stays inside is accepted
+        let ok = mk("ok.tar.gz", "import sys,tarfile,io\nt=tarfile.open(sys.argv[1],'w:gz')\ni=tarfile.TarInfo('bin/x');i.size=1;t.addfile(i,io.BytesIO(b'x'))\ni=tarfile.TarInfo('c');i.type=tarfile.SYMTYPE;i.linkname='./bin/x';t.addfile(i)\nt.close()");
+        extract_tar_gz(&ok, &d.join("out4")).unwrap();
+        assert!(d.join("out4/c").exists());
+    }
+
+    #[test]
+    fn a_zip_with_a_dotdot_entry_cannot_write_outside() {
+        let d = tmp("zipescape");
+        let made = std::process::Command::new("python3").arg("-I").arg("-c")
+            .arg("import sys,zipfile\nz=zipfile.ZipFile(sys.argv[1],'w')\nz.writestr('../evil','x')\nz.close()")
+            .arg(d.join("e.zip")).status();
+        if !matches!(made, Ok(s) if s.success()) { eprintln!("skip: python3 unavailable"); return; }
+        let _ = extract_zip(&d.join("e.zip"), &d.join("out"));
+        assert!(!d.join("evil").exists(), "the .. entry did not land outside the folder");
     }
 
     #[test]
