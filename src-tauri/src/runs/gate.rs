@@ -25,15 +25,29 @@ static NEXT_LOG: AtomicU64 = AtomicU64::new(0);
 fn lock() -> std::sync::MutexGuard<'static, ()> { GIT.lock().unwrap_or_else(|e| e.into_inner()) }
 
 pub fn git_raw(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git").arg("-C").arg(repo).args(args).stdin(Stdio::null()).output()
+    let out = git_cmd(repo, args).output()
         .map_err(|e| format!("couldn't run git: {e}"))?;
     if out.status.success() { Ok(String::from_utf8_lossy(&out.stdout).into_owned()) }
     else { Err(String::from_utf8_lossy(&out.stderr).trim().to_string()) }
 }
 pub fn git(repo: &Path, args: &[&str]) -> Result<String, String> { git_raw(repo, args).map(|s| s.trim().to_string()) }
 fn git_ok(repo: &Path, args: &[&str]) -> bool {
-    Command::new("git").arg("-C").arg(repo).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-        .status().map(|s| s.success()).unwrap_or(false)
+    git_cmd(repo, args).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+}
+/// Every git this file runs: no hooks (a husky/lint-staged hook rewrites files
+/// across the whole tree, and a hung one would hold `GIT` forever), and
+/// pathspecs are literal (`app/[id]/page.tsx` must not also match `app/i/…`).
+fn git_cmd(repo: &Path, args: &[&str]) -> Command {
+    let mut c = Command::new("git");
+    c.arg("-C").arg(repo).args(["-c", "core.hooksPath=/dev/null"]).args(args)
+        .env("GIT_LITERAL_PATHSPECS", "1").stdin(Stdio::null());
+    // the tests never inherit the user's global config (hooksPath, templateDir, …)
+    #[cfg(test)] c.env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1");
+    c
+}
+/// Paths from a `-z` listing, split on NUL: never quoted, never escaped.
+fn nul_paths(out: &str) -> Vec<String> {
+    out.split('\0').filter(|s| !s.is_empty()).map(String::from).collect()
 }
 
 /// `~/Library/Application Support/Chronicle/scratch/<repo-hash>/` (spec §15.8).
@@ -44,17 +58,20 @@ pub fn scratch_dir(repo: &Path) -> PathBuf {
     crate::config_dir().join("scratch").join(&format!("{:x}", h.finalize())[..16])
 }
 
-/// The scratch worktree, detached at `commit`. Made once, moved after.
+/// The scratch worktree, detached at `commit`. Made once, moved after; a copy
+/// that can no longer be moved is thrown away and made again, once.
 pub fn prepare_scratch(repo: &Path, scratch: &Path, commit: &str) -> Result<(), String> {
     let _g = lock();
-    if scratch.join(".git").exists() {
+    let moved = scratch.join(".git").exists() && (|| {
         git(scratch, &["checkout", "--detach", "--force", "-q", commit])?;
         // Chronicle's own copy, never the user's tree: the last check's leftovers go
-        git(scratch, &["clean", "-fdq", "-e", "node_modules"])?;
-    } else {
+        git(scratch, &["clean", "-fdq", "-e", "node_modules"])
+    })().is_ok();
+    if !moved {
         let _ = git(repo, &["worktree", "prune"]);
         if let Some(parent) = scratch.parent() { std::fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
         let _ = std::fs::remove_dir_all(scratch);
+        let _ = git(repo, &["worktree", "prune"]);
         git(repo, &["worktree", "add", "--detach", "--force", "-q", &scratch.to_string_lossy(), commit])?;
     }
     let nm = repo.join("node_modules");
@@ -152,30 +169,39 @@ pub fn save_paths(repo: &Path, paths: &[String], message: &str) -> Result<Saved,
     let _g = lock();
     let mut ls = vec!["ls-files", "-z", "--"];
     ls.extend(paths.iter().map(|s| s.as_str()));
-    let tracked: HashSet<String> = git_raw(repo, &ls).unwrap_or_default().split('\0').filter(|s| !s.is_empty()).map(String::from).collect();
+    let tracked: HashSet<String> = nul_paths(&git_raw(repo, &ls).unwrap_or_default()).into_iter().collect();
     let live: Vec<&str> = paths.iter().map(|s| s.as_str()).filter(|p| repo.join(p).exists() || tracked.contains(*p)).collect();
     if live.is_empty() { return Ok(Saved::Nothing); }
-    let mut add = vec!["add", "--"];
-    add.extend(live.iter().copied());
-    with_index_retry(|| git(repo, &add))?;
-    let mut diff = vec!["diff", "--cached", "--quiet", "HEAD", "--"];
-    diff.extend(live.iter().copied());
-    if git_ok(repo, &diff) { return Ok(Saved::AlreadySaved(git(repo, &["rev-parse", "HEAD"])?)); }
-    let mut commit = vec!["commit", "--only", "-q", "-m", message, "--"];
-    commit.extend(live.iter().copied());
-    with_index_retry(|| git(repo, &commit))?;
-    Ok(Saved::Commit(git(repo, &["rev-parse", "HEAD"])?))
+    let saved = (|| {
+        let mut add = vec!["add", "--"];
+        add.extend(live.iter().copied());
+        with_index_retry(|| git(repo, &add))?;
+        let mut diff = vec!["diff", "--cached", "--quiet", "HEAD", "--"];
+        diff.extend(live.iter().copied());
+        if git_ok(repo, &diff) { return Ok(Saved::AlreadySaved(git(repo, &["rev-parse", "HEAD"])?)); }
+        let mut commit = vec!["commit", "--only", "--no-verify", "-q", "-m", message, "--"];
+        commit.extend(live.iter().copied());
+        with_index_retry(|| git(repo, &commit))?;
+        Ok(Saved::Commit(git(repo, &["rev-parse", "HEAD"])?))
+    })();
+    if saved.is_err() {
+        // a save that didn't happen leaves nothing of the lane's staged
+        let mut reset = vec!["reset", "-q", "--"];
+        reset.extend(live.iter().copied());
+        let _ = with_index_retry(|| git(repo, &reset));
+    }
+    saved
 }
 
 pub fn changed_between(repo: &Path, from_tree: &str, to_tree: &str) -> Vec<String> {
-    git(repo, &["diff-tree", "-r", "--name-only", "--no-renames", from_tree, to_tree]).unwrap_or_default()
-        .lines().filter(|l| !l.is_empty()).map(String::from).collect()
+    nul_paths(&git_raw(repo, &["diff-tree", "-r", "-z", "--name-only", "--no-renames", from_tree, to_tree]).unwrap_or_default())
 }
 
 /// After a restart there is no turn snapshot: everything that differs from HEAD.
 pub fn dirty_paths(repo: &Path) -> Vec<String> {
-    git_raw(repo, &["status", "--porcelain=v1", "--untracked-files=all", "--no-renames"]).unwrap_or_default()
-        .lines().filter_map(|l| l.get(3..)).map(|p| p.trim_matches('"').to_string()).filter(|p| !p.is_empty()).collect()
+    // porcelain v1 with -z keeps the `XY ` prefix and never quotes the path
+    nul_paths(&git_raw(repo, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"]).unwrap_or_default())
+        .into_iter().filter_map(|l| l.get(3..).map(String::from)).filter(|p| !p.is_empty()).collect()
 }
 
 /// The lane's own files, and the rest as leaks (spec §4, the shell hole). A
@@ -209,18 +235,20 @@ pub fn diff_for(repo: &Path, commit: &str) -> String {
 }
 
 pub fn files_in(repo: &Path, commit: &str) -> Vec<String> {
-    git(repo, &["show", "--format=", "--name-only", commit]).unwrap_or_default().lines().filter(|l| !l.is_empty()).map(String::from).collect()
+    nul_paths(&git_raw(repo, &["diff-tree", "--no-commit-id", "--root", "-r", "-z", "--name-only", "--no-renames", commit]).unwrap_or_default())
 }
 
-/// The user's Discard on a stopped lane (spec §3, Stop): its tracked files go
-/// back to HEAD. Nothing untracked is deleted. Returns how many were put back.
+/// The user's Discard on a stopped lane (spec §3, Stop): its files are put
+/// back to what was saved (HEAD — not whatever the index holds). Nothing that
+/// HEAD lacks is deleted. Returns how many were put back.
 pub fn discard_paths(repo: &Path, paths: &[String]) -> Result<usize, String> {
+    if paths.is_empty() { return Ok(0); }
     let _g = lock();
-    let mut ls = vec!["ls-files", "-z", "--"];
+    let mut ls = vec!["ls-tree", "-r", "-z", "--name-only", "HEAD", "--"];
     ls.extend(paths.iter().map(|s| s.as_str()));
-    let tracked: Vec<String> = git_raw(repo, &ls)?.split('\0').filter(|s| !s.is_empty()).map(String::from).collect();
+    let tracked = nul_paths(&git_raw(repo, &ls)?);
     if tracked.is_empty() { return Ok(0); }
-    let mut co = vec!["checkout", "--"];
+    let mut co = vec!["checkout", "HEAD", "--"];
     co.extend(tracked.iter().map(|s| s.as_str()));
     with_index_retry(|| git(repo, &co))?;
     Ok(tracked.len())
@@ -394,5 +422,84 @@ mod tests {
         let mut d = dirty_paths(&r);
         d.sort();
         assert_eq!(d, vec!["README.md", "new.txt"]);
+    }
+
+    #[test]
+    fn a_lane_save_never_runs_the_users_hooks() {
+        use std::os::unix::fs::PermissionsExt;
+        let r = repo("hooks");
+        let hook = r.join(".git/hooks/pre-commit");
+        std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        std::fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\nexit 1\n", r.join("sentinel").display())).unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(r.join("lane.txt"), "lane").unwrap();
+        assert!(matches!(save_paths(&r, &["lane.txt".into()], "lane a").unwrap(), Saved::Commit(_)));
+        assert!(!r.join("sentinel").exists(), "the pre-commit hook never ran");
+        close_commit(&r, 1).unwrap();
+        assert!(!r.join("sentinel").exists());
+    }
+
+    #[test]
+    fn a_bracketed_path_is_literal_for_save_and_discard() {
+        let r = repo("literal");
+        std::fs::write(r.join("[x]"), "one").unwrap();
+        std::fs::write(r.join("x"), "one").unwrap();
+        git(&r, &["add", "--", "[x]", "x"]).unwrap();
+        git(&r, &["commit", "-qm", "both"]).unwrap();
+        std::fs::write(r.join("[x]"), "lane").unwrap();
+        std::fs::write(r.join("x"), "the user's unsaved edit").unwrap();
+        let Saved::Commit(c) = save_paths(&r, &["[x]".into()], "lane a").unwrap() else { panic!("expected a commit") };
+        assert_eq!(files_in(&r, &c), vec!["[x]"], "only the lane's file is saved");
+        std::fs::write(r.join("[x]"), "lane again").unwrap();
+        assert_eq!(discard_paths(&r, &["[x]".into()]).unwrap(), 1);
+        assert_eq!(std::fs::read_to_string(r.join("[x]")).unwrap(), "lane");
+        assert_eq!(std::fs::read_to_string(r.join("x")).unwrap(), "the user's unsaved edit", "x is left alone");
+    }
+
+    #[test]
+    fn a_failed_save_leaves_nothing_staged() {
+        let r = repo("failed");
+        std::fs::write(r.join("lane.txt"), "lane").unwrap();
+        std::fs::write(r.join("README.md"), "lane edit").unwrap();
+        // an empty message makes git abort the commit after the paths were added
+        assert!(save_paths(&r, &["lane.txt".into(), "README.md".into()], "").is_err());
+        assert_eq!(git(&r, &["diff", "--cached", "--name-only"]).unwrap(), "", "nothing of the lane's is left staged");
+        assert_eq!(git(&r, &["rev-list", "--count", "HEAD"]).unwrap(), "1");
+    }
+
+    #[test]
+    fn discard_restores_what_was_saved_not_what_was_staged() {
+        let r = repo("discard-staged");
+        std::fs::write(r.join("README.md"), "staged by a save that never finished").unwrap();
+        git(&r, &["add", "README.md"]).unwrap();
+        assert_eq!(discard_paths(&r, &["README.md".into()]).unwrap(), 1);
+        assert_eq!(std::fs::read_to_string(r.join("README.md")).unwrap(), "toy\n");
+        assert_eq!(git(&r, &["status", "--porcelain"]).unwrap(), "");
+    }
+
+    #[test]
+    fn a_non_ascii_file_name_is_read_and_saved() {
+        let r = repo("unicode");
+        std::fs::write(r.join("café.txt"), "lane").unwrap();
+        let dirty = dirty_paths(&r);
+        assert_eq!(dirty, vec!["café.txt"]);
+        let Saved::Commit(c) = save_paths(&r, &dirty, "lane a").unwrap() else { panic!("expected a commit") };
+        assert_eq!(files_in(&r, &c), vec!["café.txt"]);
+        let tree = |rev: &str| git(&r, &["rev-parse", &format!("{rev}^{{tree}}")]).unwrap();
+        assert_eq!(changed_between(&r, &tree("HEAD~1"), &tree("HEAD")), vec!["café.txt"]);
+        assert_eq!(git(&r, &["status", "--porcelain"]).unwrap(), "");
+    }
+
+    #[test]
+    fn a_broken_scratch_copy_is_made_again() {
+        let r = repo("broken-scratch");
+        let c = git(&r, &["rev-parse", "HEAD"]).unwrap();
+        let s = tmpdir("broken-scratch-copy").join("copy");
+        std::fs::create_dir_all(&s).unwrap();
+        std::fs::write(s.join(".git"), "gitdir: /nonexistent/chronicle-gate\n").unwrap();
+        std::fs::write(s.join("junk"), "").unwrap();
+        let out = run_checks_at(&r, &s, &c, &[Check { name: "t".into(), command: "test -f README.md && test ! -e junk".into() }]);
+        assert!(!out.main_tree && out.notice.is_none(), "{:?}", out.notice);
+        assert_eq!(out.results[0].exit, Some(0), "{}", out.results[0].tail);
     }
 }
