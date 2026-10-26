@@ -37,24 +37,36 @@ code task is complete and reviewed. What follows is the closing measurement.
 - Everything after that is Claude Code initialising inside the adapter: **1.1–4.1 s** across six
   runs, outside Chronicle's control. It sets the floor for `ready`.
 
-### Closing table (partial — the two live rows wait for a session with the user at the machine)
+### Closing table (2026-10-26)
+
+The two live rows were run on the dev build (`npm run tauri dev`, launched as its own instance beside the installed app with the bridge socket on a scratch path), project `~/chronicle-probe`, Claude Code 0.75.1 adapter, driven by synthetic input and read off window captures; the React numbers come from `__chroniclePerf()` (a React Profiler on the thread, DEV only) sampled every 3 s through a temporary stderr tap that was not committed.
 
 | Target | Before | After | Met |
 |---|---|---|---|
 | Warm start, project open → ready, under 1.5 s | n/a (the session started on pane mount, not at project open) | spawn → ready 1.77 / 2.62 / 4.90 s; the warm start begins at project open instead of pane mount, so the wait the user sees is shorter by the time between the two | **no** on the absolute: Claude Code's own initialise is 1.1–4.1 s |
 | Cold start, pane mount → ready, under 3 s | adapter via npx (1.0–1.6 s) + session create 1.38 s ≈ 2.4–3.0 s | npx path 2.21 / 3.41 / 4.31 s; direct 1.77 / 2.62 / 4.90 s | **sometimes**: met on the fast runs, missed when Claude Code's initialise exceeds ~1.5 s |
-| Chunk render cost, 300-entry thread, under 2 ms at 60 fps | store side 0.04–0.07 ms per full replay, ~0.1 µs per chunk; React render not measured | store side 0.09–0.28 ms per full replay, ~0.1–0.3 µs per chunk (signatures included); React render **pending the live session** (`__chroniclePerf()` in a dev build) | pending |
-| Follow-scroll, no visible jump while following | smooth scroll restarted per row; jump per chunk (by code) | pinned in a layout effect; one glide on return (by code and 8 unit tests) | pending the live session |
+| Chunk render cost, 300-entry thread, under 2 ms at 60 fps | store side 0.04–0.07 ms per full replay, ~0.1 µs per chunk; React render not measured | store side 0.09–0.28 ms per full replay; React: a 1,500-word stream averaged **1.1–1.5 ms per commit** (max 24 ms once, ~7 commits/s); a 150-tool-row turn averaged **1.2–1.5 ms** (max 24 ms, 95 of 600 commits over 2 ms during the row storm) | **yes** on the average, with single commits over 2 ms while tool rows pour in |
+| Follow-scroll, no visible jump while following | smooth scroll restarted per row; jump per chunk (by code) | pinned mid-stream through the whole 1,500-word reply; scrolled up mid-stream and the thread stayed put; scrolled back and it re-pinned with one glide; no jump seen in any capture | **yes** |
 
-### Live session still to run (with the user present)
+### The other live rows
 
-1. `npm run tauri dev`, open a project, ask for a 1,500-word reply; `__chroniclePerf()` in the Web
-   Inspector while it streams (after). The same in `/tmp/pane-before` (its profiler is patched in).
-2. Scroll up mid-stream, come back; open a subagent card mid-stream; resume an earlier session
-   then view another (the C1 fix); a reply with a link (opens through the app, no modal).
-3. Reduce motion on: every moment instant, nothing hidden.
-4. Setup & health: the connector row `missing → installing → ready 0.75.1`.
-5. Then commit `docs(runs): pane live check …` — the roadmap's proof for RN-2.
+| Row | Seen |
+|---|---|
+| Subagent card mid-stream | the card (`Count lines in README.md · 1 call · working`) opened under the reply, its permission card below it; it collapsed to `done` on its own and the thread kept following |
+| Resume an earlier session while one is live | the stored thread came up (`starting` → `idle` in ~6 s) on the stored session's agent (an OpenCode session resumed onto OpenCode from a Claude session) |
+| View another session | `Viewing an earlier session — nothing here can act` with Back / Continue in a new session; Back returned to the live thread |
+| A reply with a link | rendered as a link in the reply (`https://example.com`); the click was not driven, it would have raised the user's browser |
+| Reduce motion | not run: it would have changed the system setting while the user was working at the machine; the rule is unit-tested (`the return is a jump under reduced motion`) |
+| Setup & health connector row | `missing → installing → ready 0.75.1` observed in the agents live check (RN-4, below) |
+
+Found by these rows and fixed before this commit (each with a unit test that failed first):
+
+- The review strip (`1 file changed · Review · Keep all`) mounts below the scroller and covered the final reply: the pin rule now closes any gap, whether content grew or the viewport shrank, and the hook observes the scroller itself (707d834).
+- Collapsing a card while pinned clamps `scrollTop` and fires a scroll event the hook read as the user scrolling up: a scroll that lands exactly at the bottom keeps the pin.
+- Typing a second or third line into the composer dropped the pin: the input's autosize set its height to `auto` and read `scrollHeight`, which laid the page out with the input at one line for an instant, the thread's scroller grew, the browser clamped its `scrollTop` down, and the scroll event read as a scroll up. The box around the input now holds its height for the measurement (`fitTextarea`). Before the fix a three-line prompt's reply streamed below the fold.
+- Resume from the history while a session was live hung on `Setting up the agent bridge…`: `acp::start` refused the second session and nothing else happened. A resume now ends the live session first (records kept), and the frontend errors instead of waiting if a start is ever refused.
+
+Still to note: a resumed thread's old rows carry the live agent's name and mark (the design limit from the earlier round); the tab strip's rate-limit chip keeps Claude's value while another agent's session is live (deferred, from RN-4).
 
 ## Task 3 · streaming, before/after
 
