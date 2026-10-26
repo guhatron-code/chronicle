@@ -145,7 +145,13 @@ fn render_run_state(out: &Outcome) -> String {
             let lane = x["lane"].as_str().map(|l| format!(" · lane {}", l.to_uppercase())).unwrap_or_default();
             let item = x["item"].as_str().map(|i| format!(" · {i}")).unwrap_or_default();
             s.push_str(&format!("  {} · {}{lane}{item}: {}\n", x["index"], x["kind"].as_str().unwrap_or(""), x["reason"].as_str().unwrap_or("")));
-            for act in x["acts"].as_array().cloned().unwrap_or_default() { s.push_str(&format!("    --act '{act}'\n")); }
+            for act in x["acts"].as_array().cloned().unwrap_or_default() {
+                // one shell word: a quote inside the JSON closes and reopens the quoting
+                let word = act.to_string().replace('\'', "'\\''");
+                // a rewrite is the user's new wording, never a placeholder Chronicle invents
+                let more = if act["kind"] == "rewrite" { "   (add \"text\": the item's new wording, from the user)" } else { "" };
+                s.push_str(&format!("    --act '{word}'{more}\n"));
+            }
         }
     }
     s
@@ -455,7 +461,8 @@ mod tests {
                  "gates": [{"fix": 0, "checks": [{"name": "test", "pass": true}, {"name": "lint", "pass": false}]}]},
                 {"id": "b", "title": "Copy", "state": "needs you", "attempt": 3, "leak": [], "last_line": null, "gates": []}],
             "needs_you": [{"index": 0, "kind": "parked", "lane": "b", "item": "T-3", "reason": "it names a file that isn't there",
-                           "acts": [{"kind": "skip", "item": "T-3"}]}]}) };
+                           "acts": [{"kind": "skip", "item": "T-3"}, {"kind": "rewrite", "item": "T-3"}]},
+                          {"index": 1, "kind": "parked", "lane": "b", "item": "it's", "reason": "r", "acts": [{"kind": "skip", "item": "it's"}]}]}) };
         assert_eq!(render_table("chronicle.run.state", &out),
             "Round 2 · needs you · 2 lanes · $0.25.\n\
              lane A · Crash fix · being checked · try 2\n\
@@ -465,7 +472,10 @@ mod tests {
              lane B · Copy · needs you · try 3\n\
              needs you:\n\
              \x20 0 · parked · lane B · T-3: it names a file that isn't there\n\
-             \x20   --act '{\"kind\":\"skip\",\"item\":\"T-3\"}'\n");
+             \x20   --act '{\"kind\":\"skip\",\"item\":\"T-3\"}'\n\
+             \x20   --act '{\"kind\":\"rewrite\",\"item\":\"T-3\"}'   (add \"text\": the item's new wording, from the user)\n\
+             \x20 1 · parked · lane B · it's: r\n\
+             \x20   --act '{\"kind\":\"skip\",\"item\":\"it'\\''s\"}'\n");
     }
 
     #[test]

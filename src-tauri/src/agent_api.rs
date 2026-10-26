@@ -259,7 +259,7 @@ fn caps() -> Vec<Capability> {
         Capability {
             spec: ToolSpec {
                 name: "chronicle.run.list",
-                description: "Every run in this project, newest first: its round, state, lane count, cost, elapsed time, and how many things need the user. Read from the run records; Chronicle need not be open.",
+                description: "Every run in this project, newest first: its round, state, lane count, cost, elapsed time, and how many things need the user. Read from the run records; Chronicle need not be open. As last written: if Chronicle isn't open, a run shown as live was interrupted; it can be resumed once the app is open.",
                 input_schema: json!({ "type": "object", "properties": {} }),
             },
             run: run_list,
@@ -267,7 +267,7 @@ fn caps() -> Vec<Capability> {
         Capability {
             spec: ToolSpec {
                 name: "chronicle.run.state",
-                description: "One run in full: each lane's state and try, its checks (pass or fail), files it touched that another lane owns, its last line, and each thing that needs the user with the acts chronicle.run.needs_you takes for it. Read from the run record; Chronicle need not be open.",
+                description: "One run in full: each lane's state and try, its checks (pass or fail), files it touched that another lane owns, its last line, and each thing that needs the user with the acts chronicle.run.needs_you takes for it (a rewrite also needs text: the item's new wording, from the user). Read from the run record; Chronicle need not be open. As last written: if Chronicle isn't open, a run shown as live was interrupted; it can be resumed once the app is open.",
                 input_schema: json!({ "type": "object", "required": ["n"], "properties": {
                     "n": { "type": "integer", "description": "the run's number, as chronicle.run.list reports it" } } }),
             },
@@ -279,7 +279,12 @@ fn caps() -> Vec<Capability> {
                 description: "Stop a run. Nothing is reverted: what the lanes saved stays saved, and unsaved changes stay in the project. Chronicle must be open on this project.",
                 input_schema: json!({ "type": "object", "required": ["n"], "properties": { "n": { "type": "integer" } } }),
             },
-            run: |dir, a| { let n = run_n(dir, a)?; action(dir, "run.stop", json!({ "n": n }), "stop a run") },
+            run: |dir, a| {
+                let rec = run_record(dir, a)?;
+                // a finished run has nothing to stop: "was stopped" would be a story
+                if rec.state.terminal() { return Err(format!("Round {} is already over.", rec.round_n())) }
+                action(dir, "run.stop", json!({ "n": rec.n }), "stop a run")
+            },
         },
         Capability {
             spec: ToolSpec {
@@ -320,7 +325,7 @@ fn caps() -> Vec<Capability> {
         Capability {
             spec: ToolSpec {
                 name: "chronicle.run.lane_discard",
-                description: "Destructive: throw away a finished or stopped lane's unsaved changes. Every file the lane owns that has changes is restored from what was last saved (git checkout HEAD -- <paths>), and those edits are gone. Only when the user named the lane. Chronicle must be open on this project.",
+                description: "Destructive: throw away the unsaved changes of a lane that isn't working. Every file the lane owns that has changes is restored from what was last saved (git checkout HEAD -- <paths>), and those edits are gone. Only when the user named the lane. Chronicle must be open on this project.",
                 input_schema: json!({ "type": "object", "required": ["n", "lane"], "properties": {
                     "n": { "type": "integer" }, "lane": { "type": "string", "description": "the lane's letter" } } }),
             },
@@ -877,11 +882,29 @@ fn iso_ms(s: &str) -> Option<u64> {
     u64::try_from((days * 86_400 + h * 3600 + mi * 60 + se) * 1000).ok()
 }
 
-/// How long the run has taken: to its last write once it is over, to now while it is not.
-fn run_elapsed_ms(rec: &crate::runs::record::RunRecord) -> u64 {
+/// A record as it may be shown: one written live (not over, not already marked
+/// interrupted) while no Chronicle answers on the socket is a run nobody drives, so it
+/// reads as interrupted — said, never written (the app marks it when it next opens).
+/// The bool is true when the record's own state was overruled.
+fn shown_state(rec: &crate::runs::record::RunRecord, app_up: &dyn Fn() -> bool) -> (String, bool) {
+    use crate::runs::record::RunState;
+    if !rec.state.terminal() && rec.state != RunState::Interrupted && !app_up() { return ("interrupted".into(), true) }
+    (run_state_word(rec.state), false)
+}
+
+/// How long the run has taken: to its last write once it is over (or nobody drives it),
+/// to now while it is not.
+fn run_elapsed_ms(rec: &crate::runs::record::RunRecord, frozen: bool) -> u64 {
     let start = iso_ms(&rec.created).unwrap_or(0);
-    let end = if rec.state.terminal() { iso_ms(&rec.updated).unwrap_or(start) } else { crate::epoch_ms() };
+    let end = if rec.state.terminal() || frozen { iso_ms(&rec.updated).unwrap_or(start) } else { crate::epoch_ms() };
     end.saturating_sub(start)
+}
+
+/// Is a Chronicle answering on `sock`? Asked at most once per call, and only when a
+/// record says it is live.
+fn app_probe(sock: &Path) -> impl Fn() -> bool + '_ {
+    let seen = std::cell::OnceCell::new();
+    move || *seen.get_or_init(|| crate::bridge::running_instance(sock))
 }
 
 /// The last line a lane's agent wrote in its latest turn, from the lane's own thread.
@@ -902,7 +925,7 @@ fn lane_last_line(dir: &Path, rec: &crate::runs::record::RunRecord, lane: &str) 
 fn acts_for(index: usize, x: &crate::runs::record::NeedsYou) -> Vec<Value> {
     match x.kind.as_str() {
         "parked" => { let item = x.item.clone().unwrap_or_default();
-            vec![json!({ "kind": "skip", "item": item }), json!({ "kind": "rewrite", "item": item, "text": "…" })] }
+            vec![json!({ "kind": "skip", "item": item }), json!({ "kind": "rewrite", "item": item })] }
         "exhausted" => vec![json!({ "kind": "retry", "lane": x.lane.clone().unwrap_or_default() })],
         "head" => vec![json!({ "kind": "recheck" })],
         "refused" => vec![json!({ "kind": "dismiss", "index": index })],
@@ -912,17 +935,21 @@ fn acts_for(index: usize, x: &crate::runs::record::NeedsYou) -> Vec<Value> {
 
 fn plural(n: usize, w: &str) -> String { format!("{n} {w}{}", if n == 1 { "" } else { "s" }) }
 
-fn run_list(dir: &Path, _a: &Value) -> Result<Outcome, String> {
+fn run_list(dir: &Path, _a: &Value) -> Result<Outcome, String> { run_list_at(dir, &crate::bridge::socket_path()) }
+
+fn run_list_at(dir: &Path, sock: &Path) -> Result<Outcome, String> {
+    let app_up = app_probe(sock);
     let mut recs = crate::runs::record::list(dir);
     recs.reverse(); // newest first
-    let rows: Vec<Value> = recs.iter().map(|r| json!({
-        "n": r.n, "round": r.round_n(), "kind": r.kind, "state": run_state_word(r.state),
-        "lanes": r.lanes.len(), "cost_usd": r.total_cost().usd, "elapsed_ms": run_elapsed_ms(r),
+    let shown: Vec<(String, bool)> = recs.iter().map(|r| shown_state(r, &app_up)).collect();
+    let rows: Vec<Value> = recs.iter().zip(&shown).map(|(r, (word, frozen))| json!({
+        "n": r.n, "round": r.round_n(), "kind": r.kind, "state": word,
+        "lanes": r.lanes.len(), "cost_usd": r.total_cost().usd, "elapsed_ms": run_elapsed_ms(r, *frozen),
         "needs_you": r.needs_you.len(), "created": r.created, "updated": r.updated,
     })).collect();
     let summary = if recs.is_empty() { "No runs yet.".to_string() } else {
         format!("{} · {}.", plural(recs.len(), "run"),
-            recs.iter().map(|r| format!("round {} {}", r.round_n(), run_state_word(r.state))).collect::<Vec<_>>().join(" · "))
+            recs.iter().zip(&shown).map(|(r, (word, _))| format!("round {} {word}", r.round_n())).collect::<Vec<_>>().join(" · "))
     };
     Ok(Outcome { summary, data: json!({ "runs": rows }) })
 }
@@ -941,8 +968,11 @@ fn run_lane(dir: &Path, n: u64, a: &Value) -> Result<String, String> {
     Ok(lane.to_string())
 }
 
-fn run_state(dir: &Path, a: &Value) -> Result<Outcome, String> {
+fn run_state(dir: &Path, a: &Value) -> Result<Outcome, String> { run_state_at(dir, a, &crate::bridge::socket_path()) }
+
+fn run_state_at(dir: &Path, a: &Value, sock: &Path) -> Result<Outcome, String> {
     let rec = run_record(dir, a)?;
+    let (word, frozen) = shown_state(&rec, &app_probe(sock));
     let spec = |id: &str| rec.lane_map.as_ref().and_then(|m| m.lanes.iter().find(|l| l.id == id));
     let lanes: Vec<Value> = rec.lanes.iter().map(|l| json!({
         "id": l.id, "title": spec(&l.id).map(|s| s.title.clone()), "items": spec(&l.id).map(|s| s.items.clone()).unwrap_or_default(),
@@ -956,11 +986,10 @@ fn run_state(dir: &Path, a: &Value) -> Result<Outcome, String> {
     let needs: Vec<Value> = rec.needs_you.iter().enumerate().map(|(i, x)| json!({
         "index": i, "kind": x.kind, "lane": x.lane, "item": x.item, "reason": x.reason, "acts": acts_for(i, x),
     })).collect();
-    let word = run_state_word(rec.state);
     let cost = rec.total_cost().usd;
     let summary = format!("Round {} · {word} · {} · ${cost:.2}.", rec.round_n(), plural(rec.lanes.len(), "lane"));
     Ok(Outcome { summary, data: json!({
-        "n": rec.n, "round": rec.round_n(), "state": word, "cost_usd": cost, "elapsed_ms": run_elapsed_ms(&rec),
+        "n": rec.n, "round": rec.round_n(), "state": word, "cost_usd": cost, "elapsed_ms": run_elapsed_ms(&rec, frozen),
         "lanes": lanes, "needs_you": needs, "record": rec,
     }) })
 }
@@ -1372,12 +1401,12 @@ mod tests {
         assert!(r.summary.starts_with("round.plan"));
 
         // the run actions reach the app as their own actions, with only what the app needs
-        let mut rec = crate::runs::record::RunRecord::new(4, crate::runs::record::RunKind::Notes, Some(4), "p", "q", "");
-        rec.state = crate::runs::record::RunState::Done;
-        rec.lanes = vec![crate::runs::record::LaneRecord::new("a")];
-        crate::runs::record::save(&d, &mut rec).unwrap();
         let r = call(&d, "chronicle.run.begin", &json!({"source": {"kind": "prompt", "text": "tidy the copy"}})).unwrap();
         assert_eq!(r.summary, r#"run.begin · {"source":{"kind":"prompt","text":"tidy the copy"}}"#);
+        let mut rec = crate::runs::record::RunRecord::new(4, crate::runs::record::RunKind::Notes, Some(4), "p", "q", "");
+        rec.state = crate::runs::record::RunState::Running;
+        rec.lanes = vec![crate::runs::record::LaneRecord::new("a")];
+        crate::runs::record::save(&d, &mut rec).unwrap();
         let r = call(&d, "chronicle.run.stop", &json!({"n": 4})).unwrap();
         assert_eq!(r.summary, r#"run.stop · {"n":4}"#);
         let r = call(&d, "chronicle.run.resume", &json!({"n": 4})).unwrap();
@@ -1521,10 +1550,19 @@ mod tests {
         d
     }
 
+    /// A throwaway Chronicle on a scratch socket: `running_instance` gets its answer.
+    fn listening(d: &Path) -> PathBuf {
+        let sock = d.join("probe.sock");
+        crate::bridge::listen_at(&sock, "t".into(), std::sync::Arc::new(|_| crate::bridge::Reply { ok: true, summary: String::new(), data: None })).unwrap();
+        sock
+    }
+
     #[test]
     fn runs_are_listed_and_read_from_disk_without_the_app() {
         let d = two_runs("runs-disk");
-        let l = call(&d, "chronicle.run.list", &json!({})).unwrap();
+        // a Chronicle is answering, so round 2's needs-you is as written
+        let sock = listening(&d);
+        let l = run_list_at(&d, &sock).unwrap();
         let rows = l.data["runs"].as_array().unwrap();
         assert_eq!(rows.len(), 2);
         assert_eq!((rows[0]["n"].as_u64(), rows[1]["n"].as_u64()), (Some(2), Some(1)), "newest first");
@@ -1536,7 +1574,7 @@ mod tests {
         assert!(rows[1]["elapsed_ms"].is_u64());
         assert_eq!(l.summary, "2 runs · round 2 needs you · round 1 done.");
 
-        let s = call(&d, "chronicle.run.state", &json!({"n": 2})).unwrap();
+        let s = run_state_at(&d, &json!({"n": 2}), &sock).unwrap();
         assert_eq!(s.summary, "Round 2 · needs you · 2 lanes · $0.25.");
         assert_eq!(s.data["record"]["n"], 2, "the full record rides along");
         let lanes = s.data["lanes"].as_array().unwrap();
@@ -1550,13 +1588,49 @@ mod tests {
         assert_eq!(lanes[1]["state"], "needs you");
         assert_eq!(lanes[1]["last_line"], Value::Null, "a lane that never spoke has no last line");
         let ny = s.data["needs_you"].as_array().unwrap();
-        assert_eq!(ny[0]["acts"], json!([{"kind": "skip", "item": "T-3"}, {"kind": "rewrite", "item": "T-3", "text": "…"}]));
+        assert_eq!(ny[0]["acts"], json!([{"kind": "skip", "item": "T-3"}, {"kind": "rewrite", "item": "T-3"}]));
         assert_eq!(ny[1]["acts"], json!([{"kind": "dismiss", "index": 1}]));
         assert_eq!(call(&d, "chronicle.run.state", &json!({})).unwrap_err(), "n is required.");
         assert_eq!(call(&d, "chronicle.run.state", &json!({"n": 9})).unwrap_err(), "There's no run 9 in this project.");
 
         let empty = vault("runs-none");
         assert_eq!(call(&empty, "chronicle.run.list", &json!({})).unwrap().summary, "No runs yet.");
+    }
+
+    /// A run written live while no Chronicle answers is one nobody drives: it reads as
+    /// interrupted, its clock stops at its last write, and nothing on disk changes.
+    #[test]
+    fn a_live_run_with_no_app_answering_reads_as_interrupted_without_a_write() {
+        use crate::runs::record::*;
+        let d = vault("runs-quit");
+        let mut r = RunRecord::new(3, RunKind::Prompt, Some(3), "p", "q", "x");
+        r.lanes = vec![LaneRecord::new("a")];
+        r.state = RunState::Running;
+        r.created = "2026-10-20T10:00:00Z".into();
+        save(&d, &mut r).unwrap();
+        // freeze `updated` at a known moment, five minutes in
+        let file = path(&d, 3);
+        let body = std::fs::read_to_string(&file).unwrap();
+        let updated = serde_json::from_str::<Value>(&body).unwrap()["updated"].as_str().unwrap().to_string();
+        let body = body.replace(&updated, "2026-10-20T10:05:00Z");
+        std::fs::write(&file, &body).unwrap();
+
+        let gone = d.join("gone.sock");
+        let l = run_list_at(&d, &gone).unwrap();
+        assert_eq!(l.data["runs"][0]["state"], "interrupted");
+        assert_eq!(l.data["runs"][0]["elapsed_ms"], 300_000, "frozen at its last write");
+        assert_eq!(l.summary, "1 run · round 3 interrupted.");
+        let s = run_state_at(&d, &json!({"n": 3}), &gone).unwrap();
+        assert_eq!(s.data["state"], "interrupted");
+        assert_eq!(s.data["elapsed_ms"], 300_000);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), body, "said, never written");
+
+        // with a Chronicle answering, it is as written
+        let sock = listening(&d);
+        let l = run_list_at(&d, &sock).unwrap();
+        assert_eq!(l.data["runs"][0]["state"], "running");
+        assert!(l.data["runs"][0]["elapsed_ms"].as_u64().unwrap() > 300_000, "still counting");
+        assert_eq!(run_state_at(&d, &json!({"n": 3}), &sock).unwrap().data["state"], "running");
     }
 
     /// Each of these would be wrong to send: the refusal comes back before the socket
@@ -1582,6 +1656,8 @@ mod tests {
         assert_eq!(call(&d, "chronicle.run.needs_you", &json!({"n": 2})).unwrap_err(), "act is required.");
 
         assert_eq!(call(&d, "chronicle.run.stop", &json!({"n": 9})).unwrap_err(), "There's no run 9 in this project.");
+        // round 1 is saved: there is nothing to stop, and "was stopped" would be a story
+        assert_eq!(call(&d, "chronicle.run.stop", &json!({"n": 1})).unwrap_err(), "Round 1 is already over.");
         assert_eq!(call(&d, "chronicle.run.resume", &json!({})).unwrap_err(), "n is required.");
         assert_eq!(call(&d, "chronicle.run.lane_nudge", &json!({"n": 2, "lane": "a", "text": " "})).unwrap_err(), "Write a message first.");
         assert_eq!(call(&d, "chronicle.run.lane_nudge", &json!({"n": 2, "lane": "z", "text": "hi"})).unwrap_err(), "There's no lane z in round 2.");

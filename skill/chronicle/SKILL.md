@@ -46,19 +46,21 @@ needs their ask, not just an opportunity.
 
 A run is one plan worked as fenced lanes: Chronicle splits the round's items into lanes that
 each own their files, runs them side by side, checks each lane when it finishes, and saves
-it. A lane *finished*, *is being checked*, or *needs you*; Chronicle saves the work, it is
-never "committed" by you.
+it. A lane *finished*, *is being checked*, or *needs you*. Chronicle saves each lane's work;
+say *saved*, not committed, and *published*, not pushed.
 
 - `chronicle.run.list` — every run, newest first: its round, state, lanes, cost, elapsed time, and how many things need the user.
 - `chronicle.run.state { n }` — one run in full: each lane's state and try, its checks (pass or fail), files it touched that another lane owns, its last line, and each thing that needs the user with the acts it takes.
 - `chronicle.run.begin { source }` — `source` is `{kind: "notes"}`, `{kind: "plan", path}` (a `fixes/phase_N_fixes_plan.md`), or `{kind: "prompt", text}`. Refused while another run is live.
 - `chronicle.run.stop { n }` (nothing is undone) · `chronicle.run.resume { n }` (an interrupted run).
-- `chronicle.run.needs_you { n, act }` — `act` is one of `skip {item}`, `rewrite {item, text}`, `retry {lane}`, `recheck`, `dismiss {index}`; `run.state` lists each row's acts.
+- `chronicle.run.needs_you { n, act }` — `act` is one of `skip {item}`, `rewrite {item, text}`, `retry {lane}`, `recheck`, `dismiss {index}`; `run.state` lists each row's acts (a rewrite's `text` is the user's new wording, never one you invent).
 - `chronicle.run.lane_nudge { n, lane, text }` — a message to a running lane.
 - `chronicle.run.lane_discard { n, lane }` — **destructive**: restores every changed file the lane owns from what was saved, and those edits are gone.
 
 `run.list` and `run.state` answer from the run records on disk, so they work even when
-Chronicle isn't open. The rest need Chronicle open on the project, the same rule as `round.start`.
+Chronicle isn't open. As last written: if Chronicle isn't open, a run shown as live was
+interrupted; it can be resumed once the app is open. The rest need Chronicle open on the
+project, the same rule as `round.start`.
 
 **Never begin a run unless the user asked for one in this conversation; never `lane_discard`
 without the user naming the lane.** Reading a run is always safe; acting on what needs you
