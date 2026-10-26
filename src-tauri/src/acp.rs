@@ -29,21 +29,38 @@ pub type Emit = Arc<dyn Fn(Value) + Send + Sync>;
 /// design lane, and the reviewer — a one-turn, read-only session the provider
 /// layer opens (spec §9). The chat lane keeps the historic key (the canonical
 /// project path) and `.chronicle/agent/`; the design lane gets `<path>#design`
-/// and keeps its records beside the designs.
+/// and keeps its records beside the designs; a run's lane `k` of run `run`
+/// gets `<path>#w/<run>-<k>` and keeps its records under the run's folder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Lane { Chat, Design, Reviewer }
+pub enum Lane { Chat, Design, Reviewer, Worker { run: u64, k: u16 } }
 
 impl Lane {
     pub fn parse(s: Option<&str>) -> Result<Lane, String> {
         match s {
             None | Some("chat") => Ok(Lane::Chat),
             Some("design") => Ok(Lane::Design),
+            Some(w) if w.starts_with("w/") => w[2..].split_once('-')
+                .and_then(|(r, k)| Some(Lane::Worker { run: r.parse().ok()?, k: k.parse().ok()? }))
+                .ok_or_else(|| format!("there's no agent lane called {w}")),
             Some(other) => Err(format!("there's no agent lane called {other}")),
         }
     }
-    pub fn as_str(self) -> &'static str { match self { Lane::Chat => "chat", Lane::Design => "design", Lane::Reviewer => "review" } }
+    pub fn as_str(self) -> &'static str {
+        match self { Lane::Chat => "chat", Lane::Design => "design", Lane::Reviewer => "review", Lane::Worker { .. } => "worker" }
+    }
+    /// What the `lane` field of every acp-update says — the frontend keys by it.
+    pub fn name(self) -> String {
+        match self { Lane::Worker { run, k } => format!("w/{run}-{k}"), other => other.as_str().to_string() }
+    }
+    /// File-name safe: temp index files and logs are named with it.
+    pub fn tag(self) -> String { self.name().replace('/', "-") }
     pub fn key(self, canon: &str) -> String {
-        match self { Lane::Chat => canon.to_string(), Lane::Design => format!("{canon}#design"), Lane::Reviewer => format!("{canon}#review") }
+        match self {
+            Lane::Chat => canon.to_string(),
+            Lane::Design => format!("{canon}#design"),
+            Lane::Reviewer => format!("{canon}#review"),
+            Lane::Worker { run, k } => format!("{canon}#w/{run}-{k}"),
+        }
     }
     /// Where this lane's transcripts, ledger and `current` pointer live.
     pub fn store(self, project: &Path) -> PathBuf {
@@ -51,8 +68,17 @@ impl Lane {
             Lane::Chat => ledger::agent_dir(project),
             Lane::Design => crate::designs::designs_root(project).join(".threads"),
             Lane::Reviewer => ledger::agent_dir(project).join("reviews"),
+            Lane::Worker { run, k } => project.join(format!(".chronicle/runs/{run}/lanes/{k}")),
         }
     }
+}
+
+/// The project dir a session key belongs to. Suffix-aware, so a `#` in a real
+/// folder name is never mistaken for a lane.
+pub fn dir_of(key: &str) -> &str {
+    if let Some(d) = key.strip_suffix("#design").or_else(|| key.strip_suffix("#review")) { return d; }
+    if let Some(i) = key.rfind("#w/") { return &key[..i]; }
+    key
 }
 
 pub struct AcpState {
@@ -710,6 +736,44 @@ pub fn path_in_roots(p: &Path, roots: &[PathBuf]) -> bool {
 pub struct LaneExtras {
     pub mcp_servers: Vec<Value>,
     pub plugin_dir: Option<PathBuf>,
+    /// `Some` for a run's lane: Chronicle answers its asks and fences its writes.
+    pub policy: Option<PolicyHandle>,
+    /// `Some` for the chat lane: screens asks before the user sees them.
+    pub screen: Option<ScreenHandle>,
+}
+
+/// What Chronicle answers to one permission ask on a lane it answers for.
+/// `decision`, when present, rides on the `_chronicle/guard` line whole:
+/// `{ choice, confidence, model, band, probabilities }`.
+pub struct PolicyAnswer { pub allow: bool, pub path: String, pub reason: String, pub decision: Option<Value> }
+
+/// A run's lane (Runs §4): every ask is answered by Chronicle, never shown.
+/// `answer` runs off the reader thread and may take as long as a judge call.
+pub trait LanePolicy: Send + Sync {
+    fn answer(&self, params: &Value) -> PolicyAnswer;
+    /// The fence for a direct `fs/write_text_file` from this lane.
+    fn may_write(&self, abs: &Path) -> Result<(), String>;
+}
+
+/// A narrower hook for a lane the user still answers (the chat lane during a
+/// run): `Some` answers an ask at once, before the pane shows it.
+pub trait AskScreen: Send + Sync {
+    fn screen(&self, params: &Value) -> Option<PolicyAnswer>;
+}
+
+#[derive(Clone)]
+pub struct PolicyHandle(pub Arc<dyn LanePolicy>);
+impl std::fmt::Debug for PolicyHandle { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("PolicyHandle") } }
+#[derive(Clone)]
+pub struct ScreenHandle(pub Arc<dyn AskScreen>);
+impl std::fmt::Debug for ScreenHandle { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("ScreenHandle") } }
+
+/// The once-only option for an answer. Never an "always": those write durable
+/// rules outside the run. No once-only option → `None`, and the ask is cancelled.
+pub fn policy_option(params: &Value, allow: bool) -> Option<String> {
+    let kind = if allow { "allow_once" } else { "reject_once" };
+    params.get("options").and_then(|v| v.as_array())?.iter()
+        .find(|o| o["kind"] == kind).and_then(|o| o["optionId"].as_str()).map(String::from)
 }
 
 /// Tool names the design lane answers "allow once" for without asking: the
@@ -1185,8 +1249,7 @@ impl AcpSession {
     }
 
     fn emit_msg(&self, message: Value) {
-        let dir = self.key.strip_suffix("#design").or_else(|| self.key.strip_suffix("#review")).unwrap_or(&self.key);
-        (self.emit)(json!({ "dir": dir, "lane": self.lane.as_str(), "message": message }));
+        (self.emit)(json!({ "dir": dir_of(&self.key), "lane": self.lane.name(), "message": message }));
     }
 
     fn append_transcript(&self, msg: &Value) {
@@ -1209,6 +1272,16 @@ impl AcpSession {
     fn emit_state(&self, params: Value) {
         self.log_line(&state_log_text(&params));
         self.emit_msg(json!({ "method": "_chronicle/session_state", "params": params }));
+    }
+
+    /// Record and show what Chronicle decided about one ask.
+    fn emit_guard(&self, params: &Value, a: &PolicyAnswer) {
+        let mut p = json!({ "toolCallId": params.pointer("/toolCall/toolCallId").cloned().unwrap_or(Value::Null),
+                            "allowed": a.allow, "path": a.path, "reason": a.reason });
+        if let Some(d) = &a.decision { p["decision"] = d.clone(); }
+        let guard = json!({ "method": "_chronicle/guard", "params": p });
+        self.append_transcript(&guard);
+        self.emit_msg(guard);
     }
 
     /* ---------- wire primitives ---------- */
@@ -1537,8 +1610,9 @@ impl AcpSession {
                 if let Ok(mut g) = self.last_activity.lock() { *g = std::time::Instant::now(); }
                 // a turn ending always resolves any ask still on screen
                 self.cancel_all_perms();
+                // a run's lane is reconciled by its gate (runs/gate.rs), not the ledger
                 if self.designs_root.is_some() { self.reconcile_design_turn_end(); }
-                else if self.lane != Lane::Reviewer { self.reconcile_turn_end(); }
+                else if self.lane != Lane::Reviewer && self.extras.policy.is_none() { self.reconcile_turn_end(); }
                 let end = match outcome {
                     Ok(result) => json!({
                         "method": "_chronicle/turn_end",
@@ -1567,6 +1641,32 @@ impl AcpSession {
             "fs/read_text_file" => self.handle_fs_read(&id, params),
             "fs/write_text_file" => self.handle_fs_write(&id, params),
             "session/request_permission" => {
+                // a run's lane: Chronicle answers by policy, off the reader thread
+                // (a judge call can take a while); the user never sees the ask
+                if let Some(PolicyHandle(policy)) = self.extras.policy.clone() {
+                    // registered first, so a turn end or Stop resolves it
+                    if let Ok(mut g) = self.perms.lock() { g.insert(id.to_string(), id.clone()); }
+                    let me = self.clone();
+                    let rid = id.to_string();
+                    std::thread::spawn(move || {
+                        let a = policy.answer(&params);
+                        // already resolved by a cancel? the guard still says what was decided
+                        let _ = me.respond_permission(&rid, policy_option(&params, a.allow));
+                        me.emit_guard(&params, &a);
+                    });
+                    return;
+                }
+                if let Some(ScreenHandle(screen)) = self.extras.screen.clone() {
+                    if let Some(a) = screen.screen(&params) {
+                        let outcome = match policy_option(&params, a.allow) {
+                            Some(o) => json!({ "outcome": "selected", "optionId": o }),
+                            None => json!({ "outcome": "cancelled" }),
+                        };
+                        self.respond_ok(&id, json!({ "outcome": outcome }));
+                        self.emit_guard(&params, &a);
+                        return;
+                    }
+                }
                 if self.lane == Lane::Reviewer {
                     let tool_call_id = params.pointer("/toolCall/toolCallId").cloned().unwrap_or(Value::Null);
                     let outcome = reviewer_outcome(&params);
@@ -1720,6 +1820,11 @@ impl AcpSession {
                 return self.respond_err(id, -32602, "the design session can only change files in .chronicle/designs/");
             }
         }
+        if let Some(PolicyHandle(p)) = &self.extras.policy {
+            if let Err(reason) = p.may_write(&full) {
+                return self.respond_err(id, -32602, &reason);
+            }
+        }
         let key = full.to_string_lossy().to_string();
         // jailed AND ledgered BEFORE the write lands — law 5. The base is the
         // file's bytes before the agent's FIRST write this session.
@@ -1769,7 +1874,7 @@ impl AcpSession {
         // the checkpoint precedes every user message; a non-repo project just
         // doesn't get one (the row won't render — never a hang, never a lie)
         if self.lane != Lane::Reviewer {
-            match checkpoint::create_as(&self.repo, &sid, self.lane.as_str()) {
+            match checkpoint::create_as(&self.repo, &sid, &self.lane.tag()) {
                 Ok(id) => {
                     if let Ok(mut g) = self.last_checkpoint.lock() { *g = Some(id.clone()); }
                     self.emit_msg(json!({ "method": "_chronicle/checkpoint", "params": { "id": id } }));
@@ -1960,7 +2065,7 @@ impl AcpSession {
     fn reconcile_turn_end(&self) {
         let Some(cp) = self.last_checkpoint.lock().ok().and_then(|g| g.clone()) else { return };
         let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) else { return };
-        let Ok(now_tree) = checkpoint::snapshot_tree_as(&self.repo, self.lane.as_str()) else { return };
+        let Ok(now_tree) = checkpoint::snapshot_tree_as(&self.repo, &self.lane.tag()) else { return };
         let mut any = false;
         for (status, rel) in checkpoint::changed_since(&self.repo, &cp, &now_tree) {
             if rel.starts_with(".chronicle/") { continue; }
@@ -1983,7 +2088,7 @@ impl AcpSession {
     fn reconcile_design_turn_end(&self) {
         let Some(cp) = self.last_checkpoint.lock().ok().and_then(|g| g.clone()) else { return };
         let Some(sid) = self.session_id.lock().ok().and_then(|g| g.clone()) else { return };
-        let Ok(now_tree) = checkpoint::snapshot_tree_as(&self.repo, self.lane.as_str()) else { return };
+        let Ok(now_tree) = checkpoint::snapshot_tree_as(&self.repo, &self.lane.tag()) else { return };
         // the chat session's own edits are the chat lane's to review and undo —
         // never listed (or undoable) here
         let chat_paths: std::collections::HashSet<String> = ledger::current_session(&self.chat_store)
@@ -2422,7 +2527,7 @@ for line in sys.stdin:
     #[test]
     fn an_agent_without_plugins_never_gets_claudes_meta() {
         let codex = crate::agents::profile("codex-acp").unwrap();
-        let extras = LaneExtras { mcp_servers: vec![json!({ "name": "x", "command": "/usr/bin/true", "args": [], "env": [] })], plugin_dir: Some(PathBuf::from("/nowhere/design-plugin")) };
+        let extras = LaneExtras { mcp_servers: vec![json!({ "name": "x", "command": "/usr/bin/true", "args": [], "env": [] })], plugin_dir: Some(PathBuf::from("/nowhere/design-plugin")), ..Default::default() };
         let Some(h) = start_mock_as("no-plugins", codex, Lane::Design, extras) else { return };
         wait_for(&h.rx, 20, |v| state_is(v, "ready"));
         let log = std::fs::read_to_string(h.dir.join(".mock-requests.jsonl")).unwrap_or_default();
@@ -3613,6 +3718,7 @@ for line in sys.stdin:
         let extras = LaneExtras {
             mcp_servers: vec![json!({ "name": "playwright", "command": "/usr/bin/true", "args": ["--headless"], "env": [] })],
             plugin_dir: Some(PathBuf::from("/Applications/Chronicle.app/Contents/Resources/design-plugin")),
+            ..Default::default()
         };
         assert!(start(&h.state, emit, dkey.clone(), Lane::Design, crate::agents::claude(), h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], Some(h.dir.join(".chronicle/designs")), extras, None, cmd).unwrap());
         let _ = wait_for(&rx2, 20, |v| state_is(v, "ready"));
@@ -3628,5 +3734,119 @@ for line in sys.stdin:
         let chat_req = log.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|v| v["method"] == "session/new" && v["params"].get("_meta").is_none()).expect("the chat session/new");
         assert!(chat_req["params"].get("mcpServers").map(|m| m.as_array().map(|a| a.is_empty()).unwrap_or(true)).unwrap_or(true));
         h.state.drain();
+    }
+
+    /* ---------- worker lanes and the policy hook (Runs §4) ---------- */
+
+    struct PathPolicy;
+    impl LanePolicy for PathPolicy {
+        fn answer(&self, params: &Value) -> PolicyAnswer {
+            let path = params.pointer("/toolCall/rawInput/file_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let allow = path.ends_with("frames/a.html");
+            PolicyAnswer { allow, reason: if allow { String::new() } else { "not this lane's".into() }, path,
+                           decision: Some(json!({ "choice": "allow", "confidence": 0.93, "model": "jev-1.13.0", "band": "act",
+                                                  "probabilities": { "allow": 0.93, "reject": 0.07 } })) }
+        }
+        fn may_write(&self, _abs: &Path) -> Result<(), String> { Err("this lane owns no files".into()) }
+    }
+
+    #[test]
+    fn worker_lanes_parse_key_and_store() {
+        let w = Lane::parse(Some("w/10-2")).unwrap();
+        assert_eq!(w, Lane::Worker { run: 10, k: 2 });
+        assert_eq!(w.key("/p"), "/p#w/10-2");
+        assert_eq!(w.name(), "w/10-2");
+        assert_eq!(w.tag(), "w-10-2");
+        assert_eq!(Lane::Chat.name(), "chat");
+        assert_eq!(Lane::Reviewer.name(), "review");
+        assert_eq!(Lane::Design.tag(), "design");
+        let d = tmp("worker-store");
+        assert_eq!(w.store(&d), d.join(".chronicle/runs/10/lanes/2"));
+        assert!(Lane::parse(Some("w/x-1")).is_err());
+        assert!(Lane::parse(Some("w/10")).is_err());
+        assert_eq!(dir_of("/a#b/p#w/10-2"), "/a#b/p", "a # in the project path survives");
+        assert_eq!(dir_of("/p#design"), "/p");
+        assert_eq!(dir_of("/p#review"), "/p");
+        assert_eq!(dir_of("/p"), "/p");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn policy_options_are_once_only() {
+        let p = json!({ "options": [
+            { "optionId": "always", "kind": "allow_always" }, { "optionId": "allow", "kind": "allow_once" },
+            { "optionId": "reject", "kind": "reject_once" } ] });
+        assert_eq!(policy_option(&p, true).as_deref(), Some("allow"));
+        assert_eq!(policy_option(&p, false).as_deref(), Some("reject"));
+        assert_eq!(policy_option(&json!({ "options": [{ "optionId": "always", "kind": "allow_always" }] }), true), None, "no once-only option: the ask is cancelled");
+    }
+
+    #[test]
+    fn a_worker_lane_answers_its_own_asks_by_policy_and_never_shows_one() {
+        let extras = LaneExtras { policy: Some(PolicyHandle(Arc::new(PathPolicy))), ..Default::default() };
+        let Some(h) = start_mock_as("worker-policy", crate::agents::claude(), Lane::Worker { run: 1, k: 0 }, extras) else { return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        let s = h.state.get(&h.key).unwrap();
+        s.prompt(vec![json!({ "type": "text", "text": "DESIGN-FENCE" })], "DESIGN-FENCE".into()).unwrap();
+        let mut guards: Vec<Value> = vec![];
+        loop {
+            let v = h.rx.recv_timeout(Duration::from_secs(20)).expect("events from the worker lane");
+            assert!(!method_is(&v, "session/request_permission"), "a worker lane never shows an ask: {v}");
+            assert_eq!(v["lane"], "w/1-0");
+            assert_eq!(v["dir"], h.dir.to_string_lossy().as_ref());
+            if method_is(&v, "_chronicle/guard") { guards.push(v["message"]["params"].clone()); }
+            if method_is(&v, "_chronicle/turn_end") { break; }
+        }
+        while guards.len() < 3 { guards.push(wait_for(&h.rx, 5, |v| method_is(v, "_chronicle/guard"))["message"]["params"].clone()); }
+        let answers: Value = serde_json::from_str(&std::fs::read_to_string(h.dir.join(".fence-answers.json")).unwrap()).unwrap();
+        assert_eq!(answers, json!({ "300": "allow", "301": "reject", "302": "reject" }));
+        let allowed = guards.iter().find(|g| g["toolCallId"] == "w300").unwrap();
+        assert_eq!(allowed["allowed"], true);
+        assert_eq!(allowed["decision"]["confidence"], 0.93);
+        assert_eq!(allowed["decision"]["probabilities"]["allow"], 0.93, "the decision passes through whole");
+        assert_eq!(guards.iter().filter(|g| g["allowed"] == false).count(), 2);
+        assert!(h.dir.join(".chronicle/runs/1/lanes/0").is_dir(), "the lane's transcript lives under the run");
+        s.stop(true);
+        let _ = std::fs::remove_dir_all(&h.dir);
+    }
+
+    #[test]
+    fn a_worker_lanes_direct_writes_go_through_its_fence() {
+        let extras = LaneExtras { policy: Some(PolicyHandle(Arc::new(PathPolicy))), ..Default::default() };
+        let Some(h) = start_mock_as("worker-write", crate::agents::claude(), Lane::Worker { run: 1, k: 1 }, extras) else { return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        let s = h.state.get(&h.key).unwrap();
+        s.prompt(vec![json!({ "type": "text", "text": "do the round" })], "do the round".into()).unwrap();
+        wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/turn_end"));
+        assert!(!h.dir.join("agent-made.txt").exists(), "fs/write_text_file obeys the lane's fence");
+        s.stop(true);
+        let _ = std::fs::remove_dir_all(&h.dir);
+    }
+
+    #[test]
+    fn a_screen_answers_an_ask_before_the_user_sees_it() {
+        struct RefuseCommands;
+        impl AskScreen for RefuseCommands {
+            fn screen(&self, params: &Value) -> Option<PolicyAnswer> {
+                (params.pointer("/toolCall/title").and_then(|v| v.as_str()) == Some("Run a command"))
+                    .then(|| PolicyAnswer { allow: false, path: "Run a command".into(), reason: "Chronicle doesn’t publish for you.".into(), decision: None })
+            }
+        }
+        let extras = LaneExtras { screen: Some(ScreenHandle(Arc::new(RefuseCommands))), ..Default::default() };
+        let Some(h) = start_mock_as("screen", crate::agents::claude(), Lane::Chat, extras) else { return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        let s = h.state.get(&h.key).unwrap();
+        s.prompt(vec![json!({ "type": "text", "text": "do the round" })], "do the round".into()).unwrap();
+        let mut saw_guard = false;
+        loop {
+            let v = h.rx.recv_timeout(Duration::from_secs(20)).expect("events");
+            assert!(!method_is(&v, "session/request_permission"), "the screened ask never reached the pane");
+            if method_is(&v, "_chronicle/guard") { saw_guard = v["message"]["params"]["allowed"] == false; }
+            if method_is(&v, "_chronicle/turn_end") { break; }
+        }
+        assert!(saw_guard);
+        assert!(h.dir.join("agent-made.txt").exists(), "a screen is not a fence: the chat lane's writes are untouched");
+        s.stop(true);
+        let _ = std::fs::remove_dir_all(&h.dir);
     }
 }

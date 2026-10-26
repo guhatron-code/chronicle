@@ -3570,7 +3570,7 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
         let npx = find_tool("npx").unwrap_or_default();
         let browsers = if setup::browser_ready() { Some(setup::browsers_dir()) } else { None };
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir() }
+        acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir(), ..Default::default() }
     } else { acp::LaneExtras::default() };
     let started = acp::start(&agents, emit, key, lane, profile, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, None, acp::adapter_command_for(&launch, profile))?;
     Ok(json!({ "started": started }))
@@ -3599,7 +3599,7 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
         let npx = find_tool("npx").unwrap_or_default();
         let browsers = if setup::browser_ready() { Some(setup::browsers_dir()) } else { None };
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir() }
+        acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir(), ..Default::default() }
     } else { acp::LaneExtras::default() };
     let started = acp::start(&agents, emit, key, lane, profile, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, Some(id), acp::adapter_command_for(&launch, profile))?;
     Ok(json!({ "started": started }))
@@ -3780,6 +3780,7 @@ fn agent_for(roots: &OpenRoots, agents: &acp::AcpState, dir: &str, lane: acp::La
         acp::Lane::Chat => "there's no agent session running for this project".to_string(),
         acp::Lane::Design => "the design session isn't running".to_string(),
         acp::Lane::Reviewer => "the review session isn't running".to_string(),
+        acp::Lane::Worker { .. } => "that lane's session isn't running".to_string(),
     })
 }
 
