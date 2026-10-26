@@ -3,8 +3,9 @@
 //! server and Chronicle's policy. Its acp-updates go to the pane as usual and
 //! to the controller as `Ev`s. Plus the chat lane's screen: during a run, a
 //! push, tag, publish or release from the chat session is refused and shown.
-use super::fence::{classify, tool_name, write_target, Shell, PUBLISH_REFUSAL, RUN_SERVER, WRITE_TOOLS};
-use super::record::{list, save, NeedsYou, RunState};
+use super::fence::{classify, tool_name, write_target, Shell, GIT_REFUSAL, PUBLISH_REFUSAL, RUN_SERVER, WRITE_TOOLS};
+use super::judge::{Judge, ShellAsk};
+use super::record::{list, save, DecisionLog, NeedsYou, RunRecord, RunState};
 use super::runner::{Ev, LaneHost, RunCtl};
 use super::{tools, Runs};
 use crate::acp::{self, AskScreen, LanePolicy, PolicyAnswer};
@@ -13,7 +14,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{Emitter, Manager};
 
 pub fn lane_event(lane: &str, v: &Value) -> Ev {
@@ -146,12 +147,19 @@ pub(crate) fn launch_worker(agents: &acp::AcpState, emit: acp::Emit, key: String
 /// and the refusal is a needs-you row on the live run. Hands off (spec §3, §5):
 /// the run server's own tools, and the planner's writes of its round's two
 /// fixes/ files while the round is planned, are answered here, not by the user.
+/// And its shell commands are answered as a lane's are, owning nothing: git
+/// reads allowed, git writes refused, anything else the judge's (spec §5, §6).
 pub struct RunsScreen {
     pub dir: PathBuf,
     /// adds the row to the live run; false when no run is live
     pub record: Arc<dyn Fn(&Path, NeedsYou) -> bool + Send + Sync>,
     /// the live run's state and round, if a run is live on the project
     pub live: Arc<dyn Fn(&Path) -> Option<(RunState, u64)> + Send + Sync>,
+    /// adds the judge's rows and notices to the live run; false when no run is live
+    pub log: Arc<dyn Fn(&Path, Vec<DecisionLog>, Vec<String>) -> bool + Send + Sync>,
+    /// the judge for the project, built the first time a command needs it
+    pub make_judge: Arc<dyn Fn(&Path) -> Judge + Send + Sync>,
+    pub judge: Arc<OnceLock<Judge>>,
 }
 
 /// The live run: not finished, and not an interrupted one nobody drives.
@@ -159,19 +167,29 @@ fn live_run(dir: &Path) -> Option<(RunState, u64)> {
     list(dir).into_iter().rev().find(|r| !r.state.terminal() && r.state != RunState::Interrupted).map(|r| (r.state, r.round_n()))
 }
 
+/// A change to the live run: through its controller when one drives it, else
+/// to the saved record (a run being planned has none). False when no run is live.
+fn on_live_run(app: &tauri::AppHandle, dir: &Path, f: impl FnOnce(&mut RunRecord)) -> bool {
+    // an interrupted run is nobody's round in progress: the chat lane is itself again
+    let Some(mut rec) = list(dir).into_iter().rev().find(|r| !r.state.terminal() && r.state != RunState::Interrupted) else { return false };
+    let runs = app.state::<Runs>();
+    match runs.get(dir, rec.n).filter(|c| !c.snapshot().state.terminal()) {
+        Some(ctl) => { ctl.update(f); }
+        None => { f(&mut rec); let _ = save(dir, &mut rec); runs.publish(dir, &rec); }
+    }
+    true
+}
+
 impl RunsScreen {
     pub fn for_app(app: &tauri::AppHandle, dir: &Path) -> RunsScreen {
-        let app = app.clone();
-        RunsScreen { dir: dir.to_path_buf(), live: Arc::new(live_run), record: Arc::new(move |dir: &Path, row: NeedsYou| {
-            // an interrupted run is nobody's round in progress: the chat lane is itself again
-            let Some(mut rec) = list(dir).into_iter().rev().find(|r| !r.state.terminal() && r.state != RunState::Interrupted) else { return false };
-            let runs = app.state::<Runs>();
-            match runs.get(dir, rec.n).filter(|c| !c.snapshot().state.terminal()) {
-                Some(ctl) => { ctl.update(|r| r.needs_you.push(row)); }
-                None => { rec.needs_you.push(row); let _ = save(dir, &mut rec); runs.publish(dir, &rec); }
-            }
-            true
-        }) }
+        let (a1, a2) = (app.clone(), app.clone());
+        RunsScreen {
+            dir: dir.to_path_buf(), live: Arc::new(live_run),
+            record: Arc::new(move |dir: &Path, row: NeedsYou| on_live_run(&a1, dir, |r| r.needs_you.push(row))),
+            log: Arc::new(move |dir: &Path, logs: Vec<DecisionLog>, notices: Vec<String>| on_live_run(&a2, dir, |r| { r.decisions.extend(logs); r.notices.extend(notices); })),
+            make_judge: Arc::new(|dir: &Path| { let (decisions, review) = super::oracle::for_project(dir); Judge::new(decisions, review) }),
+            judge: Default::default(),
+        }
     }
 }
 
@@ -192,14 +210,49 @@ impl RunsScreen {
     }
 }
 
+/// The command of a shell ask, the way a lane's fence reads one.
+fn shell_command(params: &Value) -> Option<&str> {
+    let call = params.get("toolCall")?;
+    let shell = matches!(tool_name(params), Some("Bash" | "Terminal")) || call.get("kind").and_then(|v| v.as_str()) == Some("execute");
+    if !shell { return None; }
+    call.pointer("/rawInput/command").and_then(|v| v.as_str())
+}
+
 impl AskScreen for RunsScreen {
     fn screen(&self, params: &Value) -> Option<PolicyAnswer> {
         if let Some(a) = self.hands_off(params) { return Some(a); }
         let cmd = params.pointer("/toolCall/rawInput/command").and_then(|v| v.as_str())?;
-        if classify(cmd) != Shell::Publish { return None; }
-        let row = NeedsYou { kind: "refused".into(), lane: None, item: None, reason: cmd.to_string(), reading: None };
-        if !(self.record)(&self.dir, row) { return None; }
-        Some(PolicyAnswer { allow: false, path: cmd.to_string(), reason: PUBLISH_REFUSAL.into(), decision: None })
+        let class = classify(cmd);
+        if class == Shell::Publish {
+            let row = NeedsYou { kind: "refused".into(), lane: None, item: None, reason: cmd.to_string(), reading: None };
+            if !(self.record)(&self.dir, row) { return None; }
+            return Some(PolicyAnswer { allow: false, path: cmd.to_string(), reason: PUBLISH_REFUSAL.into(), decision: None });
+        }
+        // the planner owns no files: a git read is fine, a git write never is
+        let cmd = shell_command(params)?;
+        (self.live)(&self.dir)?;
+        match class {
+            Shell::ReadOnlyGit => Some(PolicyAnswer { allow: true, path: cmd.to_string(), reason: String::new(), decision: None }),
+            Shell::GitWrite => Some(PolicyAnswer { allow: false, path: cmd.to_string(), reason: GIT_REFUSAL.into(), decision: None }),
+            _ => None,
+        }
+    }
+
+    /// Any other command of the chat lane's, while a run is live: the judge's (spec §6, decision 1).
+    fn defer(&self, params: &Value) -> Option<acp::Deferred> {
+        if self.hands_off(params).is_some() { return None; }
+        let cmd = shell_command(params)?.to_string();
+        if classify(&cmd) != Shell::Other { return None; }
+        let (_, round) = (self.live)(&self.dir)?;
+        let (dir, judge, make, log) = (self.dir.clone(), self.judge.clone(), self.make_judge.clone(), self.log.clone());
+        Some(Box::new(move || {
+            let judge = judge.get_or_init(|| make(&dir));
+            let item = format!("planning round {round}");
+            let (allow, reason, logs) = judge.shell(&ShellAsk { lane: "planner", command: &cmd, owns: &[], item: &item, last_calls: &[] });
+            let decision = logs.first().map(|l| json!({ "choice": l.choice, "confidence": l.confidence, "model": l.model, "band": l.band, "probabilities": l.probabilities }));
+            log(&dir, logs, judge.take_notice());
+            PolicyAnswer { allow, path: cmd, reason, decision }
+        }))
     }
 }
 
@@ -232,7 +285,8 @@ mod tests {
         let screen = RunsScreen { dir: PathBuf::from("/p"), record: Arc::new(move |_d: &Path, row: NeedsYou| {
             if !l2.load(std::sync::atomic::Ordering::SeqCst) { return false; }
             sink.lock().unwrap().push(row); true
-        }), live: Arc::new(|_d: &Path| None) };
+        }), live: Arc::new(|_d: &Path| None), log: Arc::new(|_d: &Path, _l: Vec<DecisionLog>, _n: Vec<String>| false),
+            make_judge: Arc::new(|_d: &Path| panic!("no judge outside a run")), judge: Default::default() };
         let ask = |c: &str| json!({ "toolCall": { "toolCallId": "t", "name": "Bash", "rawInput": { "command": c } } });
         let a = screen.screen(&ask("git push origin main")).expect("refused during a round");
         assert!(!a.allow);
@@ -244,7 +298,96 @@ mod tests {
     }
 
     fn screen_with(dir: &Path, live: Option<(RunState, u64)>) -> RunsScreen {
-        RunsScreen { dir: dir.to_path_buf(), record: Arc::new(|_d: &Path, _row: NeedsYou| true), live: Arc::new(move |_d: &Path| live) }
+        RunsScreen { dir: dir.to_path_buf(), record: Arc::new(|_d: &Path, _row: NeedsYou| true), live: Arc::new(move |_d: &Path| live),
+            log: Arc::new(|_d: &Path, _logs: Vec<DecisionLog>, _notices: Vec<String>| true),
+            make_judge: Arc::new(|_d: &Path| panic!("no judge in this test")), judge: Default::default() }
+    }
+
+    /// What acp does with a screen: a deferred answer first (off the reader thread there), then the quick one.
+    fn answered(s: &RunsScreen, ask: &Value) -> Option<PolicyAnswer> {
+        s.defer(ask).map(|f| f()).or_else(|| s.screen(ask))
+    }
+
+    /// A screen on a live (or not) run with a fake judge, and what it pushed to the record.
+    struct Judged { s: RunsScreen, decide: Arc<crate::runs::oracle::fake::FakeOracle>, rows: Arc<Mutex<Vec<NeedsYou>>>, logs: Arc<Mutex<Vec<DecisionLog>>>, built: Arc<std::sync::atomic::AtomicUsize> }
+    fn judged(live: Option<(RunState, u64)>) -> Judged {
+        use crate::runs::oracle::fake::{fallback, second, FakeOracle};
+        let decide = FakeOracle::named("jev-1.13.0");
+        let review = FakeOracle::named("review");
+        let (rows, logs): (Arc<Mutex<Vec<NeedsYou>>>, Arc<Mutex<Vec<DecisionLog>>>) = Default::default();
+        let built = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (r2, l2, d2, b2) = (rows.clone(), logs.clone(), decide.clone(), built.clone());
+        let s = RunsScreen {
+            dir: PathBuf::from("/p"),
+            record: Arc::new(move |_d: &Path, row: NeedsYou| { if live.is_none() { return false; } r2.lock().unwrap().push(row); true }),
+            live: Arc::new(move |_d: &Path| live),
+            log: Arc::new(move |_d: &Path, l: Vec<DecisionLog>, _n: Vec<String>| { if live.is_none() { return false; } l2.lock().unwrap().extend(l); true }),
+            make_judge: Arc::new(move |_d: &Path| { b2.fetch_add(1, Ordering::SeqCst); Judge::new(fallback(&d2, &FakeOracle::named("agent")), second(&review, &FakeOracle::named("agent"))) }),
+            judge: Default::default(),
+        };
+        Judged { s, decide, rows, logs, built }
+    }
+    fn bash(c: &str) -> Value {
+        json!({ "toolCall": { "toolCallId": "t", "name": "Bash", "kind": "execute", "rawInput": { "command": c } },
+            "options": [ { "optionId": "yes", "kind": "allow_once" }, { "optionId": "no", "kind": "reject_once" } ] })
+    }
+
+    #[test]
+    fn the_planners_git_reads_are_allowed_and_its_git_writes_refused_without_the_judge() {
+        for st in [RunState::Planning, RunState::Running] {
+            let j = judged(Some((st, 4)));
+            let a = answered(&j.s, &bash("git log --oneline -5 && git status")).expect("a git read is answered by policy");
+            assert!(a.allow, "{st:?}");
+            let w = answered(&j.s, &bash("git commit -am wip")).expect("a git write is answered by policy");
+            assert!(!w.allow);
+            assert_eq!(w.reason, crate::runs::fence::GIT_REFUSAL);
+            assert_eq!(j.decide.decide_calls.load(Ordering::SeqCst), 0, "no rule needed the judge");
+            assert_eq!(j.built.load(Ordering::SeqCst), 0, "the judge isn't even built");
+        }
+    }
+
+    #[test]
+    fn a_publish_from_the_planner_is_refused_and_shown() {
+        let j = judged(Some((RunState::Planning, 4)));
+        let a = answered(&j.s, &bash("npm publish")).expect("refused");
+        assert!(!a.allow);
+        assert_eq!(a.reason, PUBLISH_REFUSAL);
+        assert_eq!(j.rows.lock().unwrap().len(), 1);
+        assert_eq!(j.rows.lock().unwrap()[0].kind, "refused");
+        assert_eq!(j.decide.decide_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn any_other_planner_command_goes_to_the_judge_and_its_answer_is_kept() {
+        use crate::runs::oracle::fake::{choice, decision, noul};
+        let j = judged(Some((RunState::Planning, 4)));
+        assert!(j.s.screen(&bash("ls")).is_none(), "the judge's call is never made on the reader thread");
+        j.decide.decide_with(decision(vec![choice("action", "allow", &[("allow", 0.93)], 0.93), noul("writes_outside", 0.05)], "jev-1.13.0", false));
+        let a = answered(&j.s, &bash("ls")).expect("the judge answers");
+        assert!(a.allow);
+        let d = a.decision.expect("the guard line carries the decision");
+        assert_eq!((d["choice"].as_str(), d["model"].as_str(), d["band"].as_str()), (Some("allow"), Some("jev-1.13.0"), Some("act")));
+        assert_eq!(d["confidence"], json!(0.93f32));
+        assert_eq!(d["probabilities"], json!({ "allow": 0.93f32 }));
+        j.decide.decide_with(decision(vec![choice("action", "refuse", &[("refuse", 0.9)], 0.9), noul("writes_outside", 0.8)], "jev-1.13.0", false));
+        let r = answered(&j.s, &bash("node scripts/rewrite.js")).expect("the judge answers");
+        assert!(!r.allow, "the judge's refusal is honoured");
+        let logs = j.logs.lock().unwrap();
+        assert_eq!(logs.iter().map(|l| (l.subject.as_str(), l.action.as_str())).collect::<Vec<_>>(), vec![("ls", "allow"), ("node scripts/rewrite.js", "refuse")]);
+        assert!(logs.iter().all(|l| l.kind == "shell" && l.lane.as_deref() == Some("planner")));
+        assert_eq!(j.built.load(Ordering::SeqCst), 1, "built once per screen");
+        assert!(j.rows.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn outside_a_run_the_planners_shell_asks_go_to_the_user() {
+        let j = judged(None);
+        for c in ["ls", "git status", "git commit -m x"] {
+            assert!(answered(&j.s, &bash(c)).is_none(), "{c}");
+        }
+        let read = json!({ "toolCall": { "toolCallId": "r", "name": "Read", "kind": "read", "rawInput": { "file_path": "/p/a" } }, "options": [] });
+        assert!(answered(&judged(Some((RunState::Planning, 4))).s, &read).is_none(), "only shell asks are answered here");
+        assert_eq!(j.built.load(Ordering::SeqCst), 0);
     }
     fn write_ask(name: &str, path: &Path) -> Value {
         json!({ "toolCall": { "toolCallId": "w", "name": name, "kind": "edit", "rawInput": { "file_path": path.to_string_lossy() } },

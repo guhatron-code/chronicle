@@ -762,7 +762,13 @@ pub trait LanePolicy: Send + Sync {
 /// run): `Some` answers an ask at once, before the pane shows it.
 pub trait AskScreen: Send + Sync {
     fn screen(&self, params: &Value) -> Option<PolicyAnswer>;
+    /// An answer that may take a while (a judge call): run off the reader
+    /// thread, as a lane's policy is. Asked before `screen`.
+    fn defer(&self, _params: &Value) -> Option<Deferred> { None }
 }
+
+/// A screen's slow answer, made on its own thread.
+pub type Deferred = Box<dyn FnOnce() -> PolicyAnswer + Send>;
 
 #[derive(Clone)]
 pub struct PolicyHandle(pub Arc<dyn LanePolicy>);
@@ -1664,6 +1670,21 @@ impl AcpSession {
                     return;
                 }
                 if let Some(ScreenHandle(screen)) = self.extras.screen.clone() {
+                    if let Some(answer) = screen.defer(&params) {
+                        // as a lane's policy: registered first, so a turn end or Stop resolves it
+                        if let Ok(mut g) = self.perms.lock() { g.insert(id.to_string(), id.clone()); }
+                        let me = self.clone();
+                        let rid = id.to_string();
+                        std::thread::spawn(move || {
+                            let a = answer();
+                            let a = match me.respond_permission(&rid, policy_option(&params, a.allow)) {
+                                Ok(()) => a,
+                                Err(_) => cancelled_first(a),
+                            };
+                            me.emit_guard(&params, &a);
+                        });
+                        return;
+                    }
                     if let Some(a) = screen.screen(&params) {
                         let outcome = match policy_option(&params, a.allow) {
                             Some(o) => json!({ "outcome": "selected", "optionId": o }),
