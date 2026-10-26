@@ -12,6 +12,7 @@ use super::judge::Judge;
 use super::oracle::{Fallback, Oracle, DECISIONS_FALLBACK, REVIEW_FALLBACK};
 use super::record::*;
 use super::runner::{self, CtlParts, Ev, LaneHost, RunCtl};
+use super::scheduler::MAX_ATTEMPTS;
 use super::{commands, gate, tools, Runs};
 use crate::acp::{self, LanePolicy};
 use crate::providers::{Answer, Criterion, Decision, DecisionRequest};
@@ -71,12 +72,18 @@ impl TestHost {
         if let Some(f) = old { f.store(false, Ordering::SeqCst); }
     }
     fn on_thread(&self, f: impl FnOnce() + Send + 'static) { lk(&self.threads).push(std::thread::spawn(f)); }
-    /// Every lane session ended, nothing left launching: no adapter outlives the test.
-    fn shut(&self) {
+    /// Every lane session ended, nothing left launching: no adapter outlives the
+    /// test. Launches and stops get a minute between them; whatever is still
+    /// running then is named, and the sessions are drained regardless.
+    fn shut(&self) -> Result<(), String> {
         for f in lk(&self.current).drain() { f.1.store(false, Ordering::SeqCst); }
         let threads: Vec<_> = lk(&self.threads).drain(..).collect();
-        for t in threads { let _ = t.join(); }
+        let deadline = Instant::now() + Duration::from_secs(60);
+        while threads.iter().any(|t| !t.is_finished()) && Instant::now() < deadline { std::thread::sleep(Duration::from_millis(200)); }
+        let stuck = threads.iter().filter(|t| !t.is_finished()).count();
+        for t in threads.into_iter().filter(|t| t.is_finished()) { let _ = t.join(); }
         self.agents.drain();
+        if stuck > 0 { Err(format!("{stuck} lane launch/stop thread(s) still running after a minute")) } else { Ok(()) }
     }
 }
 impl LaneHost for TestHost {
@@ -131,19 +138,30 @@ struct Cleanup {
     runs: Option<Arc<Runs>>,
     host: Arc<TestHost>,
     dirs: Vec<PathBuf>,
+    /// the bridge seam's variables as they were before the test set them
+    env: Vec<(&'static str, Option<std::ffi::OsString>)>,
 }
 impl Drop for Cleanup {
     fn drop(&mut self) {
+        let mut failures: Vec<String> = vec![];
         if let Some(ctl) = self.ctl.take() { let _ = ctl.tx.send(Ev::Stop); }
         self.runs.take();
         if let Some(t) = self.runner.take() {
             // the loop answers Stop within half a second unless a gate is running
             let deadline = Instant::now() + Duration::from_secs(120);
             while !t.is_finished() && Instant::now() < deadline { std::thread::sleep(Duration::from_millis(200)); }
-            if t.is_finished() { let _ = t.join(); } else { eprintln!("the run loop didn't stop within two minutes; ending its sessions anyway"); }
+            if t.is_finished() { let _ = t.join(); } else { failures.push("the run loop didn't stop within two minutes".to_string()); }
         }
-        self.host.shut();
+        if let Err(e) = self.host.shut() { failures.push(e); }
         for d in &self.dirs { let _ = std::fs::remove_dir_all(d); }
+        for (k, v) in self.env.drain(..) {
+            match v { Some(v) => std::env::set_var(k, v), None => std::env::remove_var(k) }
+        }
+        // loud, but never a panic inside a panic (that aborts and skips the report)
+        if !failures.is_empty() {
+            let msg = format!("cleanup: {} (sessions were drained anyway)", failures.join("; "));
+            if std::thread::panicking() { eprintln!("{msg}"); } else { panic!("{msg}"); }
+        }
     }
 }
 
@@ -180,15 +198,20 @@ fn runs_real_adapter_two_lanes_a_leak_and_a_block() {
     let bridge_dir = tmp.join(format!("crl-{pid}"));
     let scratch = tmp.join(format!("chronicle-runs-live-scratch-{pid}"));
     let host = Arc::new(TestHost { agents: Arc::new(acp::AcpState::new()), bin, current: Default::default(), threads: Default::default() });
-    let mut guard = Cleanup { ctl: None, runner: None, runs: None, host: host.clone(), dirs: vec![tmp.join(format!("chronicle-runs-live-{pid}")), scratch.clone(), bridge_dir.clone()] };
+    let mut guard = Cleanup { ctl: None, runner: None, runs: None, host: host.clone(), dirs: vec![tmp.join(format!("chronicle-runs-live-{pid}")), scratch.clone(), bridge_dir.clone()], env: vec![] };
     let d = toy_repo(&guard.dirs[0]);
     guard.dirs[0] = d.clone();
     let p = crate::load_project(&d);
 
     // the bridge the lanes' run servers dial, answered by the same handler the app uses
     let (sock, token_file) = (bridge_dir.join("s"), bridge_dir.join("t"));
-    std::env::set_var("CHRONICLE_BRIDGE_SOCKET", &sock);
-    std::env::set_var("CHRONICLE_BRIDGE_TOKEN", &token_file);
+    // process-wide, restored by the guard. The other test gated on the same variable
+    // (`acp_real_adapter_round_trip`) never reads these, so running both under
+    // `--ignored` is safe; nothing in the ungated suite sets them.
+    for (k, v) in [("CHRONICLE_BRIDGE_SOCKET", &sock), ("CHRONICLE_BRIDGE_TOKEN", &token_file)] {
+        guard.env.push((k, std::env::var_os(k)));
+        std::env::set_var(k, v);
+    }
     let token = crate::bridge::write_token_at(&token_file).unwrap();
     let runs = Arc::new(Runs::new());
     guard.runs = Some(runs.clone());
@@ -225,7 +248,10 @@ fn runs_real_adapter_two_lanes_a_leak_and_a_block() {
         let r = ctl.snapshot();
         let line = format!("{:?}: {}", r.state, r.lanes.iter().map(|l| format!("{} {:?} try {}", l.id, l.state, l.attempt)).collect::<Vec<_>>().join(", "));
         if line != last { eprintln!("[{:>4}s] {line}", t0.elapsed().as_secs()); last = line; }
-        if matches!(r.state, RunState::NeedsYou | RunState::Done | RunState::Failed | RunState::Stopped) { break r; }
+        // settled: the run waits on the user or is over, AND no lane is still moving
+        let lanes_done = !r.lanes.is_empty() && r.lanes.iter().all(|l| matches!(l.state, LaneState::Closed | LaneState::Parked | LaneState::Cancelled)
+            || (l.state.between_tries() && l.attempt >= MAX_ATTEMPTS));
+        if matches!(r.state, RunState::NeedsYou | RunState::Done | RunState::Failed | RunState::Stopped) && lanes_done { break r; }
         assert!(Instant::now() < deadline, "the run never settled: {r:#?}");
         std::thread::sleep(Duration::from_secs(2));
     };
@@ -235,12 +261,28 @@ fn runs_real_adapter_two_lanes_a_leak_and_a_block() {
         let l = held.lane(id).unwrap();
         assert_eq!(l.state, LaneState::Closed, "lane {id}");
         assert!(l.commit.is_some(), "lane {id} was saved");
+        let g = l.gates.last().unwrap_or_else(|| panic!("lane {id} was gated"));
+        assert!(g.checks.iter().any(|c| c.name == "test" && c.exit == Some(0)), "lane {id}'s test check passed: {:?}", g.checks);
+        assert!(g.review.as_ref().map_or(false, |r| r.pass), "lane {id}'s review passed: {:?}", g.review);
+        assert!(l.cost_usd > 0.0, "lane {id}'s cost was counted");
     }
+    assert!(held.cost.usd > 0.0, "the run's cost was counted");
     let log = gate::git(&d, &["log", "--name-only", "--format="]).unwrap();
     assert!(log.contains("a/alpha.txt") && log.contains("b/beta.txt"), "both lanes' files are saved: {log}");
-    assert!(held.lane("a").unwrap().leak.iter().any(|k| k.path == "NOTES.txt"), "the shell write is the lane's leak");
+    assert!(held.lane("a").unwrap().leak.iter().any(|k| k.path == "NOTES.txt" && k.owner.is_none()), "the shell write is lane A's leak, owned by no lane");
     assert!(gate::git(&d, &["status", "--porcelain"]).unwrap().contains("?? NOTES.txt"), "and is left unsaved");
-    assert!(held.needs_you.iter().any(|n| n.kind == "parked" && n.item.as_deref() == Some("I-3")), "the block claim was parked for the user");
+    let parked = held.needs_you.iter().find(|n| n.kind == "parked" && n.item.as_deref() == Some("I-3")).expect("the block claim was parked for the user");
+    assert!(!parked.reason.trim().is_empty() && parked.reading.is_some(), "the parked row carries the lane's reason and the judge's reading: {parked:?}");
     assert_eq!(held.state, RunState::NeedsYou);
+
+    // nothing outlives the run: no session in the table, no process naming the toy repo
+    let agents = host.agents.clone();
     drop(guard);
+    for k in 0..8u16 {
+        assert!(agents.get(&acp::Lane::Worker { run: 1, k }.key(&d.to_string_lossy())).is_none(), "lane session {k} is still in the table");
+    }
+    let alive = || std::process::Command::new("pgrep").args(["-f", &d.to_string_lossy()]).output().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    let gone_by = Instant::now() + Duration::from_secs(15);
+    while !alive().is_empty() && Instant::now() < gone_by { std::thread::sleep(Duration::from_millis(500)); }
+    assert!(alive().is_empty(), "processes naming {} outlived the test: {}", d.display(), alive());
 }
