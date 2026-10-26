@@ -265,7 +265,8 @@ fn writes_redirect(seg: &str) -> bool {
 }
 
 /// The conservative read-only allowlist (ruling R29): plain reads, versions, and the
-/// project's own test command, none of them able to write or run something else.
+/// project's own test command (`npm test`), none of them able to write or run something
+/// else. `npx vitest run` is not on it: its options can write (`--outputFile`, `--coverage`).
 fn read_only(prog: &str, rest: &[&str]) -> bool {
     // redirections are checked on the raw segment; here they are not arguments
     let args: Vec<&str> = rest.iter().copied().filter(|a| !a.contains('>') && *a != "/dev/null").collect();
@@ -280,7 +281,6 @@ fn read_only(prog: &str, rest: &[&str]) -> bool {
             ["test", tail @ ..] | ["run", "test", tail @ ..] => !updates(tail),
             _ => false,
         },
-        "npx" => matches!(args.as_slice(), ["vitest", "run", ..]) && !updates(&args[2..]),
         _ => false,
     }
 }
@@ -341,7 +341,8 @@ fn classify_segment(seg: &str) -> Shell {
         "npm" | "pnpm" if first_verb(&rest) == Some("publish") => Shell::Publish,
         "yarn" if rest.contains(&"publish") => Shell::Publish,
         "cargo" if first_verb(&rest) == Some("publish") => Shell::Publish,
-        p if !prefixed && read_only(p, &rest) && !writes_redirect(seg) => Shell::ReadOnly,
+        // the allowlist names programs by their bare name: `./a/cat` may be anything
+        p if !prefixed && !first.contains('/') && read_only(p, &rest) && !writes_redirect(seg) => Shell::ReadOnly,
         _ => Shell::Other,
     }
 }
@@ -412,7 +413,7 @@ mod tests {
     fn plain_reads_and_the_projects_own_tests_are_read_only() {
         for c in ["ls", "ls -la src", "cat src/greet.js", "head -20 README.md", "tail -n 5 CHANGELOG.md", "wc -l src/*.ts",
                   "grep -rn greet src", "rg greet", "find . -name '*.ts'", "pwd", "echo hi", "node --version", "node -v",
-                  "npm --version", "npm test", "npm run test", "npx vitest run", "npx vitest run src/lib", "npm test 2>&1 | tail -5",
+                  "npm --version", "npm test", "npm run test", "npm test 2>&1 | tail -5",
                   "cat src/a.ts | head -5", "ls 2>/dev/null", "node --version && npm run test 2>&1 | tail -20", "echo \"git push\"",
                   "echo 'npm publish'"] {
             assert_eq!(classify(c), Shell::ReadOnly, "{c}");
@@ -426,7 +427,11 @@ mod tests {
         for c in ["cat x > y", "echo hi >> notes.txt", "ls; rm x", "ls && rm -rf src", "cat a | tee b", "find . -delete",
                   "find . -name x -exec rm {} \\;", "rg --pre ./evil x", "npx vitest run --update", "npx vitest run -u",
                   "npm test -- -u", "npm run build", "npx tsc", "echo $(rm x)", "sudo ls", "env -S 'rm x' ls", "cd src && ls",
-                  "node scripts/x.js", "npm install", "echo hi > /tmp/x", "ls >out"] {
+                  "node scripts/x.js", "npm install", "echo hi > /tmp/x", "ls >out",
+                  // a program is on the allowlist by its bare name only: a path to it may be anything
+                  "./a/cat x", "a/ls", "/tmp/evil/head -5 x", "./node --version",
+                  // vitest's own options can write (--outputFile, --coverage), so it is judged
+                  "npx vitest run", "npx vitest run src/lib", "npx vitest run --outputFile=x.json", "npx vitest run --coverage"] {
             assert_eq!(classify(c), Shell::Other, "{c}");
         }
     }
@@ -501,7 +506,8 @@ mod tests {
         assert!(matches!(sh("git diff"), Verdict::Allow { .. }));
         assert_eq!(sh("git commit -am x"), Verdict::Refuse { path: "git commit -am x".into(), reason: GIT_REFUSAL.into() });
         assert_eq!(sh("npm publish"), Verdict::Publish { command: "npm publish".into() });
-        assert_eq!(sh("npx vitest run src/lib"), Verdict::Allow { what: "npx vitest run src/lib".into() }, "the project's own tests are a read");
+        assert_eq!(sh("npm test"), Verdict::Allow { what: "npm test".into() }, "the project's own tests are a read");
+        assert_eq!(sh("npx vitest run src/lib"), Verdict::Judge { command: "npx vitest run src/lib".into() }, "vitest's options can write");
         assert_eq!(sh("node scripts/rewrite.js"), Verdict::Judge { command: "node scripts/rewrite.js".into() });
         assert_eq!(sh("cat a > b"), Verdict::Judge { command: "cat a > b".into() });
     }

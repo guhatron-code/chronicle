@@ -1093,7 +1093,7 @@ mod tests {
         assert_eq!(a.reason, crate::runs::fence::PUBLISH_REFUSAL);
         assert_eq!(k.ctl.snapshot().needs_you[0].kind, "refused");
         k.decide.decide_with(decision(vec![choice("action", "allow", &[("allow", 0.93)], 0.93), noul("writes_outside", 0.05)], "jev-1.13.0", false));
-        let t = p.answer(&bash("npx vitest run src/lib"));
+        let t = p.answer(&bash("npm test"));
         assert!(t.allow && t.decision.is_none(), "the project's own tests are allowed by rule, no judge");
         assert_eq!(k.decide.decide_calls.load(Ordering::SeqCst), 0);
         let j = p.answer(&bash("node scripts/rewrite.js"));
