@@ -14,6 +14,8 @@ pub mod runner;
 pub mod tools;
 pub mod host;
 pub mod commands;
+#[cfg(test)]
+mod live_test;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
