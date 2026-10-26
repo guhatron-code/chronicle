@@ -1048,13 +1048,16 @@ mod tests {
         assert_eq!(a.reason, crate::runs::fence::PUBLISH_REFUSAL);
         assert_eq!(k.ctl.snapshot().needs_you[0].kind, "refused");
         k.decide.decide_with(decision(vec![choice("action", "allow", &[("allow", 0.93)], 0.93), noul("writes_outside", 0.05)], "jev-1.13.0", false));
-        let j = p.answer(&bash("npx vitest run src/lib"));
+        let t = p.answer(&bash("npx vitest run src/lib"));
+        assert!(t.allow && t.decision.is_none(), "the project's own tests are allowed by rule, no judge");
+        assert_eq!(k.decide.decide_calls.load(Ordering::SeqCst), 0);
+        let j = p.answer(&bash("node scripts/rewrite.js"));
         assert!(j.allow);
         let d = j.decision.unwrap();
         assert_eq!(d["confidence"], json!(0.93f32));
         assert_eq!(d["probabilities"], json!({ "allow": 0.93f32 }), "the guard carries the reading (R13)");
         assert_eq!((d["choice"].as_str(), d["model"].as_str(), d["band"].as_str()), (Some("allow"), Some("jev-1.13.0"), Some("act")));
-        assert_eq!(k.ctl.snapshot().decisions[0].subject, "npx vitest run src/lib");
+        assert_eq!(k.ctl.snapshot().decisions[0].subject, "node scripts/rewrite.js");
         let w = |path: &Path| json!({ "toolCall": { "toolCallId": "w", "name": "Write", "kind": "edit", "rawInput": { "file_path": path.to_string_lossy() } }, "options": [] });
         assert!(p.answer(&w(&r.join("a/x.ts"))).allow);
         assert!(!p.answer(&w(&r.join("b/x.ts"))).allow);

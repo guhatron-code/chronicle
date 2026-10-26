@@ -99,7 +99,7 @@ impl Fence {
         if name == "Bash" || kind == "execute" {
             let cmd = call.pointer("/rawInput/command").and_then(|v| v.as_str()).unwrap_or("").to_string();
             return match classify(&cmd) {
-                Shell::ReadOnlyGit => Verdict::Allow { what: cmd },
+                Shell::ReadOnly | Shell::ReadOnlyGit => Verdict::Allow { what: cmd },
                 Shell::GitWrite => Verdict::Refuse { path: cmd, reason: GIT_REFUSAL.into() },
                 Shell::Publish => Verdict::Publish { command: cmd },
                 Shell::Other => Verdict::Judge { command: cmd },
@@ -126,7 +126,7 @@ fn repo_rel(repo: &Path, abs: &Path) -> Option<String> {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
-pub enum Shell { ReadOnlyGit, Other, GitWrite, Publish }
+pub enum Shell { ReadOnly, ReadOnlyGit, Other, GitWrite, Publish }
 
 /// The most severe class of any command in the line, substitutions included.
 pub fn classify(cmd: &str) -> Shell {
@@ -234,10 +234,63 @@ fn wrapper_opts(wrapper: &str) -> &'static [&'static str] {
     }
 }
 
+/// True when the segment sends output anywhere but another descriptor or /dev/null
+/// (`>` and `>>` outside quotes), so a read that writes a file is never a read.
+fn writes_redirect(seg: &str) -> bool {
+    let cs: Vec<char> = seg.chars().collect();
+    let mut q: Option<char> = None;
+    let mut i = 0;
+    while i < cs.len() {
+        let c = cs[i];
+        match q {
+            Some(qc) => { if c == qc { q = None; } else if c == '\\' && qc == '"' { i += 1; } }
+            None if c == '\'' || c == '"' => q = Some(c),
+            None if c == '\\' => i += 1,
+            None if c == '>' => {
+                let mut j = i + 1;
+                if cs.get(j) == Some(&'>') { j += 1; }
+                if cs.get(j) == Some(&'&') && cs.get(j + 1).is_some_and(|d| d.is_ascii_digit()) { i = j + 2; continue; }
+                if cs.get(j) == Some(&'|') { return true; }
+                while cs.get(j).is_some_and(|x| x.is_whitespace()) { j += 1; }
+                let target: String = cs[j..].iter().take_while(|x| !x.is_whitespace()).collect();
+                if target != "/dev/null" { return true; }
+                i = j + target.chars().count();
+                continue;
+            }
+            None => {}
+        }
+        i += 1;
+    }
+    false
+}
+
+/// The conservative read-only allowlist (ruling R29): plain reads, versions, and the
+/// project's own test command, none of them able to write or run something else.
+fn read_only(prog: &str, rest: &[&str]) -> bool {
+    // redirections are checked on the raw segment; here they are not arguments
+    let args: Vec<&str> = rest.iter().copied().filter(|a| !a.contains('>') && *a != "/dev/null").collect();
+    let updates = |xs: &[&str]| xs.iter().any(|a| *a == "-u" || a.starts_with("--update"));
+    match prog {
+        "ls" | "cat" | "head" | "tail" | "wc" | "grep" | "pwd" | "echo" => true,
+        "rg" => !args.iter().any(|a| a.starts_with("--pre")),
+        "find" => !args.iter().any(|a| matches!(*a, "-delete" | "-exec" | "-execdir" | "-ok" | "-okdir" | "-fprint" | "-fprint0" | "-fprintf" | "-fls")),
+        "node" => matches!(args.as_slice(), ["--version"] | ["-v"]),
+        "npm" => match args.as_slice() {
+            ["--version"] | ["-v"] => true,
+            ["test", tail @ ..] | ["run", "test", tail @ ..] => !updates(tail),
+            _ => false,
+        },
+        "npx" => matches!(args.as_slice(), ["vitest", "run", ..]) && !updates(&args[2..]),
+        _ => false,
+    }
+}
+
 fn classify_segment(seg: &str) -> Shell {
     let words = split_words(seg);
     let mut w: &[String] = &words;
     let mut env_git = false;
+    // a wrapper or an assignment in front: whatever it is, it isn't a plain read
+    let mut prefixed = false;
     loop {
         match w.first().map(|s| s.as_str()) {
             // grouping and control-flow words in front of a command
@@ -249,9 +302,11 @@ fn classify_segment(seg: &str) -> Shell {
             }
             Some(x) if is_assignment(x) => {
                 if x.starts_with("GIT_") { env_git = true; }
+                prefixed = true;
                 w = &w[1..]
             }
             Some(x @ ("sudo" | "env" | "command" | "exec" | "nohup" | "time" | "xargs" | "builtin" | "timeout" | "nice" | "stdbuf")) => {
+                prefixed = true;
                 let takes = wrapper_opts(x);
                 w = &w[1..];
                 loop {
@@ -286,6 +341,7 @@ fn classify_segment(seg: &str) -> Shell {
         "npm" | "pnpm" if first_verb(&rest) == Some("publish") => Shell::Publish,
         "yarn" if rest.contains(&"publish") => Shell::Publish,
         "cargo" if first_verb(&rest) == Some("publish") => Shell::Publish,
+        p if !prefixed && read_only(p, &rest) && !writes_redirect(seg) => Shell::ReadOnly,
         _ => Shell::Other,
     }
 }
@@ -353,12 +409,36 @@ mod tests {
     }
 
     #[test]
+    fn plain_reads_and_the_projects_own_tests_are_read_only() {
+        for c in ["ls", "ls -la src", "cat src/greet.js", "head -20 README.md", "tail -n 5 CHANGELOG.md", "wc -l src/*.ts",
+                  "grep -rn greet src", "rg greet", "find . -name '*.ts'", "pwd", "echo hi", "node --version", "node -v",
+                  "npm --version", "npm test", "npm run test", "npx vitest run", "npx vitest run src/lib", "npm test 2>&1 | tail -5",
+                  "cat src/a.ts | head -5", "ls 2>/dev/null", "node --version && npm run test 2>&1 | tail -20", "echo \"git push\"",
+                  "echo 'npm publish'"] {
+            assert_eq!(classify(c), Shell::ReadOnly, "{c}");
+        }
+        // a git read in the chain keeps the chain a read
+        assert!(classify("ls && git status") <= Shell::ReadOnlyGit);
+    }
+
+    #[test]
+    fn a_read_that_writes_or_runs_something_else_is_still_judged() {
+        for c in ["cat x > y", "echo hi >> notes.txt", "ls; rm x", "ls && rm -rf src", "cat a | tee b", "find . -delete",
+                  "find . -name x -exec rm {} \\;", "rg --pre ./evil x", "npx vitest run --update", "npx vitest run -u",
+                  "npm test -- -u", "npm run build", "npx tsc", "echo $(rm x)", "sudo ls", "env -S 'rm x' ls", "cd src && ls",
+                  "node scripts/x.js", "npm install", "echo hi > /tmp/x", "ls >out"] {
+            assert_eq!(classify(c), Shell::Other, "{c}");
+        }
+    }
+
+    #[test]
     fn quoting_is_respected() {
-        assert_eq!(classify("echo \"git push\""), Shell::Other, "a string that mentions git push is not git push");
+        assert_eq!(classify("echo \"git push\""), Shell::ReadOnly, "a string that mentions git push is not git push");
         assert_eq!(classify("git commit -m \"a && git push\""), Shell::GitWrite, "the && is inside the message");
-        assert_eq!(classify("echo 'npm publish'"), Shell::Other);
+        assert_eq!(classify("echo 'npm publish'"), Shell::ReadOnly);
         assert_eq!(classify("cd src && git status"), Shell::Other, "a chain is as severe as its worst part");
-        assert_eq!(classify("npm test 2>&1 | tail -5"), Shell::Other);
+        assert_eq!(classify("npm test 2>&1 | tail -5"), Shell::ReadOnly);
+        assert_eq!(classify("echo \"a > b\""), Shell::ReadOnly, "a quoted > is not a redirect");
         assert_eq!(split_words("git commit -m \"two words\" 'x y' a\\ b"), vec!["git", "commit", "-m", "two words", "x y", "a b"]);
     }
 
@@ -421,7 +501,9 @@ mod tests {
         assert!(matches!(sh("git diff"), Verdict::Allow { .. }));
         assert_eq!(sh("git commit -am x"), Verdict::Refuse { path: "git commit -am x".into(), reason: GIT_REFUSAL.into() });
         assert_eq!(sh("npm publish"), Verdict::Publish { command: "npm publish".into() });
-        assert_eq!(sh("npx vitest run src/lib"), Verdict::Judge { command: "npx vitest run src/lib".into() });
+        assert_eq!(sh("npx vitest run src/lib"), Verdict::Allow { what: "npx vitest run src/lib".into() }, "the project's own tests are a read");
+        assert_eq!(sh("node scripts/rewrite.js"), Verdict::Judge { command: "node scripts/rewrite.js".into() });
+        assert_eq!(sh("cat a > b"), Verdict::Judge { command: "cat a > b".into() });
     }
 
     #[test]

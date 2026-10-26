@@ -147,8 +147,9 @@ pub(crate) fn launch_worker(agents: &acp::AcpState, emit: acp::Emit, key: String
 /// and the refusal is a needs-you row on the live run. Hands off (spec §3, §5):
 /// the run server's own tools, and the planner's writes of its round's two
 /// fixes/ files while the round is planned, are answered here, not by the user.
-/// And its shell commands are answered as a lane's are, owning nothing: git
-/// reads allowed, git writes refused, anything else the judge's (spec §5, §6).
+/// And while the round is planned, its shell commands are answered as a lane's
+/// are, owning nothing: reads allowed, git writes refused, anything else the
+/// judge's (spec §5, §6). Once the lanes run, only the publish refusal stays (R29).
 pub struct RunsScreen {
     pub dir: PathBuf,
     /// adds the row to the live run; false when no run is live
@@ -228,22 +229,25 @@ impl AskScreen for RunsScreen {
             if !(self.record)(&self.dir, row) { return None; }
             return Some(PolicyAnswer { allow: false, path: cmd.to_string(), reason: PUBLISH_REFUSAL.into(), decision: None });
         }
-        // the planner owns no files: a git read is fine, a git write never is
+        // the planner owns no files: a read is fine, a git write never is. Only while it plans
+        // (R29): once the lanes run, the chat lane is the user's again, but for publishing
         let cmd = shell_command(params)?;
-        (self.live)(&self.dir)?;
+        let (state, _) = (self.live)(&self.dir)?;
+        if state != RunState::Planning { return None; }
         match class {
-            Shell::ReadOnlyGit => Some(PolicyAnswer { allow: true, path: cmd.to_string(), reason: String::new(), decision: None }),
+            Shell::ReadOnly | Shell::ReadOnlyGit => Some(PolicyAnswer { allow: true, path: cmd.to_string(), reason: String::new(), decision: None }),
             Shell::GitWrite => Some(PolicyAnswer { allow: false, path: cmd.to_string(), reason: GIT_REFUSAL.into(), decision: None }),
             _ => None,
         }
     }
 
-    /// Any other command of the chat lane's, while a run is live: the judge's (spec §6, decision 1).
+    /// Any other command of the chat lane's, while its run is planned: the judge's (spec §6, decision 1; R29).
     fn defer(&self, params: &Value) -> Option<acp::Deferred> {
         if self.hands_off(params).is_some() { return None; }
         let cmd = shell_command(params)?.to_string();
         if classify(&cmd) != Shell::Other { return None; }
-        let (_, round) = (self.live)(&self.dir)?;
+        let (state, round) = (self.live)(&self.dir)?;
+        if state != RunState::Planning { return None; }
         let (dir, judge, make, log) = (self.dir.clone(), self.judge.clone(), self.make_judge.clone(), self.log.clone());
         Some(Box::new(move || {
             let judge = judge.get_or_init(|| make(&dir));
@@ -334,15 +338,31 @@ mod tests {
 
     #[test]
     fn the_planners_git_reads_are_allowed_and_its_git_writes_refused_without_the_judge() {
-        for st in [RunState::Planning, RunState::Running] {
+        let j = judged(Some((RunState::Planning, 4)));
+        let a = answered(&j.s, &bash("git log --oneline -5 && git status")).expect("a git read is answered by policy");
+        assert!(a.allow);
+        let w = answered(&j.s, &bash("git commit -am wip")).expect("a git write is answered by policy");
+        assert!(!w.allow);
+        assert_eq!(w.reason, crate::runs::fence::GIT_REFUSAL);
+        for c in ["cat src/greet.js", "node --version && npm run test 2>&1 | tail -20", "ls -la"] {
+            assert!(answered(&j.s, &bash(c)).expect("a plain read is answered by policy").allow, "{c}");
+        }
+        assert_eq!(j.decide.decide_calls.load(Ordering::SeqCst), 0, "no rule needed the judge");
+        assert_eq!(j.built.load(Ordering::SeqCst), 0, "the judge isn't even built");
+    }
+
+    #[test]
+    fn once_the_lanes_run_the_chat_lanes_asks_go_to_the_user_but_a_publish_is_still_refused() {
+        for st in [RunState::Running, RunState::NeedsYou, RunState::Gating] {
             let j = judged(Some((st, 4)));
-            let a = answered(&j.s, &bash("git log --oneline -5 && git status")).expect("a git read is answered by policy");
-            assert!(a.allow, "{st:?}");
-            let w = answered(&j.s, &bash("git commit -am wip")).expect("a git write is answered by policy");
-            assert!(!w.allow);
-            assert_eq!(w.reason, crate::runs::fence::GIT_REFUSAL);
-            assert_eq!(j.decide.decide_calls.load(Ordering::SeqCst), 0, "no rule needed the judge");
-            assert_eq!(j.built.load(Ordering::SeqCst), 0, "the judge isn't even built");
+            for c in ["ls", "git status", "git commit -m x", "npm install", "make lint"] {
+                assert!(answered(&j.s, &bash(c)).is_none(), "{st:?}: {c} is the user's to answer");
+            }
+            let p = answered(&j.s, &bash("git push origin main")).expect("a publish is refused for the whole run");
+            assert!(!p.allow);
+            assert_eq!(p.reason, PUBLISH_REFUSAL);
+            assert_eq!(j.rows.lock().unwrap().len(), 1, "{st:?}: and shown");
+            assert_eq!(j.built.load(Ordering::SeqCst), 0, "{st:?}: no judge outside planning");
         }
     }
 
@@ -361,9 +381,9 @@ mod tests {
     fn any_other_planner_command_goes_to_the_judge_and_its_answer_is_kept() {
         use crate::runs::oracle::fake::{choice, decision, noul};
         let j = judged(Some((RunState::Planning, 4)));
-        assert!(j.s.screen(&bash("ls")).is_none(), "the judge's call is never made on the reader thread");
+        assert!(j.s.screen(&bash("make lint")).is_none(), "the judge's call is never made on the reader thread");
         j.decide.decide_with(decision(vec![choice("action", "allow", &[("allow", 0.93)], 0.93), noul("writes_outside", 0.05)], "jev-1.13.0", false));
-        let a = answered(&j.s, &bash("ls")).expect("the judge answers");
+        let a = answered(&j.s, &bash("make lint")).expect("the judge answers");
         assert!(a.allow);
         let d = a.decision.expect("the guard line carries the decision");
         assert_eq!((d["choice"].as_str(), d["model"].as_str(), d["band"].as_str()), (Some("allow"), Some("jev-1.13.0"), Some("act")));
@@ -373,7 +393,7 @@ mod tests {
         let r = answered(&j.s, &bash("node scripts/rewrite.js")).expect("the judge answers");
         assert!(!r.allow, "the judge's refusal is honoured");
         let logs = j.logs.lock().unwrap();
-        assert_eq!(logs.iter().map(|l| (l.subject.as_str(), l.action.as_str())).collect::<Vec<_>>(), vec![("ls", "allow"), ("node scripts/rewrite.js", "refuse")]);
+        assert_eq!(logs.iter().map(|l| (l.subject.as_str(), l.action.as_str())).collect::<Vec<_>>(), vec![("make lint", "allow"), ("node scripts/rewrite.js", "refuse")]);
         assert!(logs.iter().all(|l| l.kind == "shell" && l.lane.as_deref() == Some("planner")));
         assert_eq!(j.built.load(Ordering::SeqCst), 1, "built once per screen");
         assert!(j.rows.lock().unwrap().is_empty());
