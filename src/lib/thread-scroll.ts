@@ -10,8 +10,6 @@ export type StickInput = {
   scrollTop: number;
   scrollHeight: number;
   clientHeight: number;
-  /** content got taller since the last decision */
-  grew: boolean;
   /** this decision follows a scroll event the user caused */
   userScrolled: boolean;
   /** this user scroll moved scrollTop to a smaller value than the last one */
@@ -31,5 +29,7 @@ export function stickDecision(i: StickInput): StickDecision {
     return { pinned: true, action: i.reducedMotion ? "jump" : "glide" };
   }
   if (!i.pinned) return { pinned: false, action: "none" };
-  return { pinned: true, action: i.grew ? "jump" : "none" };
+  // pinned means "at the bottom": whatever opened a gap — content that grew, or a
+  // viewport that shrank because a strip appeared below the thread — closes it
+  return { pinned: true, action: gap > 0 ? "jump" : "none" };
 }

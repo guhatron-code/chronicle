@@ -3,7 +3,8 @@
  * scroll animation during growth (the jump happens in a layout effect, before
  * paint, so nothing is visible), and without a scroll call at all once the
  * user has scrolled up. A ResizeObserver catches growth React never rendered
- * (an image, a card opening). `overflow-anchor: none` on the scroller stops
+ * (an image, a card opening) and the scroller's own shrink (the review strip
+ * mounting below it would otherwise cover the last lines). `overflow-anchor: none` on the scroller stops
  * the browser from correcting the same movement a second time.
  */
 import { useCallback, useLayoutEffect, useRef } from "react";
@@ -15,7 +16,6 @@ const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia
  *  appears (the pane shows an empty state first) and tears down when it goes. */
 export function useStickToBottom(deps: unknown[]) {
   const pinned = useRef(true);
-  const lastHeight = useRef(0);
   const elRef = useRef<HTMLElement | null>(null);
   const teardown = useRef<(() => void) | null>(null);
 
@@ -24,11 +24,9 @@ export function useStickToBottom(deps: unknown[]) {
   const apply = (el: HTMLElement, userScrolled: boolean) => {
     const scrolledUp = userScrolled && el.scrollTop < lastTop.current;
     lastTop.current = el.scrollTop;
-    const grew = el.scrollHeight > lastHeight.current;
-    if (!userScrolled) lastHeight.current = el.scrollHeight;
     const d = stickDecision({
       pinned: pinned.current, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight, clientHeight: el.clientHeight,
-      grew, userScrolled, scrolledUp, reducedMotion: reducedMotion(),
+      userScrolled, scrolledUp, reducedMotion: reducedMotion(),
     });
     pinned.current = d.pinned;
     if (d.action === "jump") el.scrollTop = el.scrollHeight;
@@ -42,12 +40,12 @@ export function useStickToBottom(deps: unknown[]) {
     if (!el) return;
     // open at the newest entry before the first paint
     pinned.current = true;
-    lastHeight.current = el.scrollHeight;
     el.scrollTop = el.scrollHeight;
     lastTop.current = el.scrollTop;
     const onScroll = () => apply(el, true);
     el.addEventListener("scroll", onScroll, { passive: true });
     const ro = new ResizeObserver(() => apply(el, false));
+    ro.observe(el); // the scroller itself: it shrinks when the review strip appears below it
     for (const child of Array.from(el.children)) ro.observe(child);
     const mo = new MutationObserver((muts) => {
       for (const m of muts) for (const n of Array.from(m.addedNodes)) if (n instanceof HTMLElement) ro.observe(n);
