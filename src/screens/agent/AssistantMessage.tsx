@@ -10,9 +10,10 @@ import { AssistantAvatar, MessageRow, TypingDots } from "./rows";
 
 const props = assistantMarkdownProps();
 
-export function AssistantMessage({ text, streaming, agent }: { text: string; streaming: boolean; agent: string }) {
+/** `who` names the speaker in place of the agent's own name — a run's lane thread says "Lane C". */
+export function AssistantMessage({ text, streaming, agent, who }: { text: string; streaming: boolean; agent: string; who?: string }) {
   return (
-    <MessageRow who={agentMeta(agent).headerName} avatar={<AssistantAvatar agent={agent} />}>
+    <MessageRow who={who ?? agentMeta(agent).headerName} avatar={<AssistantAvatar agent={agent} />}>
       <span data-streaming={streaming || undefined}>
         {streaming && !text.trim() ? (
           <TypingDots />

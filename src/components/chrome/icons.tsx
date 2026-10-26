@@ -320,3 +320,17 @@ export const GripGlyph = ({ size = 10, ...p }: P) => (
     <circle cx="7" cy="11.5" r="1.1" />
   </svg>
 );
+
+/** Lanes — three verticals (Runs: the run card's lane count, the composer's toggle). */
+export const LanesGlyph = ({ size = 12, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" {...p}>
+    <path d="M3 2.5v11M8 2.5v11M13 2.5v11" />
+  </svg>
+);
+
+/** Spark — the decision model's mark (Runs: decision lines, a parked item's reading). */
+export const SparkGlyph = ({ size = 12, ...p }: P) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" {...p}>
+    <path d="M8 2v12M2 8h12M4 4l8 8M12 4l-8 8" />
+  </svg>
+);

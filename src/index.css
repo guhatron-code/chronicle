@@ -26,10 +26,11 @@
 /* ============ DESIGN.md §1 — foundation tokens (DARK default) ============ */
 :root,
 [data-theme='dark'] {
-  /* motion — one curve, two durations; the pane never uses a literal duration */
+  /* motion — one curve, two durations and the status dot's breath; the pane never uses a literal duration */
   --ease-pane: cubic-bezier(0.2, 0.8, 0.2, 1);
   --dur-fast: 140ms;
   --dur-slow: 260ms;
+  --dur-pulse: 1.6s;
   /* §1.1 Surfaces — elevation ramp (lighter = forward) */
   --surface-app: #0a0a0a;
   --surface-panel: #0d0d0d;

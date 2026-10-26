@@ -201,6 +201,9 @@ export function Composer({
   onConfirm,
   onSend,
   chips,
+  placeholder,
+  footerChip,
+  nudge = false,
 }: {
   dir: string;
   /** true while the session isn't ready — the input dims and nothing sends */
@@ -213,6 +216,13 @@ export function Composer({
   onSend?: (text: string) => Promise<void>;
   /** a lane's own chips, as a row above the input (the design lane's system and critique chips) */
   chips?: ReactNode;
+  /** the input's empty text */
+  placeholder?: string;
+  /** one chip after the model selects — the chat's Run as a round */
+  footerChip?: ReactNode;
+  /** a run lane's composer: always sends through `onSend`, even while the lane
+   *  works; no modes, no models, no attachments, no Chronicle / commands */
+  nudge?: boolean;
 }) {
   const s = agentSessionFor(dir);
   // `dir` is the session's lane key; files, notes, phases and attachments
@@ -285,11 +295,11 @@ export function Composer({
     void getCurrentWebview()
       .onDragDropEvent((e) => {
         const p = e.payload;
-        if (p.type === "enter" || p.type === "over") setOsDropping(over(p.position));
+        if (p.type === "enter" || p.type === "over") setOsDropping(!nudge && over(p.position));
         else if (p.type === "leave") setOsDropping(false);
         else if (p.type === "drop") {
           setOsDropping(false);
-          if (over(p.position) && p.paths.length) void addPaths(p.paths);
+          if (!nudge && over(p.position) && p.paths.length) void addPaths(p.paths);
         }
       })
       .then((fn) => {
@@ -328,7 +338,7 @@ export function Composer({
       ? commandRows(dir, trigger.query)
           // Chronicle's own commands (undo/keep/revert) act on the chat's edit
           // review — the design lane never offers them
-          .filter((r) => !designLane || r.kind !== "local")
+          .filter((r) => !(designLane || nudge) || r.kind !== "local")
           .map((r) => ({
           id: `${r.kind}:${r.name}`,
           label: `/${r.name}`,
@@ -368,7 +378,7 @@ export function Composer({
     const ta = taRef.current;
     if (trigger.kind === "slash") {
       const local = LOCAL_COMMANDS.find((c) => `local:${c.name}` === item.id);
-      if (local && !designLane) {
+      if (local && !designLane && !nudge) {
         // Chronicle's own — run it and clear; nothing goes to the agent
         closeMenu();
         setText("");
@@ -435,7 +445,7 @@ export function Composer({
 
   const send = () => {
     const typed = text.trim();
-    if ((!typed && attachments.length === 0) || disabled || sendDisabled || sending || s.turnActive) return;
+    if ((!typed && attachments.length === 0) || disabled || sendDisabled || sending || (s.turnActive && !nudge)) return;
     const withRefs = attachments.length
       ? `${typed ? `${typed}\n\n` : ""}Attached files:\n${attachments.map((a) => `- ${a.relPath}`).join("\n")}`
       : typed;
@@ -595,7 +605,7 @@ export function Composer({
         data-agent-input
         value={text}
         disabled={disabled}
-        placeholder="Ask for anything…"
+        placeholder={placeholder ?? "Ask for anything…"}
         onChange={(e) => {
           setText(e.target.value);
           mirrorComposerText(dir, e.target.value);
@@ -619,7 +629,8 @@ export function Composer({
           // Enter sends; while a turn is active it queues; Shift+Enter / IME = newline
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
-            if (s.turnActive) {
+            // a nudge goes to the lane while it works — that is what it is for
+            if (s.turnActive && !nudge) {
               if (!designLane) queue(); // the design lane has no queue
             } else send();
           }
@@ -629,7 +640,7 @@ export function Composer({
             .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
             .map((it) => it.getAsFile())
             .filter((f): f is File => f != null);
-          if (imgs.length) { e.preventDefault(); void addFiles(imgs); }
+          if (imgs.length && !nudge) { e.preventDefault(); void addFiles(imgs); }
         }}
         className={cn(
           "max-h-[200px] min-h-14 resize-none overflow-y-auto rounded-md border border-border-field bg-surface-input px-[11px] py-[9px] text-[13px] leading-normal text-text-primary outline-none placeholder:text-text-dimmer",
@@ -641,7 +652,7 @@ export function Composer({
       {/* narrow columns (the design thread) wrap this row instead of
           shaving the chips down to their chevrons */}
       <div data-chrome className="flex flex-wrap items-center gap-[9px]">
-        {!disabled && (
+        {!disabled && !nudge && (
           <Hint label="Attach a file">
             <button
               data-agent-attach
@@ -653,7 +664,7 @@ export function Composer({
             </button>
           </Hint>
         )}
-        {!designLane && <AgentPicker projectDir={projectDir} sessionAgent={s.agent} phase={s.phase} onConfirm={onConfirm} />}
+        {!designLane && !nudge && <AgentPicker projectDir={projectDir} sessionAgent={s.agent} phase={s.phase} onConfirm={onConfirm} />}
         {designLane && stances.includes("ask") && (
           <ModeSelect
             current="ask"
@@ -665,7 +676,7 @@ export function Composer({
             ]}
           />
         )}
-        {!designLane && s.asksFirst === false && (() => {
+        {!designLane && !nudge && s.asksFirst === false && (() => {
           // no Ask mode: nothing to pick, and nothing that would pretend it asks
           const chip = ownSettingsChip(agentMeta(s.agent).name);
           return (
@@ -676,7 +687,7 @@ export function Composer({
             </Hint>
           );
         })()}
-        {!designLane && s.asksFirst !== false && stances.length > 1 && (
+        {!designLane && !nudge && s.asksFirst !== false && stances.length > 1 && (
           <ModeSelect
             current={current}
             fallbackLabel={ownModeName ?? "Choose a stance"}
@@ -685,9 +696,10 @@ export function Composer({
             options={stances.map((k) => ({ value: k, ...STANCE_COPY[k] }))}
           />
         )}
-        {!disabled && <ConfigSelect dir={dir} optionId="model" title="The model the agent uses" />}
-        {!disabled && <ConfigSelect dir={dir} optionId="effort" title="How hard the model thinks" />}
-        {!disabled && <ConfigSelect dir={dir} optionId="agent" title="Run the session as one of your custom agents" />}
+        {!disabled && !nudge && <ConfigSelect dir={dir} optionId="model" title="The model the agent uses" />}
+        {!disabled && !nudge && <ConfigSelect dir={dir} optionId="effort" title="How hard the model thinks" />}
+        {!disabled && !nudge && <ConfigSelect dir={dir} optionId="agent" title="Run the session as one of your custom agents" />}
+        {footerChip}
         <input
           ref={fileInput}
           type="file"
@@ -711,7 +723,7 @@ export function Composer({
           </span>
         )}
         <span className="flex-1" />
-        {s.turnActive ? (
+        {s.turnActive && !nudge ? (
           <>
             {text.trim() && !designLane && (
               <button

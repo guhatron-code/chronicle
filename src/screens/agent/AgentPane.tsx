@@ -20,7 +20,11 @@ import {
   subscribeAgent,
   agentVersion,
   flushAgentNotifications,
+  laneKey,
+  loadLaneHistory,
+  startRunInPane,
   type AgentEntry,
+  type Lane,
   type AgentSessionState,
   type ThreadItem,
 } from "@/lib/agent-session";
@@ -32,7 +36,11 @@ import { profilerOnRender } from "@/lib/perf";
 import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
 import { sendDesignMessage } from "@/lib/design-store";
 import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint } from "@/lib/ipc";
-import { CheckGlyph } from "@/components/chrome/icons";
+import { CheckGlyph, LanesGlyph } from "@/components/chrome/icons";
+import { refreshRuns, runFor, runsVersion, subscribeRuns } from "@/lib/runs-store";
+import { runLaneNudge } from "@/lib/runs-ipc";
+import { gateLabel, laneBusy, laneDivider } from "@/lib/runs-model";
+import { every } from "@/lib/scheduler";
 import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term-sessions";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { toastError } from "@/overlays/toasts";
@@ -48,6 +56,9 @@ import { ToolCard } from "./ToolCard";
 import { SubagentCard } from "./SubagentCard";
 import { ThoughtCard } from "./ThoughtCard";
 import { PermissionCard } from "./PermissionCard";
+import { RunEntryCard } from "./RunCard";
+import { GateCard, LaneHeader } from "./LaneThread";
+import { DecisionLine, Divider, Mono } from "./run-atoms";
 
 /** One row of the thread as it arrives: it settles in from just below, once,
  *  on mount (index.css `wv-enter`). A replayed thread mounts all its rows at
@@ -309,6 +320,9 @@ function Entry({
   readOnly,
   onRetryRound,
   onOpenNotes,
+  onOpenLane,
+  onOpenFile,
+  who,
 }: {
   dir: string;
   entry: ThreadItem;
@@ -317,6 +331,12 @@ function Entry({
   readOnly?: boolean;
   onRetryRound?: (n: number, total: number) => void;
   onOpenNotes?: () => void;
+  /** a run card's lane row opens that lane's view */
+  onOpenLane?: (n: number, lane: string) => void;
+  /** a run card's "Open the plan" */
+  onOpenFile?: (path: string) => void;
+  /** the speaker's name on assistant rows, in place of the agent's (a lane thread: "Lane C") */
+  who?: string;
 }) {
   if (entry.kind === "user")
     return (
@@ -360,7 +380,9 @@ function Entry({
         )}
       </div>
     );
-  if (entry.kind === "assistant") return <AssistantMessage text={entry.text} streaming={entry.streaming} agent={agentSessionFor(dir).agent} />;
+  if (entry.kind === "run")
+    return <RunEntryCard dir={dir} entry={entry} onOpenLane={onOpenLane ?? (() => {})} onOpenFile={onOpenFile} />;
+  if (entry.kind === "assistant") return <AssistantMessage text={entry.text} streaming={entry.streaming} agent={agentSessionFor(dir).agent} who={who} />;
   if (entry.kind === "thought")
     return (
       <div className="px-3.5 py-0.5">
@@ -386,11 +408,9 @@ function Entry({
         <SubagentCard group={entry} dir={dir} readOnly={readOnly} />
       </div>
     );
-  // "guard" is the design lane's own entry kind (a tool call the acp seam
-  // judged against the designs folder) — only the refusals show
+  // "guard": a tool call the acp seam judged — against the designs folder (only
+  // the refusals show), or by a run's judge (its decision line always shows)
   if (entry.kind === "guard") return <GuardRow entry={entry} />;
-  // the run card's face lands with the Runs pane; until then it has no row
-  if (entry.kind === "run") return null;
   return (
     <div className="px-3.5 py-1">
       <ToolCard tool={entry} dir={dir} readOnly={readOnly} />
@@ -406,18 +426,31 @@ const ThreadRow = memo(
     void sig; // only the comparator reads it
     return <Entry {...rest} />;
   },
-  (a, b) => sameRow(a, b) && a.turnActive === b.turnActive && a.readOnly === b.readOnly && a.dir === b.dir,
+  (a, b) => sameRow(a, b) && a.turnActive === b.turnActive && a.readOnly === b.readOnly && a.dir === b.dir && a.who === b.who,
 );
 
 /** Round cards also read the notes index (done-note counts), which the entry
- *  does not carry — fold its generation into their signature. */
-function sigFor(entry: ThreadItem, gen: number): string {
+ *  does not carry — fold its generation into their signature. A run card reads
+ *  the runs store the same way. */
+function sigFor(entry: ThreadItem, gen: number, runsGen: number): string {
+  if (entry.kind === "run") return `${rowSignature(entry)}:r${runsGen}`;
   return entry.kind === "round" || entry.kind === "round-plan" ? `${rowSignature(entry)}:n${gen}` : rowSignature(entry);
 }
 
 /** A design-lane write the seam kept out of the project. Allowed writes inside
  *  the designs folder are not shown; the frames appearing on the canvas show them. */
-function GuardRow({ entry }: { entry: { allowed: boolean; path: string; reason: string } }) {
+function GuardRow({ entry }: { entry: Extract<AgentEntry, { kind: "guard" }> }) {
+  // a run's judge decided this ask: what was asked, the option it took, the
+  // model and the band, and how sure it was
+  const d = entry.decision;
+  if (d)
+    return (
+      <DecisionLine prob={d.confidence.toFixed(2)}>
+        {entry.allowed ? "Ran" : "Didn’t run"} <Mono className="text-[11px] text-text-secondary">{entry.path}</Mono>
+        {entry.reason ? ` — ${entry.allowed ? "allowed" : "refused"}, ${entry.reason.replace(/\.$/, "")}.` : "."}
+        <span className="mt-0.5 block"><Mono>{[d.choice, d.model, d.band].filter(Boolean).join(" · ")}</Mono></span>
+      </DecisionLine>
+    );
   if (entry.allowed) return null;
   return (
     <div className="mx-3.5 my-1 flex items-start gap-2 rounded-md border border-border-hairline bg-surface-card px-[11px] py-2">
@@ -459,6 +492,50 @@ function QueuedMessages({ dir, queue }: { dir: string; queue: string[] }) {
   );
 }
 
+/** A lane opened (board R2): its header, its thread, its gate cards, and a composer that nudges it. */
+function LaneView({ dir, n, id, onBack, onConfirm }: { dir: string; n: number; id: string; onBack: () => void; onConfirm: (spec: ConfirmSpec) => void }) {
+  const runsGen = useSyncExternalStore(subscribeRuns, runsVersion, runsVersion);
+  const version = useSyncExternalStore(subscribeAgent, agentVersion, agentVersion);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => every(1000, () => setNow(Date.now())), []);
+  const rec = runFor(dir, n);
+  const lane = rec?.lanes.find((l) => l.id === id);
+  const k = Math.max(0, rec?.lane_map?.lanes.findIndex((l) => l.id === id) ?? 0);
+  const key = laneKey(dir, `w/${n}-${k}` as Lane);
+  const ls = agentSessionFor(key);
+  // a lane whose live wire is gone (a restart) reads its transcript back once
+  useEffect(() => { if (lane?.session && agentSessionFor(key).entries.length === 0) void loadLaneHistory(key, lane.session); }, [key, lane?.session]);
+  // the lane's thread follows its newest line exactly as the chat does
+  const setScroller = useStickToBottom([version, runsGen]);
+  if (!rec || !lane)
+    return (
+      <div className="flex min-h-0 flex-1 flex-col px-3.5 py-3">
+        <button type="button" onClick={onBack} className="self-start text-[11.5px] text-text-secondary hover:text-text-primary">Back to the run</button>
+      </div>
+    );
+  const items = groupEntries(ls.entries);
+  const keys = rowKeys(items);
+  const who = `Lane ${id.toUpperCase()}`;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" data-lane-view={id}>
+      <div ref={setScroller} className="thread-scroller flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto py-2">
+        <LaneHeader dir={dir} rec={rec} lane={lane} onBack={onBack} now={now} onConfirm={onConfirm} />
+        <Divider label={laneDivider(rec, lane)} />
+        {items.map((entry, i) => (
+          <Appear key={keys[i]}>
+            <ThreadRow sig={rowSignature(entry)} dir={key} entry={entry} turnActive={ls.turnActive} onConfirm={onConfirm} readOnly who={who} />
+          </Appear>
+        ))}
+        {lane.gates.length > 0 && <Divider label="saved · checked" />}
+        {lane.gates.map((g, i) => <GateCard key={i} label={gateLabel(lane.id, g, true)} gate={g} />)}
+      </div>
+      <Composer dir={key} nudge disabled={!(laneBusy(lane) || lane.state === "waiting")} onConfirm={onConfirm}
+        placeholder={`Nudge lane ${id.toUpperCase()} — it reads this between steps`}
+        onSend={(t) => runLaneNudge(dir, n, id, t)} />
+    </div>
+  );
+}
+
 export function AgentPane({
   dir,
   onConfirm,
@@ -468,6 +545,7 @@ export function AgentPane({
   variant = "chat",
   trailing,
   composerChips,
+  onOpenFile,
 }: {
   dir: string;
   onConfirm: (spec: ConfirmSpec) => void;
@@ -485,8 +563,15 @@ export function AgentPane({
   trailing?: ReactNode;
   /** a row of chips above the composer's input */
   composerChips?: ReactNode;
+  /** a run card's "Open the plan" — the file opens in the repo viewer */
+  onOpenFile?: (path: string) => void;
 }) {
   const version = useSyncExternalStore(subscribeAgent, agentVersion, agentVersion);
+  const runsGen = useSyncExternalStore(subscribeRuns, runsVersion, runsVersion);
+  useEffect(() => { if (variant === "chat") void refreshRuns(dir); }, [dir, variant]);
+  const [openLane, setOpenLane] = useState<{ n: number; id: string } | null>(null);
+  const [runAsRound, setRunAsRound] = useState(false);
+  const onOpenLane = useCallback((n: number, id: string) => setOpenLane({ n, id }), []);
   const [, bump] = useState(0);
   useEffect(() => subscribeNotesIndex(() => bump((n) => n + 1)), []); // round cards tick with the vault, not with a keystroke
   useEffect(() => () => flushAgentNotifications(), []); // a pane unmounting mid-stream leaves nothing pending
@@ -637,6 +722,10 @@ export function AgentPane({
     return null;
   })();
 
+  /* a run's lane opened from its card (board R2) — it takes the thread's place until Back */
+  if (variant === "chat" && openLane && !s.viewing)
+    return <LaneView dir={dir} n={openLane.n} id={openLane.id} onBack={() => setOpenLane(null)} onConfirm={onConfirm} />;
+
   /* F37 — a read-only view of an earlier session's transcript */
   if (s.viewing) {
     return (
@@ -663,7 +752,7 @@ export function AgentPane({
             const keys = rowKeys(items);
             return items.map((entry, i) => (
               <Appear key={keys[i]}>
-                <ThreadRow sig={sigFor(entry, gen)} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} />
+                <ThreadRow sig={sigFor(entry, gen, runsGen)} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} onOpenLane={onOpenLane} onOpenFile={onOpenFile} />
               </Appear>
             ));
           })()}
@@ -709,7 +798,7 @@ export function AgentPane({
                 const keys = rowKeys(items);
                 return items.map((entry, i) => (
                   <Appear key={keys[i]}>
-                    <ThreadRow sig={sigFor(entry, gen)} dir={dir} entry={entry} turnActive={s.turnActive} onConfirm={onConfirm} onOpenNotes={onOpenNotes} onRetryRound={onRetryRound} />
+                    <ThreadRow sig={sigFor(entry, gen, runsGen)} dir={dir} entry={entry} turnActive={s.turnActive} onConfirm={onConfirm} onOpenNotes={onOpenNotes} onRetryRound={onRetryRound} onOpenLane={onOpenLane} onOpenFile={onOpenFile} />
                   </Appear>
                 ));
               })()}
@@ -742,8 +831,21 @@ export function AgentPane({
         }
         sendDisabled={variant !== "design" && s.phase !== "ready"}
         onConfirm={onConfirm}
-        onSend={variant === "design" ? (t) => sendDesignMessage(splitLaneKey(dir).dir, t) : undefined}
+        onSend={
+          variant === "design"
+            ? (t) => sendDesignMessage(splitLaneKey(dir).dir, t)
+            : runAsRound
+              ? (t) => startRunInPane(dir, { kind: "prompt", text: t }).then(() => setRunAsRound(false))
+              : undefined
+        }
         chips={composerChips}
+        footerChip={variant === "chat" ? (
+          <button type="button" data-run-toggle aria-pressed={runAsRound} onClick={() => setRunAsRound((v) => !v)}
+            className={cn("inline-flex h-[26px] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-lg border px-[9px] text-[11.5px]",
+              runAsRound ? "border-border-strong bg-fill-hover text-text-primary" : "border-border-hairline text-text-muted hover:bg-fill-hover")}>
+            <LanesGlyph size={12} />Run as a round
+          </button>
+        ) : undefined}
       />
     </div>
   );

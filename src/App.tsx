@@ -1498,6 +1498,7 @@ function AppShell() {
               goPane("repo");
             }}
             onOpenNotes={() => goPane("notes")}
+            onOpenFile={(path) => { openFileInRepo(active.dir, path); goPane("repo"); }}
           />
         }
         onConfirm={setConfirm}
