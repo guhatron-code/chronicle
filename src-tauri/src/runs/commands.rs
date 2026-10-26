@@ -163,10 +163,24 @@ fn planner_last_text(dir: &Path) -> Option<String> {
 /// retried twice with the reasons, then the run fails (spec §3, §11). Each
 /// settle's planner cost is added to the record's.
 pub fn settle_in(p: &Project, n: u64, planner_cost: f64) -> Result<Settle, String> {
+    settle_on(p, n, planner_cost, crate::agents::project_profile(&p.dir))
+}
+
+/// Settle on a given agent. The agent may have changed since the run began: an
+/// accepted map on one that can't ask first fails the run with the sentence
+/// before it is ever saved as running, so no record runs without a controller (R28).
+pub fn settle_on(p: &Project, n: u64, planner_cost: f64, agent: &crate::agents::AgentProfile) -> Result<Settle, String> {
     let mut rec = load(&p.dir, n)?.ok_or_else(|| format!("There's no round {n} being planned."))?;
     if rec.state != RunState::Planning { return Err(format!("Round {n} isn't being planned any more.")); }
     rec.planner_cost_usd += planner_cost.max(0.0);
     if rec.lane_map.is_some() {
+        if let Some(why) = crate::acp::worker_refusal(agent) {
+            rec.set_state(RunState::Failed)?;
+            rec.planner_error = Some(why.clone());
+            save(&p.dir, &mut rec)?;
+            fail_round(&p.dir, &rec);
+            return Ok(Settle::Failed(why));
+        }
         rec.set_state(RunState::Running)?;
         save(&p.dir, &mut rec)?;
         runner::set_round_state(&p.dir, rec.round_n(), round_state_for(rec.state));
@@ -413,17 +427,34 @@ pub async fn run_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>, runs
     let p = crate::project_for(&roots, &dir)?;
     // one resume (or begin) at a time: the check below and the controller's insert happen under it
     let _hold = runs.hold(&p.dir)?;
+    match resume_on(&p, n, crate::agents::project_profile(&p.dir))? {
+        Resumed::Planning(back) => {
+            runs.planning(&p.dir, n);
+            runs.publish(&p.dir, &back);
+            Ok(json!({ "state": "planning", "prompt": planner_prompt_for(&p, &back) }))
+        }
+        Resumed::Launch(back, first) => {
+            launch(&app, &runs, &p, back, first)?;
+            Ok(json!({ "state": "running" }))
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Resumed { Planning(RunRecord), Launch(RunRecord, Vec<Action>) }
+
+/// An interrupted run, brought back on a given agent and saved. One with lanes to
+/// run is refused before it is saved as running when that agent can't ask first
+/// (R28), so it stays interrupted until the project's agent is one that does.
+pub fn resume_on(p: &Project, n: u64, agent: &crate::agents::AgentProfile) -> Result<Resumed, String> {
     let rec = load(&p.dir, n)?.ok_or_else(|| format!("There's no round {n}."))?;
     if rec.state != RunState::Interrupted { return Err(format!("Round {n} wasn't interrupted.")); }
     let (mut back, first) = scheduler::resume(&rec);
-    save(&p.dir, &mut back)?;
-    if back.state == RunState::Planning {
-        runs.planning(&p.dir, n);
-        runs.publish(&p.dir, &back);
-        return Ok(json!({ "state": "planning", "prompt": planner_prompt_for(&p, &back) }));
+    if back.state != RunState::Planning {
+        if let Some(why) = crate::acp::worker_refusal(agent) { return Err(why); }
     }
-    launch(&app, &runs, &p, back, first)?;
-    Ok(json!({ "state": "running" }))
+    save(&p.dir, &mut back)?;
+    Ok(if back.state == RunState::Planning { Resumed::Planning(back) } else { Resumed::Launch(back, first) })
 }
 
 #[tauri::command]
@@ -594,6 +625,42 @@ mod tests {
         accept(&q, 1, one_lane(Some("Tasks/A.md")));
         match settle_in(&q, 1, 0.26).unwrap() { Settle::Launch(r) => assert_eq!(r.state, RunState::Running), _ => panic!("an accepted map launches") }
         assert_eq!(crate::notes::rounds::load(&q.dir).unwrap()[0].state, "ready");
+    }
+
+    #[test]
+    fn a_map_accepted_on_an_agent_that_cannot_ask_first_fails_the_run_with_the_sentence() {
+        let p = project("settle-no-ask");
+        note(&p, "Tasks/A.md", "x");
+        begin_in(&p, &Source::Notes, None).unwrap();
+        std::fs::write(p.dir.join("fixes/phase_1_fixes_plan.md"), "Round kind: bug fixes\n").unwrap();
+        accept(&p, 1, one_lane(Some("Tasks/A.md")));
+        let opencode = crate::agents::profile("opencode").unwrap();
+        let why = "OpenCode can't run lanes: it never asks before changing files — choose Claude Code or Codex for this project.";
+        match settle_on(&p, 1, 0.2, opencode).unwrap() { Settle::Failed(s) => assert_eq!(s, why), _ => panic!("the launch is refused at settle") }
+        let rec = load(&p.dir, 1).unwrap().unwrap();
+        assert_eq!(rec.state, RunState::Failed, "never left Running with no controller");
+        assert_eq!(rec.planner_error.as_deref(), Some(why), "the footer reads the sentence");
+        assert_eq!(crate::notes::rounds::load(&p.dir).unwrap()[0].state, "failed");
+        let text = std::fs::read_to_string(p.dir.join(".chronicle/notes/Tasks/A.md")).unwrap();
+        assert!(text.contains("status: queued"), "{text}");
+    }
+
+    #[test]
+    fn resuming_a_running_round_on_an_agent_that_cannot_ask_first_leaves_it_interrupted() {
+        let p = project("resume-no-ask");
+        note(&p, "Tasks/A.md", "x");
+        begin_in(&p, &Source::Notes, None).unwrap();
+        std::fs::write(p.dir.join("fixes/phase_1_fixes_plan.md"), "Round kind: bug fixes\n").unwrap();
+        accept(&p, 1, one_lane(Some("Tasks/A.md")));
+        assert!(matches!(settle_in(&p, 1, 0.0).unwrap(), Settle::Launch(_)));
+        let mut r = load(&p.dir, 1).unwrap().unwrap();
+        r.set_state(RunState::Interrupted).unwrap();
+        save(&p.dir, &mut r).unwrap();
+        let opencode = crate::agents::profile("opencode").unwrap();
+        assert!(resume_on(&p, 1, opencode).unwrap_err().contains("OpenCode can't run lanes"));
+        assert_eq!(load(&p.dir, 1).unwrap().unwrap().state, RunState::Interrupted, "nothing was saved as running");
+        assert!(matches!(resume_on(&p, 1, crate::agents::claude()).unwrap(), Resumed::Launch(..)));
+        assert_eq!(load(&p.dir, 1).unwrap().unwrap().state, RunState::Running);
     }
 
     #[test]
