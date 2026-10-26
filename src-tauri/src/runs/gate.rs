@@ -98,6 +98,26 @@ fn tail_of(p: &Path) -> String {
     String::from_utf8_lossy(&bytes[start..]).trim_end().to_string()
 }
 
+/// Process groups that are running checks. A check's group isn't Chronicle's,
+/// so quitting would leave it running: the app's exit kills every one here.
+pub struct Groups(Mutex<std::collections::BTreeSet<i32>>);
+impl Groups {
+    pub const fn new() -> Self { Groups(Mutex::new(std::collections::BTreeSet::new())) }
+    fn set(&self) -> std::sync::MutexGuard<'_, std::collections::BTreeSet<i32>> { self.0.lock().unwrap_or_else(|e| e.into_inner()) }
+    pub fn add(&self, pgid: i32) { self.set().insert(pgid); }
+    pub fn remove(&self, pgid: i32) { self.set().remove(&pgid); }
+    /// SIGKILL every registered group and forget it; how many there were.
+    pub fn kill_all(&self) -> usize {
+        let groups: Vec<i32> = std::mem::take(&mut *self.set()).into_iter().collect();
+        for g in &groups { unsafe { libc::killpg(*g, libc::SIGKILL); } }
+        groups.len()
+    }
+}
+/// The checks running right now, in every run.
+pub static CHECK_GROUPS: Groups = Groups::new();
+/// Quitting: no check outlives the app.
+pub fn kill_running_checks() { CHECK_GROUPS.kill_all(); }
+
 /// One check, in its own process group, output to a file (a child that keeps a
 /// pipe open can never wedge us), killed with the whole group at `timeout`.
 pub fn run_check(cwd: &Path, check: &Check, env: &[(String, String)], timeout: Duration) -> CheckResult {
@@ -112,6 +132,7 @@ pub fn run_check(cwd: &Path, check: &Check, env: &[(String, String)], timeout: D
     for (k, v) in env { cmd.env(k, v); }
     let mut child = match cmd.spawn() { Ok(c) => c, Err(e) => return fail(format!("couldn't start the check: {e}")) };
     let pgid = child.id() as i32;
+    CHECK_GROUPS.add(pgid);
     let (exit, timed_out) = loop {
         match child.try_wait() {
             Ok(Some(st)) => break (st.code(), false),
@@ -126,6 +147,7 @@ pub fn run_check(cwd: &Path, check: &Check, env: &[(String, String)], timeout: D
     };
     // anything the check left running dies with its group
     unsafe { libc::killpg(pgid, libc::SIGKILL); }
+    CHECK_GROUPS.remove(pgid);
     let mut tail = tail_of(&log);
     let _ = std::fs::remove_file(&log);
     if timed_out { tail.push_str(&format!("\n[stopped after {}]", human(timeout))); }
@@ -204,12 +226,16 @@ pub fn dirty_paths(repo: &Path) -> Vec<String> {
         .into_iter().filter_map(|l| l.get(3..).map(String::from)).filter(|p| !p.is_empty()).collect()
 }
 
-/// The lane's own files, and the rest as leaks (spec §4, the shell hole). A
+/// The lane's own files, and the rest as leaks (spec §4, the shell hole). The
+/// gating lane's own globs come first (a rewritten item's lane shares its
+/// closed lane's files); then the lanes still open, then the closed ones. A
 /// path another lane owns is that lane's when that lane was working too AND
 /// wrote it through a tool Chronicle allowed; otherwise it is a leak. The
 /// app's own `.chronicle/` writes are never anyone's.
-pub fn split_changes(changed: &[String], lane: &str, map: &LaneMap, active: &[String], tool_writes: &HashMap<String, HashSet<String>>) -> (Vec<String>, Vec<Leak>) {
-    let globs: Vec<(String, Vec<super::lane_map::Glob>)> = map.lanes.iter().map(|l| (l.id.clone(), compile(&l.owns))).collect();
+pub fn split_changes(changed: &[String], lane: &str, map: &LaneMap, active: &[String], tool_writes: &HashMap<String, HashSet<String>>, closed: &[String]) -> (Vec<String>, Vec<Leak>) {
+    let rank = |id: &str| if id == lane { 0 } else if closed.iter().any(|c| c == id) { 2 } else { 1 };
+    let mut globs: Vec<(String, Vec<super::lane_map::Glob>)> = map.lanes.iter().map(|l| (l.id.clone(), compile(&l.owns))).collect();
+    globs.sort_by_key(|(id, _)| rank(id)); // stable: map order within each rank
     let mut owned = vec![];
     let mut leaks = vec![];
     for p in changed {
@@ -404,13 +430,50 @@ mod tests {
         let map = LaneMap { items: vec![], lanes: vec![spec("a", &["src/a/**"]), spec("b", &["src/b/**"]), spec("c", &["src/c/**"])] };
         let changed: Vec<String> = ["src/a/x.ts", "src/b/own.ts", "src/b/sneaky.ts", "src/c/y.ts", "README.md", ".chronicle/journal.jsonl"].iter().map(|s| s.to_string()).collect();
         let writes = HashMap::from([("b".to_string(), HashSet::from(["src/b/own.ts".to_string()]))]);
-        let (owned, leaks) = split_changes(&changed, "a", &map, &["b".to_string()], &writes);
+        let (owned, leaks) = split_changes(&changed, "a", &map, &["b".to_string()], &writes, &[]);
         assert_eq!(owned, vec!["src/a/x.ts"]);
         assert_eq!(leaks, vec![
             Leak { path: "src/b/sneaky.ts".into(), owner: Some("b".into()), by: None },
             Leak { path: "src/c/y.ts".into(), owner: Some("c".into()), by: None },
             Leak { path: "README.md".into(), owner: None, by: None },
         ], "b's own tool write while b was working is b's; .chronicle/ is the app's");
+    }
+
+    #[test]
+    fn a_registered_check_group_is_killed_by_the_quit_helper() {
+        use std::os::unix::process::CommandExt;
+        let groups = Groups::new();
+        let mut child = Command::new("/bin/sh").arg("-c").arg("sleep 30 & wait").process_group(0)
+            .stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
+        let pgid = child.id() as i32;
+        groups.add(pgid);
+        std::thread::sleep(Duration::from_millis(200)); // the background sleep is in the group
+        let alive = |g: i32| unsafe { libc::killpg(g, 0) } == 0;
+        assert!(alive(pgid));
+        assert_eq!(groups.kill_all(), 1);
+        let _ = child.wait();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while alive(pgid) && Instant::now() < deadline { std::thread::sleep(Duration::from_millis(50)); }
+        assert!(!alive(pgid), "the whole group is gone, the backgrounded sleep with it");
+        assert_eq!(groups.kill_all(), 0, "a killed group is forgotten");
+    }
+
+    #[test]
+    fn a_rewritten_items_lane_owns_its_files_though_a_closed_lane_shares_its_globs() {
+        // "Rewrite the item": lane c runs the item on lane a's files, after a closed
+        let map = LaneMap { items: vec![], lanes: vec![spec("a", &["src/a/**"]), spec("b", &["src/b/**"]), spec("c", &["src/a/**"])] };
+        let closed = vec!["a".to_string()];
+        let changed: Vec<String> = ["src/a/rewrite.ts"].iter().map(|s| s.to_string()).collect();
+        let (owned, leaks) = split_changes(&changed, "c", &map, &[], &HashMap::new(), &closed);
+        assert_eq!(owned, vec!["src/a/rewrite.ts"], "the gating lane's own globs come first");
+        assert!(leaks.is_empty(), "{leaks:?}");
+        // another lane touching those files leaks into the lane still working on them, not the closed one
+        let (owned, leaks) = split_changes(&["src/a/q.ts".to_string()], "b", &map, &[], &HashMap::new(), &closed);
+        assert!(owned.is_empty());
+        assert_eq!(leaks, vec![Leak { path: "src/a/q.ts".into(), owner: Some("c".into()), by: None }]);
+        // with every sharer closed, the first in the map is still named
+        let (_, leaks) = split_changes(&["src/a/q.ts".to_string()], "b", &map, &[], &HashMap::new(), &["a".to_string(), "c".to_string()]);
+        assert_eq!(leaks[0].owner.as_deref(), Some("a"));
     }
 
     #[test]

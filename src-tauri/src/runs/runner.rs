@@ -314,7 +314,8 @@ impl RunCtl {
         let changed = match (from, to) { (Some(f), Some(t)) => gate::changed_between(&self.repo, &f, &t), _ => gate::dirty_paths(&self.repo) };
         let active: Vec<String> = lk(&self.active).get(id).map(|s| s.iter().cloned().collect()).unwrap_or_default();
         let writes = lk(&self.tool_writes).clone();
-        let (owned, leaks) = gate::split_changes(&changed, id, &map, &active, &writes);
+        let closed: Vec<String> = rec.lanes.iter().filter(|l| l.state == LaneState::Closed).map(|l| l.id.clone()).collect();
+        let (owned, leaks) = gate::split_changes(&changed, id, &map, &active, &writes, &closed);
         // 2 · save the lane's own files, by explicit path
         // the review is asked only about the items still the lane's: never one parked for the user or skipped
         let set_aside: HashSet<&str> = rec.needs_you.iter().filter(|x| x.kind == "parked" && x.lane.as_deref() == Some(id))
@@ -1200,6 +1201,32 @@ mod tests {
         assert_eq!(stopped, vec!["a", "b"], "both working sessions were ended");
         let rec = crate::runs::record::load(&r, 21).unwrap().unwrap();
         assert!(rec.lanes.iter().all(|l| l.state == LaneState::Streaming), "the record stays as it was, for resume");
+    }
+
+    #[test]
+    fn a_rewritten_item_runs_as_its_own_lane_and_its_work_is_saved() {
+        let r = repo("rewrite", 28);
+        let mut rec = closed_lanes(&r, 28);
+        // lane a closed with I-3 parked for the user; the user rewrites it
+        if let Some(m) = rec.lane_map.as_mut() {
+            m.items.push(Item { id: "I-3".into(), title: "the impossible work".into(), note: None, rewrite: None });
+            m.lanes[0].items.push("I-3".into());
+        }
+        rec.needs_you.push(NeedsYou { kind: "parked".into(), lane: Some("a".into()), item: Some("I-3".into()), reason: "can't".into(), reading: None });
+        rec.state = RunState::NeedsYou;
+        crate::runs::commands::apply_needs_you(&r, &mut rec, &crate::runs::commands::NeedsAct::Rewrite { item: "I-3".into(), text: "do it this way".into() }).unwrap();
+        let new_lane = rec.lanes.last().unwrap().id.clone();
+        assert_eq!(new_lane, "c");
+        let host = FakeHost::new(Box::new(|lane, _| if lane == "c" { vec![("a/rewrite.txt".into(), "the rewritten work".into(), true)] } else { vec![] }));
+        let mut k = kit(&r, rec, vec![], host);
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        let done = wait_until(&k.ctl, 60, |x| x.state.terminal());
+        assert_eq!(done.state, RunState::Done, "{done:#?}");
+        let c = done.lane("c").unwrap();
+        let commit = c.commit.clone().expect("the rewrite's lane saved");
+        assert_eq!(gate::files_in(&r, &commit), vec!["a/rewrite.txt"], "its own commit holds its work");
+        assert!(c.leak.is_empty() && done.lane("a").unwrap().leak.is_empty(), "no leak on either lane: {:?} / {:?}", c.leak, done.lane("a").unwrap().leak);
+        assert_eq!(gate::git(&r, &["status", "--porcelain"]).unwrap(), "", "nothing is left unsaved");
     }
 
     #[test]

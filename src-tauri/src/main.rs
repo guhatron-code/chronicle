@@ -4319,6 +4319,8 @@ fn main() {
                 if let Some(agents) = app.try_state::<acp::AcpState>() {
                     agents.drain(); // adapter children die through the same kill-and-reap path
                 }
+                // a run's checks run in process groups of their own: they go too
+                runs::gate::kill_running_checks();
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -4382,6 +4384,7 @@ fn main() {
         // the same chord the menu emits, so the ONE guard in the frontend runs; it
         // calls `quit_app` when it is done, and that is what gets past this.
         .run(|app, event| {
+            if let tauri::RunEvent::Exit = &event { runs::gate::kill_running_checks(); }
             if let tauri::RunEvent::ExitRequested { api, .. } = &event {
                 if !REALLY_QUIT.load(std::sync::atomic::Ordering::SeqCst) {
                     // The escape hatch: a dead webview can never answer, so a second
