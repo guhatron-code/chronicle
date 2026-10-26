@@ -23,7 +23,6 @@ fn spawn_from(profile: &'static AgentProfile, find: impl Fn(&str) -> Option<acp:
     })
 }
 
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub struct AgentCalls {
     pub profile: &'static AgentProfile,
     pub repo: PathBuf,
@@ -32,7 +31,6 @@ pub struct AgentCalls {
     pub timeout: Duration,
 }
 
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 impl AgentCalls {
     /// The project's agent, launched from the bundled pin like the pane's own session.
     pub fn for_project(profile: &'static AgentProfile, repo: PathBuf, project_dir: PathBuf) -> AgentCalls {

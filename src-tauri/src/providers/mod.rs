@@ -3,10 +3,8 @@
 //! two calls; `Agent` needs no key and rides the user's agent.
 pub mod agent;
 pub mod config;
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub mod http;
 pub mod keys;
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub mod schema;
 
 use serde::{Deserialize, Serialize};
@@ -39,31 +37,26 @@ impl Provider {
     }
 }
 
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub struct CompleteRequest { pub system: String, pub prompt: String, pub schema: Value, pub max_tokens: u32 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub enum Criterion {
     Choice { name: String, options: Vec<String> },
     Score { name: String, min: i32, max: i32 },
     Noul { name: String },
 }
 
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 impl Criterion {
     pub fn name(&self) -> &str {
         match self { Criterion::Choice { name, .. } | Criterion::Score { name, .. } | Criterion::Noul { name } => name }
     }
 }
 
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub struct DecisionRequest { pub state: String, pub instructions: String, pub criteria: Vec<Criterion> }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub enum Answer {
     Choice { choice: String, probabilities: HashMap<String, f32>, confidence: f32 },
     Score { value: i32, confidence: f32 },
@@ -71,7 +64,6 @@ pub enum Answer {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub struct Decision {
     pub answers: HashMap<String, Answer>,
     pub model: String,
@@ -81,7 +73,6 @@ pub struct Decision {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub enum CallError {
     /// HTTP 401/403: the saved key no longer works. The caller falls back to the agent.
     KeyRefused(String),
@@ -94,7 +85,6 @@ impl std::fmt::Display for CallError {
     }
 }
 
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub trait Calls: Send + Sync {
     /// One schema-checked JSON answer.
     fn complete_json(&self, req: &CompleteRequest) -> Result<Value, CallError>;
@@ -104,11 +94,9 @@ pub trait Calls: Send + Sync {
     fn model(&self) -> String;
 }
 
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 const DECIDE_SYSTEM: &str = "You make small, bounded decisions for a coding tool. For each named criterion give your answer, a probability for every option, and how confident you are, as numbers from 0 to 1. Answer with JSON only.";
 
 /// A decision through `complete_json`, for every provider without native decisions.
-#[allow(dead_code)] // consumed by the Runs plan (Plan B)
 pub fn emulate_decide(c: &dyn Calls, req: &DecisionRequest) -> Result<Decision, CallError> {
     let schema = schema::decision_schema(&req.criteria);
     let v = c.complete_json(&CompleteRequest {
