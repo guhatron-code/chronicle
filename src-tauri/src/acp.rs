@@ -857,7 +857,7 @@ fn write_target(call: &Value) -> &str {
 /// `path_in_roots` pops non-existent components as literal names, so a
 /// dangling link inside a root would otherwise pass while a write through it
 /// lands wherever the link points.
-fn has_dangling_link(p: &Path) -> bool {
+pub(crate) fn has_dangling_link(p: &Path) -> bool {
     p.ancestors().any(|a| {
         std::fs::symlink_metadata(a).map(|m| m.file_type().is_symlink()).unwrap_or(false) && !a.exists()
     })

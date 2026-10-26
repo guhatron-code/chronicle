@@ -115,6 +115,7 @@ impl Fence {
 /// Canonical, repo-relative; `None` for anything relative, climbing, or outside.
 fn repo_rel(repo: &Path, abs: &Path) -> Option<String> {
     if !abs.is_absolute() || abs.components().any(|c| matches!(c, std::path::Component::ParentDir)) { return None; }
+    if crate::acp::has_dangling_link(abs) { return None; }
     let canon = crate::acp::canonical_deep(abs)?;
     let croot = repo.canonicalize().ok()?;
     let rel = canon.strip_prefix(&croot).ok()?;
@@ -162,7 +163,7 @@ fn segments(cmd: &str) -> Vec<String> {
         if q == Some('"') { if c == '"' { q = None; } cur.push(c); i += 1; continue; }
         if c == '\'' || c == '"' { q = Some(c); cur.push(c); i += 1; continue; }
         let redirect = c == '&' && (i > 0 && cs[i - 1] == '>' || cs.get(i + 1) == Some(&'>'));
-        if !redirect && matches!(c, ';' | '\n' | '|' | '&') {
+        if !redirect && matches!(c, ';' | '\n' | '|' | '&' | '(' | ')') {
             if !cur.trim().is_empty() { out.push(cur.trim().to_string()); }
             cur.clear();
             if (c == '&' || c == '|') && cs.get(i + 1) == Some(&c) { i += 1; }
@@ -218,22 +219,57 @@ fn first_verb<'a>(xs: &[&'a str]) -> Option<&'a str> {
     xs.iter().find(|a| !a.starts_with('-') && !a.starts_with('+')).copied()
 }
 
+/// Options that take a value, per wrapper command; the value is skipped with the option.
+fn wrapper_opts(wrapper: &str) -> &'static [&'static str] {
+    match wrapper {
+        "sudo" => &["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t"],
+        "env" => &["-u", "-C", "-S", "--unset", "--chdir"],
+        "timeout" => &["-s", "-k", "--signal", "--kill-after"],
+        "nice" => &["-n", "--adjustment"],
+        "stdbuf" => &["-i", "-o", "-e"],
+        "xargs" => &["-n", "-I", "-L", "-P", "-s", "-d", "-E", "-a"],
+        _ => &[],
+    }
+}
+
 fn classify_segment(seg: &str) -> Shell {
     let words = split_words(seg);
     let mut w: &[String] = &words;
+    let mut env_git = false;
     loop {
         match w.first().map(|s| s.as_str()) {
-            Some(x) if is_assignment(x) => w = &w[1..],
-            Some("sudo" | "env" | "command" | "exec" | "nohup" | "time" | "xargs" | "builtin") => {
+            // grouping and control-flow words in front of a command
+            Some("{" | "!" | "then" | "do" | "else" | "elif" | "while" | "until" | "if") => w = &w[1..],
+            Some(x) if x.starts_with('(') && x.len() > 1 => {
+                let mut v: Vec<String> = w.to_vec();
+                v[0] = x.trim_start_matches('(').to_string();
+                return classify_segment(&v.join(" "));
+            }
+            Some(x) if is_assignment(x) => {
+                if x.starts_with("GIT_") { env_git = true; }
+                w = &w[1..]
+            }
+            Some(x @ ("sudo" | "env" | "command" | "exec" | "nohup" | "time" | "xargs" | "builtin" | "timeout" | "nice" | "stdbuf")) => {
+                let takes = wrapper_opts(x);
                 w = &w[1..];
-                while w.first().map(|s| s.starts_with('-') || is_assignment(s)).unwrap_or(false) { w = &w[1..]; }
+                loop {
+                    match w.first().map(|s| s.as_str()) {
+                        Some(o) if takes.contains(&o) => w = &w[w.len().min(2)..],
+                        Some(o) if o.starts_with('-') => w = &w[1..],
+                        Some(o) if is_assignment(o) => { if o.starts_with("GIT_") { env_git = true; } w = &w[1..] }
+                        _ => break,
+                    }
+                }
+                if x == "timeout" && !w.is_empty() { w = &w[1..]; } // the duration
             }
             _ => break,
         }
     }
+    let worst = |s: Shell| if env_git && s == Shell::ReadOnlyGit { Shell::GitWrite } else { s };
     let Some(first) = w.first() else { return Shell::Other };
     let prog = first.rsplit('/').next().unwrap_or(first).to_string();
     let rest: Vec<&str> = w[1..].iter().map(|s| s.as_str()).collect();
+    if prog == "eval" { return worst(classify(&rest.join(" "))); }
     if matches!(prog.as_str(), "bash" | "sh" | "zsh" | "dash") {
         if let Some(i) = rest.iter().position(|a| matches!(*a, "-c" | "-lc" | "-ic")) {
             if let Some(script) = rest.get(i + 1) { return classify(script); }
@@ -243,7 +279,7 @@ fn classify_segment(seg: &str) -> Shell {
     }
     match prog.as_str() {
         "release.sh" => Shell::Publish,
-        "git" => git_verb(&rest),
+        "git" => worst(git_verb(&rest)),
         "gh" if first_verb(&rest) == Some("release") => Shell::Publish,
         "npm" | "pnpm" if first_verb(&rest) == Some("publish") => Shell::Publish,
         "yarn" if rest.contains(&"publish") => Shell::Publish,
@@ -256,12 +292,20 @@ fn git_verb(args: &[&str]) -> Shell {
     let mut i = 0;
     while i < args.len() {
         let a = args[i];
-        if matches!(a, "-C" | "-c" | "--git-dir" | "--work-tree" | "--namespace") { i += 2; continue; }
+        // options that make a read verb run something else, or point git elsewhere
+        if matches!(a, "-c" | "--config-env" | "--exec-path" | "--git-dir" | "--work-tree" | "--namespace" | "--super-prefix")
+            || a.starts_with("-c") && a.len() > 2 && !a.starts_with("--")
+            || ["--config-env=", "--exec-path=", "--git-dir=", "--work-tree=", "--namespace="].iter().any(|p| a.starts_with(p))
+        { return Shell::GitWrite; }
+        if a == "-C" { i += 2; continue; }
         if a.starts_with('-') { i += 1; continue; }
         break;
     }
     let Some(verb) = args.get(i) else { return Shell::ReadOnlyGit };
     let tail: Vec<&str> = args[i + 1..].iter().copied().filter(|a| !a.starts_with("2>") && *a != "2>&1").collect();
+    if tail.iter().any(|a| matches!(*a, "--ext-diff" | "--output" | "-O" | "--textconv") || a.starts_with("--output=") || a.starts_with("-O")) {
+        return if matches!(*verb, "push" | "tag") { Shell::Publish } else { Shell::GitWrite };
+    }
     match *verb {
         "push" | "tag" => Shell::Publish,
         "status" | "diff" | "log" | "show" | "blame" | "ls-files" | "grep" | "rev-parse" => Shell::ReadOnlyGit,
@@ -401,5 +445,36 @@ mod tests {
         assert!(matches!(f.verdict(&w(root.join("home/frames/a.html"))), Verdict::Allow { .. }));
         assert!(matches!(f.verdict(&w(r.join("src/escape.ts"))), Verdict::Refuse { .. }));
         assert_eq!(f.verdict(&ask("Bash", "execute", json!({ "command": "ls" }))), Verdict::NotMine, "the design lane's other asks keep their own handling");
+    }
+
+    #[test]
+    fn publish_does_not_hide_behind_shell_constructs() {
+        for c in ["(git push)", "{ git push; }", "! git push", "if true; then git push; fi", "for x in a; do git push; done",
+                  "eval \"git push\"", "timeout 5 git push", "nice git push", "nice -n 5 git push", "env -u X git push",
+                  "sudo -u root git push", "stdbuf -o0 git push", "xargs -n1 git push", "nohup git tag v1", "while true; do npm publish; done"] {
+            assert_eq!(classify(c), Shell::Publish, "{c}");
+        }
+    }
+
+    #[test]
+    fn a_read_verb_cannot_be_made_to_run_something_else() {
+        for c in ["git -c alias.status='!git push' status", "git -c core.pager='rm -rf x' log", "git diff --ext-diff",
+                  "git log --output=x", "git diff -O orders", "GIT_EXTERNAL_DIFF=evil git diff", "env GIT_PAGER=evil git log",
+                  "git --exec-path=/tmp/x status", "git --config-env=a=B status", "git --git-dir=/tmp/x log"] {
+            assert_eq!(classify(c), Shell::GitWrite, "{c}");
+        }
+    }
+
+    #[test]
+    fn a_dangling_link_is_refused_wherever_it_points() {
+        let r = repo("dangling");
+        std::os::unix::fs::symlink("../index.css", r.join("src/lib/inside.css")).unwrap();
+        std::os::unix::fs::symlink(r.join("fixes/new.md"), r.join("src/lib/forbidden.md")).unwrap();
+        std::os::unix::fs::symlink(std::env::temp_dir().join("chronicle-nowhere-xyz"), r.join("src/lib/outside.txt")).unwrap();
+        let f = lane_fence(&r);
+        for n in ["inside.css", "forbidden.md", "outside.txt"] {
+            let v = f.verdict(&ask("Write", "edit", json!({ "file_path": r.join("src/lib").join(n).to_string_lossy() })));
+            assert!(matches!(v, Verdict::Refuse { .. }), "{n}: {v:?}");
+        }
     }
 }
