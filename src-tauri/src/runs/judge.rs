@@ -40,6 +40,11 @@ pub fn band(confidence: f32, self_reported: bool) -> Band {
     if b == Band::Act { Band::SecondOpinion } else { Band::Strict }
 }
 
+/// Ruling R30: when the decisions provider IS the agent, its answer is final —
+/// there is no one else to ask. Only the strict floor stays: at or above 0.45 it
+/// acts on the choice, below it takes the stricter option. No self-reported shift.
+pub fn agent_band(confidence: f32) -> Band { if confidence >= SECOND { Band::Act } else { Band::Strict } }
+
 pub struct ShellAsk<'a> { pub lane: &'a str, pub command: &'a str, pub owns: &'a [String], pub item: &'a str, pub last_calls: &'a [String] }
 
 #[derive(Debug, PartialEq)]
@@ -75,6 +80,11 @@ impl Judge {
     pub fn decisions_ride_agent(&self) -> bool { self.decisions.rides_agent() }
     /// What the judge's calls cost so far, both sides (the review side is shared with the reviewer).
     pub fn spent_usd(&self) -> f64 { self.decisions.spent_usd() + self.second.spent_usd() }
+    /// How a decision's confidence reads: R30's two bands when the agent is the
+    /// decisions provider (never a second opinion), REFLEX's three otherwise.
+    fn read(&self, confidence: f32, self_reported: bool) -> Band {
+        if self.decisions.rides_agent() { agent_band(confidence) } else { band(confidence, self_reported) }
+    }
 
     /// Every pending fallback notice, the decisions role's first, then the second-opinion
     /// (review) role's. The review notice is shared with `review::review`: whichever side
@@ -112,12 +122,15 @@ impl Judge {
         let (mut choice, probabilities, confidence) = choice_of(&d, "action").unwrap_or(("refuse".into(), BTreeMap::new(), 0.0));
         let writes = noul_of(&d, "writes_outside").unwrap_or(1.0);
         if choice == "allow" && writes >= 0.5 { choice = "confirm".into(); }
-        let b = band(confidence, d.self_reported);
+        let b = self.read(confidence, d.self_reported);
         let first = DecisionLog { model: d.model.clone(), choice: choice.clone(), probabilities, confidence, band: b.as_str().into(), self_reported: d.self_reported, ..base.clone() };
         let (allow, reason, extra) = match (b, choice.as_str()) {
             (Band::Strict, _) => (false, "it wasn’t clear the command stays inside the lane’s files".to_string(), vec![]),
             (Band::Act, "allow") => (true, if writes < 0.2 { "it reads only".to_string() } else { "it stays inside the lane’s files".to_string() }, vec![]),
             (Band::Act, "refuse") => (false, "it could change files the lane doesn’t own".to_string(), vec![]),
+            // R30: the agent's "confirm" (or an allow that writes outside) has no one
+            // else to ask, so it takes the stricter option
+            (Band::Act, _) if self.decisions.rides_agent() => (false, "it wasn’t clear the command stays inside the lane’s files".to_string(), vec![]),
             _ => self.second_shell(&state, &base),
         };
         let mut out = vec![DecisionLog { action: if allow { "allow".into() } else { "refuse".into() }, reason: reason.clone(), ..first }];
@@ -155,7 +168,7 @@ impl Judge {
                 self_reported: d.self_reported, reason: "the decision had no answer".into(), ..base }]);
         };
         let conf = yes.max(1.0 - yes);
-        let b = band(conf, d.self_reported);
+        let b = self.read(conf, d.self_reported);
         let first = DecisionLog { model: d.model.clone(), choice: if yes >= 0.5 { "impossible".into() } else { "possible".into() },
             probabilities: BTreeMap::from([("yes".to_string(), yes), ("no".to_string(), 1.0 - yes)]), confidence: conf, band: b.as_str().into(),
             self_reported: d.self_reported, ..base.clone() };
@@ -196,7 +209,7 @@ impl Judge {
         let (choice, probabilities, confidence) = choice_of(&d, "lane").unwrap_or(("none".into(), BTreeMap::new(), 0.0));
         let valid = |c: &str| c != "none" && lanes.iter().any(|l| l.id == c);
         let action_of = |p: &Option<String>| p.as_ref().map(|p| format!("reopen {p}")).unwrap_or_else(|| "none".into());
-        let b = band(confidence, d.self_reported);
+        let b = self.read(confidence, d.self_reported);
         let mut extra = vec![];
         let pick = match b {
             Band::Act => Some(choice.clone()).filter(|c| valid(c)),
@@ -230,7 +243,7 @@ impl Judge {
         let value = value.clamp(1, 6) as u32;
         let fewer = value.saturating_sub(1).max(1);
         let aim = |n: u32| format!("aim for {n} lanes");
-        let b = band(confidence, d.self_reported);
+        let b = self.read(confidence, d.self_reported);
         let mut extra = vec![];
         let n = match b {
             Band::Act => value,
@@ -493,6 +506,96 @@ mod tests {
         assert_eq!(j.block("a", "T-1", "why", "", &o).0, BlockOutcome::Park { reading: None }, "both unreachable: park");
         assert_eq!(j.triage("out", &[]).0, None, "both unreachable: none");
         assert_eq!(j.sizing("table", 3).0, 1, "both unreachable: one lane");
+    }
+
+    /// A judge whose decisions side IS the agent (no decisions key), as `for_project` builds it.
+    fn agent_judge(decisions: &Arc<FakeOracle>, second_: &Arc<FakeOracle>) -> Judge {
+        Judge::new(Fallback::agent(decisions.clone()), second(second_, &FakeOracle::named("agent")))
+    }
+
+    #[test]
+    fn r30_an_agent_decision_at_point_6_acts_without_a_second_opinion() {
+        let p = FakeOracle::named("agent/claude-acp");
+        p.decide_with(decision(vec![choice("action", "allow", &[("allow", 0.6)], 0.6), noul("writes_outside", 0.05)], "agent/claude-acp", true));
+        let s = FakeOracle::named("review");
+        s.complete_with(json!({ "choice": "refuse", "reason": "no" }));
+        let j = agent_judge(&p, &s);
+        let (o, l) = (owns(), vec![]);
+        let (allow, reason, logs) = j.shell(&shell_ask(&o, &l));
+        assert!(allow, "the agent's answer is final");
+        assert_eq!(reason, "it reads only");
+        assert_eq!(logs.len(), 1, "one row, no second opinion");
+        assert_eq!((logs[0].band.as_str(), logs[0].action.as_str()), ("act", "allow"));
+        assert_eq!(s.complete_calls.load(Ordering::SeqCst) + p.complete_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn r30_an_agent_decision_below_point_45_takes_the_stricter_option() {
+        let p = FakeOracle::named("agent/claude-acp");
+        p.decide_with(decision(vec![choice("action", "allow", &[("allow", 0.3)], 0.3), noul("writes_outside", 0.05)], "agent/claude-acp", true));
+        let s = FakeOracle::named("review");
+        let j = agent_judge(&p, &s);
+        let (o, l) = (owns(), vec![]);
+        let (allow, _, logs) = j.shell(&shell_ask(&o, &l));
+        assert!(!allow);
+        assert_eq!(logs.len(), 1);
+        assert_eq!((logs[0].band.as_str(), logs[0].action.as_str()), ("strict", "refuse"));
+        assert_eq!(s.complete_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn r30_an_agent_confirm_or_an_allow_that_writes_outside_refuses_without_asking() {
+        let p = FakeOracle::named("agent/claude-acp");
+        p.decide_with(decision(vec![choice("action", "confirm", &[("confirm", 0.8)], 0.8), noul("writes_outside", 0.1)], "agent/claude-acp", true));
+        p.decide_with(decision(vec![choice("action", "allow", &[("allow", 0.9)], 0.9), noul("writes_outside", 0.8)], "agent/claude-acp", true));
+        let s = FakeOracle::named("review");
+        let j = agent_judge(&p, &s);
+        let (o, l) = (owns(), vec![]);
+        for _ in 0..2 {
+            let (allow, _, logs) = j.shell(&shell_ask(&o, &l));
+            assert!(!allow);
+            assert_eq!(logs.len(), 1);
+            assert_eq!(logs[0].action, "refuse");
+        }
+        assert_eq!(s.complete_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn r30_agent_block_triage_and_sizing_never_ask_a_second_opinion() {
+        let p = FakeOracle::named("agent/claude-acp");
+        p.decide_with(decision(vec![noul("impossible_as_written", 0.3)], "agent/claude-acp", true));
+        p.decide_with(decision(vec![choice("lane", "a", &[("a", 0.6)], 0.6)], "agent/claude-acp", true));
+        p.decide_with(decision(vec![score("lanes", 5, 0.6)], "agent/claude-acp", true));
+        p.decide_with(decision(vec![score("lanes", 5, 0.3)], "agent/claude-acp", true));
+        let s = FakeOracle::named("review");
+        let j = agent_judge(&p, &s);
+        let (outcome, logs) = j.block("d", "T-1", "why", "", &owns());
+        assert!(matches!(outcome, BlockOutcome::Retry { .. }), "0.7 sure it can be done: retry");
+        assert_eq!((logs.len(), logs[0].band.as_str()), (1, "act"));
+        let lanes = vec![TriageLane { id: "a".into(), title: "A".into(), items: vec![], files: vec![] }];
+        let (pick, logs) = j.triage("out", &lanes);
+        assert_eq!(pick.as_deref(), Some("a"));
+        assert_eq!((logs.len(), logs[0].band.as_str()), (1, "act"));
+        let (n, logs) = j.sizing("table", 6);
+        assert_eq!((n, logs.len(), logs[0].band.as_str()), (5, 1, "act"));
+        let (n, logs) = j.sizing("table", 6);
+        assert_eq!((n, logs[0].band.as_str()), (4, "strict"));
+        assert_eq!(s.complete_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn r30_a_provider_judge_keeps_its_second_opinion() {
+        let p = FakeOracle::named("typesafe/jev-1.13.0");
+        p.decide_with(decision(vec![choice("action", "allow", &[("allow", 0.6)], 0.6), noul("writes_outside", 0.05)], "typesafe/jev-1.13.0", false));
+        let s = FakeOracle::named("review");
+        s.complete_with(json!({ "choice": "allow", "reason": "it only runs the tests" }));
+        let j = judge(&p, &s);
+        let (o, l) = (owns(), vec![]);
+        let (allow, _, logs) = j.shell(&shell_ask(&o, &l));
+        assert!(allow);
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].band, "second-opinion");
+        assert_eq!(s.complete_calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
