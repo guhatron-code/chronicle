@@ -79,7 +79,7 @@ export function runWord(r: RunRecord): Word {
 }
 
 export const runTitle = (r: RunRecord, fallback = 0) => `Round ${r.round ?? r.n} · ${plural(itemCount(r, fallback), "item")}`;
-export const lanesSummary = (r: RunRecord) => `${r.lanes.filter((l) => l.state !== "waiting").length} of ${r.lanes.length} lanes`;
+export const lanesSummary = (r: RunRecord) => `${r.lanes.filter((l) => l.state !== "waiting").length} of ${plural(r.lanes.length, "lane")}`;
 export const fmtCost = (usd: number) => `$${usd.toFixed(2)}`;
 
 export function fmtElapsed(ms: number): string {
@@ -110,7 +110,10 @@ function needsFooter(r: RunRecord, rows: NeedsYou[]): string {
 /** The one sentence at the foot of the card: the most important thing happening. */
 export function runFooter(r: RunRecord): string {
   const round = r.round ?? r.n;
-  if (r.state === "done") return `Saved as round ${round}. ${plural(itemCount(r), "item")} done.`;
+  if (r.state === "done") {
+    const skipped = (r.lane_map?.items ?? []).filter((i) => r.skipped.includes(i.id)).length;
+    return `Saved as round ${round}. ${plural(itemCount(r) - skipped, "item")} done${skipped > 0 ? `, ${skipped} skipped` : ""}.`;
+  }
   if (r.state === "stopped") return "Stopped. Nothing was undone; each lane’s unsaved changes are listed in its thread."; // (new copy)
   // validation reasons, or the planner's last words when it never declared a lane map (new copy)
   if (r.state === "failed") return r.planner_error ? `The plan couldn’t be split into lanes: ${r.planner_error}` : "The plan couldn’t be split into lanes.";
@@ -141,6 +144,12 @@ export interface NeedsRow {
 }
 
 export function needsYouRows(r: RunRecord): NeedsRow[] {
+  // a run that is over takes no more actions: its rows stay as the record of what waited
+  if (runOver(r)) return needsYouRowsLive(r).map((row) => ({ ...row, actions: [] }));
+  return needsYouRowsLive(r);
+}
+
+function needsYouRowsLive(r: RunRecord): NeedsRow[] {
   return r.needs_you.map((x, index): NeedsRow => {
     const head = { index, kind: x.kind, lane: x.lane, item: x.item, reading: null };
     switch (x.kind) {
@@ -176,11 +185,11 @@ export function planRowText(r: RunRecord | null, n: number, total: number): stri
 
 export function runSubline(r: RunRecord, done: number, total: number): string {
   const tail = `${done} of ${total} done · ${fmtCost(r.cost.usd)}`;
-  if (r.state === "needs-you") return `needs you · ${r.lanes.filter((l) => l.state === "closed" && !laneNeedsYou(r, l.id)).length} lanes saved · ${tail}`;
+  if (r.state === "needs-you") return `needs you · ${plural(r.lanes.filter((l) => l.state === "closed" && !laneNeedsYou(r, l.id)).length, "lane")} saved · ${tail}`;
   if (r.state === "planning") return `${plural(total, "note")} · planning the lanes…`; // (new copy)
   if (r.state === "gating" || r.state === "closing") return `final check · ${tail}`;
   if (runOver(r) || r.state === "interrupted") return `${runWord(r).word} · ${tail}`;
-  return `${r.lanes.filter(laneBusy).length} lanes working · ${tail}`;
+  return `${plural(r.lanes.filter(laneBusy).length, "lane")} working · ${tail}`;
 }
 
 /** A note row's chip on the notes card while its round runs (board R1/R4). */

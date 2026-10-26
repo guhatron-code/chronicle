@@ -219,3 +219,37 @@ describe("the lane view and the plan row's own words (Task 14 selectors)", () =>
     expect(M.guardLine({ allowed: false, path: "x", reason: "outside the folder" })).toBeNull();
   });
 });
+
+describe("counts read in the singular and the plural (final review)", () => {
+  const one = () => {
+    const r = clone();
+    r.lanes = [lane(r, "a")];
+    r.lane_map!.lanes = r.lane_map!.lanes.filter((l) => l.id === "a");
+    return r;
+  };
+  it("one lane is one lane", () => {
+    const r = one();
+    expect(M.lanesSummary(r)).toBe("1 of 1 lane");
+    expect(M.runSubline(r, 0, 2)).toBe("1 lane working · 0 of 2 done · $1.84");
+    r.state = "needs-you";
+    lane(r, "a").state = "closed";
+    expect(M.runSubline(r, 1, 2)).toBe("needs you · 1 lane saved · 1 of 2 done · $1.84");
+  });
+  it("a done round counts only the items done, and says how many were skipped", () => {
+    const r = clone();
+    r.state = "done";
+    r.skipped = ["T-141", "T-142"];
+    expect(M.runFooter(r)).toBe("Saved as round 10. 5 items done, 2 skipped.");
+    r.skipped = r.lane_map!.items.slice(1).map((i) => i.id);
+    expect(M.runFooter(r)).toBe("Saved as round 10. 1 item done, 6 skipped.");
+  });
+  it("a run that is over offers no actions on its rows", () => {
+    const r = clone();
+    r.needs_you = [{ kind: "exhausted", lane: "b", item: null, reason: "Lane B didn’t finish after three tries.", reading: null },
+      { kind: "parked", lane: "d", item: "T-147", reason: "x", reading: null }];
+    r.state = "needs-you";
+    expect(M.needsYouRows(r)[0].actions.map((a) => a.label)).toEqual(["Try the lane again", "Open the lane"]);
+    r.state = "stopped";
+    expect(M.needsYouRows(r).map((x) => x.actions)).toEqual([[], []]);
+  });
+});
