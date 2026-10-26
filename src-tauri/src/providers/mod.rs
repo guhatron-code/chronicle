@@ -92,6 +92,9 @@ pub trait Calls: Send + Sync {
     fn decide(&self, req: &DecisionRequest) -> Result<Decision, CallError>;
     /// What answered, for the run record: "<provider>/<model>".
     fn model(&self) -> String;
+    /// What this caller's calls have cost so far, where the answering side reports it (the agent's
+    /// own sessions do; HTTP providers are billed to the user's key, so they say nothing).
+    fn spent_usd(&self) -> f64 { 0.0 }
 }
 
 const DECIDE_SYSTEM: &str = "You make small, bounded decisions for a coding tool. For each named criterion give your answer, a probability for every option, and how confident you are, as numbers from 0 to 1. Answer with JSON only.";

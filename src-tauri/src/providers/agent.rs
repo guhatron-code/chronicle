@@ -29,12 +29,14 @@ pub struct AgentCalls {
     pub project_dir: PathBuf,
     pub spawn: Spawn,
     pub timeout: Duration,
+    /// what this caller's sessions reported they cost, summed
+    pub spent: Arc<Mutex<f64>>,
 }
 
 impl AgentCalls {
     /// The project's agent, launched from the bundled pin like the pane's own session.
     pub fn for_project(profile: &'static AgentProfile, repo: PathBuf, project_dir: PathBuf) -> AgentCalls {
-        AgentCalls { profile, repo, project_dir, spawn: spawn_from(profile, crate::setup::agent_launch), timeout: Duration::from_secs(300) }
+        AgentCalls { profile, repo, project_dir, spawn: spawn_from(profile, crate::setup::agent_launch), timeout: Duration::from_secs(300), spent: Default::default() }
     }
 
     /// One reviewer turn: the prompt out, the assistant's text back.
@@ -49,13 +51,16 @@ impl AgentCalls {
         let state = AcpState::new();
         let canon = self.repo.canonicalize().unwrap_or_else(|_| self.repo.clone());
         let key = Lane::Reviewer.key(&canon.to_string_lossy());
-        let result = self.run(&state, emit, &rx, key.clone(), text, cmd);
+        let mut cost = 0.0;
+        let result = self.run(&state, emit, &rx, key.clone(), text, cmd, &mut cost);
+        // the session's own figure, whatever became of the answer: it was spent either way
+        if let Ok(mut g) = self.spent.lock() { *g += cost; }
         if let Some(s) = state.get(&key) { s.stop(false); }
         state.drain();
         result
     }
 
-    fn run(&self, state: &AcpState, emit: Emit, rx: &mpsc::Receiver<Value>, key: String, text: String, cmd: std::process::Command) -> Result<String, CallError> {
+    fn run(&self, state: &AcpState, emit: Emit, rx: &mpsc::Receiver<Value>, key: String, text: String, cmd: std::process::Command, cost: &mut f64) -> Result<String, CallError> {
         if let Some(why) = acp::reviewer_refusal(self.profile) { return Err(CallError::Failed(why)); }
         let deadline = Instant::now() + self.timeout;
         let name = self.profile.name;
@@ -89,6 +94,10 @@ impl AgentCalls {
                     Some("ended") => return Err(CallError::Failed(format!("{name} ended before it answered"))),
                     _ => {}
                 },
+                // the session's cost so far (cumulative, as a lane's is read): the last one is the turn's
+                Some("session/update") if params.pointer("/update/sessionUpdate").and_then(Value::as_str) == Some("usage_update") => {
+                    if let Some(usd) = params.pointer("/update/cost/amount").and_then(Value::as_f64) { *cost = usd; }
+                }
                 Some("session/update") if params.pointer("/update/sessionUpdate").and_then(Value::as_str) == Some("agent_message_chunk") => {
                     if let Some(t) = params.pointer("/update/content/text").and_then(Value::as_str) { reply.push_str(t); }
                 }
@@ -123,6 +132,7 @@ impl Calls for AgentCalls {
     }
     fn decide(&self, req: &DecisionRequest) -> Result<Decision, CallError> { emulate_decide(self, req) }
     fn model(&self) -> String { format!("agent/{}", self.profile.id) }
+    fn spent_usd(&self) -> f64 { self.spent.lock().map(|g| *g).unwrap_or(0.0) }
 }
 
 #[cfg(test)]
@@ -178,6 +188,9 @@ for line in sys.stdin:
             send({"jsonrpc":"2.0","id":pid,"result":{"stopReason":"end_turn"}})
     elif meth == "session/prompt":
         send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"r1","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":reply}}}})
+        if mode == "costed":
+            for amount in (0.03, 0.07):
+                send({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"r1","update":{"sessionUpdate":"usage_update","used":1,"size":2,"cost":{"amount":amount,"currency":"USD"}}}})
         send({"jsonrpc":"2.0","id":m["id"],"result":{"stopReason":"max_tokens" if mode == "cut" else "end_turn"}})
 "#;
 
@@ -200,6 +213,7 @@ for line in sys.stdin:
             project_dir: dir,
             spawn: std::sync::Arc::new(move || { let mut c = std::process::Command::new(&py); c.arg(&script).arg(&reply).arg(&mode).arg(&pdir); Ok(c) }),
             timeout: std::time::Duration::from_secs(20),
+            spent: Default::default(),
         })
     }
 
@@ -210,6 +224,20 @@ for line in sys.stdin:
         let v = a.complete_json(&CompleteRequest { system: "You review diffs.".into(), prompt: "diff --git …".into(), schema, max_tokens: 2000 }).unwrap();
         assert_eq!(v["verdict"], "pass");
         assert_eq!(a.model(), "agent/claude-acp");
+    }
+
+    #[test]
+    fn what_the_agents_own_session_reports_it_cost_is_counted() {
+        let Some(a) = mock("costed", "{\"ok\":true}", "costed") else { return };
+        let req = CompleteRequest { system: String::new(), prompt: "x".into(), schema: json!({ "type": "object" }), max_tokens: 100 };
+        assert_eq!(a.spent_usd(), 0.0);
+        a.complete_json(&req).unwrap();
+        assert!((a.spent_usd() - 0.07).abs() < 1e-9, "the session's last (cumulative) figure: {}", a.spent_usd());
+        a.complete_json(&req).unwrap();
+        assert!((a.spent_usd() - 0.14).abs() < 1e-9, "each call's session adds its own: {}", a.spent_usd());
+        let Some(b) = mock("uncosted", "{\"ok\":true}", "ok") else { return };
+        b.complete_json(&req).unwrap();
+        assert_eq!(b.spent_usd(), 0.0, "no figure, no cost");
     }
 
     #[test]

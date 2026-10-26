@@ -156,8 +156,8 @@ pub struct RunsScreen {
     pub record: Arc<dyn Fn(&Path, NeedsYou) -> bool + Send + Sync>,
     /// the live run's state and round, if a run is live on the project
     pub live: Arc<dyn Fn(&Path) -> Option<(RunState, u64)> + Send + Sync>,
-    /// adds the judge's rows and notices to the live run; false when no run is live
-    pub log: Arc<dyn Fn(&Path, Vec<DecisionLog>, Vec<String>) -> bool + Send + Sync>,
+    /// adds the judge's rows, notices and cost to the live run; false when no run is live
+    pub log: Arc<dyn Fn(&Path, Vec<DecisionLog>, Vec<String>, f64) -> bool + Send + Sync>,
     /// the judge for the project, built the first time a command needs it
     pub make_judge: Arc<dyn Fn(&Path) -> Judge + Send + Sync>,
     pub judge: Arc<OnceLock<Judge>>,
@@ -187,7 +187,9 @@ impl RunsScreen {
         RunsScreen {
             dir: dir.to_path_buf(), live: Arc::new(live_run),
             record: Arc::new(move |dir: &Path, row: NeedsYou| on_live_run(&a1, dir, |r| r.needs_you.push(row))),
-            log: Arc::new(move |dir: &Path, logs: Vec<DecisionLog>, notices: Vec<String>| on_live_run(&a2, dir, |r| { r.decisions.extend(logs); r.notices.extend(notices); })),
+            log: Arc::new(move |dir: &Path, logs: Vec<DecisionLog>, notices: Vec<String>, usd: f64| on_live_run(&a2, dir, |r| {
+                r.decisions.extend(logs); r.notices.extend(notices); r.judge_usd += usd; r.cost = r.total_cost();
+            })),
             make_judge: Arc::new(|dir: &Path| { let (decisions, review) = super::oracle::for_project(dir); Judge::new(decisions, review) }),
             judge: Default::default(),
         }
@@ -252,9 +254,11 @@ impl AskScreen for RunsScreen {
         Some(Box::new(move || {
             let judge = judge.get_or_init(|| make(&dir));
             let item = format!("planning round {round}");
+            let before = judge.spent_usd();
             let (allow, reason, logs) = judge.shell(&ShellAsk { lane: "planner", command: &cmd, owns: &[], item: &item, last_calls: &[] });
+            let usd = (judge.spent_usd() - before).max(0.0);
             let decision = logs.first().map(|l| json!({ "choice": l.choice, "confidence": l.confidence, "model": l.model, "band": l.band, "probabilities": l.probabilities }));
-            log(&dir, logs, judge.take_notice());
+            log(&dir, logs, judge.take_notice(), usd);
             PolicyAnswer { allow, path: cmd, reason, decision }
         }))
     }
@@ -289,7 +293,7 @@ mod tests {
         let screen = RunsScreen { dir: PathBuf::from("/p"), record: Arc::new(move |_d: &Path, row: NeedsYou| {
             if !l2.load(std::sync::atomic::Ordering::SeqCst) { return false; }
             sink.lock().unwrap().push(row); true
-        }), live: Arc::new(|_d: &Path| None), log: Arc::new(|_d: &Path, _l: Vec<DecisionLog>, _n: Vec<String>| false),
+        }), live: Arc::new(|_d: &Path| None), log: Arc::new(|_d: &Path, _l: Vec<DecisionLog>, _n: Vec<String>, _u: f64| false),
             make_judge: Arc::new(|_d: &Path| panic!("no judge outside a run")), judge: Default::default() };
         let ask = |c: &str| json!({ "toolCall": { "toolCallId": "t", "name": "Bash", "rawInput": { "command": c } } });
         let a = screen.screen(&ask("git push origin main")).expect("refused during a round");
@@ -303,7 +307,7 @@ mod tests {
 
     fn screen_with(dir: &Path, live: Option<(RunState, u64)>) -> RunsScreen {
         RunsScreen { dir: dir.to_path_buf(), record: Arc::new(|_d: &Path, _row: NeedsYou| true), live: Arc::new(move |_d: &Path| live),
-            log: Arc::new(|_d: &Path, _logs: Vec<DecisionLog>, _notices: Vec<String>| true),
+            log: Arc::new(|_d: &Path, _logs: Vec<DecisionLog>, _notices: Vec<String>, _u: f64| true),
             make_judge: Arc::new(|_d: &Path| panic!("no judge in this test")), judge: Default::default() }
     }
 
@@ -325,7 +329,7 @@ mod tests {
             dir: PathBuf::from("/p"),
             record: Arc::new(move |_d: &Path, row: NeedsYou| { if live.is_none() { return false; } r2.lock().unwrap().push(row); true }),
             live: Arc::new(move |_d: &Path| live),
-            log: Arc::new(move |_d: &Path, l: Vec<DecisionLog>, _n: Vec<String>| { if live.is_none() { return false; } l2.lock().unwrap().extend(l); true }),
+            log: Arc::new(move |_d: &Path, l: Vec<DecisionLog>, _n: Vec<String>, _u: f64| { if live.is_none() { return false; } l2.lock().unwrap().extend(l); true }),
             make_judge: Arc::new(move |_d: &Path| { b2.fetch_add(1, Ordering::SeqCst); Judge::new(fallback(&d2, &FakeOracle::named("agent")), second(&review, &FakeOracle::named("agent"))) }),
             judge: Default::default(),
         };

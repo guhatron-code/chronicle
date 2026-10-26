@@ -103,6 +103,8 @@ pub struct RunCtl {
     recent: Mutex<HashMap<String, Vec<String>>>,
     /// per lane: how many of its asks Chronicle is still answering (a judged command, a block, an ask)
     deciding: Mutex<HashMap<String, usize>>,
+    /// what the judge cost before this controller (planning, an earlier controller)
+    judge_base: f64,
 }
 
 /// While held, the lane is waiting on Chronicle, not silent: the scheduler doesn't stall it.
@@ -119,13 +121,14 @@ impl Drop for Deciding {
 impl RunCtl {
     pub fn new(p: CtlParts) -> (Arc<RunCtl>, Receiver<Ev>) {
         let (tx, rx) = std::sync::mpsc::channel();
+        let judge_base = p.rec.judge_usd;
         let ctl = Arc::new(RunCtl {
             n: p.rec.n, dir: p.dir, repo: p.repo, scratch: p.scratch, checks: p.checks, max_lanes: p.max_lanes,
             judge: p.judge, reviewer: p.reviewer, tx, host: p.host, publish: p.publish, rec: Mutex::new(p.rec),
             gate_lock: Mutex::new(()), main_tree: AtomicBool::new(false), stopping: AtomicBool::new(false), skew_ms: AtomicU64::new(0),
             last_wire: Default::default(), tool_writes: Default::default(), snapshots: Default::default(), active: Default::default(),
             pending: Default::default(), cost_base: Default::default(), nudges: Default::default(), recent: Default::default(),
-            deciding: Default::default(),
+            deciding: Default::default(), judge_base,
         });
         (ctl, rx)
     }
@@ -148,6 +151,7 @@ impl RunCtl {
         let mut g = lk(&self.rec);
         let before = g.clone();
         f(&mut g);
+        g.judge_usd = self.judge_base + self.judge.spent_usd();
         g.cost = g.total_cost();
         if let Err(e) = save(&self.dir, &mut g) { eprintln!("run {}: couldn't save its record: {e}", self.n); }
         let after = g.clone();
@@ -1322,6 +1326,21 @@ mod tests {
         assert_eq!(a.state, LaneState::Closed);
         assert_eq!(a.fixes, 0, "a nudge isn't a fix pass");
         assert!(a.gates.len() >= 2 && a.gates.last().unwrap().passed(), "the nudged turn was checked too");
+    }
+
+    #[test]
+    fn the_reviews_agent_cost_is_part_of_the_runs_cost() {
+        let r = repo("judgecost", 32);
+        let host = FakeHost::new(Box::new(|lane, _| vec![(format!("{lane}/work.txt"), lane.to_string(), true)]));
+        let mut rec = two_lanes(32, &[], &[]);
+        rec.judge_usd = 0.5; // what planning's decisions cost, before the controller
+        let mut k = kit(&r, rec, vec![], host);
+        *k.review.per_call_usd.lock().unwrap() = 0.25;
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        let done = wait_until(&k.ctl, 60, |x| x.state.terminal());
+        assert_eq!(done.state, RunState::Done);
+        assert!((done.judge_usd - 1.0).abs() < 1e-9, "planning's 0.50 and two reviews at 0.25: {}", done.judge_usd);
+        assert!((done.cost.usd - 1.0).abs() < 1e-9, "the card's figure carries it: {}", done.cost.usd);
     }
 
     #[test]

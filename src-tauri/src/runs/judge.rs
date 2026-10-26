@@ -71,6 +71,10 @@ pub struct Judge { decisions: Fallback, second: Arc<Fallback> }
 
 impl Judge {
     pub fn new(decisions: Fallback, second: Arc<Fallback>) -> Self { Judge { decisions, second } }
+    /// No decisions key: the user's agent is the judge (spec §6's notice).
+    pub fn decisions_ride_agent(&self) -> bool { self.decisions.rides_agent() }
+    /// What the judge's calls cost so far, both sides (the review side is shared with the reviewer).
+    pub fn spent_usd(&self) -> f64 { self.decisions.spent_usd() + self.second.spent_usd() }
 
     /// Every pending fallback notice, the decisions role's first, then the second-opinion
     /// (review) role's. The review notice is shared with `review::review`: whichever side

@@ -121,7 +121,13 @@ pub fn begin_on(p: &Project, source: &Source, judge: Option<&Judge>, agent: &cra
     // the lanes' reviews read each lane's whole diff from here (spec §3)
     rec.base_commit = super::gate::git(&p.repo, &["rev-parse", "HEAD"]).ok().filter(|h| !h.is_empty());
     rec.decisions.extend(logs);
-    if let Some(j) = judge { rec.notices.extend(j.take_notice()); }
+    if let Some(j) = judge {
+        // spec §6: with no decisions key the agent is the judge, and the card says so once
+        if j.decisions_ride_agent() { rec.notices.push(oracle::AGENT_DECISIONS_NOTICE.into()); }
+        rec.notices.extend(j.take_notice());
+        rec.judge_usd += j.spent_usd();
+    }
+    rec.cost = rec.total_cost();
     save(dir, &mut rec)?;
     let prompt = planner_prompt_for(p, &rec);
     Ok(json!({ "n": n, "total": total, "prompt": prompt }))
@@ -477,6 +483,41 @@ mod tests {
     fn one_lane(note: Option<&str>) -> LaneMap {
         LaneMap { items: vec![Item { id: "T-1".into(), title: "x".into(), note: note.map(String::from), rewrite: None }],
                   lanes: vec![LaneSpec { id: "a".into(), title: "A".into(), items: vec!["T-1".into()], owns: vec!["src/lib/**".into()], depends_on: vec![], checks: vec![], isolation: None }] }
+    }
+
+    #[test]
+    fn a_run_whose_decisions_ride_the_agent_says_so_once_on_its_card() {
+        use crate::runs::oracle::fake::{second, FakeOracle};
+        use crate::runs::oracle::Fallback;
+        let p = project("agent-notice");
+        let agent = FakeOracle::named("agent/claude-acp");
+        let on_agent = Judge::new(Fallback::agent(agent.clone()), second(&agent, &agent));
+        let out = begin_on(&p, &Source::Prompt { text: "do it".into() }, Some(&on_agent), crate::agents::claude()).unwrap();
+        let rec = load(&p.dir, out["n"].as_u64().unwrap()).unwrap().unwrap();
+        assert_eq!(rec.notices, vec![super::super::oracle::AGENT_DECISIONS_NOTICE.to_string()]);
+        assert_eq!(super::super::oracle::AGENT_DECISIONS_NOTICE, "Decisions ride your agent — add a decisions key in Setup for a cheaper, faster judge.");
+        // a decisions key in Setup: no notice
+        let q = project("key-notice");
+        let keyed = Judge::new(crate::runs::oracle::fake::fallback(&FakeOracle::named("anthropic/claude"), &agent), second(&agent, &agent));
+        let out = begin_on(&q, &Source::Prompt { text: "do it".into() }, Some(&keyed), crate::agents::claude()).unwrap();
+        assert!(load(&q.dir, out["n"].as_u64().unwrap()).unwrap().unwrap().notices.is_empty());
+    }
+
+    #[test]
+    fn the_sizing_decisions_cost_is_the_runs() {
+        use crate::runs::oracle::fake::{decision, score, second, FakeOracle};
+        use crate::runs::oracle::Fallback;
+        let p = project("sizing-cost");
+        note(&p, "Tasks/A.md", "Fix src/lib/a.ts");
+        note(&p, "Tasks/B.md", "Fix src/lib/b.ts");
+        let agent = FakeOracle::named("agent/claude-acp");
+        *agent.per_call_usd.lock().unwrap() = 0.04;
+        agent.decide_with(decision(vec![score("lanes", 2, 0.9)], "agent/claude-acp", false));
+        let j = Judge::new(Fallback::agent(agent.clone()), second(&agent, &agent));
+        let out = begin_on(&p, &Source::Notes, Some(&j), crate::agents::claude()).unwrap();
+        let rec = load(&p.dir, out["n"].as_u64().unwrap()).unwrap().unwrap();
+        assert!(agent.decide_calls.load(std::sync::atomic::Ordering::SeqCst) >= 1);
+        assert!(rec.judge_usd > 0.0 && (rec.cost.usd - rec.judge_usd).abs() < 1e-9, "{} / {}", rec.judge_usd, rec.cost.usd);
     }
 
     #[test]

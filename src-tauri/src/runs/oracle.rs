@@ -19,6 +19,8 @@ pub trait Oracle: Send + Sync {
     fn decide(&self, req: DecisionRequest) -> Result<Decision, String>;
     /// The schema-checked JSON answer, and the model that gave it.
     fn complete_json(&self, system: &str, prompt: &str, schema: &Value) -> Result<(Value, String), String>;
+    /// What its calls have cost so far, where that is known (the agent's sessions).
+    fn spent_usd(&self) -> f64 { 0.0 }
 }
 
 pub struct ProviderOracle {
@@ -45,10 +47,13 @@ impl Oracle for ProviderOracle {
         }).map_err(|e| format!("{}: {e}", self.label))?;
         Ok((v, self.calls.model()))
     }
+    fn spent_usd(&self) -> f64 { self.calls.spent_usd() }
 }
 
 pub const DECISIONS_FALLBACK: &str = "The decision model couldn’t be reached, so your agent answers the run’s small questions from here on.";
 pub const REVIEW_FALLBACK: &str = "The review model couldn’t be reached, so your agent reviews the lanes from here on.";
+/// Spec §6: no decisions key, so the judge is the user's agent — said once, at begin.
+pub const AGENT_DECISIONS_NOTICE: &str = "Decisions ride your agent — add a decisions key in Setup for a cheaper, faster judge.";
 
 pub struct Fallback {
     primary: Arc<dyn Oracle>,
@@ -57,15 +62,27 @@ pub struct Fallback {
     degraded: AtomicBool,
     notice: Mutex<Option<String>>,
     what: &'static str,
+    /// the primary is the user's agent itself (no key for this role)
+    on_agent: bool,
 }
 
 impl Fallback {
     pub fn new(primary: Arc<dyn Oracle>, fallback: Arc<dyn Oracle>, what: &'static str) -> Self {
-        Fallback { primary, fallback: Some(fallback), degraded: AtomicBool::new(false), notice: Mutex::new(None), what }
+        Fallback { primary, fallback: Some(fallback), degraded: AtomicBool::new(false), notice: Mutex::new(None), what, on_agent: false }
     }
     /// A role with no separate fallback: its failure is just the error, and there is no notice.
     pub fn alone(primary: Arc<dyn Oracle>) -> Self {
-        Fallback { primary, fallback: None, degraded: AtomicBool::new(false), notice: Mutex::new(None), what: "" }
+        Fallback { primary, fallback: None, degraded: AtomicBool::new(false), notice: Mutex::new(None), what: "", on_agent: false }
+    }
+    /// A role the user's agent answers because no key is set for it: alone, and known to be the agent.
+    pub fn agent(primary: Arc<dyn Oracle>) -> Self { Fallback { on_agent: true, ..Self::alone(primary) } }
+    /// The role rides the user's agent from the start (spec §6's no-key case).
+    pub fn rides_agent(&self) -> bool { self.on_agent }
+    /// What both sides' calls have cost, where that is known.
+    pub fn spent_usd(&self) -> f64 {
+        // one oracle on both sides is counted once
+        let same = |f: &Arc<dyn Oracle>| Arc::as_ptr(f) as *const () == Arc::as_ptr(&self.primary) as *const ();
+        self.primary.spent_usd() + self.fallback.as_ref().filter(|f| !same(f)).map(|f| f.spent_usd()).unwrap_or(0.0)
     }
     fn degrade(&self) {
         if !self.degraded.swap(true, Ordering::SeqCst) {
@@ -94,7 +111,7 @@ impl Fallback {
 /// already is the agent (`<provider>/<model>` starting `agent/`), the agent alone, so an
 /// agent failure isn't retried on the same agent under a false notice.
 fn role(primary: Arc<dyn Oracle>, primary_model: &str, agent: impl FnOnce() -> Arc<dyn Oracle>, what: &'static str) -> Fallback {
-    if primary_model.starts_with("agent/") { Fallback::alone(primary) } else { Fallback::new(primary, agent(), what) }
+    if primary_model.starts_with("agent/") { Fallback::agent(primary) } else { Fallback::new(primary, agent(), what) }
 }
 
 /// The project's Decisions and Review roles (agents spec §9), each falling back
@@ -129,6 +146,8 @@ pub(crate) mod fake {
         /// every prompt `complete_json` was asked, in order
         pub prompts: Mutex<Vec<String>>,
         pub model: String,
+        /// what each call is said to cost (an agent session's own figure)
+        pub per_call_usd: Mutex<f64>,
     }
     impl FakeOracle {
         pub fn named(model: &str) -> Arc<Self> { Arc::new(FakeOracle { model: model.into(), ..Default::default() }) }
@@ -145,6 +164,9 @@ pub(crate) mod fake {
             self.complete_calls.fetch_add(1, Ordering::SeqCst);
             self.prompts.lock().unwrap().push(p.to_string());
             self.completes.lock().unwrap().pop_front().unwrap_or_else(|| Err("unreachable".into())).map(|v| (v, self.model.clone()))
+        }
+        fn spent_usd(&self) -> f64 {
+            (self.decide_calls.load(Ordering::SeqCst) + self.complete_calls.load(Ordering::SeqCst)) as f64 * *self.per_call_usd.lock().unwrap()
         }
     }
     pub(crate) fn choice(name: &str, pick: &str, probs: &[(&str, f32)], confidence: f32) -> (String, Answer) {

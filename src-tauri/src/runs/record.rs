@@ -207,6 +207,8 @@ pub struct RunRecord {
     #[serde(default)] pub planner_tries: u32,
     #[serde(default)] pub planner_error: Option<String>,
     #[serde(default)] pub planner_cost_usd: f64,
+    /// what the judge's and the reviewer's agent sessions cost, where the agent reports it
+    #[serde(default)] pub judge_usd: f64,
     #[serde(default)] pub notices: Vec<String>,
     /// the lane count the sizing decision told the planner to aim for
     #[serde(default)] pub target_lanes: Option<u32>,
@@ -256,7 +258,7 @@ impl RunRecord {
         RunRecord { n, round, kind, state: RunState::Planning, created: now.clone(), updated: now,
             plan_path: plan_path.into(), prompt_path: prompt_path.into(), source: source.into(),
             lane_map: None, lanes: vec![], head_check: None, decisions: vec![], needs_you: vec![], cost: Cost::default(),
-            planner_tries: 0, planner_error: None, planner_cost_usd: 0.0, notices: vec![], target_lanes: None,
+            planner_tries: 0, planner_error: None, planner_cost_usd: 0.0, judge_usd: 0.0, notices: vec![], target_lanes: None,
             interrupted_from: None, skipped: vec![], head_pending: vec![], base_commit: None }
     }
     pub fn round_n(&self) -> u64 { self.round.unwrap_or(self.n) }
@@ -277,7 +279,7 @@ impl RunRecord {
     }
     pub fn total_cost(&self) -> Cost {
         Cost {
-            usd: self.planner_cost_usd + self.lanes.iter().map(|l| l.cost_usd).sum::<f64>(),
+            usd: self.planner_cost_usd + self.judge_usd + self.lanes.iter().map(|l| l.cost_usd).sum::<f64>(),
             input: self.lanes.iter().map(|l| l.tokens.input).sum(),
             out: self.lanes.iter().map(|l| l.tokens.out).sum(),
         }
@@ -360,11 +362,15 @@ pub fn transition_lines(before: &RunRecord, after: &RunRecord) -> Vec<String> {
     let n = after.round_n();
     let mut out = vec![];
     if before.state != after.state {
-        let items = after.lane_map.as_ref().map(|m| m.items.len()).unwrap_or(0);
+        let ids: Vec<&str> = after.lane_map.as_ref().map(|m| m.items.iter().map(|i| i.id.as_str()).collect()).unwrap_or_default();
+        let skipped = ids.iter().filter(|i| after.skipped.iter().any(|s| s == *i)).count();
+        let done = ids.len() - skipped;
+        let count = |n: usize, w: &str| format!("{n} {w}{}", if n == 1 { "" } else { "s" });
         match after.state {
-            RunState::Running if before.state == RunState::Planning => out.push(format!("Round {n} started: {} lanes.", after.lanes.len())),
+            RunState::Running if before.state == RunState::Planning => out.push(format!("Round {n} started: {}.", count(after.lanes.len(), "lane"))),
             RunState::Gating => out.push(format!("Round {n}: every lane passed; checking the whole project.")),
-            RunState::Done => out.push(format!("Round {n} is saved: {items} items done.")),
+            RunState::Done => out.push(format!("Round {n} is saved: {} done{}.", count(done, "item"),
+                if skipped > 0 { format!(", {skipped} skipped") } else { String::new() })),
             RunState::NeedsYou => out.push(format!("Round {n} needs you.")),
             RunState::Stopped => out.push(format!("Round {n} was stopped.")),
             RunState::Failed => out.push(format!("Round {n} couldn't start: the plan couldn't be split into lanes.")),
@@ -489,6 +495,26 @@ mod tests {
         d.state = RunState::Done;
         assert_eq!(transition_lines(&c, &d), vec!["Round 10 is saved: 7 items done."]);
         assert!(transition_lines(&d, &d).is_empty());
+    }
+
+    #[test]
+    fn the_close_line_counts_only_what_was_done_and_says_what_was_skipped() {
+        let item = |id: &str| Item { id: id.into(), title: "x".into(), note: None, rewrite: None };
+        let mut a = sample(1);
+        a.lane_map = Some(LaneMap { items: vec![item("T-1"), item("T-2"), item("T-3"), item("T-4")], lanes: vec![] });
+        a.lanes = vec![LaneRecord::new("a")];
+        a.state = RunState::Closing;
+        let mut b = a.clone();
+        b.state = RunState::Done;
+        b.skipped = vec!["T-3".into(), "T-4".into()];
+        assert_eq!(transition_lines(&a, &b), vec!["Round 1 is saved: 2 items done, 2 skipped."]);
+        b.skipped = vec!["T-2".into(), "T-3".into(), "T-4".into()];
+        assert_eq!(transition_lines(&a, &b), vec!["Round 1 is saved: 1 item done, 3 skipped."]);
+        let mut p = a.clone();
+        p.state = RunState::Planning;
+        let mut r = a.clone();
+        r.state = RunState::Running;
+        assert_eq!(transition_lines(&p, &r), vec!["Round 1 started: 1 lane."]);
     }
 
     #[test]
