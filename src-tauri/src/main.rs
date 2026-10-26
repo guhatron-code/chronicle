@@ -22,6 +22,7 @@ mod agent_api;
 mod cli;
 mod mcp;
 mod bridge;
+mod runs;
 
 use base64::Engine;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
@@ -2590,17 +2591,23 @@ async fn round_retro(roots: State<'_, OpenRoots>, dir: String, n: u64) -> Result
 
 fn journal_path(dir: &Path) -> PathBuf { dir.join(".chronicle/journal.jsonl") }
 
+/// One journal line, written by Rust (runs) or by the frontend's command below.
+pub(crate) fn journal_append_in(dir: &Path, kind: &str, text: &str) {
+    let e = json!({ "kind": kind, "text": text, "ts": epoch_ms() });
+    let _ = std::fs::create_dir_all(dir.join(".chronicle"));
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(journal_path(dir)) {
+        let _ = writeln!(f, "{}", e);
+    }
+}
+
 #[tauri::command]
 async fn journal_append(roots: State<'_, OpenRoots>, dir: String, entry: Value) -> Result<(), String> {
     let p = project_for(&roots, &dir)?;
     if !entry.is_object() { return Err("malformed journal entry".into()); }
-    let mut e = entry;
-    if let Some(obj) = e.as_object_mut() { obj.insert("ts".into(), json!(epoch_ms())); }
-    std::fs::create_dir_all(p.dir.join(".chronicle")).map_err(|x| x.to_string())?;
-    use std::io::Write;
-    let mut f = std::fs::OpenOptions::new().create(true).append(true)
-        .open(journal_path(&p.dir)).map_err(|x| x.to_string())?;
-    writeln!(f, "{}", serde_json::to_string(&e).map_err(|x| x.to_string())?).map_err(|x| x.to_string())
+    let field = |k: &str| entry.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    journal_append_in(&p.dir, &field("kind"), &field("text"));
+    Ok(())
 }
 
 #[tauri::command]

@@ -171,6 +171,8 @@ pub fn settle_done(dir: &Path) {
     let Ok(mut rounds) = load(dir) else { return };
     let mut moved = false;
     for r in rounds.iter_mut().filter(|r| r.state == "ready") {
+        // a run owns its round's state while it is live (spec §7)
+        if crate::runs::record::is_live(dir, r.n) { continue; }
         let st = statuses_for(dir, &r.note_paths);
         let all_done = r.note_paths.iter().all(|p| {
             match st.get(p).and_then(|s| s.as_deref()) {
@@ -201,6 +203,23 @@ mod tests {
                 note_paths: paths.iter().map(|s| s.to_string()).collect(), created_at: 0,
                 plan_path: format!("fixes/phase_{n}_fixes_plan.md"),
                 prompt_path: format!("fixes/phase_{n}_fixes_prompt.md") }
+    }
+
+    #[test]
+    fn a_ready_round_with_a_live_run_does_not_settle() {
+        // a prompt-kind run's round has no notes, and "every note done" is vacuously
+        // true — without this the round would flip to done the moment it went ready
+        let d = tmp("live-run");
+        save(&d, &[round(7, "ready", &[])]).unwrap();
+        let mut run = crate::runs::record::RunRecord::new(7, crate::runs::record::RunKind::Prompt, Some(7), "fixes/phase_7_fixes_plan.md", "fixes/phase_7_fixes_prompt.md", "do it");
+        run.state = crate::runs::record::RunState::Running;
+        crate::runs::record::save(&d, &mut run).unwrap();
+        settle_done(&d);
+        assert_eq!(load(&d).unwrap()[0].state, "ready");
+        run.state = crate::runs::record::RunState::Done;
+        crate::runs::record::save(&d, &mut run).unwrap();
+        settle_done(&d);
+        assert_eq!(load(&d).unwrap()[0].state, "done");
     }
 
     #[test]
