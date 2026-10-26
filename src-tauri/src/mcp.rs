@@ -32,6 +32,18 @@ impl Session {
 
 const INSTRUCTIONS: &str = "Chronicle keeps this project's notes (tasks, bugs, ideas) and its build roadmap. Use chronicle.notes.* to list, read, create and update notes instead of grepping .chronicle/notes; use chronicle.state.* before saying what is done or what is next, because it answers from git and the roadmap rules, not from memory. Use chronicle.designs.list and chronicle.designs.read to see the project's designs and their frame files; both are read-only, so a design never changes through them.";
 
+const PLANNER_INSTRUCTIONS: &str = "Chronicle's run tools for planning a round: declare the round's lanes with chronicle.run.declare, and see where the round stands with chronicle.run.lane_state.";
+const LANE_INSTRUCTIONS: &str = "Chronicle's run tools for this lane: chronicle.run.block when an item can't be done as written, chronicle.run.ask for a decision the plan doesn't settle, and chronicle.run.lane_state to see where the round stands.";
+
+/// What a session is told at `initialize`: a run's server speaks only of its own tools.
+fn instructions(scope: Option<&RunScope>) -> &'static str {
+    match scope {
+        None => INSTRUCTIONS,
+        Some(RunScope::Planner) => PLANNER_INSTRUCTIONS,
+        Some(RunScope::Lane { .. }) => LANE_INSTRUCTIONS,
+    }
+}
+
 /// The version a person would recognise: the app's, from tauri.conf.json, not the
 /// crate's 0.1.0. Parsed once from the file compiled in beside this one.
 pub(crate) fn app_version() -> &'static str {
@@ -74,7 +86,7 @@ pub(crate) fn handle_line(s: &mut Session, line: &str) -> Option<String> {
             "protocolVersion": "2025-06-18",
             "capabilities": { "tools": {} },
             "serverInfo": { "name": "chronicle", "version": app_version() },
-            "instructions": INSTRUCTIONS,
+            "instructions": instructions(s.scope.as_ref()),
         })),
         "ping" => reply(id, json!({})),
         "tools/list" => reply(id, json!({ "tools": agent_api::catalog().iter().filter(|t| s.visible(t.name)).map(|t| json!({
@@ -208,5 +220,15 @@ mod tests {
         let mut s = Session::new(d).with_scope(Some(RunScope::Planner));
         let e = rpc(&mut s, r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"chronicle.notes.list","arguments":{}}}"#);
         assert_eq!(e["result"]["content"][0]["text"], "chronicle.notes.list isn't available to this session.");
+    }
+
+    #[test]
+    fn a_runs_server_is_told_only_about_its_own_tools() {
+        let init = |s: &mut Session| rpc(s, r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#)["result"]["instructions"].as_str().unwrap().to_string();
+        let planner = init(&mut Session::new(PathBuf::from("/p")).with_scope(Some(RunScope::Planner)));
+        assert!(planner.contains("chronicle.run.declare") && !planner.contains("notes"), "{planner}");
+        let lane = init(&mut Session::new(PathBuf::from("/p")).with_scope(Some(RunScope::Lane { n: 1, lane: "a".into() })));
+        assert!(lane.contains("chronicle.run.block") && !lane.contains("declare") && !lane.contains("notes"), "{lane}");
+        assert!(init(&mut Session::new(PathBuf::from("/p"))).contains("notes"));
     }
 }

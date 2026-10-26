@@ -843,15 +843,8 @@ pub enum WriteDecision {
     Cancel { path: String },
 }
 
-const WRITE_TOOLS: [&str; 4] = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
-
-/// The path a file-writing permission ask targets ("" when it names none).
-fn write_target(call: &Value) -> &str {
-    call.pointer("/rawInput/file_path").and_then(|v| v.as_str())
-        .or_else(|| call.pointer("/rawInput/notebook_path").and_then(|v| v.as_str()))
-        .or_else(|| call.pointer("/locations/0/path").and_then(|v| v.as_str()))
-        .unwrap_or("")
-}
+// one list of file-writing tools and one reading of their target, shared with a run's fence
+use crate::runs::fence::{write_target, WRITE_TOOLS};
 
 /// True when any component of `p` is a symlink whose target doesn't exist.
 /// `path_in_roots` pops non-existent components as literal names, so a

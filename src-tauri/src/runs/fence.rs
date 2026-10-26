@@ -32,6 +32,8 @@ pub(crate) fn write_target(call: &Value) -> &str {
 
 pub enum Fence {
     /// The design lane: writes strictly inside `.chronicle/designs/<slug>/`.
+    /// Not constructed by the app yet: the design lane still answers through acp's own rule.
+    #[allow(dead_code)]
     Design(PathBuf),
     /// A run's lane: writes inside `owns`; `others` name who owns the rest.
     Lane { repo: PathBuf, lane: String, owns: Vec<Glob>, others: Vec<(String, Vec<Glob>)> },

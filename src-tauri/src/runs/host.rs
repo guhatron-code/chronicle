@@ -1,1 +1,223 @@
-//! The host — filled by Task 11.
+//! The real `LaneHost`: each lane is an ACP session (`Lane::Worker`) on the
+//! project's agent profile (agents spec §3, §12.7), carrying the lane's run
+//! server and Chronicle's policy. Its acp-updates go to the pane as usual and
+//! to the controller as `Ev`s. Plus the chat lane's screen: during a run, a
+//! push, tag, publish or release from the chat session is refused and shown.
+use super::fence::{classify, Shell, PUBLISH_REFUSAL};
+use super::record::{list, save, NeedsYou, RunState};
+use super::runner::{Ev, LaneHost, RunCtl};
+use super::{tools, Runs};
+use crate::acp::{self, AskScreen, LanePolicy, PolicyAnswer};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
+use tauri::{Emitter, Manager};
+
+pub fn lane_event(lane: &str, v: &Value) -> Ev {
+    let m = &v["message"];
+    let l = || lane.to_string();
+    match m["method"].as_str().unwrap_or("") {
+        "_chronicle/session_state" => match m["params"]["state"].as_str().unwrap_or("") {
+            "ready" => Ev::Ready { lane: l(), session: m["params"]["sessionId"].as_str().unwrap_or("").to_string() },
+            s @ ("error" | "ended" | "needs-login") => Ev::Died { lane: l(), reason: m["params"]["message"].as_str().map(String::from).unwrap_or_else(|| format!("the session is {s}")) },
+            _ => Ev::Wire { lane: l() },
+        },
+        "_chronicle/turn_end" => Ev::TurnEnd { lane: l(), stop: m["params"]["stopReason"].as_str().map(String::from), error: !m["params"]["error"].is_null() },
+        "session/update" if m["params"]["update"]["sessionUpdate"] == "usage_update" => match m["params"]["update"]["cost"]["amount"].as_f64() {
+            Some(usd) => Ev::Usage { lane: l(), usd },
+            None => Ev::Wire { lane: l() },
+        },
+        _ => Ev::Wire { lane: l() },
+    }
+}
+
+/// What one session start says to the controller: its events, while it is the
+/// lane's current session. Once the controller stops it (a passed gate, a
+/// failed try, Stop), its late lines — the "ended" of its own shutdown, a
+/// cancelled turn's end — would read as the lane's NEXT try dying, so they go
+/// to the pane only.
+fn forward(tx: Sender<Ev>, lane: String, current: Arc<AtomicBool>) -> impl Fn(&Value) + Send + Sync {
+    let tx = Mutex::new(tx);
+    move |v: &Value| {
+        if !current.load(Ordering::SeqCst) { return; }
+        if let Ok(t) = tx.lock() { let _ = t.send(lane_event(&lane, v)); }
+    }
+}
+
+/// The app's lane host. `start`, `prompt` and `stop` return at once (the
+/// `LaneHost` contract): the adapter's spawn, a session's shutdown (up to two
+/// seconds of SIGTERM grace) and a prompt's checkpoint run on their own thread.
+pub struct AcpHost {
+    pub app: tauri::AppHandle,
+    /// per session key: whether that key's session is still the one the controller started
+    current: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+impl AcpHost {
+    pub fn new(app: tauri::AppHandle) -> Self { AcpHost { app, current: Mutex::new(HashMap::new()) } }
+    fn key(ctl: &RunCtl, k: u16) -> String { acp::Lane::Worker { run: ctl.n, k }.key(&ctl.dir.to_string_lossy()) }
+    fn session(&self, ctl: &RunCtl, k: u16) -> Option<Arc<acp::AcpSession>> { self.app.state::<acp::AcpState>().get(&Self::key(ctl, k)) }
+    /// The key's current session stops speaking to the controller; a new start's flag, if any, replaces it.
+    fn retire(&self, key: &str, next: Option<Arc<AtomicBool>>) {
+        let mut g = self.current.lock().unwrap_or_else(|e| e.into_inner());
+        let old = match next { Some(f) => g.insert(key.to_string(), f), None => g.remove(key) };
+        if let Some(f) = old { f.store(false, Ordering::SeqCst); }
+    }
+}
+
+impl LaneHost for AcpHost {
+    fn start(&self, ctl: &Arc<RunCtl>, lane: &str, k: u16, policy: Arc<dyn LanePolicy>) -> Result<(), String> {
+        let key = Self::key(ctl, k);
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let flag = Arc::new(AtomicBool::new(true));
+        self.retire(&key, Some(flag.clone()));
+        let old = self.session(ctl, k);
+        let to_ctl = forward(ctl.tx.clone(), lane.to_string(), flag.clone());
+        let app = self.app.clone();
+        let emit: acp::Emit = Arc::new(move |v: Value| {
+            to_ctl(&v);
+            let _ = app.emit("acp-update", v);
+        });
+        let extras = acp::LaneExtras {
+            mcp_servers: vec![tools::lane_server(&ctl.dir, &exe, ctl.n, lane)],
+            policy: Some(acp::PolicyHandle(policy)),
+            ..Default::default()
+        };
+        let (app, dir, n, tx, id) = (self.app.clone(), ctl.dir.clone(), ctl.n, ctl.tx.clone(), lane.to_string());
+        std::thread::spawn(move || {
+            // the lane's previous try ends first, or `acp::start` would find it alive and start nothing
+            if let Some(s) = old { s.stop(false); }
+            let agents = app.state::<acp::AcpState>();
+            let started = launch_worker(&agents, emit, key.clone(), acp::Lane::Worker { run: n, k }, &dir, extras);
+            let reason = match started {
+                // stopped while it was launching: `stop` found nothing to end, so this does
+                Ok(true) if !flag.load(Ordering::SeqCst) => { if let Some(s) = agents.get(&key) { s.stop(false); } return }
+                Ok(true) => return,
+                Ok(false) => "the lane's previous session was still running".to_string(),
+                Err(e) => e,
+            };
+            let _ = tx.send(Ev::Died { lane: id, reason });
+        });
+        Ok(())
+    }
+    fn prompt(&self, ctl: &Arc<RunCtl>, lane: &str, k: u16, text: &str) -> Result<(), String> {
+        let s = self.session(ctl, k).ok_or("the lane's session isn't running")?;
+        let (tx, id, text) = (ctl.tx.clone(), lane.to_string(), text.to_string());
+        std::thread::spawn(move || {
+            // the thread shows the first line ("You are lane C of round 10: …"), the agent gets it all
+            let display = text.lines().next().unwrap_or("").to_string();
+            if s.prompt(vec![json!({ "type": "text", "text": text })], display).is_err() {
+                let _ = tx.send(Ev::TurnEnd { lane: id, stop: None, error: true });
+            }
+        });
+        Ok(())
+    }
+    fn cancel(&self, ctl: &Arc<RunCtl>, _lane: &str, k: u16) { if let Some(s) = self.session(ctl, k) { let _ = s.cancel(); } }
+    fn stop(&self, ctl: &Arc<RunCtl>, _lane: &str, k: u16) {
+        let key = Self::key(ctl, k);
+        self.retire(&key, None);
+        // looked up now, stopped off-thread: a later try's session is never the one this stops
+        if let Some(s) = self.session(ctl, k) { std::thread::spawn(move || s.stop(false)); }
+    }
+}
+
+/// The one place a worker session meets Plan C's names: the project's agent
+/// profile, its launch, and `acp::start`'s profile argument.
+pub(crate) fn launch_worker(agents: &acp::AcpState, emit: acp::Emit, key: String, lane: acp::Lane, dir: &Path, extras: acp::LaneExtras) -> Result<bool, String> {
+    let p = crate::load_project(dir);
+    let profile = crate::agents::project_profile(&p.dir);
+    let launch = crate::setup::agent_launch(profile.id).ok_or_else(|| format!("{} isn't installed — open Setup & health", profile.name))?;
+    let mut jail = vec![p.repo.clone(), p.dir.clone()];
+    jail.extend(p.extras.iter().map(|(_, b)| b.clone()));
+    acp::start(agents, emit, key, lane, profile, p.repo.clone(), p.dir.clone(), jail, None, extras, None, acp::adapter_command_for(&launch, profile))
+}
+
+/// The chat lane during a run (spec §4): publish verbs are refused there too,
+/// and the refusal is a needs-you row on the live run.
+pub struct RunsScreen {
+    pub dir: PathBuf,
+    /// adds the row to the live run; false when no run is live
+    pub record: Arc<dyn Fn(&Path, NeedsYou) -> bool + Send + Sync>,
+}
+
+impl RunsScreen {
+    pub fn for_app(app: &tauri::AppHandle, dir: &Path) -> RunsScreen {
+        let app = app.clone();
+        RunsScreen { dir: dir.to_path_buf(), record: Arc::new(move |dir: &Path, row: NeedsYou| {
+            // an interrupted run is nobody's round in progress: the chat lane is itself again
+            let Some(mut rec) = list(dir).into_iter().rev().find(|r| !r.state.terminal() && r.state != RunState::Interrupted) else { return false };
+            let runs = app.state::<Runs>();
+            match runs.get(dir, rec.n).filter(|c| !c.snapshot().state.terminal()) {
+                Some(ctl) => { ctl.update(|r| r.needs_you.push(row)); }
+                None => { rec.needs_you.push(row); let _ = save(dir, &mut rec); runs.publish(dir, &rec); }
+            }
+            true
+        }) }
+    }
+}
+
+impl AskScreen for RunsScreen {
+    fn screen(&self, params: &Value) -> Option<PolicyAnswer> {
+        let cmd = params.pointer("/toolCall/rawInput/command").and_then(|v| v.as_str())?;
+        if classify(cmd) != Shell::Publish { return None; }
+        let row = NeedsYou { kind: "refused".into(), lane: None, item: None, reason: cmd.to_string(), reading: None };
+        if !(self.record)(&self.dir, row) { return None; }
+        Some(PolicyAnswer { allow: false, path: cmd.to_string(), reason: PUBLISH_REFUSAL.into(), decision: None })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::sync::Mutex;
+
+    fn wire(method: &str, params: Value) -> Value { json!({ "dir": "/p", "lane": "w/10-0", "message": { "method": method, "params": params } }) }
+
+    #[test]
+    fn a_lane_sessions_events_become_the_controllers() {
+        assert_eq!(lane_event("a", &wire("_chronicle/session_state", json!({ "state": "ready", "sessionId": "s1" }))), Ev::Ready { lane: "a".into(), session: "s1".into() });
+        assert!(matches!(lane_event("a", &wire("_chronicle/session_state", json!({ "state": "error", "message": "boom" }))), Ev::Died { ref reason, .. } if reason == "boom"));
+        assert!(matches!(lane_event("a", &wire("_chronicle/session_state", json!({ "state": "needs-login" }))), Ev::Died { .. }));
+        assert_eq!(lane_event("a", &wire("_chronicle/session_state", json!({ "state": "starting" }))), Ev::Wire { lane: "a".into() });
+        assert_eq!(lane_event("a", &wire("_chronicle/turn_end", json!({ "stopReason": "end_turn", "usage": null }))), Ev::TurnEnd { lane: "a".into(), stop: Some("end_turn".into()), error: false });
+        assert_eq!(lane_event("a", &wire("_chronicle/turn_end", json!({ "error": { "message": "x" } }))), Ev::TurnEnd { lane: "a".into(), stop: None, error: true });
+        assert_eq!(lane_event("a", &wire("session/update", json!({ "update": { "sessionUpdate": "usage_update", "cost": { "amount": 0.42 } } }))), Ev::Usage { lane: "a".into(), usd: 0.42 });
+        assert_eq!(lane_event("a", &wire("session/update", json!({ "update": { "sessionUpdate": "agent_message_chunk" } }))), Ev::Wire { lane: "a".into() });
+    }
+
+    #[test]
+    fn the_chat_screen_refuses_a_publish_only_while_a_round_runs() {
+        let taken: Arc<Mutex<Vec<NeedsYou>>> = Default::default();
+        let sink = taken.clone();
+        let live = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let l2 = live.clone();
+        let screen = RunsScreen { dir: PathBuf::from("/p"), record: Arc::new(move |_d: &Path, row: NeedsYou| {
+            if !l2.load(std::sync::atomic::Ordering::SeqCst) { return false; }
+            sink.lock().unwrap().push(row); true
+        }) };
+        let ask = |c: &str| json!({ "toolCall": { "toolCallId": "t", "name": "Bash", "rawInput": { "command": c } } });
+        let a = screen.screen(&ask("git push origin main")).expect("refused during a round");
+        assert!(!a.allow);
+        assert_eq!(a.reason, crate::runs::fence::PUBLISH_REFUSAL);
+        assert_eq!(taken.lock().unwrap()[0].kind, "refused");
+        assert!(screen.screen(&ask("npm test")).is_none(), "only publish verbs are screened; the user answers the rest");
+        live.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert!(screen.screen(&ask("git push")).is_none(), "outside a round the chat lane behaves as today");
+    }
+
+    #[test]
+    fn a_stopped_session_no_longer_speaks_to_the_controller() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let current = Arc::new(AtomicBool::new(true));
+        let to_ctl = forward(tx, "a".into(), current.clone());
+        to_ctl(&wire("_chronicle/turn_end", json!({ "stopReason": "end_turn" })));
+        assert!(matches!(rx.try_recv(), Ok(Ev::TurnEnd { .. })));
+        current.store(false, Ordering::SeqCst);
+        to_ctl(&wire("_chronicle/session_state", json!({ "state": "ended" })));
+        assert!(rx.try_recv().is_err(), "the ended line of a session the controller stopped is not a death of the lane's next try");
+    }
+}

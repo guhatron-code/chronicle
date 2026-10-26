@@ -3549,11 +3549,20 @@ fn launch_refusal(p: &agents::AgentProfile) -> String {
     }
 }
 
+/// A lane the pane may start or resume itself: a run's lane (`w/…`) is started
+/// by its run, with the run's policy, never from here with the chat lane's extras.
+fn user_lane(lane: Option<&str>) -> Result<acp::Lane, String> {
+    match acp::Lane::parse(lane)? {
+        acp::Lane::Worker { .. } => Err("Lanes are started by their run.".into()),
+        l => Ok(l),
+    }
+}
+
 /// Start (or reuse) the project's one live agent session. Progress arrives as
 /// `acp-update` events (installing → starting → ready | needs-login | error).
 #[tauri::command]
 async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, lane: Option<String>) -> Result<Value, String> {
-    let lane = acp::Lane::parse(lane.as_deref())?;
+    let lane = user_lane(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     let key = session_key(&dir, lane)?;
     let profile = session_profile(&dir, lane)?;
@@ -3571,7 +3580,16 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
         let browsers = if setup::browser_ready() { Some(setup::browsers_dir()) } else { None };
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir(), ..Default::default() }
-    } else { acp::LaneExtras::default() };
+    } else {
+        // the chat lane plans rounds: its run server (declare and lane state only) and a
+        // screen that refuses push, tag, publish and release while a round runs (Runs §4)
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        acp::LaneExtras {
+            mcp_servers: vec![runs::tools::planner_server(&p.dir, &exe)],
+            screen: Some(acp::ScreenHandle(Arc::new(runs::host::RunsScreen::for_app(&app, &p.dir)))),
+            ..Default::default()
+        }
+    };
     let started = acp::start(&agents, emit, key, lane, profile, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, None, acp::adapter_command_for(&launch, profile))?;
     Ok(json!({ "started": started }))
 }
@@ -3580,7 +3598,7 @@ async fn agent_session_start(app: tauri::AppHandle, roots: State<'_, OpenRoots>,
 /// initialize response advertised loadSession (the history list gates it).
 #[tauri::command]
 async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>, agents: State<'_, acp::AcpState>, dir: String, id: String, lane: Option<String>) -> Result<Value, String> {
-    let lane = acp::Lane::parse(lane.as_deref())?;
+    let lane = user_lane(lane.as_deref())?;
     let p = project_for(&roots, &dir)?;
     let key = session_key(&dir, lane)?;
     if id.contains('/') || id.contains("..") { return Err("bad session id".into()); }
@@ -3600,7 +3618,16 @@ async fn agent_session_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>
         let browsers = if setup::browser_ready() { Some(setup::browsers_dir()) } else { None };
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         acp::LaneExtras { mcp_servers: designs::plugin::servers(&p.dir, &npx, browsers.as_deref(), &exe), plugin_dir: setup::design_plugin_dir(), ..Default::default() }
-    } else { acp::LaneExtras::default() };
+    } else {
+        // the chat lane plans rounds: its run server (declare and lane state only) and a
+        // screen that refuses push, tag, publish and release while a round runs (Runs §4)
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        acp::LaneExtras {
+            mcp_servers: vec![runs::tools::planner_server(&p.dir, &exe)],
+            screen: Some(acp::ScreenHandle(Arc::new(runs::host::RunsScreen::for_app(&app, &p.dir)))),
+            ..Default::default()
+        }
+    };
     let started = acp::start(&agents, emit, key, lane, profile, p.repo.clone(), p.dir.clone(), jail_roots, designs_root, extras, Some(id), acp::adapter_command_for(&launch, profile))?;
     Ok(json!({ "started": started }))
 }
@@ -3969,6 +3996,11 @@ fn main() {
         let rest = &args[i + 1..];
         let start = rest.first().filter(|a| !a.starts_with("--")).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
         let scope = runs::tools::RunScope::from_args(rest);
+        // a run's flags that don't parse never fall back to the project's own server
+        if scope.is_none() && rest.iter().any(|a| matches!(a.as_str(), "--run" | "--lane" | "--planner")) {
+            eprintln!("Those run flags aren't valid: use --planner, or --run <n> --lane <one lowercase letter>.");
+            std::process::exit(1);
+        }
         match agent_api::resolve_project_dir(&start) {
             Some(dir) => std::process::exit(mcp::serve(dir, rest.iter().any(|a| a == "--designs-only"), scope)),
             None => { eprintln!("No Chronicle project at {}.", start.display()); std::process::exit(1) }
@@ -4111,6 +4143,13 @@ fn main() {
                     }
                 }
             }
+            // run records reach the frontend as `run-update` (src/lib/runs-store.ts)
+            {
+                let h = app.handle().clone();
+                app.state::<runs::Runs>().set_emit(Arc::new(move |dir: &Path, rec: &runs::record::RunRecord| {
+                    let _ = h.emit("run-update", json!({ "dir": dir.to_string_lossy(), "record": rec }));
+                }));
+            }
             // The agent bridge: `chronicle --mcp` and the CLI reach the RUNNING app
             // through a private socket under config_dir(). A fresh token each launch
             // keeps a stale helper out; OpenRoots keeps a project the user never
@@ -4252,6 +4291,9 @@ fn main() {
             notes::notes_delete, notes::notes_search, notes::notes_attach, notes::notes_detach,
             notes::notes_reveal, notes::notes_reveal_vault,
             round_plan_begin, round_plan_settle, round_plan_cancel, round_run_message_cmd,
+            runs::commands::run_begin, runs::commands::run_plan_settle, runs::commands::run_plan_cancel, runs::commands::runs_list,
+            runs::commands::run_stop, runs::commands::run_resume, runs::commands::run_needs_you, runs::commands::run_lane_nudge,
+            runs::commands::run_lane_discard,
             git_status_detail, git_stage, git_unstage, git_discard, git_commit, git_init_here, git_push, git_pull, git_log_graph, git_diff, run_command,
             git_checkout, git_worktree_prune, stat_file, read_file_b64, open_url,
             history::history_facts, history::git_fetch,
@@ -4415,6 +4457,13 @@ mod r1_tests {
         let (kb, lb) = canon_key(b.to_string_lossy().as_ref()).unwrap();
         assert_ne!(ka, kb, "same-named folders must not share a run key");
         assert_ne!(la, lb, "same-named folders must not share a log file");
+    }
+
+    #[test]
+    fn the_pane_never_starts_a_runs_lane() {
+        assert_eq!(user_lane(Some("w/10-0")).unwrap_err(), "Lanes are started by their run.");
+        assert_eq!(user_lane(None).unwrap(), acp::Lane::Chat);
+        assert_eq!(user_lane(Some("design")).unwrap(), acp::Lane::Design);
     }
 
     #[test]

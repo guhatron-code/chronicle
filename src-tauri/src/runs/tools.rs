@@ -9,6 +9,7 @@ use super::Runs;
 use crate::bridge::Reply;
 use serde_json::{json, Value};
 use std::path::Path;
+use std::time::Duration;
 
 /// What a planner's server shows, and what a lane's shows. Neither set is ever
 /// visible to the project's own `.mcp.json` server.
@@ -60,17 +61,29 @@ fn server(dir: &Path, exe: &Path, extra: &[&str]) -> Value {
 pub fn planner_server(dir: &Path, exe: &Path) -> Value { server(dir, exe, &["--planner"]) }
 pub fn lane_server(dir: &Path, exe: &Path, n: u64, lane: &str) -> Value { server(dir, exe, &["--run", &n.to_string(), "--lane", lane]) }
 
+/// How long a lane's block or ask may take: inside the bridge's six-minute
+/// cut-off for them (bridge.rs), whatever the providers and the agent do.
+pub const ANSWER_WITHIN: Duration = Duration::from_secs(330);
+const NOT_DECIDED: &str = "Chronicle hasn't decided on that item yet. Carry on with your other items, then call chronicle_run_block again for it.";
+
+/// `f`'s result if it comes within `limit`; it carries on in the background either way.
+fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || { let _ = tx.send(f()); });
+    rx.recv_timeout(limit).ok()
+}
+
 pub fn handle(runs: &Runs, p: &crate::Project, action: &str, args: &Value) -> Reply {
     let r = match action {
         "run.declare" => declare(runs, p, args),
         "run.block" => lane_call(runs, p, args).and_then(|(ctl, lane)| {
-            let item = args.get("item").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).ok_or("item is required.")?;
-            let reason = args.get("reason").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).ok_or("reason is required.")?;
-            ctl.block(&lane, item, reason).map(|s| (s, json!({})))
+            let item = args.get("item").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).ok_or("item is required.")?.to_string();
+            let reason = args.get("reason").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).ok_or("reason is required.")?.to_string();
+            within(ANSWER_WITHIN, move || ctl.block(&lane, &item, &reason)).unwrap_or_else(|| Ok(NOT_DECIDED.into())).map(|s| (s, json!({})))
         }),
         "run.ask" => lane_call(runs, p, args).and_then(|(ctl, lane)| {
-            let q = args.get("question").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).ok_or("question is required.")?;
-            Ok((ctl.ask(&lane, q), json!({})))
+            let q = args.get("question").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()).ok_or("question is required.")?.to_string();
+            Ok((within(ANSWER_WITHIN, move || ctl.ask(&lane, &q)).unwrap_or_else(|| super::judge::NO_ANSWER.into()), json!({})))
         }),
         "run.lane_state" => lane_state(runs, p, args),
         other => Err(format!("No action named {other}.")),
@@ -176,6 +189,13 @@ mod tests {
         assert_eq!(rec.lane_map.unwrap().lanes[0].owns, vec!["src/lib/**"]);
         assert_eq!(rec.lanes.iter().map(|l| (l.id.as_str(), l.state)).collect::<Vec<_>>(), vec![("a", LaneState::Waiting), ("b", LaneState::Waiting)]);
         assert!(declare(&runs, &p, &good).unwrap_err().contains("already accepted"));
+    }
+
+    #[test]
+    fn a_slow_answer_is_cut_off_inside_the_bridges_wait() {
+        assert_eq!(within(Duration::from_secs(5), || 7), Some(7));
+        assert_eq!(within(Duration::from_millis(50), || { std::thread::sleep(Duration::from_millis(500)); 7 }), None);
+        assert!(ANSWER_WITHIN < Duration::from_secs(6 * 60));
     }
 
     #[test]

@@ -109,6 +109,7 @@ fn reaches_forbidden(g: &Glob) -> bool {
 
 pub fn compile(owns: &[String]) -> Vec<Glob> { owns.iter().filter_map(|o| Glob::parse(o).ok()).collect() }
 
+#[allow(dead_code)] // only the tests ask it: the gate and Discard read each lane's own globs (a rewritten item's lane shares them)
 pub fn owner_of(map: &LaneMap, rel: &str) -> Option<String> {
     map.lanes.iter().find(|l| compile(&l.owns).iter().any(|g| g.matches(rel))).map(|l| l.id.clone())
 }
