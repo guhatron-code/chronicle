@@ -932,9 +932,10 @@ mod tests {
         std::thread::sleep(Duration::from_millis(700));
         assert!(k.ctl.snapshot().lanes.iter().all(|l| l.state == LaneState::Streaming), "one minute without a word isn't a stall");
         // a wire message from b keeps it alive; a stays silent past five minutes
-        // b's wire message lands first (no loop tick can fall into the gap), then the clock moves on
+        // 4.5 minutes of silence in all (still under STALL_MS, so a loop tick before b's wire is handled stalls nothing);
+        // b's wire is confirmed handled, then one more minute: a has been quiet 5.5 minutes, b one
         let seen = lk(&k.ctl.last_wire).get("b").copied();
-        k.ctl.advance_clock(scheduler::STALL_MS - 30_000);
+        k.ctl.advance_clock(scheduler::STALL_MS - 90_000);
         k.ctl.tx.send(Ev::Wire { lane: "b".into() }).unwrap();
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while lk(&k.ctl.last_wire).get("b").copied() == seen { assert!(std::time::Instant::now() < deadline, "b's wire was never handled"); std::thread::sleep(Duration::from_millis(10)); }
