@@ -70,9 +70,7 @@ describe("a run's records replay into the card, moment by moment", () => {
   it("R4 · two parked items need you", () => {
     const r = at(3);
     expect(M.runWord(r).word).toBe("needs you");
-    // The recording also shows a copy bug in needsFooter: with no item saved it reads
-    // "The other no are saved." (countWord(0)); reported, not asserted.
-    expect(M.runFooter(r)).toMatch(/^Two things need you\./);
+    expect(M.runFooter(r)).toBe("Two things need you. Nothing is saved yet.");
     expect(M.fmtCost(r.cost.usd)).toBe("$2.08");
   });
   it("R3.4 · done after the parked items were skipped", () => {

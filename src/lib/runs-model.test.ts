@@ -122,6 +122,20 @@ describe("needs you (board R4)", () => {
     expect(M.runWord(r).word).toBe("needs you");
     expect(M.runFooter(r)).toBe("One thing needs you: an item in lane D can’t be done as written. The other six are saved.");
   });
+  it("says nothing is saved yet when every item is parked, and keeps the one and many forms", () => {
+    const z = clone();
+    z.state = "needs-you";
+    z.needs_you = [
+      { kind: "parked", lane: "d", item: "T-146", reason: "x", reading: 0.8 },
+      { kind: "parked", lane: "d", item: "T-147", reason: "y", reading: 0.8 },
+    ];
+    z.lane_map!.items = z.lane_map!.items.slice(0, 2);
+    expect(M.runFooter(z)).toBe("Two things need you. Nothing is saved yet.");
+    z.lane_map!.items = clone().lane_map!.items.slice(0, 3);
+    expect(M.runFooter(z)).toBe("Two things need you. The other one is saved.");
+    z.lane_map!.items = clone().lane_map!.items.slice(0, 4);
+    expect(M.runFooter(z)).toBe("Two things need you. The other two are saved.");
+  });
   it("draws the two rows with their buttons", () => {
     const [parked, refused] = M.needsYouRows(r);
     expect(parked).toMatchObject({ title: "Pre-warm the session when the project opens", reading: "0.86",

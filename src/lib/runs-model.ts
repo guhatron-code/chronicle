@@ -96,7 +96,7 @@ export const laneElapsed = (l: LaneRecord, now: number) =>
 function needsFooter(r: RunRecord, rows: NeedsYou[]): string {
   const parked = rows.filter((x) => x.kind === "parked").length;
   const others = Math.max(0, itemCount(r) - parked);
-  const saved = others === 1 ? "The other one is saved." : `The other ${countWord(others)} are saved.`;
+  const saved = others === 0 ? "Nothing is saved yet." : others === 1 ? "The other one is saved." : `The other ${countWord(others)} are saved.`;
   if (rows.length === 1) {
     const x = rows[0];
     const what = x.kind === "parked" ? `an item in lane ${ID(x.lane)} can’t be done as written`
