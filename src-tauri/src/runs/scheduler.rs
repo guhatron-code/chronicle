@@ -18,6 +18,9 @@ pub fn backoff_ms(attempt: u32) -> u64 {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Action { Start(String), Gate(String), Stall(String), Park { lane: String, reason: String }, HeadCheck, Close, NeedsYou }
 
+/// `last_wire` contract: the controller seeds `last_wire[lane] = now` when it launches a lane and
+/// refreshes it on every wire message. A lane with no entry is read as "launched this tick" and is
+/// never stalled.
 pub struct Tick<'a> { pub now_ms: u64, pub last_wire: &'a HashMap<String, u64>, pub max_lanes: usize, pub main_tree: bool }
 
 fn holds(n: &NeedsYou) -> bool { matches!(n.kind.as_str(), "parked" | "exhausted" | "head") }
@@ -54,11 +57,21 @@ pub fn next_actions(rec: &RunRecord, t: &Tick) -> Vec<Action> {
             free -= 1;
         }
     }
+    // a Waiting lane whose dependency will never reach Closed is parked itself, once, while Waiting
+    let dead = |id: &str| rec.lane(id).map_or(false, |l| {
+        matches!(l.state, Parked | Cancelled) || (l.state.between_tries() && l.attempt >= MAX_ATTEMPTS)
+    });
+    for spec in &map.lanes {
+        if state_of(&spec.id) != Some(Waiting) { continue; }
+        if let Some(d) = spec.depends_on.iter().find(|d| dead(d)) {
+            out.push(Action::Park { lane: spec.id.clone(), reason: format!("Lane {} did not finish.", d.to_uppercase()) });
+        }
+    }
     if !hold_starts {
         for spec in &map.lanes {
             if free == 0 { break; }
             if state_of(&spec.id) != Some(Waiting) { continue; }
-            if spec.depends_on.iter().all(|d| state_of(d) == Some(Closed)) {
+            if spec.depends_on.iter().all(|d| state_of(d) == Some(Closed)) { // a dead dependency never satisfies this
                 out.push(Action::Start(spec.id.clone()));
                 free -= 1;
             }
@@ -84,7 +97,7 @@ pub fn resume(rec: &RunRecord) -> (RunRecord, Vec<Action>) {
     for l in r.lanes.iter_mut() {
         l.state = match l.state {
             Finishing | Gating => Finishing,
-            Preparing | BuildingPrompt | Launching | Initialising | Streaming | Fixing | Cancelled => Waiting,
+            Preparing | BuildingPrompt | Launching | Initialising | Streaming | Fixing => Waiting,
             s => s,
         };
         if l.state == Waiting { l.retry_at_ms = None; }
@@ -191,7 +204,44 @@ mod tests {
         let mut r = run(&[("a", &[]), ("b", &["a"])]);
         set(&mut r, "a", LaneState::Parked);
         r.needs_you.push(NeedsYou { kind: "exhausted".into(), lane: Some("a".into()), item: None, reason: "three tries".into(), reading: None });
+        assert_eq!(next_actions(&r, &tick(0, &w)), vec![Action::Park { lane: "b".into(), reason: "Lane A did not finish.".into() }]);
+        set(&mut r, "b", LaneState::Parked);
         assert_eq!(next_actions(&r, &tick(0, &w)), vec![Action::NeedsYou]);
+    }
+
+    #[test]
+    fn a_cancelled_or_rowless_parked_dependency_parks_its_dependent_but_a_retrying_one_does_not() {
+        let w = HashMap::new();
+        let mut r = run(&[("a", &[]), ("b", &["a"])]);
+        set(&mut r, "a", LaneState::Cancelled);
+        assert_eq!(next_actions(&r, &tick(0, &w)), vec![Action::Park { lane: "b".into(), reason: "Lane A did not finish.".into() }]);
+        set(&mut r, "a", LaneState::Parked);
+        assert!(r.needs_you.is_empty());
+        assert_eq!(next_actions(&r, &tick(0, &w)), vec![Action::Park { lane: "b".into(), reason: "Lane A did not finish.".into() }]);
+        set(&mut r, "a", LaneState::Failed);
+        r.lane_mut("a").unwrap().attempt = 1;
+        r.lane_mut("a").unwrap().retry_at_ms = Some(10_000);
+        assert!(next_actions(&r, &tick(0, &w)).is_empty(), "between tries: b just waits");
+    }
+
+    #[test]
+    fn a_lane_with_no_wire_entry_is_treated_as_just_launched() {
+        let mut r = run(&[("a", &[])]);
+        set(&mut r, "a", LaneState::Streaming);
+        let w = HashMap::new();
+        assert!(next_actions(&r, &tick(10 * STALL_MS, &w)).is_empty());
+    }
+
+    #[test]
+    fn resume_leaves_cancelled_lanes_cancelled() {
+        let mut r = run(&[("a", &[]), ("b", &[])]);
+        set(&mut r, "a", LaneState::Cancelled);
+        set(&mut r, "b", LaneState::Parked);
+        r.state = RunState::Interrupted;
+        r.interrupted_from = Some(RunState::Running);
+        let (back, _) = resume(&r);
+        assert_eq!(back.lane("a").unwrap().state, LaneState::Cancelled);
+        assert_eq!(back.lane("b").unwrap().state, LaneState::Parked);
     }
 
     #[test]
