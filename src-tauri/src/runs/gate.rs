@@ -35,11 +35,11 @@ fn git_ok(repo: &Path, args: &[&str]) -> bool {
     git_cmd(repo, args).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
 }
 /// Every git this file runs: no hooks (a husky/lint-staged hook rewrites files
-/// across the whole tree, and a hung one would hold `GIT` forever), and
-/// pathspecs are literal (`app/[id]/page.tsx` must not also match `app/i/…`).
+/// across the whole tree, and a hung one would hold `GIT` forever), no signing
+/// (a pinentry prompt would hold it just as long), and pathspecs are literal (`app/[id]/page.tsx` must not also match `app/i/…`).
 fn git_cmd(repo: &Path, args: &[&str]) -> Command {
     let mut c = Command::new("git");
-    c.arg("-C").arg(repo).args(["-c", "core.hooksPath=/dev/null"]).args(args)
+    c.arg("-C").arg(repo).args(["-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false"]).args(args)
         .env("GIT_LITERAL_PATHSPECS", "1").stdin(Stdio::null());
     // the tests never inherit the user's global config (hooksPath, templateDir, …)
     #[cfg(test)] c.env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_NOSYSTEM", "1");
@@ -432,8 +432,9 @@ mod tests {
         std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
         std::fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\nexit 1\n", r.join("sentinel").display())).unwrap();
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        git(&r, &["config", "commit.gpgsign", "true"]).unwrap(); // no key exists: a signed save would fail or prompt
         std::fs::write(r.join("lane.txt"), "lane").unwrap();
-        assert!(matches!(save_paths(&r, &["lane.txt".into()], "lane a").unwrap(), Saved::Commit(_)));
+        assert!(matches!(save_paths(&r, &["lane.txt".into()], "lane a").unwrap(), Saved::Commit(_)), "saved unsigned, no prompt");
         assert!(!r.join("sentinel").exists(), "the pre-commit hook never ran");
         close_commit(&r, 1).unwrap();
         assert!(!r.join("sentinel").exists());
