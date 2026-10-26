@@ -336,14 +336,19 @@ impl RunCtl {
         let Some(map) = rec.lane_map.clone() else { return };
         let Some(spec) = map.lanes.iter().find(|l| l.id == id).cloned() else { return };
         let lane = rec.lane(id).cloned().unwrap_or_else(|| LaneRecord::new(id));
-        // 1 · what the turn changed: the lane's own files, and leaks
+        // 1 · what changed: the lane's own unsaved files, and this turn's leaks
         let from = lk(&self.snapshots).get(id).cloned();
         let to = crate::acp::checkpoint::snapshot_tree_as(&self.repo, &format!("run-{}-{id}", self.n)).ok();
         let changed = match (from, to) { (Some(f), Some(t)) => gate::changed_between(&self.repo, &f, &t), _ => gate::dirty_paths(&self.repo) };
         let active: Vec<String> = lk(&self.active).get(id).map(|s| s.iter().cloned().collect()).unwrap_or_default();
         let writes = lk(&self.tool_writes).clone();
         let closed: Vec<String> = rec.lanes.iter().filter(|l| l.state == LaneState::Closed).map(|l| l.id.clone()).collect();
-        let (owned, leaks) = gate::split_changes(&changed, id, &map, &active, &writes, &closed);
+        let (mut owned, leaks) = gate::split_changes(&changed, id, &map, &active, &writes, &closed);
+        // the lane's own files are every owned path that differs from what is saved, not only this
+        // turn's: work from before an interrupt (or a cut-off try) is saved too. The turn's
+        // snapshot still decides the leaks.
+        let (unsaved, _) = gate::split_changes(&gate::dirty_paths(&self.repo), id, &map, &active, &writes, &closed);
+        for p in unsaved { if !owned.contains(&p) { owned.push(p); } }
         // 2 · save the lane's own files, by explicit path
         // the review is asked only about the items still the lane's: never one parked for the user or skipped
         let set_aside: HashSet<&str> = rec.needs_you.iter().filter(|x| x.kind == "parked" && x.lane.as_deref() == Some(id))
@@ -1341,6 +1346,25 @@ mod tests {
         assert_eq!(done.state, RunState::Done);
         assert!((done.judge_usd - 1.0).abs() < 1e-9, "planning's 0.50 and two reviews at 0.25: {}", done.judge_usd);
         assert!((done.cost.usd - 1.0).abs() < 1e-9, "the card's figure carries it: {}", done.cost.usd);
+    }
+
+    #[test]
+    fn work_a_lane_did_before_an_interrupt_is_saved_at_its_next_gate() {
+        let r = repo("prework", 33);
+        // lane a wrote its README before the app was killed: on disk, never saved
+        std::fs::create_dir_all(r.join("a")).unwrap();
+        std::fs::write(r.join("a/before.txt"), "written before the interrupt").unwrap();
+        let host = FakeHost::new(Box::new(|lane, _| vec![(format!("{lane}/work.txt"), lane.to_string(), true)]));
+        let mut k = kit(&r, two_lanes(33, &[], &[]), vec![], host);
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        let done = wait_until(&k.ctl, 60, |x| x.state.terminal());
+        assert_eq!(done.state, RunState::Done, "{done:#?}");
+        let a = done.lane("a").unwrap();
+        let mut files = gate::files_in(&r, a.commit.as_deref().unwrap());
+        files.sort();
+        assert_eq!(files, vec!["a/before.txt", "a/work.txt"], "every owned path that differs from the last save is saved");
+        assert!(a.leak.is_empty(), "{:?}", a.leak);
+        assert_eq!(gate::git(&r, &["status", "--porcelain"]).unwrap(), "");
     }
 
     #[test]
