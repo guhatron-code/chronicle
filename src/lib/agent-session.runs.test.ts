@@ -150,4 +150,16 @@ describe("runs in the agent store", () => {
     expect(notes.setRoundGenerating).not.toHaveBeenCalled();
     expect(ipc.agentPrompt).not.toHaveBeenCalled();
   });
+
+  it("a queued planner prompt whose send fails ends the card failed and takes the run out of planning", async () => {
+    agent.agentSessionFor(DIR).turnActive = true;
+    await agent.startRunInPane(DIR, { kind: "notes" });
+    expect(runCard()).toMatchObject({ queued: true });
+    vi.mocked(ipc.agentPrompt).mockRejectedValueOnce(new Error("the agent is still working"));
+    onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
+    await vi.waitFor(() => expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10));
+    expect(runCard()).toMatchObject({ ended: true, outcome: "failed" });
+    expect(notes.setRoundGenerating).toHaveBeenLastCalledWith(DIR, false);
+    expect(runsIpc.runPlanCancel).toHaveBeenCalledTimes(1);
+  });
 });

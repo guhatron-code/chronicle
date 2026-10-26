@@ -1350,7 +1350,13 @@ async function landCardInPane(dir: string, c: CardLanding): Promise<void> {
     landed = true;
     c.push(queued);
   };
-  const un = sendWhenPaneIsFree(dir, c.kind, c.prompt, { land, stillWanted: c.stillWanted, abandon: c.abandon, fail: c.giveUp });
+  const un = sendWhenPaneIsFree(dir, c.kind, c.prompt, {
+    land,
+    stillWanted: c.stillWanted,
+    abandon: c.abandon,
+    // wrapped: the send's .catch hands over its error, which is not giveUp's to read
+    fail: () => c.giveUp(),
+  });
   if (!needsStart) { land(true); return; }
   // startAgentSession resets the thread, so the card goes in AFTER it
   try {
@@ -1668,10 +1674,10 @@ async function landRunPrompt(dir: string, n: number, total: number, prompt: stri
   // every way the landing gives up is a failure (a send refused, a session
   // that would not start, a pane that errored); a user's stop is the
   // planning turn ending `cancelled`, which settleRunPlan handles
-  const giveUp = (outcome: "failed" | "cancelled" = "failed") => {
+  const giveUp = () => {
     if (over) return;
     over = true;
-    abandonRun(dir, n, outcome);
+    abandonRun(dir, n, "failed");
   };
   await landCardInPane(dir, {
     kind: "run",
@@ -1722,13 +1728,14 @@ async function settleRunPlan(dir: string, entry: RunEntry, stopReason: string | 
         // the next turn's end settles it afresh
         entry.ended = false;
         entry.queued = true;
+        let retryOver = false;
         touch(entry);
         sendWhenPaneIsFree(dir, "run", r.prompt, {
           land: () => {},
           stillWanted: () => !entry.ended,
           abandon: () => {},
           // the reasons never reached the planner: the run cannot start
-          fail: () => abandonRun(dir, entry.n, "failed"),
+          fail: () => { if (!retryOver) { retryOver = true; abandonRun(dir, entry.n, "failed"); } },
         });
         notify();
         return;
