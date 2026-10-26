@@ -33,6 +33,10 @@ describe("stickDecision", () => {
     const top = 1600 - 600 - 10;
     expect(stickDecision({ ...base, pinned: false, userScrolled: true, scrollTop: top, reducedMotion: true })).toEqual({ pinned: true, action: "jump" });
   });
+  it("content that shrank under the pin (a card collapsed) clamps scrollTop upward and keeps the pin", () => {
+    // the browser clamps scrollTop to the new bottom and fires a scroll event; nobody scrolled up
+    expect(stickDecision({ ...base, userScrolled: true, scrolledUp: true, scrollTop: 700, scrollHeight: 1300 })).toEqual({ pinned: true, action: "none" });
+  });
   it("a scroll event that lands exactly at the bottom keeps the pin", () => {
     expect(stickDecision({ ...base, userScrolled: true, scrollTop: 1000 })).toEqual({ pinned: true, action: "none" });
   });

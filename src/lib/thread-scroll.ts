@@ -21,8 +21,11 @@ export type StickDecision = { pinned: boolean; action: "none" | "jump" | "glide"
 export function stickDecision(i: StickInput): StickDecision {
   const gap = i.scrollHeight - i.scrollTop - i.clientHeight;
   if (i.userScrolled) {
+    // a scroll that lands exactly at the bottom is the browser clamping scrollTop
+    // after the content shrank (a card collapsed) — nobody left the bottom
+    if (i.scrolledUp && gap > 0) return { pinned: false, action: "none" };
     // direction first: any upward movement leaves the bottom, however close
-    if (i.scrolledUp) return { pinned: false, action: "none" };
+    if (i.scrolledUp) return { pinned: true, action: "none" };
     const near = gap < NEAR_BOTTOM_PX;
     if (!near) return { pinned: false, action: "none" };
     if (i.pinned) return { pinned: true, action: "none" };

@@ -42,6 +42,7 @@ import { AgentMark } from "@/components/chrome/AgentMark";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { Autocomplete, findTrigger, handleKey, type PickerItem } from "./Autocomplete";
 import { commandRows, LOCAL_COMMANDS } from "@/lib/composer-commands";
+import { fitTextarea } from "@/lib/fit-textarea";
 import {
   buildBlocks,
   ensureFileIndex,
@@ -426,8 +427,10 @@ export function Composer({
   useLayoutEffect(() => {
     const ta = taRef.current;
     if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${ta.scrollHeight}px`;
+    // the box holds its height while the input is measured, so the thread above
+    // never sees the one-line instant (its scroller would grow, the browser would
+    // clamp its scrollTop down, and the pin to the bottom would read that as a scroll up)
+    fitTextarea(ta, ta.parentElement);
   }, [text]);
 
   const send = () => {
