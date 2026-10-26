@@ -1,6 +1,6 @@
 # Any agent, any provider · design
 
-Date: 2026-10-15. Status: **draft, written for the user's review** at the user's request that the whole
+Date: 2026-10-15. Status: **implemented** — live check 2026-10-26 in c-runs/PROGRESS.md; was: draft, written for the user's review at the user's request that the whole
 program ships in the next update. Brainstorm questions were answered by the user on 2026-10-15 ("any agent
 in the pane" and "any provider for Chronicle's own calls"); the choices this spec made on its own are in
 §12 for the user to confirm or overturn. Plans: `docs/superpowers/plans/2026-10-15-agents-and-providers.md`

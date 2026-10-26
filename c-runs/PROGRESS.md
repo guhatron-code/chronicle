@@ -63,3 +63,36 @@ Superseded by the closing table above.
 ## Any agent, any provider (RN-4)
 - 2026-10-15 · boards approved by the user ("looks good"): `design/comps/agents/project/01-Setup-agents-providers.dc.html`, `02-Pane-on-codex.dc.html`. Summary card: not asked for; today's row list stays unless the user says otherwise.
 - 2026-10-20 · probe: claude-acp shipped, codex-acp shipped, gemini not yet supported (deferred, needs sign-in), opencode shipped (see the spec, §11 probe result); Claude 0.90.1-preview.15: FAIL
+
+### Any agent, any provider · live check (2026-10-26)
+
+Release build (`cargo build --release --features tauri/custom-protocol`, HEAD 05f9b65 + the live test below), launched as its own instance beside the installed 0.11.x (`CHRONICLE_BRIDGE_SOCKET`/`TOKEN` on scratch paths), project `~/chronicle-probe`, every step driven by synthetic input and read off window captures.
+
+| | Claude Code | Codex | Gemini CLI | OpenCode |
+|---|---|---|---|---|
+| version | 0.75.1 (`@agentclientprotocol/claude-agent-acp`) | 2.2.3-preview.10 (`@agentclientprotocol/codex-acp`) | — not shipped (`not yet supported` row) | 1.19.0 (binary) |
+| installed from Setup | already there: the managed adapter had moved to `tools/agents/claude-acp`, row read `ready` with the connector line `0.75.1 · installed by Chronicle` | yes: `missing · Install` → `installing` with a progress bar → `ready` | — | yes: `missing · Install` → `installing` → `ready` |
+| sign-in path | none needed (`Signed in.` — the claude CLI was already signed in on this Mac) | none needed (`~/.codex/auth.json` already there; the row went straight to ready) | — | none asked: it ran on its own settings with the free `opencode/big-pickle` model |
+| ready, one turn answered | yes | yes | — | yes |
+| header mark and name | Claude's mark · `Chronigirl` (the persona) · idle / waiting on you / working | `Cx` · `Codex` | — | `Oc` · `OpenCode` |
+| stances offered | Ask first, Execute, Auto, Unattended | Ask first, Execute, Auto, Unattended (Auto = Codex's own `agent` mode) | — | none: static chip `Its own settings`; empty state says it doesn't ask before changing files |
+| tool rows (tree / flat) | flat this turn (Read README.md · Editing/Edited notes.txt `+2 −0` · Show the diff); no subagent ran, so no tree | flat (Thought › · Ran `head -n 1 README.md …` finished · Edited notes.txt) | — | flat (Read README.md · Edited notes.txt · Show the output) |
+| permission card, edit landed | yes — `The agent wants to edit notes.txt` Allow / Don't allow / Always allow in this session; notes.txt = `live` | yes — same card; notes.txt = `live` | — | no card (by design); notes.txt = `live` |
+| End session, new session | yes (`The session ended.` → `Start a new session` → idle on Claude) | yes | — | yes |
+| switch from the picker asked first | yes: `Switch to Codex? This ends the current session…` Keep Claude Code / Switch to Codex → the new session came up on Codex | yes (Codex → OpenCode, same dialog) | — | — |
+
+The terminal sign-in flows (`claude /login`, `codex login`, `opencode auth login`) were not exercised: every agent was already signed in on this Mac.
+
+| Provider | role tried | answered | model | note |
+|---|---|---|---|---|
+| Your agent | decisions (one `decide` through the reviewer lane; review rides the same session) | yes | agent/claude-acp 6.8 s · agent/codex-acp 4.4 s | `live_agent_provider_answers_one_decision`; OpenCode refused as designed: *OpenCode can't review without changing files — choose a provider for Review in Setup* |
+| Anthropic | decisions | no key | — | no key saved on this Mac |
+| OpenAI | decisions | no key | — | |
+| OpenRouter | decisions | no key | — | |
+| TypeSafe | decisions | no key | — | response shape still the fixture's assumption, unconfirmed |
+| Local | decisions | none running | — | |
+
+The Keychain-removal check (role falls back to *with your agent*) was not run: no key to remove. Setup's Providers group drew both roles on *with your agent*, the Your agent row `ready`, and `Add key` / `Add address` on every other row (board 1).
+
+Seen and not in the matrix: after a turn that changed a file, the `1 file changed · Review · Keep all` bar covered the agent's final reply on all three agents until the thread was scrolled by hand (fixed in the follow-up commit); the rate-limit chip in the tab strip kept Claude's `2% · resets 10:10 AM` while the Codex and OpenCode sessions were live (deferred); the window had to be activated by process id before synthetic clicks were taken (a CLI-launched instance starts without focus; not a product issue).
+

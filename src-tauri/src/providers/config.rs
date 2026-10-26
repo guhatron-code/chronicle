@@ -282,4 +282,25 @@ mod config_tests {
             match c.decide(&req) { Ok(d) => eprintln!("{id}: {} {:?}", d.model, d.answers), Err(e) => eprintln!("{id}: FAILED {e}") }
         }
     }
+
+    /// Live: the Your agent provider — one decision through each installed agent's
+    /// reviewer session on the probe repo (an agent with no Ask mode is refused here).
+    /// CHRONICLE_PROVIDER_LIVE=1 cargo test live_agent -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_agent_provider_answers_one_decision() {
+        if std::env::var("CHRONICLE_PROVIDER_LIVE").ok().as_deref() != Some("1") { eprintln!("skipped"); return; }
+        let repo = std::path::PathBuf::from(std::env::var("CHRONICLE_LIVE_REPO").unwrap_or_else(|_| format!("{}/chronicle-probe", std::env::var("HOME").unwrap())));
+        let req = crate::providers::DecisionRequest {
+            state: "git status".into(),
+            instructions: "Does this shell command change any file?".into(),
+            criteria: vec![crate::providers::Criterion::Noul { name: "writes".into() }, crate::providers::Criterion::Choice { name: "action".into(), options: vec!["allow".into(), "refuse".into()] }],
+        };
+        for id in ["claude-acp", "codex-acp", "opencode"] {
+            let profile = crate::agents::profile(id).unwrap();
+            let c = crate::providers::agent::AgentCalls::for_project(profile, repo.clone(), repo.clone());
+            let t = std::time::Instant::now();
+            match c.decide(&req) { Ok(d) => eprintln!("agent {id}: {} {:?} in {:.1}s", d.model, d.answers, t.elapsed().as_secs_f32()), Err(e) => eprintln!("agent {id}: FAILED {e}") }
+        }
+    }
 }
