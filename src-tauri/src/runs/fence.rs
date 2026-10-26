@@ -112,23 +112,10 @@ impl Fence {
     }
 }
 
-/// The path with its deepest existing ancestor canonicalised (symlinks followed), the rest appended.
-fn canonical_deep(p: &Path) -> Option<PathBuf> {
-    let mut existing = p.to_path_buf();
-    let mut tail: Vec<std::ffi::OsString> = Vec::new();
-    while !existing.exists() {
-        tail.push(existing.file_name()?.to_os_string());
-        if !existing.pop() { return None; }
-    }
-    let mut canon = existing.canonicalize().ok()?;
-    for part in tail.iter().rev() { canon.push(part); }
-    Some(canon)
-}
-
 /// Canonical, repo-relative; `None` for anything relative, climbing, or outside.
 fn repo_rel(repo: &Path, abs: &Path) -> Option<String> {
     if !abs.is_absolute() || abs.components().any(|c| matches!(c, std::path::Component::ParentDir)) { return None; }
-    let canon = canonical_deep(abs)?;
+    let canon = crate::acp::canonical_deep(abs)?;
     let croot = repo.canonicalize().ok()?;
     let rel = canon.strip_prefix(&croot).ok()?;
     let s = rel.to_string_lossy().into_owned();

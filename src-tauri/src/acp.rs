@@ -856,7 +856,7 @@ fn has_dangling_link(p: &Path) -> bool {
 /// canonical path is `<designs root>/<slug>/…` where no component starts with
 /// `.` — so `.threads` (the lane's own records, which undo trusts),
 /// `.gitignore`, a design's `.versions/` and any future dot entry are out of reach.
-fn strictly_inside(p: &Path, root: &Path) -> bool {
+pub(crate) fn strictly_inside(p: &Path, root: &Path) -> bool {
     use std::path::Component;
     if !p.is_absolute()
         || p.components().any(|c| matches!(c, Component::ParentDir))
@@ -941,7 +941,7 @@ pub fn design_outside_undo(
 }
 
 /// The deepest existing ancestor canonicalized, with the missing tail appended.
-fn canonical_deep(p: &Path) -> Option<PathBuf> {
+pub(crate) fn canonical_deep(p: &Path) -> Option<PathBuf> {
     let mut existing = p.to_path_buf();
     let mut tail: Vec<std::ffi::OsString> = Vec::new();
     while !existing.exists() {
