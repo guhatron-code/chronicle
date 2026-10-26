@@ -52,7 +52,8 @@ pub const REVIEW_FALLBACK: &str = "The review model couldn’t be reached, so yo
 
 pub struct Fallback {
     primary: Arc<dyn Oracle>,
-    fallback: Arc<dyn Oracle>,
+    /// `None` when the primary already is the agent: there is nothing else to fall to.
+    fallback: Option<Arc<dyn Oracle>>,
     degraded: AtomicBool,
     notice: Mutex<Option<String>>,
     what: &'static str,
@@ -60,7 +61,11 @@ pub struct Fallback {
 
 impl Fallback {
     pub fn new(primary: Arc<dyn Oracle>, fallback: Arc<dyn Oracle>, what: &'static str) -> Self {
-        Fallback { primary, fallback, degraded: AtomicBool::new(false), notice: Mutex::new(None), what }
+        Fallback { primary, fallback: Some(fallback), degraded: AtomicBool::new(false), notice: Mutex::new(None), what }
+    }
+    /// A role with no separate fallback: its failure is just the error, and there is no notice.
+    pub fn alone(primary: Arc<dyn Oracle>) -> Self {
+        Fallback { primary, fallback: None, degraded: AtomicBool::new(false), notice: Mutex::new(None), what: "" }
     }
     fn degrade(&self) {
         if !self.degraded.swap(true, Ordering::SeqCst) {
@@ -68,35 +73,43 @@ impl Fallback {
         }
     }
     pub fn decide(&self, mk: &dyn Fn() -> DecisionRequest) -> Result<Decision, String> {
+        let Some(fallback) = &self.fallback else { return self.primary.decide(mk()) };
         if !self.degraded.load(Ordering::SeqCst) {
             match self.primary.decide(mk()) { Ok(d) => return Ok(d), Err(_) => self.degrade() }
         }
-        self.fallback.decide(mk())
+        fallback.decide(mk())
     }
     pub fn complete_json(&self, system: &str, prompt: &str, schema: &Value) -> Result<(Value, String), String> {
+        let Some(fallback) = &self.fallback else { return self.primary.complete_json(system, prompt, schema) };
         if !self.degraded.load(Ordering::SeqCst) {
             match self.primary.complete_json(system, prompt, schema) { Ok(v) => return Ok(v), Err(_) => self.degrade() }
         }
-        self.fallback.complete_json(system, prompt, schema)
+        fallback.complete_json(system, prompt, schema)
     }
     /// The one notice for the run card, once.
     pub fn take_notice(&self) -> Option<String> { self.notice.lock().ok()?.take() }
 }
 
+/// One role's fallback: the agent behind a provider, or, when what answers the role
+/// already is the agent (`<provider>/<model>` starting `agent/`), the agent alone, so an
+/// agent failure isn't retried on the same agent under a false notice.
+fn role(primary: Arc<dyn Oracle>, primary_model: &str, agent: impl FnOnce() -> Arc<dyn Oracle>, what: &'static str) -> Fallback {
+    if primary_model.starts_with("agent/") { Fallback::alone(primary) } else { Fallback::new(primary, agent(), what) }
+}
+
 /// The project's Decisions and Review roles (agents spec §9), each falling back
 /// to the user's agent — which is also what both roles are when no key is set.
-pub fn for_project(project: &Path) -> (Fallback, Fallback) {
+/// The review side is shared: the judge asks its second opinions and lane
+/// questions there, and `review::review` gives its verdict there.
+pub fn for_project(project: &Path) -> (Fallback, Arc<Fallback>) {
     use crate::providers::{agent_calls, config::Role, for_role};
-    let agent = |tokens: u32| -> Arc<dyn Oracle> {
-        Arc::new(ProviderOracle::new(Box::new(agent_calls(project)), "agent").with_max_tokens(tokens))
+    let side = |r: Role, tokens: u32, what: &'static str| -> Fallback {
+        let calls = for_role(r, project);
+        let model = calls.model();
+        let primary: Arc<dyn Oracle> = Arc::new(ProviderOracle::new(calls, r.as_str()).with_max_tokens(tokens));
+        role(primary, &model, || Arc::new(ProviderOracle::new(Box::new(agent_calls(project)), "agent").with_max_tokens(tokens)), what)
     };
-    let decisions = Fallback::new(
-        Arc::new(ProviderOracle::new(for_role(Role::Decisions, project), "decisions").with_max_tokens(DECISION_TOKENS)),
-        agent(DECISION_TOKENS), DECISIONS_FALLBACK);
-    let review = Fallback::new(
-        Arc::new(ProviderOracle::new(for_role(Role::Review, project), "review").with_max_tokens(REVIEW_TOKENS)),
-        agent(REVIEW_TOKENS), REVIEW_FALLBACK);
-    (decisions, review)
+    (side(Role::Decisions, DECISION_TOKENS, DECISIONS_FALLBACK), Arc::new(side(Role::Review, REVIEW_TOKENS, REVIEW_FALLBACK)))
 }
 
 #[cfg(test)]
@@ -143,6 +156,10 @@ pub(crate) mod fake {
     pub(crate) fn fallback(primary: &Arc<FakeOracle>, agent: &Arc<FakeOracle>) -> Fallback {
         Fallback::new(primary.clone(), agent.clone(), DECISIONS_FALLBACK)
     }
+    /// The review side, shared by the judge's second opinions and the reviewer.
+    pub(crate) fn second(primary: &Arc<FakeOracle>, agent: &Arc<FakeOracle>) -> Arc<Fallback> {
+        Arc::new(Fallback::new(primary.clone(), agent.clone(), REVIEW_FALLBACK))
+    }
 }
 
 #[cfg(test)]
@@ -166,5 +183,23 @@ mod tests {
         assert_eq!(v["max_tokens"], 4000);
         let req = DecisionRequest { state: "x".into(), instructions: "y".into(), criteria: vec![Criterion::Noul { name: "n".into() }] };
         assert_eq!(o.decide(req).unwrap_err(), "review: answered 500");
+    }
+
+    #[test]
+    fn a_role_the_agent_already_answers_has_no_fallback_and_no_notice() {
+        use super::fake::FakeOracle;
+        let agent = FakeOracle::named("agent/claude-acp");
+        let f = role(agent.clone(), "agent/claude-acp", || panic!("no second agent for an agent role"), DECISIONS_FALLBACK);
+        let req = || DecisionRequest { state: "x".into(), instructions: "y".into(), criteria: vec![] };
+        assert_eq!(f.decide(&req).unwrap_err(), "unreachable", "an agent failure is just the error");
+        assert!(f.complete_json("s", "p", &json!({})).is_err());
+        assert_eq!(f.take_notice(), None, "no false notice");
+        assert_eq!(agent.decide_calls.load(Ordering::SeqCst), 1, "asked once, not twice");
+        let provider = FakeOracle::named("anthropic/claude-opus-5-5");
+        let fallback_agent = FakeOracle::named("agent/claude-acp");
+        let f = role(provider.clone(), "anthropic/claude-opus-5-5", || fallback_agent.clone(), DECISIONS_FALLBACK);
+        assert!(f.decide(&req).is_err());
+        assert_eq!(f.take_notice().as_deref(), Some(DECISIONS_FALLBACK), "a provider falls to the agent, with the notice");
+        assert_eq!(fallback_agent.decide_calls.load(Ordering::SeqCst), 1);
     }
 }

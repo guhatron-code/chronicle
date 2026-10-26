@@ -144,7 +144,6 @@ pub fn agent_calls(project_dir: &std::path::Path) -> agent::AgentCalls {
 
 /// What answers a role for this project right now: the chosen provider when its key or address is there,
 /// else the agent. Reads `config.json` and the Keychain; posts through curl.
-#[allow(dead_code)] // consumed by the Runs plan (Plan B): its judge and reviewer call it
 pub fn for_role(role: config::Role, project_dir: &std::path::Path) -> Box<dyn Calls + Send + Sync> {
     let cfg = crate::load_config();
     let p = config::resolve(&cfg, role, &keys::Keychain);
