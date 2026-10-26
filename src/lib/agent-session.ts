@@ -1121,7 +1121,9 @@ export async function resumeAgentSession(dir: string, id: string): Promise<void>
   dropQueueWaiters(dir); // the queue went with the thread
   notify();
   try {
-    await agentSessionResume(dir, id);
+    const r = (await agentSessionResume(dir, id)) as { started?: boolean } | null;
+    // never leave the pane on "installing" with nothing coming
+    if (r && r.started === false) throw new Error("Another session is still live in this project — end it first.");
   } catch (e) {
     s.phase = "error";
     s.errorMessage = String(e);

@@ -1058,9 +1058,16 @@ pub fn start(
 ) -> Result<bool, String> {
     use std::os::unix::process::CommandExt;
     let mut sessions = state.sessions.lock().map_err(|e| e.to_string())?;
-    if let Some(existing) = sessions.get(&key) {
+    if let Some(existing) = sessions.get(&key).cloned() {
         if existing.is_alive() {
-            return Ok(false); // single-flight: one live session per project
+            if resume.is_none() {
+                return Ok(false); // single-flight: one live session per project
+            }
+            // a resume is the user replacing the live thread with a stored one: that
+            // session ends first (records kept), off the map lock, which shutdown takes
+            drop(sessions);
+            existing.stop(false);
+            sessions = state.sessions.lock().map_err(|e| e.to_string())?;
         }
         sessions.remove(&key);
     }
@@ -2287,6 +2294,23 @@ for line in sys.stdin:
         let Some(h) = start_mock_full("walk-plan", crate::agents::claude(), Lane::Chat, None, |d| std::fs::write(d.join(".start-mode"), "plan").unwrap()) else { return };
         let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
         assert_eq!(ready_mode(&ready), Some("default"), "{ready}");
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_resume_while_a_session_is_live_replaces_it() {
+        let Some(h) = start_mock_full("resume-replaces", crate::agents::claude(), Lane::Chat, None, |d| std::fs::write(d.join(".can-load"), "").unwrap()) else { return };
+        let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert!(state_is(&ready, "ready"), "{ready}");
+        // the user picks an earlier thread from the history while this one is live
+        let mut cmd = std::process::Command::new(python3().unwrap());
+        cmd.arg(h.dir.join(".mock-agent.py")).arg(&h.dir);
+        let (tx, rx2) = mpsc::channel::<Value>();
+        let emit: Emit = Arc::new(move |v| { let _ = tx.send(v); });
+        let started = start(&h.state, emit, h.key.clone(), Lane::Chat, crate::agents::claude(), h.dir.clone(), h.dir.clone(), vec![h.dir.clone()], None, LaneExtras::default(), Some("sess-1".into()), cmd).unwrap();
+        assert!(started, "a resume replaces the live session instead of being refused as a second start");
+        let ready2 = wait_for(&rx2, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert!(state_is(&ready2, "ready"), "{ready2}");
         h.state.drain();
     }
 
