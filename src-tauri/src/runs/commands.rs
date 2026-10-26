@@ -79,6 +79,12 @@ pub fn planner_prompt_for(p: &Project, rec: &RunRecord) -> String {
 }
 
 pub fn begin_in(p: &Project, source: &Source, judge: Option<&Judge>) -> Result<Value, String> {
+    begin_on(p, source, judge, crate::agents::project_profile(&p.dir))
+}
+
+/// Begin on a given agent: refused before anything is opened when that agent can't run lanes (R28).
+pub fn begin_on(p: &Project, source: &Source, judge: Option<&Judge>, agent: &crate::agents::AgentProfile) -> Result<Value, String> {
+    if let Some(why) = crate::acp::worker_refusal(agent) { return Err(why); }
     let dir = &p.dir;
     if list(dir).iter().any(|r| !r.state.terminal()) { return Err("A round is already running in this project. Stop it or let it finish first.".into()); }
     let max = max_lanes(p.manifest.as_ref()) as u32;
@@ -308,6 +314,8 @@ pub fn begin_with(runs: &Runs, p: &Project, source: &Source, judge: Option<&Judg
 /// A controller for a running record, registered and started. The judge and
 /// the gate's reviewer share one review side, so one degrade covers both.
 fn launch(app: &tauri::AppHandle, runs: &Runs, p: &Project, rec: RunRecord, first: Vec<Action>) -> Result<(), String> {
+    // the agent may have changed since the run began: lanes never run on one that can't ask first (R28)
+    if let Some(why) = crate::acp::worker_refusal(crate::agents::project_profile(&p.dir)) { return Err(why); }
     let (decisions, review) = oracle::for_project(&p.dir);
     let (ctl, rx) = RunCtl::new(CtlParts {
         dir: p.dir.clone(), repo: p.repo.clone(), scratch: gate::scratch_dir(&p.repo), rec,
@@ -469,6 +477,21 @@ mod tests {
     fn one_lane(note: Option<&str>) -> LaneMap {
         LaneMap { items: vec![Item { id: "T-1".into(), title: "x".into(), note: note.map(String::from), rewrite: None }],
                   lanes: vec![LaneSpec { id: "a".into(), title: "A".into(), items: vec!["T-1".into()], owns: vec!["src/lib/**".into()], depends_on: vec![], checks: vec![], isolation: None }] }
+    }
+
+    #[test]
+    fn a_run_on_an_agent_that_cannot_ask_first_is_refused_before_the_planner() {
+        let p = project("no-ask");
+        note(&p, "Tasks/A.md", "Fix src/lib/a.ts");
+        let opencode = crate::agents::profile("opencode").unwrap();
+        for source in [Source::Notes, Source::Prompt { text: "do it".into() }] {
+            let e = begin_on(&p, &source, None, opencode).unwrap_err();
+            assert_eq!(e, "OpenCode can't run lanes: it never asks before changing files — choose Claude Code or Codex for this project.");
+        }
+        assert!(list(&p.dir).is_empty(), "no run record was made");
+        assert!(crate::notes::rounds::load(&p.dir).unwrap().is_empty(), "no round was opened");
+        assert!(!p.dir.join(".chronicle/round_1_notes.json").exists());
+        assert!(begin_on(&p, &Source::Notes, None, crate::agents::claude()).is_ok(), "an agent that asks first begins");
     }
 
     #[test]

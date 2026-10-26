@@ -831,6 +831,16 @@ pub fn reviewer_refusal(p: &crate::agents::AgentProfile) -> Option<String> {
     p.modes.ask.is_none().then(|| format!("{} can't review without changing files — choose a provider for Review in Setup", p.name))
 }
 
+/// What a worker lane on this agent can't do, as the sentence the run card shows: a lane's
+/// fence, git guard and publish refusal live in the agent's asks, so an agent that can't be
+/// put in Ask first would change files unfenced (ruling R28).
+pub fn worker_refusal(p: &crate::agents::AgentProfile) -> Option<String> {
+    p.modes.ask.is_none().then(|| format!("{} can't run lanes: it never asks before changing files — choose Claude Code or Codex for this project.", p.name))
+}
+
+/// A worker lane's mode lock: it runs in Ask first, start to end.
+pub const WORKER_MODE_LOCK: &str = "A lane stays in Ask first.";
+
 /// The `allow_once` option id for a permission ask from one of the design
 /// session's own MCP servers; `None` for any other tool, or when no once-only
 /// option exists (the ask then reaches the user as usual).
@@ -1449,6 +1459,17 @@ impl AcpSession {
                         return self.fail_handshake(&format!("{name} couldn't be put in Ask first, so it can't review read-only"));
                     }
                 }
+                if let Lane::Worker { .. } = self.lane {
+                    // a lane's fence, git guard and publish refusal are answers to its asks: a lane
+                    // that can't be put in Ask first never starts (ruling R28)
+                    let name = self.profile.name;
+                    let Some(ask) = ask else {
+                        return self.fail_handshake(&worker_refusal(self.profile).unwrap_or_default());
+                    };
+                    if current != Some(ask) && self.set_mode(ask).is_err() {
+                        return self.fail_handshake(&format!("{name} couldn't be put in Ask first, so it can't run a lane."));
+                    }
+                }
                 if self.lane == Lane::Chat {
                     // only where the session offers it: a session with no such mode has nothing to walk
                     let offered = |a: &str| resp.pointer("/modes/availableModes").and_then(|v| v.as_array())
@@ -1590,6 +1611,15 @@ impl AcpSession {
                 {
                     let ms = self.clone();
                     std::thread::spawn(move || { let _ = ms.set_mode("default"); });
+                }
+                // a worker lane's mode lock, the same way: any switch away from Ask first is walked back
+                if let (Lane::Worker { .. }, Some(ask)) = (self.lane, crate::agents::profiles::mode_for(self.profile, crate::agents::profiles::Stance::Ask)) {
+                    if msg.pointer("/params/update/sessionUpdate").and_then(|v| v.as_str()) == Some("current_mode_update")
+                        && msg.pointer("/params/update/currentModeId").and_then(|v| v.as_str()) != Some(ask)
+                    {
+                        let ms = self.clone();
+                        std::thread::spawn(move || { let _ = ms.set_mode(ask); });
+                    }
                 }
                 if msg.get("method").and_then(|m| m.as_str()) == Some("session/update") {
                     self.append_transcript(&msg);
@@ -2014,6 +2044,11 @@ impl AcpSession {
     pub fn set_mode(&self, mode_id: &str) -> Result<(), String> {
         if self.designs_root.is_some() && mode_id != "default" {
             return Err(DESIGN_MODE_LOCK.into());
+        }
+        if matches!(self.lane, Lane::Worker { .. })
+            && crate::agents::profiles::mode_for(self.profile, crate::agents::profiles::Stance::Ask) != Some(mode_id)
+        {
+            return Err(WORKER_MODE_LOCK.into());
         }
         let advertised = self.modes.lock().map_err(|e| e.to_string())?
             .get("availableModes").and_then(|v| v.as_array())
@@ -2494,6 +2529,62 @@ for line in sys.stdin:
         let end = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
         assert!(state_is(&end, "error"), "never ready: {end}");
         assert_eq!(end.pointer("/message/params/message").and_then(|m| m.as_str()), Some("Claude Code couldn't be put in Ask first, so it can't review read-only"));
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_worker_lane_is_walked_to_ask_first_before_ready_and_stays_there() {
+        let Some(h) = start_mock_full("worker-walk", crate::agents::claude(), Lane::Worker { run: 3, k: 0 }, None, |d| std::fs::write(d.join(".start-mode"), "acceptEdits").unwrap()) else { return };
+        let ready = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert!(state_is(&ready, "ready"), "{ready}");
+        assert_eq!(ready_mode(&ready), Some("default"), "ready already reads Ask first: {ready}");
+        let set: Value = serde_json::from_str(&std::fs::read_to_string(h.dir.join(".set-mode.json")).unwrap()).unwrap();
+        assert_eq!(set["modeId"], "default");
+        let s = h.state.get(&h.key).unwrap();
+        for mode in ["acceptEdits", "bypassPermissions", "plan"] {
+            assert_eq!(s.set_mode(mode).unwrap_err(), WORKER_MODE_LOCK, "{mode}");
+        }
+        assert_eq!(s.current_state().pointer("/modes/currentModeId").and_then(|v| v.as_str()), Some("default"));
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_worker_lane_that_switches_its_own_mode_is_walked_back() {
+        let Some(h) = start_mock_full("worker-walk-back", crate::agents::claude(), Lane::Worker { run: 3, k: 1 }, None, |_| {}) else { return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        assert!(!h.dir.join(".set-mode.json").exists(), "already in Ask first: nothing to walk");
+        let s = h.state.get(&h.key).unwrap();
+        // EXIT-PLAN: the mock switches itself to plan mid-turn
+        s.prompt(vec![json!({"type":"text","text":"EXIT-PLAN"})], "EXIT-PLAN".into()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !h.dir.join(".set-mode.json").exists() && std::time::Instant::now() < deadline { std::thread::sleep(Duration::from_millis(50)); }
+        let set: Value = serde_json::from_str(&std::fs::read_to_string(h.dir.join(".set-mode.json")).unwrap()).unwrap();
+        assert_eq!(set["modeId"], "default", "the lane was set back to Ask first");
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_worker_lane_on_an_agent_that_cannot_ask_first_never_becomes_ready() {
+        let opencode = crate::agents::profile("opencode").unwrap();
+        let Some(h) = start_mock_full("worker-no-ask", opencode, Lane::Worker { run: 3, k: 2 }, None, |d| std::fs::write(d.join(".start-mode"), "acceptEdits").unwrap()) else { return };
+        let end = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert!(state_is(&end, "error"), "never ready: {end}");
+        assert_eq!(end.pointer("/message/params/message").and_then(|m| m.as_str()),
+            Some("OpenCode can't run lanes: it never asks before changing files — choose Claude Code or Codex for this project."));
+        assert_eq!(worker_refusal(opencode).as_deref(), Some("OpenCode can't run lanes: it never asks before changing files — choose Claude Code or Codex for this project."));
+        assert_eq!(worker_refusal(crate::agents::claude()), None);
+        h.state.drain();
+    }
+
+    #[test]
+    fn a_worker_lane_whose_switch_is_refused_never_becomes_ready() {
+        let Some(h) = start_mock_full("worker-refused", crate::agents::claude(), Lane::Worker { run: 3, k: 3 }, None, |d| {
+            std::fs::write(d.join(".start-mode"), "acceptEdits").unwrap();
+            std::fs::write(d.join(".refuse-set-mode"), "").unwrap();
+        }) else { return };
+        let end = wait_for(&h.rx, 20, |v| state_is(v, "ready") || state_is(v, "error"));
+        assert!(state_is(&end, "error"), "never ready: {end}");
+        assert_eq!(end.pointer("/message/params/message").and_then(|m| m.as_str()), Some("Claude Code couldn't be put in Ask first, so it can't run a lane."));
         h.state.drain();
     }
 
