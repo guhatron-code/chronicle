@@ -6,13 +6,28 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 use crate::agent_api;
+use crate::runs::tools::{scoped_args, RunScope};
 
-pub(crate) struct Session { dir: PathBuf, initialized: bool, designs_only: bool }
+pub(crate) struct Session { dir: PathBuf, initialized: bool, designs_only: bool, scope: Option<RunScope> }
 impl Session {
-    pub(crate) fn new(dir: PathBuf) -> Self { Self { dir, initialized: false, designs_only: false } }
+    pub(crate) fn new(dir: PathBuf) -> Self { Self { dir, initialized: false, designs_only: false, scope: None } }
     /// The design session's server (`--designs-only`): only `chronicle.designs.*` is visible or callable.
     pub(crate) fn designs_only(mut self, on: bool) -> Self { self.designs_only = on; self }
-    fn visible(&self, name: &str) -> bool { !self.designs_only || ["list", "read", "capture", "lint"].iter().any(|v| name == format!("chronicle.designs.{v}")) }
+    /// A run's server (`--planner`, or `--run <n> --lane <id>`): only its run tools.
+    pub(crate) fn with_scope(mut self, scope: Option<RunScope>) -> Self { self.scope = scope; self }
+    fn visible(&self, name: &str) -> bool {
+        match &self.scope {
+            Some(scope) => scope.shows(name),
+            // the project's own `.mcp.json` server never shows the scoped run tools
+            None => !crate::runs::tools::is_scoped_tool(name)
+                && (!self.designs_only || ["list", "read", "capture", "lint"].iter().any(|v| name == format!("chronicle.designs.{v}"))),
+        }
+    }
+    /// Who a refused tool isn't available to.
+    fn refusal(&self, name: &str) -> String {
+        if self.designs_only && self.scope.is_none() { format!("{name} isn't available to the design session.") }
+        else { format!("{name} isn't available to this session.") }
+    }
 }
 
 const INSTRUCTIONS: &str = "Chronicle keeps this project's notes (tasks, bugs, ideas) and its build roadmap. Use chronicle.notes.* to list, read, create and update notes instead of grepping .chronicle/notes; use chronicle.state.* before saying what is done or what is next, because it answers from git and the roadmap rules, not from memory. Use chronicle.designs.list and chronicle.designs.read to see the project's designs and their frame files; both are read-only, so a design never changes through them.";
@@ -67,7 +82,7 @@ pub(crate) fn handle_line(s: &mut Session, line: &str) -> Option<String> {
         "tools/call" => {
             let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
-            let result = if s.visible(name) { agent_api::call(&s.dir, name, &args) } else { Err(format!("{name} isn't available to the design session.")) };
+            let result = if s.visible(name) { agent_api::call(&s.dir, name, &scoped_args(s.scope.as_ref(), &args)) } else { Err(s.refusal(name)) };
             match result {
                 Ok(out) => reply(id, tool_text(format!("{}\n{}", out.summary, serde_json::to_string_pretty(&out.data).unwrap_or_default()), false)),
                 Err(e) => reply(id, tool_text(e, true)),
@@ -78,9 +93,9 @@ pub(crate) fn handle_line(s: &mut Session, line: &str) -> Option<String> {
 }
 
 /// Serve until stdin closes. Every reply is one line, flushed at once.
-pub(crate) fn serve(dir: PathBuf, designs_only: bool) -> i32 {
+pub(crate) fn serve(dir: PathBuf, designs_only: bool, scope: Option<RunScope>) -> i32 {
     use std::io::{BufRead, Write};
-    let mut s = Session::new(dir).designs_only(designs_only);
+    let mut s = Session::new(dir).designs_only(designs_only).with_scope(scope);
     let stdin = std::io::stdin();
     let mut out = std::io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -176,5 +191,22 @@ mod tests {
         assert_eq!(b["result"]["isError"], true);
         let ok = rpc(&mut s, r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"chronicle.designs.list","arguments":{}}}"#);
         assert!(ok["result"].get("isError").is_none());
+    }
+
+    #[test]
+    fn the_projects_own_server_never_shows_the_scoped_run_tools() {
+        let names = |s: &Session| agent_api::catalog().iter().filter(|t| s.visible(t.name)).map(|t| t.name).collect::<Vec<_>>();
+        let plain = Session::new(PathBuf::from("/p"));
+        let scoped = ["chronicle.run.declare", "chronicle.run.block", "chronicle.run.ask", "chronicle.run.lane_state"];
+        assert!(!names(&plain).iter().any(|n| scoped.contains(n)), "the project's own .mcp.json server never shows them");
+        assert!(!names(&Session::new(PathBuf::from("/p")).designs_only(true)).iter().any(|n| scoped.contains(n)));
+        let planner = Session::new(PathBuf::from("/p")).with_scope(Some(RunScope::Planner));
+        assert_eq!(names(&planner), vec!["chronicle.run.declare", "chronicle.run.lane_state"]);
+        let lane = Session::new(PathBuf::from("/p")).with_scope(Some(RunScope::Lane { n: 1, lane: "a".into() }));
+        assert_eq!(names(&lane), vec!["chronicle.run.block", "chronicle.run.ask", "chronicle.run.lane_state"]);
+        let (d, _) = session("run-refusal");
+        let mut s = Session::new(d).with_scope(Some(RunScope::Planner));
+        let e = rpc(&mut s, r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"chronicle.notes.list","arguments":{}}}"#);
+        assert_eq!(e["result"]["content"][0]["text"], "chronicle.notes.list isn't available to this session.");
     }
 }

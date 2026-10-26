@@ -3966,9 +3966,11 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     if let Some(code) = cli::run(&args[1..]) { std::process::exit(code); }
     if let Some(i) = args.iter().position(|a| a == "--mcp") {
-        let start = args.get(i + 1).filter(|a| *a != "--designs-only").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+        let rest = &args[i + 1..];
+        let start = rest.first().filter(|a| !a.starts_with("--")).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."));
+        let scope = runs::tools::RunScope::from_args(rest);
         match agent_api::resolve_project_dir(&start) {
-            Some(dir) => std::process::exit(mcp::serve(dir, args[i + 1..].iter().any(|a| a == "--designs-only"))),
+            Some(dir) => std::process::exit(mcp::serve(dir, rest.iter().any(|a| a == "--designs-only"), scope)),
             None => { eprintln!("No Chronicle project at {}.", start.display()); std::process::exit(1) }
         }
     }
@@ -4039,6 +4041,7 @@ fn main() {
             next_id: std::sync::atomic::AtomicU32::new(1),
         })
         .manage(acp::AcpState::new())
+        .manage(runs::Runs::new())
         .manage(setup::SetupState::new())
         .manage(power::UiVisible(std::sync::atomic::AtomicBool::new(true)))
         .manage(LaunchOpen(Mutex::new(launch_open)))
@@ -4129,6 +4132,16 @@ fn main() {
                                 }
                             });
                             return bridge::Reply { ok: true, summary: "Chronicle is in front.".into(), data: None };
+                        }
+                        // a run's tools are answered here, in Rust: the record has one writer
+                        if req.action.starts_with("run.") {
+                            let Ok(canon) = PathBuf::from(&req.dir).canonicalize() else {
+                                return bridge::Reply { ok: false, summary: "That project isn't open in Chronicle. Open it and try again.".into(), data: None };
+                            };
+                            if !h.state::<OpenRoots>().0.lock().map(|s| s.contains(&canon)).unwrap_or(false) {
+                                return bridge::Reply { ok: false, summary: "That project isn't open in Chronicle. Open it and try again.".into(), data: None };
+                            }
+                            return runs::tools::handle(&h.state::<runs::Runs>(), &load_project(&canon), &req.action, &req.args);
                         }
                         // a name the app doesn't perform never reaches the frontend: the
                         // socket is the edge of the app, and the list of actions is closed

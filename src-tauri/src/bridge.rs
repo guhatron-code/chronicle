@@ -28,7 +28,9 @@ pub(crate) fn token_path() -> PathBuf {
 
 /// The four actions the app performs for an agent, and how to say each one in a
 /// sentence. An action outside this list never reaches the frontend.
-pub(crate) const ACTIONS: [&str; 7] = ["round.plan", "round.start", "project.open", "terminal.read", "designs.capture", "designs.lint", "designs.bench"];
+/// The `run.*` four are answered in Rust (`runs::tools::handle`), never by the frontend.
+pub(crate) const ACTIONS: [&str; 11] = ["round.plan", "round.start", "project.open", "terminal.read", "designs.capture", "designs.lint", "designs.bench",
+    "run.declare", "run.block", "run.ask", "run.lane_state"];
 
 pub(crate) fn known_action(name: &str) -> bool { ACTIONS.contains(&name) }
 
@@ -42,6 +44,10 @@ pub(crate) fn verb_for(action: &str) -> &'static str {
         "designs.capture" => "capture a design",
         "designs.lint" => "lint a design",
         "designs.bench" => "run the design benchmark",
+        "run.declare" => "declare the lane map",
+        "run.block" => "report a blocked item",
+        "run.ask" => "ask Chronicle",
+        "run.lane_state" => "read the round",
         _ => "do that",
     }
 }
@@ -54,6 +60,8 @@ pub(crate) fn timeout_for(action: &str) -> std::time::Duration {
         // capture and lint wait their turn behind the app's one capture window
         // (a turn-end review may hold it), then render frame by frame
         "designs.capture" | "designs.lint" => 3 * 60,
+        // the judge may be a one-turn agent session
+        "run.block" | "run.ask" => 6 * 60,
         _ => 30,
     })
 }
@@ -473,11 +481,19 @@ mod tests {
         assert_eq!(verb_for("designs.capture"), "capture a design");
         assert_eq!(verb_for("designs.lint"), "lint a design");
         assert!(known_action("designs.capture") && known_action("designs.lint") && known_action("designs.bench"));
-        assert_eq!(ACTIONS.len(), 7);
+        assert_eq!(ACTIONS.len(), 11);
         assert_eq!(timeout_for("designs.bench"), std::time::Duration::from_secs(3 * 60 * 60));
         assert_eq!(timeout_for("round.plan"), std::time::Duration::from_secs(30));
         assert_eq!(timeout_for("designs.capture"), std::time::Duration::from_secs(3 * 60));
         assert_eq!(timeout_for("designs.lint"), std::time::Duration::from_secs(3 * 60));
         assert_eq!(timeout_for("terminal.read"), std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn the_run_actions_are_known_and_wait_for_the_judge() {
+        for a in ["run.declare", "run.block", "run.ask", "run.lane_state"] { assert!(known_action(a), "{a}"); }
+        assert_eq!(verb_for("run.block"), "report a blocked item");
+        assert_eq!(timeout_for("run.ask"), std::time::Duration::from_secs(6 * 60));
+        assert_eq!(timeout_for("run.declare"), std::time::Duration::from_secs(30));
     }
 }

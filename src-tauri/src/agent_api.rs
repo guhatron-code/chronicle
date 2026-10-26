@@ -242,6 +242,53 @@ fn caps() -> Vec<Capability> {
                 action(dir, "designs.bench", a.clone(), "run the design benchmark")
             },
         },
+        // the run tools: shown only by a run's own server (`--planner`, `--run <n> --lane <id>`,
+        // see mcp.rs and runs::tools), whose `_run`/`_lane` are set by the server, never the agent
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.declare",
+                description: "Declare this round's lane map: every item, and the lanes that split them (owned files, dependencies, checks). Chronicle checks it and answers accepted, or exactly what to fix.",
+                input_schema: json!({ "type": "object", "required": ["items", "lanes"], "properties": {
+                    "items": { "type": "array", "items": { "type": "object", "required": ["id", "title"], "properties": {
+                        "id": { "type": "string" }, "title": { "type": "string" }, "note": { "type": "string", "description": "the note's vault path, when the item came from a note" } } } },
+                    "lanes": { "type": "array", "items": { "type": "object", "required": ["id", "title", "items", "owns"], "properties": {
+                        "id": { "type": "string", "description": "one lowercase letter" }, "title": { "type": "string" },
+                        "items": { "type": "array", "items": { "type": "string" } },
+                        "owns": { "type": "array", "items": { "type": "string" }, "description": "paths or globs relative to the project root" },
+                        "depends_on": { "type": "array", "items": { "type": "string" } },
+                        "checks": { "type": "array", "items": { "type": "string" } } } } } } }),
+            },
+            run: |dir, a| {
+                if !a.get("items").is_some_and(Value::is_array) { return Err("items is required, as a list.".into()) }
+                if !a.get("lanes").is_some_and(Value::is_array) { return Err("lanes is required, as a list.".into()) }
+                action(dir, "run.declare", a.clone(), "declare the lane map")
+            },
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.block",
+                description: "Say one of your items can't be done as written, and why. Chronicle decides whether to set it aside for the user or ask you to try again. Then carry on with your other items.",
+                input_schema: json!({ "type": "object", "required": ["item", "reason"], "properties": {
+                    "item": { "type": "string", "description": "the item id" }, "reason": { "type": "string" } } }),
+            },
+            run: |dir, a| { required_str(a, "item")?; required_str(a, "reason")?; action(dir, "run.block", a.clone(), "report a blocked item") },
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.ask",
+                description: "Ask a question about your lane that the plan doesn't settle. Chronicle answers; the user isn't interrupted.",
+                input_schema: json!({ "type": "object", "required": ["question"], "properties": { "question": { "type": "string" } } }),
+            },
+            run: |dir, a| { required_str(a, "question")?; action(dir, "run.ask", a.clone(), "ask Chronicle") },
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.lane_state",
+                description: "Read where the round stands: your lane's items and files, and which lanes have finished.",
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            run: |dir, a| action(dir, "run.lane_state", a.clone(), "read the round"),
+        },
     ]
 }
 
