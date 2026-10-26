@@ -9,12 +9,12 @@ import { Eyebrow } from "@/components/chrome/atoms";
 import { CheckGlyph, ChevronLeftGlyph, ChevronRightGlyph, WarnGlyph } from "@/components/chrome/icons";
 import { runLaneDiscard } from "@/lib/runs-ipc";
 import {
-  checkRows, fmtCost, fmtElapsed, laneElapsed, laneItemTitles, laneWord, ownsLabel, reviewLine,
+  checkRows, fmtCost, fmtElapsed, laneElapsed, laneItemTitles, laneWord, leakParts, ownsLabel, reviewLine, stoppedLaneLine,
   type Gate, type LaneRecord, type RunRecord,
 } from "@/lib/runs-model";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
 import { toastError, toastSuccess } from "@/overlays/toasts";
-import { ChatBtn, Chip, CheckRow, Mono, RunWord } from "./run-atoms";
+import { ChatBtn, Chip, CheckRow, LeakNotice, Mono, RunWord } from "./run-atoms";
 
 export function LaneHeader({ dir, rec, lane, onBack, now, onConfirm }: {
   dir: string; rec: RunRecord; lane: LaneRecord; onBack: () => void; now: number;
@@ -24,6 +24,7 @@ export function LaneHeader({ dir, rec, lane, onBack, now, onConfirm }: {
   const spec = rec.lane_map?.lanes.find((l) => l.id === lane.id);
   const [open, setOpen] = useState(true);
   const id = lane.id.toUpperCase();
+  const stopped = stoppedLaneLine(lane);
   const doDiscard = () =>
     void runLaneDiscard(dir, rec.n, lane.id)
       .then((k) => toastSuccess("Discarded", `${k} ${k === 1 ? "file" : "files"} put back`))
@@ -62,10 +63,13 @@ export function LaneHeader({ dir, rec, lane, onBack, now, onConfirm }: {
         <span className="text-[11px] text-text-faint">{ownsLabel(rec, lane)}</span>
       </button>
       {open && <div className="-mt-1 mb-1 ml-[17px] flex flex-col gap-[3px]">{spec?.owns.map((p) => <Mono key={p} className="text-text-subtle">{p}</Mono>)}</div>}
-      {lane.state === "cancelled" && (
+      {/* a change this lane made to a file it doesn't own, or another lane made to one it does */}
+      {lane.leak.length > 0 && (
+        <div className="-ml-[18px] flex flex-col">{lane.leak.map((k) => <LeakNotice key={`${k.path}:${k.by ?? ""}`} parts={leakParts(k)} />)}</div>
+      )}
+      {stopped && (
         <div className="flex items-center gap-2">
-          {/* (new copy) */}
-          <span className="flex-1 text-[11.5px] text-text-muted">Stopped. This lane’s unsaved changes are still in your project.</span>
+          <span className="flex-1 text-[11.5px] text-text-muted">{stopped}</span>
           <ChatBtn kind="quiet" onClick={discard}>Discard them</ChatBtn>
         </div>
       )}

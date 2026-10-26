@@ -204,6 +204,7 @@ export function Composer({
   placeholder,
   footerChip,
   nudge = false,
+  sendsWhileBusy = false,
 }: {
   dir: string;
   /** true while the session isn't ready — the input dims and nothing sends */
@@ -223,6 +224,9 @@ export function Composer({
   /** a run lane's composer: always sends through `onSend`, even while the lane
    *  works; no modes, no models, no attachments, no Chronicle / commands */
   nudge?: boolean;
+  /** Enter and Queue send through `onSend` even while a turn is active (the
+   *  chat's Run as a round: the run waits for the pane itself), never queue */
+  sendsWhileBusy?: boolean;
 }) {
   const s = agentSessionFor(dir);
   // `dir` is the session's lane key; files, notes, phases and attachments
@@ -445,7 +449,7 @@ export function Composer({
 
   const send = () => {
     const typed = text.trim();
-    if ((!typed && attachments.length === 0) || disabled || sendDisabled || sending || (s.turnActive && !nudge)) return;
+    if ((!typed && attachments.length === 0) || disabled || sendDisabled || sending || (s.turnActive && !nudge && !sendsWhileBusy)) return;
     const withRefs = attachments.length
       ? `${typed ? `${typed}\n\n` : ""}Attached files:\n${attachments.map((a) => `- ${a.relPath}`).join("\n")}`
       : typed;
@@ -630,7 +634,7 @@ export function Composer({
           if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             // a nudge goes to the lane while it works — that is what it is for
-            if (s.turnActive && !nudge) {
+            if (s.turnActive && !nudge && !sendsWhileBusy) {
               if (!designLane) queue(); // the design lane has no queue
             } else send();
           }
@@ -728,7 +732,7 @@ export function Composer({
             {text.trim() && !designLane && (
               <button
                 data-agent-queue
-                onClick={queue}
+                onClick={sendsWhileBusy ? send : queue}
                 className="h-7 rounded-md border border-border-strong px-3 text-xs font-medium text-text-primary hover:bg-fill-hover"
               >
                 Queue

@@ -177,3 +177,45 @@ describe("the edges the boards don't draw", () => {
     expect(M.needsYouRows(r)[0].actions.map((a) => a.label)).toEqual(["Check again"]);
   });
 });
+
+describe("the lane view and the plan row's own words (Task 14 selectors)", () => {
+  it("the plan row says planning, planned, stopped or didn't start, and waits for the pane", () => {
+    const r = clone();
+    expect(M.planRowState(r, { n: 10, total: 7 })).toBe("planned");
+    expect(M.planRowLine(r, { n: 10, total: 7 })).toBe("Planned round 10 · 7 items into 4 lanes");
+    expect(M.planRowState(null, { n: 11, total: 3 })).toBe("planning");
+    expect(M.planRowLine(null, { n: 11, total: 3, queued: true })).toBe("Planning round 11 · 3 notes · waiting for the pane");
+    expect(M.planRowState(null, { n: 11, total: 3, outcome: "cancelled" })).toBe("failed");
+    expect(M.planRowLine(null, { n: 11, total: 3, outcome: "cancelled" })).toBe("Round 11 · stopped before the lanes were planned");
+    expect(M.planRowLine(null, { n: 11, total: 3, outcome: "failed" })).toBe("Round 11 didn’t start");
+    const f = clone();
+    f.lane_map = null;
+    f.state = "failed";
+    f.planner_error = null;
+    expect(M.planRowLine(f, { n: 10, total: 7, outcome: "failed" })).toBe("The plan couldn’t be split into lanes.");
+  });
+  it("a needs-you row takes its lane's word, or the run's", () => {
+    const r = clone();
+    r.state = "needs-you";
+    r.needs_you = [{ kind: "parked", lane: "d", item: "T-147", reason: "x", reading: 0.86 }];
+    expect(M.needsWord(r, "d")).toEqual({ word: "needs you", tone: "warn", pulse: false });
+    expect(M.needsWord(r, null)).toEqual({ word: "needs you", tone: "warn", pulse: false });
+    expect(M.needsWord(r, "zz").word).toBe("needs you");
+  });
+  it("a stopped lane says its changes are still there; any other lane says nothing", () => {
+    const r = clone();
+    expect(M.stoppedLaneLine(lane(r, "a"))).toBeNull();
+    lane(r, "a").state = "cancelled";
+    expect(M.stoppedLaneLine(lane(r, "a"))).toBe("Stopped. This lane’s unsaved changes are still in your project.");
+  });
+  it("the guard's decision line says what ran, why, the option, the model and the band", () => {
+    const decision = { choice: "allow", confidence: 0.934, model: "haiku", band: "high" };
+    expect(M.guardLine({ allowed: true, path: "npx vitest run src/lib", reason: "it reads only.", decision })).toEqual({
+      lead: "Ran", path: "npx vitest run src/lib", tail: " — allowed, it reads only.", meta: "allow · haiku · high", prob: "0.93",
+    });
+    expect(M.guardLine({ allowed: false, path: "git push", reason: "", decision: { ...decision, choice: "deny" } })).toMatchObject({
+      lead: "Didn’t run", tail: ".", meta: "deny · haiku · high",
+    });
+    expect(M.guardLine({ allowed: false, path: "x", reason: "outside the folder" })).toBeNull();
+  });
+});

@@ -11,8 +11,8 @@ import { every } from "@/lib/scheduler";
 import { runFor, runsVersion, subscribeRuns } from "@/lib/runs-store";
 import { runNeedsYou, runStop, type NeedsAct } from "@/lib/runs-ipc";
 import {
-  decisionLine, elapsedMs, finalCheckRows, fmtCost, fmtElapsed, laneWord, lanesSummary, leakParts, needsYouRows,
-  planRowText, runFooter, runOver, runTitle, runWord, tryLabel, type LaneRecord, type NeedsRow, type RunRecord, type Word,
+  decisionLine, elapsedMs, finalCheckRows, fmtCost, fmtElapsed, laneWord, lanesSummary, leakParts, needsWord, needsYouRows,
+  planRowLine, planRowState, runFooter, runOver, runTitle, runWord, tryLabel, type LaneRecord, type NeedsRow, type RunRecord, type Word,
 } from "@/lib/runs-model";
 import { Spinner } from "@/components/chrome/atoms";
 import { CheckGlyph, ChevronRightGlyph, ErrorGlyph, LanesGlyph, SparkGlyph, WarnGlyph } from "@/components/chrome/icons";
@@ -24,20 +24,17 @@ type RunEntry = Extract<AgentEntry, { kind: "run" }>;
 type Act = NeedsRow["actions"][number]["act"];
 
 function PlanRow({ entry, rec, onOpenFile }: { entry: RunEntry; rec: RunRecord | null; onOpenFile?: (p: string) => void }) {
-  const planned = rec?.lane_map != null;
-  const failed = rec?.state === "failed" || entry.outcome === "failed" || entry.outcome === "cancelled";
+  const state = planRowState(rec, entry);
+  const planned = state === "planned";
   const lead = planned ? <span className="flex text-state-success"><CheckGlyph size={12} /></span>
-    : failed ? <span className="flex text-state-error"><ErrorGlyph size={12} /></span> : <Spinner size={11} />;
-  const text = failed && !planned
-    ? entry.outcome === "cancelled" ? `Round ${entry.n} · stopped before the lanes were planned` /* (new copy) */ : rec ? runFooter(rec) : `Round ${entry.n} didn’t start` /* (new copy) */
-    : planRowText(rec, entry.n, entry.total);
+    : state === "failed" ? <span className="flex text-state-error"><ErrorGlyph size={12} /></span> : <Spinner size={11} />;
   return (
     <div className="mx-3.5 my-1 flex h-[38px] items-center gap-2 rounded-[10px] border border-border-hairline bg-surface-card-raised px-3.5">
       {lead}
-      <span className="min-w-0 truncate text-[12.5px] text-text-primary">{entry.queued ? `${text} · waiting for the pane` : text}</span>
+      <span className="min-w-0 truncate text-[12.5px] text-text-primary">{planRowLine(rec, entry)}</span>
       <span className="flex-1" />
       {rec && rec.planner_cost_usd > 0 && <Mono className="text-[11px]">{fmtCost(rec.planner_cost_usd)}</Mono>}
-      {planned && onOpenFile && rec.plan_path && (
+      {planned && onOpenFile && rec?.plan_path && (
         <button type="button" onClick={() => onOpenFile(rec.plan_path)} className="whitespace-nowrap text-[11.5px] text-text-secondary hover:text-text-primary">Open the plan ›</button>
       )}
     </div>
@@ -137,10 +134,6 @@ export function RunEntryCard({ dir, entry, onOpenLane, onOpenFile }: {
     return runNeedsYou(dir, entry.n, payload).catch((e) => { toastError("Couldn’t do that", String(e).slice(0, 110)); throw e; });
   };
   const decision = rec ? decisionLine(rec) : null;
-  const wordFor = (row: NeedsRow): Word => {
-    const l = rec?.lanes.find((x) => x.id === row.lane);
-    return rec && l ? laneWord(rec, l) : rec ? runWord(rec) : { word: "", tone: "warn", pulse: false };
-  };
   const gating = rec?.state === "gating" || rec?.state === "closing";
   return (
     <div className="flex flex-col">
@@ -176,7 +169,16 @@ export function RunEntryCard({ dir, entry, onOpenLane, onOpenFile }: {
           </div>
           {rec.needs_you.length > 0 && (
             <div className="flex flex-col gap-1.5 pt-0.5">
-              {needsYouRows(rec).map((row) => <NeedsYouRow key={`${row.kind}:${row.index}`} row={row} word={wordFor(row)} onAct={act} />)}
+              {/* keyed by what the row is about, so an open rewrite draft stays with its item when rows shift */}
+              {(() => {
+                const seen = new Map<string, number>();
+                return needsYouRows(rec).map((row) => {
+                  const base = `${row.kind}:${row.item ?? row.lane ?? "run"}`;
+                  const k = (seen.get(base) ?? 0) + 1;
+                  seen.set(base, k);
+                  return <NeedsYouRow key={`${base}:${k}`} row={row} word={needsWord(rec, row.lane)} onAct={act} />;
+                });
+              })()}
             </div>
           )}
           {rec.notices.at(-1) && <span className="text-[11px] leading-normal text-text-faint">{rec.notices.at(-1)}</span>}

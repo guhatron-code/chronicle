@@ -39,7 +39,7 @@ import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint } from "@/lib/ipc"
 import { CheckGlyph, LanesGlyph } from "@/components/chrome/icons";
 import { refreshRuns, runFor, runsVersion, subscribeRuns } from "@/lib/runs-store";
 import { runLaneNudge } from "@/lib/runs-ipc";
-import { gateLabel, laneBusy, laneDivider } from "@/lib/runs-model";
+import { gateLabel, guardLine, laneBusy, laneDivider } from "@/lib/runs-model";
 import { every } from "@/lib/scheduler";
 import { getTerm, setActiveTermFor, spawnTerm, subscribeTerms } from "@/lib/term-sessions";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
@@ -442,13 +442,12 @@ function sigFor(entry: ThreadItem, gen: number, runsGen: number): string {
 function GuardRow({ entry }: { entry: Extract<AgentEntry, { kind: "guard" }> }) {
   // a run's judge decided this ask: what was asked, the option it took, the
   // model and the band, and how sure it was
-  const d = entry.decision;
-  if (d)
+  const g = guardLine(entry);
+  if (g)
     return (
-      <DecisionLine prob={d.confidence.toFixed(2)}>
-        {entry.allowed ? "Ran" : "Didn’t run"} <Mono className="text-[11px] text-text-secondary">{entry.path}</Mono>
-        {entry.reason ? ` — ${entry.allowed ? "allowed" : "refused"}, ${entry.reason.replace(/\.$/, "")}.` : "."}
-        <span className="mt-0.5 block"><Mono>{[d.choice, d.model, d.band].filter(Boolean).join(" · ")}</Mono></span>
+      <DecisionLine prob={g.prob}>
+        {g.lead} <Mono className="text-[11px] text-text-secondary">{g.path}</Mono>{g.tail}
+        {g.meta && <span className="mt-0.5 block"><Mono>{g.meta}</Mono></span>}
       </DecisionLine>
     );
   if (entry.allowed) return null;
@@ -496,15 +495,19 @@ function QueuedMessages({ dir, queue }: { dir: string; queue: string[] }) {
 function LaneView({ dir, n, id, onBack, onConfirm }: { dir: string; n: number; id: string; onBack: () => void; onConfirm: (spec: ConfirmSpec) => void }) {
   const runsGen = useSyncExternalStore(subscribeRuns, runsVersion, runsVersion);
   const version = useSyncExternalStore(subscribeAgent, agentVersion, agentVersion);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => every(1000, () => setNow(Date.now())), []);
   const rec = runFor(dir, n);
-  const lane = rec?.lanes.find((l) => l.id === id);
-  const k = Math.max(0, rec?.lane_map?.lanes.findIndex((l) => l.id === id) ?? 0);
-  const key = laneKey(dir, `w/${n}-${k}` as Lane);
+  // the lane's index in the plan names its session; an id the plan doesn't
+  // have is no lane at all (never lane 0's session)
+  const k = rec?.lane_map?.lanes.findIndex((l) => l.id === id) ?? -1;
+  const lane = k >= 0 ? rec?.lanes.find((l) => l.id === id) : undefined;
+  const key = laneKey(dir, `w/${n}-${Math.max(0, k)}` as Lane);
   const ls = agentSessionFor(key);
+  // the clock ticks only while the lane works, as the card's does while the run is live
+  const busy = lane != null && laneBusy(lane);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => (busy ? every(1000, () => setNow(Date.now())) : undefined), [busy]);
   // a lane whose live wire is gone (a restart) reads its transcript back once
-  useEffect(() => { if (lane?.session && agentSessionFor(key).entries.length === 0) void loadLaneHistory(key, lane.session); }, [key, lane?.session]);
+  useEffect(() => { if (lane && lane.session && agentSessionFor(key).entries.length === 0) void loadLaneHistory(key, lane.session); }, [key, lane?.session]);
   // the lane's thread follows its newest line exactly as the chat does
   const setScroller = useStickToBottom([version, runsGen]);
   if (!rec || !lane)
@@ -752,7 +755,7 @@ export function AgentPane({
             const keys = rowKeys(items);
             return items.map((entry, i) => (
               <Appear key={keys[i]}>
-                <ThreadRow sig={sigFor(entry, gen, runsGen)} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} onOpenLane={onOpenLane} onOpenFile={onOpenFile} />
+                <ThreadRow sig={sigFor(entry, gen, runsGen)} dir={dir} entry={entry} turnActive={false} onConfirm={onConfirm} readOnly onOpenNotes={onOpenNotes} onOpenFile={onOpenFile} />
               </Appear>
             ));
           })()}
@@ -839,6 +842,9 @@ export function AgentPane({
               : undefined
         }
         chips={composerChips}
+        // with the toggle on, every send starts a run — mid-turn too: the run's
+        // card waits for the pane, so nothing goes out as a plain message
+        sendsWhileBusy={variant === "chat" && runAsRound}
         footerChip={variant === "chat" ? (
           <button type="button" data-run-toggle aria-pressed={runAsRound} onClick={() => setRunAsRound((v) => !v)}
             className={cn("inline-flex h-[26px] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-lg border px-[9px] text-[11.5px]",

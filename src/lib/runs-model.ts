@@ -232,3 +232,49 @@ export function transitionNotice(prev: RunRecord | null, next: RunRecord): strin
   if (next.state === "done") return `Round ${next.round ?? next.n} is saved.`;
   return null;
 }
+
+/** What the run card's plan row knows from its thread entry. */
+export interface PlanEntry { n: number; total: number; queued?: boolean; outcome?: "running" | "failed" | "cancelled" }
+
+/** Where the plan row stands: the lanes are planned, the planning failed or was stopped, or it is still planning. */
+export function planRowState(r: RunRecord | null, e: PlanEntry): "planned" | "failed" | "planning" {
+  if (r?.lane_map != null) return "planned";
+  return r?.state === "failed" || e.outcome === "failed" || e.outcome === "cancelled" ? "failed" : "planning";
+}
+
+/** The plan row's one sentence, including why a round never got its lanes. */
+export function planRowLine(r: RunRecord | null, e: PlanEntry): string {
+  const text = planRowState(r, e) !== "failed"
+    ? planRowText(r, e.n, e.total)
+    : e.outcome === "cancelled" ? `Round ${e.n} · stopped before the lanes were planned` // (new copy)
+    : r ? runFooter(r) : `Round ${e.n} didn’t start`; // (new copy)
+  return e.queued ? `${text} · waiting for the pane` : text;
+}
+
+/** The state word a needs-you row shows: its lane's, or the run's when it belongs to no lane. */
+export function needsWord(r: RunRecord, laneId: string | null): Word {
+  const l = laneId ? r.lanes.find((x) => x.id === laneId) : undefined;
+  return l ? laneWord(r, l) : runWord(r);
+}
+
+/** A stopped lane's line in its view, above Discard (new copy). */
+export const stoppedLaneLine = (l: LaneRecord): string | null =>
+  l.state === "cancelled" ? "Stopped. This lane’s unsaved changes are still in your project." : null;
+
+/** A lane's ask the judge decided, as its thread's decision line: what ran or
+ *  didn't, why, and the option taken, the model and the band. */
+export function guardLine(g: {
+  allowed: boolean; path: string; reason: string;
+  decision?: { choice: string; confidence: number; model: string; band: string } | null;
+}): { lead: string; path: string; tail: string; meta: string; prob: string } | null {
+  const d = g.decision;
+  if (!d) return null;
+  const why = g.reason.trim().replace(/\.$/, "");
+  return {
+    lead: g.allowed ? "Ran" : "Didn’t run",
+    path: g.path,
+    tail: why ? ` — ${g.allowed ? "allowed" : "refused"}, ${why}.` : ".",
+    meta: [d.choice, d.model, d.band].filter(Boolean).join(" · "),
+    prob: d.confidence.toFixed(2),
+  };
+}
