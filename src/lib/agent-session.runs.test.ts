@@ -88,6 +88,23 @@ describe("runs in the agent store", () => {
     await vi.waitFor(() => { agent.flushAgentNotifications(); expect(runCard()).toMatchObject({ ended: true, outcome: "running" }); }, { timeout: 5000, interval: 5 });
   });
 
+  it("an accepted map moves the run's card to the end of the thread and leaves its plan row in place", async () => {
+    await agent.startRunInPane(DIR, { kind: "notes" });
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(ipc.agentPrompt).toHaveBeenCalled(); }, { timeout: 5000, interval: 5 });
+    onUpdate!({ dir: DIR, lane: "chat", message: chunk("I wrote the plan and declared two lanes.") });
+    agent.flushAgentNotifications();
+    onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
+    agent.flushAgentNotifications();
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(runCards().at(-1)).toMatchObject({ outcome: "running" }); }, { timeout: 5000, interval: 5 });
+    const es = agent.agentSessionFor(DIR).entries;
+    const reply = es.findIndex((e) => e.kind === "assistant");
+    expect(es.at(-1)).toMatchObject({ kind: "run", n: 10, total: 7, ended: true, outcome: "running", part: "card" });
+    const plan = es.findIndex((e) => e.kind === "run" && e.part === "plan");
+    expect(plan).toBeGreaterThanOrEqual(0);
+    expect(plan).toBeLessThan(reply);
+    expect(runCards()).toHaveLength(2);
+  });
+
   it("a turn that declared no map sends the reasons and waits again", async () => {
     vi.mocked(runsIpc.runPlanSettle).mockResolvedValueOnce({ state: "retry", prompt: "FIX THE MAP" });
     await agent.startRunInPane(DIR, { kind: "notes" });

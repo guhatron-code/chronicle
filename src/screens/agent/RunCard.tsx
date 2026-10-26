@@ -137,11 +137,11 @@ export function RunEntryCard({ dir, entry, onOpenLane, onOpenFile }: {
   const gating = rec?.state === "gating" || rec?.state === "closing";
   return (
     <div className="flex flex-col">
-      <PlanRow entry={entry} rec={rec} onOpenFile={onOpenFile} />
-      {decision && live && (
+      {entry.part !== "card" && <PlanRow entry={entry} rec={rec} onOpenFile={onOpenFile} />}
+      {entry.part === "plan" ? null : decision && live && (
         <DecisionLine prob={decision.prob}>{decision.lead} <Mono className="text-[11px] text-text-secondary">{decision.command}</Mono> {decision.tail}</DecisionLine>
       )}
-      {rec?.lane_map && (
+      {entry.part !== "plan" && rec?.lane_map && (
         <div data-run-card className="mx-3.5 my-1 flex flex-col gap-2 rounded-[10px] border border-border-hairline bg-surface-card-raised px-3.5 pb-2.5 pt-3">
           <div className="flex items-center gap-2 whitespace-nowrap">
             <span className="text-[13px] font-semibold text-text-primary">{runTitle(rec, entry.total)}</span>

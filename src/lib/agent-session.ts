@@ -177,6 +177,10 @@ export type AgentEntry = { rev: number } & (
       outcome?: "running" | "failed" | "cancelled";
       /** the session's cost when the planner's prompt went out — the plan row shows the difference */
       costBase?: number;
+      /** once the map is accepted the run is two rows: its plan row stays where the
+       *  planning began ("plan"), and its card moves to the thread's end ("card")
+       *  so the live lanes and needs-you rows aren't buried under the planner's turn */
+      part?: "plan" | "card";
     }
   | {
       kind: "plan";
@@ -1713,6 +1717,16 @@ function abandonRun(dir: string, n: number, outcome: "failed" | "cancelled"): vo
   void refreshRuns(dir);
 }
 
+/** The map was accepted: the plan row stays where it is and the card is
+ *  landed again as the thread's newest entry (Runs §8). */
+function relandRunCard(dir: string, entry: RunEntry): void {
+  const es = agentSessionFor(dir).entries;
+  if (entry.part || !es.includes(entry)) return;
+  entry.part = "plan";
+  touch(entry);
+  es.push({ ...entry, rev: 0, part: "card" });
+}
+
 /** The planning turn ended. Rust reads what was declared and says what happens next. */
 async function settleRunPlan(dir: string, entry: RunEntry, stopReason: string | null): Promise<void> {
   const s = agentSessionFor(dir);
@@ -1741,6 +1755,7 @@ async function settleRunPlan(dir: string, entry: RunEntry, stopReason: string | 
         return;
       }
       entry.outcome = r.state === "running" ? "running" : "failed";
+      if (r.state === "running") relandRunCard(dir, entry);
       if (r.state === "failed") toastError("The round didn’t start", (r.reason ?? "The plan couldn’t be split into lanes").slice(0, 110));
     }
   } catch (e) {
