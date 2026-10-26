@@ -34,11 +34,13 @@ vi.mock("@/overlays/toasts", () => ({ toastAction: vi.fn(), toastError: vi.fn() 
 
 const ipc = await import("./ipc");
 const runsIpc = await import("./runs-ipc");
+const notes = await import("./notes-store");
 const agent = await import("./agent-session");
 const DIR = "/home/u/proj";
 const chunk = (text: string) => ({ method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } } });
 const usage = (amount: number) => ({ method: "session/update", params: { update: { sessionUpdate: "usage_update", used: 1, size: 10, cost: { amount } } } });
 const turnEnd = () => ({ method: "_chronicle/turn_end", params: { stopReason: "end_turn" } });
+const runCards = () => agent.agentSessionFor(DIR).entries.filter((e) => e.kind === "run");
 const runCard = () => agent.agentSessionFor(DIR).entries.find((e) => e.kind === "run") as Extract<AgentEntry, { kind: "run" }> | undefined;
 
 describe("runs in the agent store", () => {
@@ -102,5 +104,50 @@ describe("runs in the agent store", () => {
     await agent.resumeRunInPane(DIR, 10);
     await vi.waitFor(() => expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("PLAN AGAIN"));
     expect(runCard()).toMatchObject({ n: 10 });
+  });
+
+  it("a first send that fails ends the card failed and takes the run out of planning", async () => {
+    vi.mocked(ipc.agentPrompt).mockRejectedValueOnce(new Error("the agent is still working"));
+    await expect(agent.startRunInPane(DIR, { kind: "notes" })).rejects.toThrow("still working");
+    expect(runCard()).toMatchObject({ ended: true, outcome: "failed" });
+    expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10);
+    expect(notes.setRoundGenerating).toHaveBeenLastCalledWith(DIR, false);
+  });
+
+  it("a retry whose reasons can't be sent fails the run and tells Rust", async () => {
+    vi.mocked(runsIpc.runPlanSettle).mockResolvedValueOnce({ state: "retry", prompt: "FIX THE MAP" });
+    await agent.startRunInPane(DIR, { kind: "notes" });
+    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalledTimes(1));
+    vi.mocked(ipc.agentPrompt).mockRejectedValueOnce(new Error("gone"));
+    onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
+    await vi.waitFor(() => expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10));
+    expect(runCard()).toMatchObject({ ended: true, outcome: "failed" });
+    expect(notes.setRoundGenerating).toHaveBeenLastCalledWith(DIR, false);
+  });
+
+  it("a settle that throws cancels the run's planning and fails the card", async () => {
+    vi.mocked(runsIpc.runPlanSettle).mockRejectedValueOnce(new Error("disk"));
+    await agent.startRunInPane(DIR, { kind: "notes" });
+    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
+    await vi.waitFor(() => expect(runCard()).toMatchObject({ ended: true, outcome: "failed" }));
+    expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10);
+  });
+
+  it("resuming a run whose card is in the thread reopens that card", async () => {
+    agent.agentSessionFor(DIR).entries.push({ kind: "run", rev: 0, n: 10, total: 7, ended: true, outcome: "failed" });
+    await agent.resumeRunInPane(DIR, 10);
+    await vi.waitFor(() => expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("PLAN AGAIN"));
+    expect(runCards()).toHaveLength(1);
+    expect(runCard()).toMatchObject({ n: 10, total: 7, ended: false, queued: false });
+    expect(runCard()?.outcome).toBeUndefined();
+  });
+
+  it("a run that can't begin touches nothing", async () => {
+    vi.mocked(runsIpc.runBegin).mockRejectedValueOnce(new Error("no notes"));
+    await expect(agent.startRunInPane(DIR, { kind: "notes" })).rejects.toThrow("no notes");
+    expect(runCards()).toHaveLength(0);
+    expect(notes.setRoundGenerating).not.toHaveBeenCalled();
+    expect(ipc.agentPrompt).not.toHaveBeenCalled();
   });
 });

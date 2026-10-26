@@ -1665,22 +1665,28 @@ export async function loadLaneHistory(key: string, sessionId: string): Promise<v
 async function landRunPrompt(dir: string, n: number, total: number, prompt: string): Promise<void> {
   agentSessionFor(dir).viewing = null;
   let over = false;
-  const giveUp = () => {
+  // every way the landing gives up is a failure (a send refused, a session
+  // that would not start, a pane that errored); a user's stop is the
+  // planning turn ending `cancelled`, which settleRunPlan handles
+  const giveUp = (outcome: "failed" | "cancelled" = "failed") => {
     if (over) return;
     over = true;
-    const e = runCardFor(dir, n);
-    if (e && !e.ended) { e.ended = true; e.outcome = "cancelled"; touch(e); notify(); }
-    void runPlanCancel(dir, n).catch(() => {});
-    setRoundGenerating(dir, false);
-    void refreshNotes(dir);
-    void refreshRuns(dir);
+    abandonRun(dir, n, outcome);
   };
   await landCardInPane(dir, {
     kind: "run",
     prompt,
     push: (queued) => {
       const s = agentSessionFor(dir);
-      s.entries.push({ kind: "run", rev: 0, n, total, queued, costBase: s.cost ?? 0 });
+      // a run already in the thread (a resume) is reopened, never doubled
+      const e = runCardFor(dir, n);
+      if (e) {
+        Object.assign(e, { queued, ended: false, outcome: undefined, costBase: s.cost ?? 0 });
+        if (total > 0) e.total = total;
+        touch(e);
+      } else {
+        s.entries.push({ kind: "run", rev: 0, n, total, queued, costBase: s.cost ?? 0 });
+      }
       notify();
     },
     stillWanted: () => !over,
@@ -1688,6 +1694,17 @@ async function landRunPrompt(dir: string, n: number, total: number, prompt: stri
     giveUp,
     isOver: () => over,
   });
+}
+
+/** The run's planning is over without a start: close its card with `outcome`
+ *  and tell Rust, so the record is not left in `planning`. */
+function abandonRun(dir: string, n: number, outcome: "failed" | "cancelled"): void {
+  const e = runCardFor(dir, n);
+  if (e && !e.ended) { e.ended = true; e.outcome = outcome; touch(e); notify(); }
+  void runPlanCancel(dir, n).catch(() => {});
+  setRoundGenerating(dir, false);
+  void refreshNotes(dir);
+  void refreshRuns(dir);
 }
 
 /** The planning turn ended. Rust reads what was declared and says what happens next. */
@@ -1710,7 +1727,8 @@ async function settleRunPlan(dir: string, entry: RunEntry, stopReason: string | 
           land: () => {},
           stillWanted: () => !entry.ended,
           abandon: () => {},
-          fail: () => { entry.ended = true; entry.outcome = "failed"; touch(entry); notify(); },
+          // the reasons never reached the planner: the run cannot start
+          fail: () => abandonRun(dir, entry.n, "failed"),
         });
         notify();
         return;
@@ -1719,6 +1737,8 @@ async function settleRunPlan(dir: string, entry: RunEntry, stopReason: string | 
       if (r.state === "failed") toastError("The round didn’t start", (r.reason ?? "The plan couldn’t be split into lanes").slice(0, 110));
     }
   } catch (e) {
+    // the record was never settled — take it out of `planning` as best we can
+    await runPlanCancel(dir, entry.n).catch(() => {});
     entry.outcome = "failed";
     toastError("Couldn’t start the round", String(e).slice(0, 110));
   }
