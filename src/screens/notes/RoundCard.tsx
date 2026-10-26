@@ -26,6 +26,9 @@ import { agentSessionFor, cancelAgentTurn } from "@/lib/agent-session";
 import { clearRunningRound, dismissRound } from "@/lib/round-log";
 import { refreshNotes, setRoundGenerating } from "@/lib/notes-store";
 import { roundSubline, type RoundPhase, type RoundRoute } from "@/lib/notes-model";
+import { runStop } from "@/lib/runs-ipc";
+import { noteChip, runOver, runSubline, runWord, type RunRecord } from "@/lib/runs-model";
+import { RunWord } from "@/screens/agent/run-atoms";
 import { toastError, toastSuccess } from "@/overlays/toasts";
 import { StatusChip } from "./StatusChip";
 import { cn } from "@/lib/utils";
@@ -42,6 +45,8 @@ export interface RoundCardData {
   route: RoundRoute | null;
   /** the tab running it, when the route is a terminal — "Open the terminal" */
   termId?: number;
+  /** the run driving this round, when there is one — the card mirrors it, board R4 */
+  run: RunRecord | null;
 }
 
 /** A note's row label. Before anything runs, "working" would be a lie; after
@@ -106,6 +111,58 @@ export const RoundCard = memo(function RoundCard({
       .finally(() => setBusy(false));
   };
 
+  /* A round a run drives mirrors the run: its word, its subline, each note's
+     chip from the lane it sits in. Every hook above has already run. A run
+     still planning is a turn in the pane, so Stop cancels the turn first, then
+     tells the backend the run is over. */
+  if (round.run) {
+    const run = round.run;
+    const over = runOver(run);
+    const chips = notes.map((note) => noteChip(run, note.path, note.status) ?? rowStatus(note, phase));
+    const doneNow = chips.filter((c) => c.label === "done").length;
+    const stopRun = () => {
+      setBusy(true);
+      (agentSessionFor(dir).turnActive && run.state === "planning" ? cancelAgentTurn(dir) : Promise.resolve())
+        .then(() => runStop(dir, run.n))
+        .catch((e) => toastError("Couldn't stop it", String(e).slice(0, 90)))
+        .finally(() => setBusy(false));
+    };
+    return (
+      <div className="mx-2 mb-2 mt-1 rounded-lg border border-border-strong bg-surface-card px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-text-primary">Round {n} · {kind}</span>
+          <RunWord w={runWord(run)} />
+        </div>
+        <div className="mt-0.5 text-[11px] text-text-muted">{runSubline(run, doneNow, total)}</div>
+        {!over && total > 0 && (
+          <div className="my-2.5 h-[2px] overflow-hidden rounded-[1px] bg-fill-subtle">
+            <div className="h-full rounded-[1px] bg-state-neutral" style={{ width: `${Math.round((doneNow / total) * 100)}%` }} />
+          </div>
+        )}
+        {total > 0 && (
+          <div className={cn("flex flex-col text-[12.5px] text-text-secondary", over && "mt-2")}>
+            {notes.map((note, i) => (
+              <TreeRow
+                key={note.path}
+                name={note.title}
+                marquee
+                icon={<DocGlyph size={13} strokeWidth={1.2} className="shrink-0 text-text-subtle" />}
+                selected={note.path === openPath}
+                trailing={<StatusChip {...chips[i]} />}
+                onClick={() => onOpenNote(note.path)}
+              />
+            ))}
+          </div>
+        )}
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {!over && onRevealPane && <button type="button" onClick={onRevealPane} className={BTN}>Open the pane</button>}
+          {!over && <button type="button" disabled={busy} onClick={stopRun} className={BTN}>Stop</button>}
+          {over && <button type="button" onClick={() => dismissRound(dir, n)} className={BTN}>Dismiss</button>}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-2 mb-2 mt-1 rounded-lg border border-border-strong bg-surface-card px-3 py-2.5">
       <div className="truncate text-[12.5px] font-semibold text-text-primary">
@@ -144,7 +201,7 @@ export const RoundCard = memo(function RoundCard({
       {phase === "plan-ready" && (
         <div className="mt-2.5 flex flex-wrap gap-1.5">
           {onRunInPane && (
-            <button type="button" onClick={() => onRunInPane(n, total)} className={BTN}>Run in the pane</button>
+            <button type="button" onClick={() => onRunInPane(n, total)} className={BTN}>Run this plan</button>
           )}
           {onRunInTerminal && (
             <button type="button" onClick={() => onRunInTerminal(n, total)} className={BTN}>Run in a terminal</button>

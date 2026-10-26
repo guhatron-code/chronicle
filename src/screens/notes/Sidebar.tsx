@@ -1,5 +1,5 @@
 /*
- * The tree, the tags, the open round card, and "Start a round ▸" — the left
+ * The tree, the tags, the open round card, and "Run a round ▸" — the left
  * column of the pane (mock frames 1 and 2). Collapse state and the tag
  * filter are the sidebar's own; everything else is the index NotesPane hands
  * down. Every line of text is a chrome/Tree row — the same folder, note, guide
@@ -184,7 +184,7 @@ export const Sidebar = memo(function Sidebar({
   borrowed: boolean;
   /** the pinned round, in whatever phase it is in — null when there is none */
   round: RoundCardData | null;
-  /** "Start a round" — the plan is written as a turn in the agent pane */
+  /** "Run a round" — the planner splits the round into lanes as a turn in the agent pane */
   onStartRound: () => void;
   onRunRoundInPane?: (n: number, total: number) => void;
   onRunRoundInTerminal?: (n: number, total: number) => void;
@@ -447,7 +447,7 @@ export const Sidebar = memo(function Sidebar({
           onClick={onStartRound}
           className="inline-flex items-center gap-[4px] rounded-sm bg-primary px-[11px] py-[5px] text-[11.5px] font-semibold text-primary-foreground hover:bg-(--primary-hover) disabled:bg-fill-subtle disabled:text-text-dimmer disabled:opacity-100"
         >
-          Start a round
+          Run a round
           <ChevronRightGlyph size={11} className="shrink-0" />
         </button>
       </div>

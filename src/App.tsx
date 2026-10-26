@@ -92,7 +92,7 @@ import { HelpScreen } from "@/screens/help/HelpScreen";
 import type { HelpTarget } from "@/lib/help-content";
 import { allReady as doctorAllReady, refreshDoctor, subscribeDoctor } from "@/lib/setup-store";
 import { AgentPane } from "@/screens/agent/AgentPane";
-import { agentLive, agentSessionFor, answerPermission, laneKey, setAgentDraft, startAgentSession, startRoundInPane, startRoundPlanInPane, subscribeAgent, warmAgentSession } from "@/lib/agent-session";
+import { agentLive, agentSessionFor, answerPermission, laneKey, setAgentDraft, startAgentSession, startRunInPane, subscribeAgent, warmAgentSession } from "@/lib/agent-session";
 import {
   answerQuestions, designProjectFor, evictDesignProject, loadDesigns, openDesign, sendDesignMessage, subscribeDesigns, titleFromBrief,
 } from "@/lib/design-store";
@@ -1177,11 +1177,11 @@ function AppShell() {
   agentRef.current = agent;
   useEffect(() => {
     const unmount = mountAgentBridge({
-      planRound: startRoundPlanInPane,
+      planRound: (dir) => startRunInPane(dir, { kind: "notes" }).then(() => undefined),
       startRound: (dir, n, total, where) =>
         where === "terminal"
           ? startRoundInTerminal(dir, n, total, agentRef.current)
-          : startRoundInPane(dir, n, total),
+          : startRunInPane(dir, { kind: "plan", path: `fixes/phase_${n}_fixes_plan.md` }).then(() => undefined),
       openProject: doOpenProject,
       // the two reveals below act on whatever project the window is showing, so
       // the bridge switches to the action's project first: a round started in a
@@ -1570,13 +1570,13 @@ function AppShell() {
             onRevealPane={() => patchLayout({ agent: true, agentCollapsed: false })}
             onPlanRound={() => {
               patchLayout({ agent: true, agentCollapsed: false });
-              void startRoundPlanInPane(active.dir).catch((e) =>
+              void startRunInPane(active.dir, { kind: "notes" }).catch((e) =>
                 toastError("Couldn't start the round", String(e).slice(0, 110)),
               );
             }}
-            onRunRoundInPane={(n, total) => {
+            onRunRoundInPane={(n) => {
               patchLayout({ agent: true, agentCollapsed: false });
-              void startRoundInPane(active.dir, n, total).catch((e) =>
+              void startRunInPane(active.dir, { kind: "plan", path: `fixes/phase_${n}_fixes_plan.md` }).catch((e) =>
                 toastError("Couldn't start the round", String(e).slice(0, 110)),
               );
             }}

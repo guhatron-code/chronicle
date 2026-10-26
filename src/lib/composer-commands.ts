@@ -10,7 +10,9 @@
  * their own heading so the difference is visible rather than implied.
  */
 import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint } from "./ipc";
-import { agentSessionFor, type AgentCommand } from "./agent-session";
+import { agentSessionFor, startRunInPane, type AgentCommand } from "./agent-session";
+import { indexFor } from "./notes-store";
+import { liveRun } from "./runs-store";
 
 export interface LocalCommand {
   /** typed without the leading slash */
@@ -32,6 +34,12 @@ export function lastCheckpoint(dir: string): string | null {
 }
 
 const pendingEdits = (dir: string) => agentSessionFor(dir).editFiles.length > 0;
+
+/** The newest round whose plan is written and not yet run. */
+function newestReadyRound(dir: string): number | null {
+  const ready = indexFor(dir).rounds.filter((r) => r.state === "ready").map((r) => r.n);
+  return ready.length ? Math.max(...ready) : null;
+}
 
 export const LOCAL_COMMANDS: LocalCommand[] = [
   {
@@ -56,6 +64,16 @@ export const LOCAL_COMMANDS: LocalCommand[] = [
     enabled: pendingEdits,
     run: (dir) => agentEditUndo(dir, null),
   },
+  {
+    name: "run-plan",
+    description: "Run the newest written plan as a round, in lanes",
+    enabled: (dir) => newestReadyRound(dir) != null && liveRun(dir) == null,
+    run: (dir) => {
+      const n = newestReadyRound(dir);
+      if (n == null) return Promise.reject(new Error("there's no written plan to run"));
+      return startRunInPane(dir, { kind: "plan", path: `fixes/phase_${n}_fixes_plan.md` });
+    },
+  },
 ];
 
 export type CommandRow =
@@ -64,7 +82,7 @@ export type CommandRow =
 
 /**
  * The / menu's rows for a query (the text after the slash, may be empty).
- * Chronicle's own commands lead — there are three of them against the agent's
+ * Chronicle's own commands lead — there are four of them against the agent's
  * ninety-odd, and burying them under a plugin's skills would hide them.
  */
 export function commandRows(dir: string, query: string): CommandRow[] {

@@ -2,7 +2,7 @@
  * The frontend half of the agent action bridge.
  *
  * An agent running inside Chronicle can ask the app to do one of the things
- * its buttons do — plan a round, run one, open a project, read a terminal
+ * its buttons do — run a round, run one, open a project, read a terminal
  * back. Rust takes that request off the socket and emits `agent-action`; this
  * module performs it with the SAME code the buttons call (nothing here reaches
  * around the app's own paths), replies with a sentence a person can read, and
@@ -115,7 +115,7 @@ const refusal = (verb: string, e: unknown): ActionOutcome => ({
 export function describeAction(action: string, args: Record<string, unknown>): string | null {
   switch (action) {
     case "round.plan":
-      return "Plan a round";
+      return "Run a round";
     case "round.start": {
       const n = intArg(args.n);
       if (n == null) return null;

@@ -11,7 +11,7 @@
  * raw text matches). `[data-missing="true"]` is already styled dashed
  * (src/index.css, added with the node).
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
 import { NoteEditor } from "./editor/NoteEditor";
 import { Sidebar } from "./Sidebar";
 import { NoteHeader } from "./NoteHeader";
@@ -25,6 +25,7 @@ import {
   subscribeNotes, takePendingOpenNote,
 } from "@/lib/notes-store";
 import { subscribeRoundSession } from "@/lib/round-log";
+import { refreshRuns, runFor, runsVersion, subscribeRuns } from "@/lib/runs-store";
 import type { RoundCardData } from "./RoundCard";
 import { toastError } from "@/overlays/toasts";
 import type { ConfirmSpec } from "@/overlays/ConfirmDialog";
@@ -68,7 +69,7 @@ export function NotesPane({
   onOpenSearch: () => void;
   onOpenFile: (path: string) => void;
   onOpenUrl: (url: string) => void;
-  /** "Start a round" — App writes the plan as a turn in the agent pane */
+  /** "Run a round" — the planner splits the round into lanes as a turn in the agent pane */
   onPlanRound: () => void;
   onRunRoundInPane?: (n: number, total: number) => void;
   onRunRoundInTerminal?: (n: number, total: number) => void;
@@ -82,6 +83,9 @@ export function NotesPane({
   // a round starting or stopping is a phase change, so the card's route, its
   // buttons and the subline all move with it
   useEffect(() => subscribeRoundSession(() => bump((n) => n + 1)), []);
+  // the run driving the round, when there is one — the card mirrors its word and lanes
+  const runsGen = useSyncExternalStore(subscribeRuns, runsVersion, runsVersion);
+  useEffect(() => { void refreshRuns(dir); }, [dir]);
   useEffect(() => { setNotesOnScreen(onScreen ? dir : null); return () => setNotesOnScreen(null); }, [dir, onScreen]);
 
   /* the search overlay / palette land here */
@@ -138,8 +142,10 @@ export function NotesPane({
     () => (phase == null || roundN == null ? null : {
       phase, n: roundN, kind: roundKindFor(dir, roundN), notes: roundNotes,
       done: roundNotes.filter((x) => x.status === "done").length, route, termId,
+      run: runFor(dir, roundN),
     }),
-    [dir, phase, roundN, roundNotes, route, termId],
+    // runsGen: a run-update replaces the record, so the card re-reads it
+    [dir, phase, roundN, roundNotes, route, termId, runsGen],
   );
 
   /* the sidebar splitter — same drag math as the Repo pane's tree splitter
@@ -190,7 +196,7 @@ export function NotesPane({
   paneRef.current = onRevealPane;
   const revealPane = useCallback(() => paneRef.current?.(), []);
 
-  /* same reason: "Start a round" arrives as an inline arrow from App, and the
+  /* same reason: "Run a round" arrives as an inline arrow from App, and the
      sidebar's memo is what keeps typing cheap */
   const planRef = useRef(onPlanRound);
   planRef.current = onPlanRound;

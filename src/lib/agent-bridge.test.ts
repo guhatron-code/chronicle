@@ -24,7 +24,7 @@ import { toastError, toastSuccess } from "@/overlays/toasts";
 
 describe("what an agent asked for, in words", () => {
   it("names each action", () => {
-    expect(describeAction("round.plan", {})).toBe("Plan a round");
+    expect(describeAction("round.plan", {})).toBe("Run a round");
     expect(describeAction("round.start", { n: 3, where: "pane" })).toBe("Start round 3 in the pane");
     expect(describeAction("round.start", { n: 3, where: "terminal" })).toBe("Start round 3 in a terminal");
     expect(describeAction("project.open", { dir: "/x/y" })).toBe("Open /x/y");
