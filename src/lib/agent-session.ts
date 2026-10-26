@@ -699,7 +699,9 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     if (live && lane === "chat") {
       for (let i = s.entries.length - 1; i >= 0; i--) {
         const e = s.entries[i];
-        if ((e.kind === "round-plan" || e.kind === "run") && !e.ended && !e.queued) {
+        // a run's card ("card") never had a planning turn of its own: only the
+        // plan entry is settled, so a card landed after a relaunch is left alone
+        if ((e.kind === "round-plan" || (e.kind === "run" && e.part !== "card")) && !e.ended && !e.queued) {
           e.ended = true;
           touch(e);
           settledPlan = true;
@@ -1667,7 +1669,8 @@ export async function landLiveRunCards(dir: string): Promise<void> {
   for (const r of [...list].sort((a, b) => a.n - b.n)) {
     if (r.state === "done" || r.state === "failed" || r.state === "stopped") continue;
     if (runCardFor(dir, r.n)) continue;
-    s.entries.push({ kind: "run", rev: 0, n: r.n, total: r.lane_map?.items.length ?? 0, ended: false, queued: false, part: "card" });
+    // ended: it carries no prompt, so there is no planning turn for it to wait on
+    s.entries.push({ kind: "run", rev: 0, n: r.n, total: r.lane_map?.items.length ?? 0, ended: true, queued: false, part: "card" });
     landed = true;
   }
   if (landed) notify();
@@ -1710,7 +1713,9 @@ async function landRunPrompt(dir: string, n: number, total: number, prompt: stri
       // a run already in the thread (a resume) is reopened, never doubled
       const e = runCardFor(dir, n);
       if (e) {
-        Object.assign(e, { queued, ended: false, outcome: undefined, costBase: s.cost ?? 0 });
+        // a card landed after a relaunch becomes the plan entry again: its plan
+        // row shows while the planner runs, and an accepted map re-lands the card
+        Object.assign(e, { queued, ended: false, outcome: undefined, costBase: s.cost ?? 0, part: undefined });
         if (total > 0) e.total = total;
         touch(e);
       } else {

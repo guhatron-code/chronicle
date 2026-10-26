@@ -177,7 +177,7 @@ describe("runs in the agent store", () => {
     await agent.landLiveRunCards(DIR);
     agent.flushAgentNotifications();
     const es = agent.agentSessionFor(DIR).entries;
-    expect(es.at(-1)).toMatchObject({ kind: "run", n: 12, total: 2, part: "card", ended: false, queued: false });
+    expect(es.at(-1)).toMatchObject({ kind: "run", n: 12, total: 2, part: "card", ended: true, queued: false });
     expect(runCards()).toHaveLength(1);
     expect(runCards()[0]).toMatchObject({ n: 12 });
     expect(ipc.agentPrompt).not.toHaveBeenCalled();
@@ -188,6 +188,39 @@ describe("runs in the agent store", () => {
     await agent.landLiveRunCards(DIR);
     expect(runCards()).toHaveLength(0);
     vi.mocked(store.refreshRuns).mockResolvedValue([]);
+  });
+
+  it("a card landed after a relaunch is never settled by the next chat turn", async () => {
+    const store = await import("./runs-store");
+    vi.mocked(store.refreshRuns).mockResolvedValue([{ n: 12, state: "interrupted", round: 12, lane_map: null }] as never);
+    await agent.landLiveRunCards(DIR);
+    const before = { ...runCard()! };
+    onUpdate!({ dir: DIR, lane: "chat", message: chunk("an ordinary reply") });
+    onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
+    agent.flushAgentNotifications();
+    await new Promise((r) => setTimeout(r, 20));
+    agent.flushAgentNotifications();
+    expect(runsIpc.runPlanSettle).not.toHaveBeenCalled();
+    expect(runsIpc.runPlanCancel).not.toHaveBeenCalled();
+    expect(runCard()).toEqual(before);
+    vi.mocked(store.refreshRuns).mockResolvedValue([]);
+  });
+
+  it("a card landed after a relaunch becomes the plan again when its planning run is resumed, and the map lands the card once", async () => {
+    const store = await import("./runs-store");
+    vi.mocked(store.refreshRuns).mockResolvedValue([{ n: 10, state: "interrupted", round: 10, lane_map: null }] as never);
+    await agent.landLiveRunCards(DIR);
+    vi.mocked(store.refreshRuns).mockResolvedValue([]);
+    await agent.resumeRunInPane(DIR, 10);
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("PLAN AGAIN"); }, { timeout: 5000, interval: 5 });
+    expect(runCards()).toHaveLength(1);
+    expect(runCard()).toMatchObject({ n: 10, ended: false, queued: false });
+    expect(runCard()?.part).not.toBe("card");
+    onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
+    agent.flushAgentNotifications();
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(runCards()).toHaveLength(2); }, { timeout: 5000, interval: 5 });
+    expect(runCards()[0]).toMatchObject({ part: "plan" });
+    expect(runCards()[1]).toMatchObject({ part: "card", outcome: "running" });
   });
 
   it("a run that can't begin touches nothing", async () => {
