@@ -132,6 +132,48 @@ describe("handling an action", () => {
   });
 });
 
+describe("a run an outside session asked for", () => {
+  const deps = () => ({
+    planRound: vi.fn(async () => {}), startRound: vi.fn(async () => {}), openProject: vi.fn(),
+    activate: vi.fn(), revealPane: vi.fn(), revealTerminal: vi.fn(), roundTotal: vi.fn(() => 2),
+    termTail: vi.fn(() => ""), beginRun: vi.fn(async () => 7), resumeRun: vi.fn(async () => {}),
+  });
+  it("names each run action", () => {
+    expect(describeAction("run.begin", { source: { kind: "notes" } })).toBe("Begin a run from the queued notes");
+    expect(describeAction("run.begin", { source: { kind: "plan", path: "fixes/phase_4_fixes_plan.md" } })).toBe("Begin a run from fixes/phase_4_fixes_plan.md");
+    expect(describeAction("run.begin", { source: { kind: "prompt", text: "tidy the copy" } })).toBe("Begin a run from a prompt");
+    expect(describeAction("run.begin", {})).toBeNull();
+    expect(describeAction("run.resume", { n: 3 })).toBe("Resume round 3");
+  });
+  it("begins a run in the pane, the way the Run button does", async () => {
+    const d = deps();
+    const order: string[] = [];
+    d.activate.mockImplementation(() => { order.push("activate"); });
+    d.revealPane.mockImplementation(() => { order.push("revealPane"); });
+    const source = { kind: "prompt", text: "tidy the copy" };
+    const r = await handleAgentAction({ id: 1, dir: "/p", action: "run.begin", args: { source } }, d);
+    expect(d.beginRun).toHaveBeenCalledWith("/p", source);
+    expect(order).toEqual(["activate", "revealPane"]);
+    expect(r).toEqual({ ok: true, summary: "An agent began round 7 as a run in the pane.", data: { n: 7 } });
+  });
+  it("refuses a source it can't read, and reports a refused begin honestly", async () => {
+    const d = deps();
+    expect(await handleAgentAction({ id: 1, dir: "/p", action: "run.begin", args: { source: { kind: "later" } } }, d))
+      .toEqual({ ok: false, summary: "Couldn't start a run: no source to run" });
+    expect(d.beginRun).not.toHaveBeenCalled();
+    d.beginRun.mockRejectedValueOnce(new Error("A round is already running in this project."));
+    expect(await handleAgentAction({ id: 1, dir: "/p", action: "run.begin", args: { source: { kind: "notes" } } }, d))
+      .toEqual({ ok: false, summary: "Couldn't start a run: A round is already running in this project." });
+  });
+  it("resumes a run in the pane", async () => {
+    const d = deps();
+    const r = await handleAgentAction({ id: 1, dir: "/p", action: "run.resume", args: { n: 3 } }, d);
+    expect(d.resumeRun).toHaveBeenCalledWith("/p", 3);
+    expect(r).toEqual({ ok: true, summary: "An agent resumed round 3." });
+    expect((await handleAgentAction({ id: 1, dir: "/p", action: "run.resume", args: {} }, d)).ok).toBe(false);
+  });
+});
+
 describe("mounting the bridge", () => {
   const minimalDeps = () => ({
     planRound: vi.fn(async () => {}), startRound: vi.fn(async () => {}), openProject: vi.fn(),

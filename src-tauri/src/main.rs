@@ -296,6 +296,44 @@ fn ensure_init_skill() {
     }
 }
 
+/* ================= the run card's buttons, for an outside session ==================
+   `chronicle.run.stop|needs_you|lane_nudge|lane_discard` over the bridge: the same Tauri
+   commands the run card calls, so a click and an agent leave the same trace. `None` for
+   any other action (the scoped run tools, answered by runs::tools::handle). The caller
+   has already checked the project is one the user opened. */
+
+fn run_card_action(h: &tauri::AppHandle, canon: &Path, action: &str, args: &Value) -> Option<bridge::Reply> {
+    let dir = canon.to_string_lossy().into_owned();
+    let n = args.get("n").and_then(Value::as_u64);
+    let s = |k: &str| args.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let need_n = || bridge::Reply { ok: false, summary: "n is required.".into(), data: None };
+    let reply = |r: Result<(String, Value), String>| match r {
+        Ok((summary, data)) => bridge::Reply { ok: true, summary, data: Some(data) },
+        Err(summary) => bridge::Reply { ok: false, summary, data: None },
+    };
+    use tauri::async_runtime::block_on;
+    Some(match action {
+        "run.stop" => { let Some(n) = n else { return Some(need_n()) };
+            reply(block_on(runs::commands::run_stop(h.state(), h.state(), h.state(), dir, n)).map(|_| (format!("Round {n} was stopped. Nothing was undone."), json!({ "n": n })))) }
+        "run.needs_you" => { let Some(n) = n else { return Some(need_n()) };
+            let act = match serde_json::from_value::<runs::commands::NeedsAct>(args.get("act").cloned().unwrap_or(Value::Null)) {
+                Ok(a) => a,
+                Err(e) => return Some(bridge::Reply { ok: false, summary: format!("act isn't in the expected shape ({e})."), data: None }),
+            };
+            reply(block_on(runs::commands::run_needs_you(h.state(), h.state(), dir, n, act)).map(|_| (format!("Done. Round {n} carries on from there."), json!({ "n": n })))) }
+        "run.lane_nudge" => { let Some(n) = n else { return Some(need_n()) };
+            let lane = s("lane");
+            reply(block_on(runs::commands::run_lane_nudge(h.state(), h.state(), dir, n, lane.clone(), s("text"))).map(|_| (format!("Lane {} has your message.", lane.to_uppercase()), json!({ "n": n, "lane": lane })))) }
+        "run.lane_discard" => { let Some(n) = n else { return Some(need_n()) };
+            let lane = s("lane");
+            reply(block_on(runs::commands::run_lane_discard(h.state(), h.state(), dir, n, lane.clone())).map(|k| {
+                let files = if k == 1 { "1 file".to_string() } else { format!("{k} files") };
+                (format!("Lane {}'s unsaved changes are gone: {files} restored from what was saved.", lane.to_uppercase()), json!({ "n": n, "lane": lane, "restored": k }))
+            })) }
+        _ => return None,
+    })
+}
+
 /* ================= agent access opt-in (.mcp.json, the `chronicle` skill, access.json) ====
    Task 4 of the agent-actions-bridge plan: the explicit per-project opt-in that lets an
    agent (Claude Code) reach this project's notes/state/actions over the MCP bridge. Nothing
@@ -4172,14 +4210,17 @@ fn main() {
                             });
                             return bridge::Reply { ok: true, summary: "Chronicle is in front.".into(), data: None };
                         }
-                        // a run's tools are answered here, in Rust: the record has one writer
-                        if req.action.starts_with("run.") {
+                        // a run's tools are answered here, in Rust: the record has one writer.
+                        // begin and resume go on to the frontend below: the planner's prompt
+                        // lands in the pane the way a round's does (startRunInPane)
+                        if req.action.starts_with("run.") && req.action != "run.begin" && req.action != "run.resume" {
                             let Ok(canon) = PathBuf::from(&req.dir).canonicalize() else {
                                 return bridge::Reply { ok: false, summary: "That project isn't open in Chronicle. Open it and try again.".into(), data: None };
                             };
                             if !h.state::<OpenRoots>().0.lock().map(|s| s.contains(&canon)).unwrap_or(false) {
                                 return bridge::Reply { ok: false, summary: "That project isn't open in Chronicle. Open it and try again.".into(), data: None };
                             }
+                            if let Some(r) = run_card_action(&h, &canon, &req.action, &req.args) { return r; }
                             return runs::tools::handle(&h.state::<runs::Runs>(), &load_project(&canon), &req.action, &req.args);
                         }
                         // a name the app doesn't perform never reaches the frontend: the

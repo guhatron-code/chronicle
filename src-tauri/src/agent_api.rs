@@ -242,6 +242,94 @@ fn caps() -> Vec<Capability> {
                 action(dir, "designs.bench", a.clone(), "run the design benchmark")
             },
         },
+        // the public run tools: an outside session begins, watches, steers and stops a run
+        // the way the run card does. list and state read the records; the rest need the app.
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.begin",
+                description: "Ask the running Chronicle to begin a run: one plan worked as parallel lanes that Chronicle fences, checks and saves. The source is the queued notes, a fixes plan, or a prompt. Refused while another run is live in this project. Only when the user asked for a run in this conversation. Chronicle must be open on this project.",
+                input_schema: json!({ "type": "object", "required": ["source"], "properties": {
+                    "source": { "type": "object", "required": ["kind"], "description": "{kind: notes} | {kind: plan, path} | {kind: prompt, text}", "properties": {
+                        "kind": { "type": "string", "enum": ["notes", "plan", "prompt"] },
+                        "path": { "type": "string", "description": "for plan: fixes/phase_N_fixes_plan.md" },
+                        "text": { "type": "string", "description": "for prompt: what the round should do" } } } } }),
+            },
+            run: run_begin,
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.list",
+                description: "Every run in this project, newest first: its round, state, lane count, cost, elapsed time, and how many things need the user. Read from the run records; Chronicle need not be open.",
+                input_schema: json!({ "type": "object", "properties": {} }),
+            },
+            run: run_list,
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.state",
+                description: "One run in full: each lane's state and try, its checks (pass or fail), files it touched that another lane owns, its last line, and each thing that needs the user with the acts chronicle.run.needs_you takes for it. Read from the run record; Chronicle need not be open.",
+                input_schema: json!({ "type": "object", "required": ["n"], "properties": {
+                    "n": { "type": "integer", "description": "the run's number, as chronicle.run.list reports it" } } }),
+            },
+            run: run_state,
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.stop",
+                description: "Stop a run. Nothing is reverted: what the lanes saved stays saved, and unsaved changes stay in the project. Chronicle must be open on this project.",
+                input_schema: json!({ "type": "object", "required": ["n"], "properties": { "n": { "type": "integer" } } }),
+            },
+            run: |dir, a| { let n = run_n(dir, a)?; action(dir, "run.stop", json!({ "n": n }), "stop a run") },
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.resume",
+                description: "Resume an interrupted run: the lanes that hadn't finished pick up again. Chronicle must be open on this project.",
+                input_schema: json!({ "type": "object", "required": ["n"], "properties": { "n": { "type": "integer" } } }),
+            },
+            run: |dir, a| { let n = run_n(dir, a)?; action(dir, "run.resume", json!({ "n": n }), "resume a run") },
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.needs_you",
+                description: "Act on something a run needs the user for, as the card's buttons do: skip {item}, rewrite {item, text}, retry {lane}, recheck, or dismiss {index}. chronicle.run.state lists each row's acts. Only what the user decided. Chronicle must be open on this project.",
+                input_schema: json!({ "type": "object", "required": ["n", "act"], "properties": {
+                    "n": { "type": "integer" },
+                    "act": { "type": "object", "required": ["kind"], "properties": {
+                        "kind": { "type": "string", "enum": NEEDS_ACTS },
+                        "item": { "type": "string" }, "text": { "type": "string" },
+                        "lane": { "type": "string" }, "index": { "type": "integer" } } } } }),
+            },
+            run: run_needs_you,
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.lane_nudge",
+                description: "Send a running lane a message, as typing in its thread does. Chronicle must be open on this project.",
+                input_schema: json!({ "type": "object", "required": ["n", "lane", "text"], "properties": {
+                    "n": { "type": "integer" }, "lane": { "type": "string", "description": "the lane's letter" }, "text": { "type": "string" } } }),
+            },
+            run: |dir, a| {
+                let n = run_n(dir, a)?;
+                let text = arg_str(a, "text")?.unwrap_or("");
+                if text.trim().is_empty() { return Err("Write a message first.".into()) }
+                let lane = run_lane(dir, n, a)?;
+                action(dir, "run.lane_nudge", json!({ "n": n, "lane": lane, "text": text }), "nudge a lane")
+            },
+        },
+        Capability {
+            spec: ToolSpec {
+                name: "chronicle.run.lane_discard",
+                description: "Destructive: throw away a finished or stopped lane's unsaved changes. Every file the lane owns that has changes is restored from what was last saved (git checkout HEAD -- <paths>), and those edits are gone. Only when the user named the lane. Chronicle must be open on this project.",
+                input_schema: json!({ "type": "object", "required": ["n", "lane"], "properties": {
+                    "n": { "type": "integer" }, "lane": { "type": "string", "description": "the lane's letter" } } }),
+            },
+            run: |dir, a| {
+                let n = run_n(dir, a)?;
+                let lane = run_lane(dir, n, a)?;
+                action(dir, "run.lane_discard", json!({ "n": n, "lane": lane }), "discard a lane's changes")
+            },
+        },
         // the run tools: shown only by a run's own server (`--planner`, `--run <n> --lane <id>`,
         // see mcp.rs and runs::tools), whose `_run`/`_lane` are set by the server, never the agent
         Capability {
@@ -753,6 +841,167 @@ fn terminal_read(dir: &Path, a: &Value) -> Result<Outcome, String> {
     action(dir, "terminal.read", json!({ "id": id, "lines": lines }), "read a terminal")
 }
 
+/* ---------- runs: list and state from the records, the rest through the app ---------- */
+
+const NEEDS_ACTS: [&str; 5] = ["skip", "rewrite", "retry", "recheck", "dismiss"];
+
+/// The record's own state, said as words ("needs-you" is "needs you").
+fn run_state_word(s: crate::runs::record::RunState) -> String {
+    serde_json::to_value(s).ok().and_then(|v| v.as_str().map(|w| w.replace('-', " "))).unwrap_or_default()
+}
+
+/// A lane as the card says it: finished, being checked, needs you, …
+fn lane_word(rec: &crate::runs::record::RunRecord, l: &crate::runs::record::LaneRecord) -> &'static str {
+    use crate::runs::record::LaneState::*;
+    if l.state == Parked || rec.needs_you.iter().any(|x| x.lane.as_deref() == Some(&l.id) && x.kind != "refused") { return "needs you" }
+    match l.state {
+        Waiting => "waiting",
+        Finishing | Gating => "being checked",
+        Fixing => "fixing",
+        Closed => "finished",
+        Cancelled => "stopped",
+        _ => "working",
+    }
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ` (record::iso's own shape) back to epoch ms.
+fn iso_ms(s: &str) -> Option<u64> {
+    let num = |r: std::ops::Range<usize>| s.get(r)?.parse::<i64>().ok();
+    let (y, mo, d, h, mi, se) = (num(0..4)?, num(5..7)?, num(8..10)?, num(11..13)?, num(14..16)?, num(17..19)?);
+    let y = if mo <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if mo > 2 { mo - 3 } else { mo + 9 }) + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146_097 + doe - 719_468;
+    u64::try_from((days * 86_400 + h * 3600 + mi * 60 + se) * 1000).ok()
+}
+
+/// How long the run has taken: to its last write once it is over, to now while it is not.
+fn run_elapsed_ms(rec: &crate::runs::record::RunRecord) -> u64 {
+    let start = iso_ms(&rec.created).unwrap_or(0);
+    let end = if rec.state.terminal() { iso_ms(&rec.updated).unwrap_or(start) } else { crate::epoch_ms() };
+    end.saturating_sub(start)
+}
+
+/// The last line a lane's agent wrote in its latest turn, from the lane's own thread.
+fn lane_last_line(dir: &Path, rec: &crate::runs::record::RunRecord, lane: &str) -> Option<String> {
+    let sid = rec.lane(lane)?.session.clone()?;
+    let k = rec.lane_map.as_ref()?.lanes.iter().position(|l| l.id == lane)? as u16;
+    let lines = crate::acp::transcript::read(&crate::acp::Lane::Worker { run: rec.n, k }.store(dir), &sid);
+    let from = lines.iter().rposition(|l| l["method"] == "_chronicle/user_message").map(|i| i + 1).unwrap_or(0);
+    let text: String = lines[from..].iter()
+        .filter(|l| l["method"] == "session/update" && l["params"]["update"]["sessionUpdate"] == "agent_message_chunk")
+        .filter_map(|l| l["params"]["update"]["content"]["text"].as_str())
+        .collect();
+    let last = text.lines().map(str::trim).filter(|l| !l.is_empty()).last()?;
+    Some(if last.chars().count() > 200 { format!("{}…", last.chars().take(200).collect::<String>().trim_end()) } else { last.to_string() })
+}
+
+/// What `chronicle.run.needs_you` takes for one row, exactly as `NeedsAct` reads it.
+fn acts_for(index: usize, x: &crate::runs::record::NeedsYou) -> Vec<Value> {
+    match x.kind.as_str() {
+        "parked" => { let item = x.item.clone().unwrap_or_default();
+            vec![json!({ "kind": "skip", "item": item }), json!({ "kind": "rewrite", "item": item, "text": "…" })] }
+        "exhausted" => vec![json!({ "kind": "retry", "lane": x.lane.clone().unwrap_or_default() })],
+        "head" => vec![json!({ "kind": "recheck" })],
+        "refused" => vec![json!({ "kind": "dismiss", "index": index })],
+        _ => vec![],
+    }
+}
+
+fn plural(n: usize, w: &str) -> String { format!("{n} {w}{}", if n == 1 { "" } else { "s" }) }
+
+fn run_list(dir: &Path, _a: &Value) -> Result<Outcome, String> {
+    let mut recs = crate::runs::record::list(dir);
+    recs.reverse(); // newest first
+    let rows: Vec<Value> = recs.iter().map(|r| json!({
+        "n": r.n, "round": r.round_n(), "kind": r.kind, "state": run_state_word(r.state),
+        "lanes": r.lanes.len(), "cost_usd": r.total_cost().usd, "elapsed_ms": run_elapsed_ms(r),
+        "needs_you": r.needs_you.len(), "created": r.created, "updated": r.updated,
+    })).collect();
+    let summary = if recs.is_empty() { "No runs yet.".to_string() } else {
+        format!("{} · {}.", plural(recs.len(), "run"),
+            recs.iter().map(|r| format!("round {} {}", r.round_n(), run_state_word(r.state))).collect::<Vec<_>>().join(" · "))
+    };
+    Ok(Outcome { summary, data: json!({ "runs": rows }) })
+}
+
+/// The run `n` names, read from disk: every action on a run checks it is there first,
+/// the way `round.start` checks its round, so a typo never reaches the app.
+fn run_record(dir: &Path, a: &Value) -> Result<crate::runs::record::RunRecord, String> {
+    let n = arg_u64(a, "n")?.ok_or("n is required.")?;
+    crate::runs::record::load(dir, n)?.ok_or_else(|| format!("There's no run {n} in this project."))
+}
+fn run_n(dir: &Path, a: &Value) -> Result<u64, String> { run_record(dir, a).map(|r| r.n) }
+fn run_lane(dir: &Path, n: u64, a: &Value) -> Result<String, String> {
+    let lane = required_str(a, "lane")?;
+    let rec = crate::runs::record::load(dir, n)?.ok_or_else(|| format!("There's no run {n} in this project."))?;
+    if rec.lane(lane).is_none() { return Err(format!("There's no lane {lane} in round {}.", rec.round_n())) }
+    Ok(lane.to_string())
+}
+
+fn run_state(dir: &Path, a: &Value) -> Result<Outcome, String> {
+    let rec = run_record(dir, a)?;
+    let spec = |id: &str| rec.lane_map.as_ref().and_then(|m| m.lanes.iter().find(|l| l.id == id));
+    let lanes: Vec<Value> = rec.lanes.iter().map(|l| json!({
+        "id": l.id, "title": spec(&l.id).map(|s| s.title.clone()), "items": spec(&l.id).map(|s| s.items.clone()).unwrap_or_default(),
+        "state": lane_word(&rec, l), "attempt": l.attempt, "cost_usd": l.cost_usd, "commit": l.commit, "parked": l.parked,
+        "gates": l.gates.iter().map(|g| json!({ "fix": g.fix, "commit": g.commit,
+            "checks": g.checks.iter().map(|c| json!({ "name": c.name, "pass": c.exit == Some(0) })).collect::<Vec<_>>(),
+            "review": g.review.as_ref().map(|r| r.pass) })).collect::<Vec<_>>(),
+        "leak": l.leak.iter().map(|k| k.path.clone()).collect::<Vec<_>>(),
+        "last_line": lane_last_line(dir, &rec, &l.id),
+    })).collect();
+    let needs: Vec<Value> = rec.needs_you.iter().enumerate().map(|(i, x)| json!({
+        "index": i, "kind": x.kind, "lane": x.lane, "item": x.item, "reason": x.reason, "acts": acts_for(i, x),
+    })).collect();
+    let word = run_state_word(rec.state);
+    let cost = rec.total_cost().usd;
+    let summary = format!("Round {} · {word} · {} · ${cost:.2}.", rec.round_n(), plural(rec.lanes.len(), "lane"));
+    Ok(Outcome { summary, data: json!({
+        "n": rec.n, "round": rec.round_n(), "state": word, "cost_usd": cost, "elapsed_ms": run_elapsed_ms(&rec),
+        "lanes": lanes, "needs_you": needs, "record": rec,
+    }) })
+}
+
+fn run_begin(dir: &Path, a: &Value) -> Result<Outcome, String> {
+    let src = match a.get("source") { None | Some(Value::Null) => return Err("source is required.".into()), Some(v) => v };
+    let source = match src.get("kind").and_then(Value::as_str) {
+        Some("notes") => json!({ "kind": "notes" }),
+        Some("plan") => {
+            let path = required_str(src, "path").map_err(|_| "source.path is required for a plan.".to_string())?;
+            let ok = regex::Regex::new(r"^fixes/phase_\d+_fixes_plan\.md$").map(|re| re.is_match(path)).unwrap_or(false);
+            if !ok { return Err("That isn't a fixes/phase_N_fixes_plan.md file.".into()) }
+            if !dir.join(path).is_file() { return Err(format!("There's no plan at {path}.")) }
+            json!({ "kind": "plan", "path": path })
+        }
+        Some("prompt") => {
+            let text = arg_str(src, "text").map_err(|_| "source.text must be a string.".to_string())?.unwrap_or("");
+            if text.trim().is_empty() { return Err("Write what the round should do first.".into()) }
+            json!({ "kind": "prompt", "text": text })
+        }
+        _ => return Err("source.kind must be notes, plan or prompt.".into()),
+    };
+    // the app refuses this too (begin_in); said here, the caller hears it without the app
+    if crate::runs::record::list(dir).iter().any(|r| !r.state.terminal()) {
+        return Err("A round is already running in this project. Stop it or let it finish first.".into());
+    }
+    action(dir, "run.begin", json!({ "source": source }), "start a run")
+}
+
+fn run_needs_you(dir: &Path, a: &Value) -> Result<Outcome, String> {
+    let act = match a.get("act") { None | Some(Value::Null) => return Err("act is required.".into()), Some(v) => v };
+    if !act.get("kind").and_then(Value::as_str).is_some_and(|k| NEEDS_ACTS.contains(&k)) {
+        return Err(format!("act.kind must be one of {}.", NEEDS_ACTS.join(", ")));
+    }
+    // exactly what the app's command reads, checked before the socket
+    serde_json::from_value::<crate::runs::commands::NeedsAct>(act.clone())
+        .map_err(|e| format!("act isn't in the expected shape ({e})."))?;
+    let n = run_n(dir, a)?;
+    action(dir, "run.needs_you", json!({ "n": n, "act": act }), "act on what needs you")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -772,9 +1021,21 @@ mod tests {
     #[test]
     fn the_catalog_names_every_capability_once() {
         let names: Vec<&str> = catalog().iter().map(|t| t.name).collect();
-        for n in ["chronicle.notes.list", "chronicle.notes.read"] {
+        for n in ["chronicle.notes.list", "chronicle.notes.read",
+                  "chronicle.run.begin", "chronicle.run.list", "chronicle.run.state", "chronicle.run.stop",
+                  "chronicle.run.resume", "chronicle.run.needs_you", "chronicle.run.lane_nudge", "chronicle.run.lane_discard",
+                  "chronicle.run.declare", "chronicle.run.block", "chronicle.run.ask", "chronicle.run.lane_state"] {
             assert!(names.contains(&n), "{n} missing from {names:?}");
         }
+        // the public run tools are ordinary capabilities: never hidden as scoped ones
+        for n in ["chronicle.run.begin", "chronicle.run.list", "chronicle.run.state", "chronicle.run.stop",
+                  "chronicle.run.resume", "chronicle.run.needs_you", "chronicle.run.lane_nudge", "chronicle.run.lane_discard"] {
+            assert!(!crate::runs::tools::is_scoped_tool(n), "{n} is public");
+            assert!(!crate::runs::tools::RunScope::Planner.shows(n), "{n} is not the planner's");
+            assert!(!crate::runs::tools::RunScope::Lane { n: 1, lane: "a".into() }.shows(n), "{n} is not a lane's");
+        }
+        let discard = catalog().into_iter().find(|t| t.name == "chronicle.run.lane_discard").unwrap();
+        assert!(discard.description.contains("git checkout"), "the one destructive verb says so: {}", discard.description);
         let mut dedup = names.clone(); dedup.sort(); dedup.dedup();
         assert_eq!(dedup.len(), names.len(), "no duplicate names");
         for t in catalog() {
@@ -1110,6 +1371,24 @@ mod tests {
         let r = call(&d, "chronicle.round.plan", &json!({})).unwrap();
         assert!(r.summary.starts_with("round.plan"));
 
+        // the run actions reach the app as their own actions, with only what the app needs
+        let mut rec = crate::runs::record::RunRecord::new(4, crate::runs::record::RunKind::Notes, Some(4), "p", "q", "");
+        rec.state = crate::runs::record::RunState::Done;
+        rec.lanes = vec![crate::runs::record::LaneRecord::new("a")];
+        crate::runs::record::save(&d, &mut rec).unwrap();
+        let r = call(&d, "chronicle.run.begin", &json!({"source": {"kind": "prompt", "text": "tidy the copy"}})).unwrap();
+        assert_eq!(r.summary, r#"run.begin · {"source":{"kind":"prompt","text":"tidy the copy"}}"#);
+        let r = call(&d, "chronicle.run.stop", &json!({"n": 4})).unwrap();
+        assert_eq!(r.summary, r#"run.stop · {"n":4}"#);
+        let r = call(&d, "chronicle.run.resume", &json!({"n": 4})).unwrap();
+        assert_eq!(r.summary, r#"run.resume · {"n":4}"#);
+        let r = call(&d, "chronicle.run.needs_you", &json!({"n": 4, "act": {"kind": "recheck"}})).unwrap();
+        assert_eq!(r.summary, r#"run.needs_you · {"n":4,"act":{"kind":"recheck"}}"#);
+        let r = call(&d, "chronicle.run.lane_nudge", &json!({"n": 4, "lane": "a", "text": "look at b.ts"})).unwrap();
+        assert_eq!(r.summary, r#"run.lane_nudge · {"n":4,"lane":"a","text":"look at b.ts"}"#);
+        let r = call(&d, "chronicle.run.lane_discard", &json!({"n": 4, "lane": "a"})).unwrap();
+        assert_eq!(r.summary, r#"run.lane_discard · {"n":4,"lane":"a"}"#);
+
         let r = call(&d, "chronicle.terminal.read", &json!({"lines": 50})).unwrap();
         assert_eq!(r.data["echo"]["lines"], 50);
         assert_eq!(r.data["echo"]["id"], Value::Null, "no id means the focused terminal");
@@ -1194,6 +1473,120 @@ mod tests {
         let files = r.data["frameFiles"].as_array().unwrap();
         assert_eq!(files.len(), 1, "only the safe frame file is reported: {files:?}");
         assert!(files[0].as_str().unwrap().ends_with("frames/a.html"), "{files:?}");
+    }
+
+    /// Two recorded runs, the way Chronicle writes them: round 1 saved, round 2
+    /// waiting on the user with a lane checked, a leak, and a lane's last words.
+    fn two_runs(name: &str) -> PathBuf {
+        use crate::runs::record::*;
+        let d = vault(name);
+        let mut one = RunRecord::new(1, RunKind::Notes, Some(1), "fixes/phase_1_fixes_plan.md", "fixes/phase_1_fixes_prompt.md", "");
+        one.lane_map = Some(LaneMap { items: vec![Item { id: "T-1".into(), title: "Login".into(), ..Default::default() }],
+            lanes: vec![LaneSpec { id: "a".into(), title: "Login".into(), items: vec!["T-1".into()], owns: vec!["src/a.ts".into()], ..Default::default() }] });
+        let mut a = LaneRecord::new("a");
+        a.state = LaneState::Closed; a.attempt = 1; a.cost_usd = 0.5;
+        one.lanes = vec![a];
+        one.state = RunState::Done;
+        one.created = "2026-10-20T10:00:00Z".into();
+        save(&d, &mut one).unwrap();
+
+        let mut two = RunRecord::new(2, RunKind::Prompt, Some(2), "fixes/phase_2_fixes_plan.md", "fixes/phase_2_fixes_prompt.md", "fix it");
+        two.lane_map = Some(LaneMap {
+            items: vec![Item { id: "T-2".into(), title: "Crash".into(), ..Default::default() }, Item { id: "T-3".into(), title: "Copy".into(), ..Default::default() }],
+            lanes: vec![
+                LaneSpec { id: "a".into(), title: "Crash fix".into(), items: vec!["T-2".into()], owns: vec!["src/b.ts".into()], ..Default::default() },
+                LaneSpec { id: "b".into(), title: "Copy".into(), items: vec!["T-3".into()], owns: vec!["src/c.ts".into()], ..Default::default() }] });
+        let mut a = LaneRecord::new("a");
+        a.state = LaneState::Gating; a.attempt = 2; a.cost_usd = 0.25; a.session = Some("sess-a".into());
+        a.gates = vec![Gate { commit: "abc".into(), fix: 0, review: None, notice: None, checks: vec![
+            CheckResult { name: "test".into(), exit: Some(0), ms: 10, timed_out: false, tail: String::new() },
+            CheckResult { name: "lint".into(), exit: Some(1), ms: 10, timed_out: false, tail: String::new() }] }];
+        a.leak = vec![Leak { path: "src/c.ts".into(), owner: Some("b".into()), by: None }];
+        let mut b = LaneRecord::new("b");
+        b.state = LaneState::Parked; b.attempt = 3;
+        two.lanes = vec![a, b];
+        two.needs_you = vec![
+            NeedsYou { kind: "parked".into(), lane: Some("b".into()), item: Some("T-3".into()), reason: "it names a file that isn't there".into(), reading: Some(0.9) },
+            NeedsYou { kind: "refused".into(), lane: None, item: None, reason: "a publish was refused".into(), reading: None }];
+        two.state = RunState::NeedsYou;
+        save(&d, &mut two).unwrap();
+
+        // lane a (index 0) said something last turn: its last line is what run.state shows
+        let store = crate::acp::Lane::Worker { run: 2, k: 0 }.store(&d);
+        std::fs::create_dir_all(store.join("sess-a")).unwrap();
+        let chunk = |t: &str| json!({ "method": "session/update", "params": { "update": { "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": t } } } }).to_string();
+        let lines = [json!({ "method": "_chronicle/user_message", "params": { "text": "You are lane A" } }).to_string(),
+                     chunk("Looking at the crash.\n"), chunk("Fixed the null check"), chunk(" in src/b.ts.\n\n")];
+        std::fs::write(store.join("sess-a/thread.jsonl"), lines.join("\n") + "\n").unwrap();
+        d
+    }
+
+    #[test]
+    fn runs_are_listed_and_read_from_disk_without_the_app() {
+        let d = two_runs("runs-disk");
+        let l = call(&d, "chronicle.run.list", &json!({})).unwrap();
+        let rows = l.data["runs"].as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!((rows[0]["n"].as_u64(), rows[1]["n"].as_u64()), (Some(2), Some(1)), "newest first");
+        assert_eq!(rows[0]["state"], "needs you", "the record's state, said as words");
+        assert_eq!(rows[1]["state"], "done");
+        assert_eq!(rows[0]["lanes"], 2);
+        assert_eq!(rows[0]["needs_you"], 2);
+        assert_eq!(rows[1]["cost_usd"], 0.5);
+        assert!(rows[1]["elapsed_ms"].is_u64());
+        assert_eq!(l.summary, "2 runs · round 2 needs you · round 1 done.");
+
+        let s = call(&d, "chronicle.run.state", &json!({"n": 2})).unwrap();
+        assert_eq!(s.summary, "Round 2 · needs you · 2 lanes · $0.25.");
+        assert_eq!(s.data["record"]["n"], 2, "the full record rides along");
+        let lanes = s.data["lanes"].as_array().unwrap();
+        assert_eq!(lanes[0]["id"], "a");
+        assert_eq!(lanes[0]["title"], "Crash fix");
+        assert_eq!(lanes[0]["state"], "being checked");
+        assert_eq!(lanes[0]["attempt"], 2);
+        assert_eq!(lanes[0]["gates"][0]["checks"], json!([{"name": "test", "pass": true}, {"name": "lint", "pass": false}]));
+        assert_eq!(lanes[0]["leak"], json!(["src/c.ts"]));
+        assert_eq!(lanes[0]["last_line"], "Fixed the null check in src/b.ts.");
+        assert_eq!(lanes[1]["state"], "needs you");
+        assert_eq!(lanes[1]["last_line"], Value::Null, "a lane that never spoke has no last line");
+        let ny = s.data["needs_you"].as_array().unwrap();
+        assert_eq!(ny[0]["acts"], json!([{"kind": "skip", "item": "T-3"}, {"kind": "rewrite", "item": "T-3", "text": "…"}]));
+        assert_eq!(ny[1]["acts"], json!([{"kind": "dismiss", "index": 1}]));
+        assert_eq!(call(&d, "chronicle.run.state", &json!({})).unwrap_err(), "n is required.");
+        assert_eq!(call(&d, "chronicle.run.state", &json!({"n": 9})).unwrap_err(), "There's no run 9 in this project.");
+
+        let empty = vault("runs-none");
+        assert_eq!(call(&empty, "chronicle.run.list", &json!({})).unwrap().summary, "No runs yet.");
+    }
+
+    /// Each of these would be wrong to send: the refusal comes back before the socket
+    /// is dialled. No app is listening in this test, so reaching the bridge at all would
+    /// answer "Chronicle isn't open on this project…" instead.
+    #[test]
+    fn run_actions_are_refused_before_the_bridge_when_their_arguments_are_wrong() {
+        let d = two_runs("runs-refuse");
+        let begin = |src: Value| call(&d, "chronicle.run.begin", &json!({"source": src}));
+        assert_eq!(begin(json!({"kind": "prompt", "text": ""})).unwrap_err(), "Write what the round should do first.");
+        assert_eq!(begin(json!({"kind": "prompt", "text": "   "})).unwrap_err(), "Write what the round should do first.");
+        assert_eq!(begin(json!({"kind": "later"})).unwrap_err(), "source.kind must be notes, plan or prompt.");
+        assert_eq!(call(&d, "chronicle.run.begin", &json!({})).unwrap_err(), "source is required.");
+        assert_eq!(begin(json!({"kind": "plan", "path": "notes.md"})).unwrap_err(), "That isn't a fixes/phase_N_fixes_plan.md file.");
+        assert_eq!(begin(json!({"kind": "plan", "path": "fixes/phase_7_fixes_plan.md"})).unwrap_err(), "There's no plan at fixes/phase_7_fixes_plan.md.");
+        // round 2 is waiting on the user: it is still live, so a second run is refused
+        assert_eq!(begin(json!({"kind": "notes"})).unwrap_err(), "A round is already running in this project. Stop it or let it finish first.");
+
+        let act = |a: Value| call(&d, "chronicle.run.needs_you", &json!({"n": 2, "act": a}));
+        assert_eq!(act(json!({"kind": "explode"})).unwrap_err(), "act.kind must be one of skip, rewrite, retry, recheck, dismiss.");
+        assert_eq!(act(json!("skip")).unwrap_err(), "act.kind must be one of skip, rewrite, retry, recheck, dismiss.");
+        assert!(act(json!({"kind": "skip"})).unwrap_err().starts_with("act isn't in the expected shape"), "skip needs its item");
+        assert_eq!(call(&d, "chronicle.run.needs_you", &json!({"n": 2})).unwrap_err(), "act is required.");
+
+        assert_eq!(call(&d, "chronicle.run.stop", &json!({"n": 9})).unwrap_err(), "There's no run 9 in this project.");
+        assert_eq!(call(&d, "chronicle.run.resume", &json!({})).unwrap_err(), "n is required.");
+        assert_eq!(call(&d, "chronicle.run.lane_nudge", &json!({"n": 2, "lane": "a", "text": " "})).unwrap_err(), "Write a message first.");
+        assert_eq!(call(&d, "chronicle.run.lane_nudge", &json!({"n": 2, "lane": "z", "text": "hi"})).unwrap_err(), "There's no lane z in round 2.");
+        assert_eq!(call(&d, "chronicle.run.lane_discard", &json!({"n": 2})).unwrap_err(), "lane is required.");
+        assert_eq!(call(&d, "chronicle.run.lane_discard", &json!({"n": 2, "lane": "q"})).unwrap_err(), "There's no lane q in round 2.");
     }
 
     #[test]

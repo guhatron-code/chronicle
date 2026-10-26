@@ -26,11 +26,15 @@ pub(crate) fn token_path() -> PathBuf {
         .unwrap_or_else(|| crate::config_dir().join("app.token"))
 }
 
-/// The four actions the app performs for an agent, and how to say each one in a
+/// The actions the app performs for an agent, and how to say each one in a
 /// sentence. An action outside this list never reaches the frontend.
-/// The `run.*` four are answered in Rust (`runs::tools::handle`), never by the frontend.
-pub(crate) const ACTIONS: [&str; 11] = ["round.plan", "round.start", "project.open", "terminal.read", "designs.capture", "designs.lint", "designs.bench",
-    "run.declare", "run.block", "run.ask", "run.lane_state"];
+/// The scoped `run.*` four (a planner's and a lane's) are answered in Rust
+/// (`runs::tools::handle`). Of the public six an outside session sends, `run.begin`
+/// and `run.resume` go to the frontend (the planner's prompt lands in the pane, as a
+/// round's does); the other four are answered in Rust by the run card's own commands.
+pub(crate) const ACTIONS: [&str; 17] = ["round.plan", "round.start", "project.open", "terminal.read", "designs.capture", "designs.lint", "designs.bench",
+    "run.declare", "run.block", "run.ask", "run.lane_state",
+    "run.begin", "run.stop", "run.resume", "run.needs_you", "run.lane_nudge", "run.lane_discard"];
 
 pub(crate) fn known_action(name: &str) -> bool { ACTIONS.contains(&name) }
 
@@ -48,6 +52,12 @@ pub(crate) fn verb_for(action: &str) -> &'static str {
         "run.block" => "report a blocked item",
         "run.ask" => "ask Chronicle",
         "run.lane_state" => "read the round",
+        "run.begin" => "start a run",
+        "run.stop" => "stop a run",
+        "run.resume" => "resume a run",
+        "run.needs_you" => "act on what needs you",
+        "run.lane_nudge" => "nudge a lane",
+        "run.lane_discard" => "discard a lane's changes",
         _ => "do that",
     }
 }
@@ -62,6 +72,8 @@ pub(crate) fn timeout_for(action: &str) -> std::time::Duration {
         "designs.capture" | "designs.lint" => 3 * 60,
         // the judge may be a one-turn agent session
         "run.block" | "run.ask" => 6 * 60,
+        // the sizing decision may ask a provider, then the prompt waits for the pane
+        "run.begin" | "run.resume" => 6 * 60,
         _ => 30,
     })
 }
@@ -481,7 +493,7 @@ mod tests {
         assert_eq!(verb_for("designs.capture"), "capture a design");
         assert_eq!(verb_for("designs.lint"), "lint a design");
         assert!(known_action("designs.capture") && known_action("designs.lint") && known_action("designs.bench"));
-        assert_eq!(ACTIONS.len(), 11);
+        assert_eq!(ACTIONS.len(), 17);
         assert_eq!(timeout_for("designs.bench"), std::time::Duration::from_secs(3 * 60 * 60));
         assert_eq!(timeout_for("round.plan"), std::time::Duration::from_secs(30));
         assert_eq!(timeout_for("designs.capture"), std::time::Duration::from_secs(3 * 60));
@@ -495,5 +507,24 @@ mod tests {
         assert_eq!(verb_for("run.block"), "report a blocked item");
         assert_eq!(timeout_for("run.ask"), std::time::Duration::from_secs(6 * 60));
         assert_eq!(timeout_for("run.declare"), std::time::Duration::from_secs(30));
+    }
+
+    /// The public run actions an outside session sends: each is said as a person would,
+    /// and begin and resume wait for the sizing decision and the pane.
+    #[test]
+    fn the_public_run_actions_are_known_and_said_as_a_person_would() {
+        let said = [("run.begin", "start a run"), ("run.stop", "stop a run"), ("run.resume", "resume a run"),
+            ("run.needs_you", "act on what needs you"), ("run.lane_nudge", "nudge a lane"), ("run.lane_discard", "discard a lane's changes")];
+        for (a, verb) in said {
+            assert!(known_action(a), "{a}");
+            assert_eq!(verb_for(a), verb, "{a}");
+        }
+        assert_eq!(timeout_for("run.begin"), std::time::Duration::from_secs(6 * 60));
+        assert_eq!(timeout_for("run.resume"), std::time::Duration::from_secs(6 * 60));
+        for a in ["run.stop", "run.needs_you", "run.lane_nudge", "run.lane_discard"] {
+            assert_eq!(timeout_for(a), std::time::Duration::from_secs(30), "{a}");
+        }
+        // list and state answer from disk: they never cross the socket
+        assert!(!known_action("run.list") && !known_action("run.state"));
     }
 }

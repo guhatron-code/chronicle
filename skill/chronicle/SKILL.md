@@ -1,13 +1,13 @@
 ---
 name: chronicle
-description: Use when working in a project that Chronicle tracks: its notes, its roadmap state, and rounds. Prefer the chronicle MCP tools over grepping .chronicle/.
+description: Use when working in a project that Chronicle tracks: its notes, its roadmap state, rounds, and runs. Prefer the chronicle MCP tools over grepping .chronicle/.
 ---
 
 # chronicle — read and steer a project Chronicle tracks
 
 Chronicle is the desktop app the user has open on this project. It keeps the project's
 notes (tasks, bugs, ideas) in a vault, derives a roadmap from git + the manifest, and runs
-work in rounds the user watches, and holds the Design pane's designs. Four groups of tools
+work in rounds and runs the user watches, and holds the Design pane's designs. Five groups of tools
 cover it; prefer them over reading `.chronicle/` files directly — the files are an
 implementation detail and can change shape.
 
@@ -42,7 +42,29 @@ first, or ask the user to.
 reading state is always safe; starting a round runs real work the user then watches, so it
 needs their ask, not just an opportunity.
 
-## 4 · designs — read, capture, lint, bench
+## 4 · runs — one plan, worked as parallel lanes
+
+A run is one plan worked as fenced lanes: Chronicle splits the round's items into lanes that
+each own their files, runs them side by side, checks each lane when it finishes, and saves
+it. A lane *finished*, *is being checked*, or *needs you*; Chronicle saves the work, it is
+never "committed" by you.
+
+- `chronicle.run.list` — every run, newest first: its round, state, lanes, cost, elapsed time, and how many things need the user.
+- `chronicle.run.state { n }` — one run in full: each lane's state and try, its checks (pass or fail), files it touched that another lane owns, its last line, and each thing that needs the user with the acts it takes.
+- `chronicle.run.begin { source }` — `source` is `{kind: "notes"}`, `{kind: "plan", path}` (a `fixes/phase_N_fixes_plan.md`), or `{kind: "prompt", text}`. Refused while another run is live.
+- `chronicle.run.stop { n }` (nothing is undone) · `chronicle.run.resume { n }` (an interrupted run).
+- `chronicle.run.needs_you { n, act }` — `act` is one of `skip {item}`, `rewrite {item, text}`, `retry {lane}`, `recheck`, `dismiss {index}`; `run.state` lists each row's acts.
+- `chronicle.run.lane_nudge { n, lane, text }` — a message to a running lane.
+- `chronicle.run.lane_discard { n, lane }` — **destructive**: restores every changed file the lane owns from what was saved, and those edits are gone.
+
+`run.list` and `run.state` answer from the run records on disk, so they work even when
+Chronicle isn't open. The rest need Chronicle open on the project, the same rule as `round.start`.
+
+**Never begin a run unless the user asked for one in this conversation; never `lane_discard`
+without the user naming the lane.** Reading a run is always safe; acting on what needs you
+is the user's decision, so pass on what they chose rather than choosing for them.
+
+## 5 · designs — read, capture, lint, bench
 
 - `chronicle.designs.list` — the Design pane's designs.
 - `chronicle.designs.read { slug, version? }` — a design's brief, its design.json, and the absolute paths of its frame HTML and thumbnails. Read the frame files to see exactly what was approved. Nothing here changes a design.
@@ -59,6 +81,12 @@ chronicle notes list|read|create|update|set_status|attach [--flag value ...] [di
 chronicle state phases|needs_you|rounds [dir]
 chronicle round plan [dir]
 chronicle round start --n N [--where pane|terminal] [dir]
+chronicle run list [dir]
+chronicle run state|stop|resume --n N [dir]
+chronicle run begin --kind notes|plan|prompt [--path P] [--text T] [dir]
+chronicle run needs_you --n N --act '{"kind":"recheck"}' [dir]
+chronicle run lane_nudge --n N --lane L --text T [dir]
+chronicle run lane_discard --n N --lane L [dir]
 chronicle project open <path>
 chronicle terminal read [--id <tab>] [--lines N] [dir]
 chronicle designs list|read|capture|lint|bench [--slug s] [--version n] [--frame f] [--brief id] [--kind k] [--quick] [dir]

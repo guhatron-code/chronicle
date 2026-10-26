@@ -23,6 +23,7 @@ import { toastError, toastSuccess } from "@/overlays/toasts";
 import type { BenchArgs, BenchResults } from "./design-bench";
 import type { LintReport } from "./design-review-model";
 import type { UnlistenFn } from "@tauri-apps/api/event";
+import type { RunSource } from "./runs-ipc";
 
 /** Where a round runs: the agent pane, or a terminal tab you can watch. */
 export type RoundRoute = "pane" | "terminal";
@@ -59,6 +60,10 @@ export interface BridgeDeps {
    *  promise below has resolved — never before, or an action arriving in that
    *  window would be emitted into the socket with nobody home to hear it. */
   bridgeReady?(): void | Promise<void>;
+  /** A run, as the Run button begins one (startRunInPane): resolves with its number. */
+  beginRun?(dir: string, source: RunSource): Promise<number>;
+  /** An interrupted run, as the card's Resume does (resumeRunInPane). */
+  resumeRun?(dir: string, n: number): Promise<void>;
   /** The Design pane's actions: pictures of a design's current frames (absolute paths), */
   designCapture?(dir: string, slug: string, frame?: string): Promise<string[]>;
   /** its lint over the current files, */
@@ -84,6 +89,15 @@ function intArg(v: unknown): number | null {
 
 function textArg(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v : null;
+}
+
+/** A run's source, exactly as `run_begin` reads it — or null. */
+function sourceArg(v: unknown): RunSource | null {
+  const o = (v ?? {}) as Record<string, unknown>;
+  if (o.kind === "notes") return { kind: "notes" };
+  if (o.kind === "plan" && textArg(o.path)) return { kind: "plan", path: o.path as string };
+  if (o.kind === "prompt" && textArg(o.text)) return { kind: "prompt", text: o.text as string };
+  return null;
 }
 
 function routeArg(v: unknown): RoundRoute {
@@ -142,6 +156,15 @@ export function describeAction(action: string, args: Record<string, unknown>): s
     }
     case "designs.bench":
       return "Run the design benchmark";
+    case "run.begin": {
+      const src = sourceArg(args.source);
+      if (src == null) return null;
+      return src.kind === "notes" ? "Begin a run from the queued notes" : src.kind === "plan" ? `Begin a run from ${src.path}` : "Begin a run from a prompt";
+    }
+    case "run.resume": {
+      const n = intArg(args.n);
+      return n == null ? null : `Resume round ${n}`;
+    }
     default:
       return null;
   }
@@ -226,6 +249,34 @@ export async function handleAgentAction(a: AgentAction, deps: BridgeDeps): Promi
         summary: `${got} lines from ${named == null ? "the terminal" : `terminal ${named}`}.`,
         data: { text, lines: got },
       };
+    }
+
+    case "run.begin": {
+      const source = sourceArg(args.source);
+      if (source == null) return refusal("start a run", "no source to run");
+      if (!deps.beginRun) return refusal("start a run", "runs aren't available");
+      try {
+        deps.activate(a.dir); // the project first, then its pane: the planner's turn is visible
+        deps.revealPane();
+        const n = await deps.beginRun(a.dir, source);
+        return { ok: true, summary: `An agent began round ${n} as a run in the pane.`, data: { n } };
+      } catch (e) {
+        return refusal("start a run", e);
+      }
+    }
+
+    case "run.resume": {
+      const n = intArg(args.n);
+      if (n == null) return refusal("resume a run", "no round number");
+      if (!deps.resumeRun) return refusal("resume a run", "runs aren't available");
+      try {
+        deps.activate(a.dir);
+        deps.revealPane();
+        await deps.resumeRun(a.dir, n);
+        return { ok: true, summary: `An agent resumed round ${n}.` };
+      } catch (e) {
+        return refusal(`resume round ${n}`, e);
+      }
     }
 
     case "designs.capture": {

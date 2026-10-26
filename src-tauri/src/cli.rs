@@ -10,10 +10,11 @@ pub(crate) struct Invocation { pub name: String, pub args: Value, pub dir: Optio
 #[derive(Debug)]
 pub(crate) struct Usage(pub String);
 
-const GROUPS: [(&str, &[&str]); 6] = [
+const GROUPS: [(&str, &[&str]); 7] = [
     ("notes", &["list", "read", "create", "update", "set_status", "attach"]),
     ("state", &["phases", "needs_you", "rounds"]),
     ("round", &["plan", "start"]),
+    ("run", &["begin", "list", "state", "stop", "resume", "needs_you", "lane_nudge", "lane_discard"]),
     ("project", &["open"]),
     ("terminal", &["read"]),
     ("designs", &["list", "read", "capture", "lint", "bench"]),
@@ -24,6 +25,8 @@ const MAP_FLAGS: [&str; 1] = ["set"];
 const CSV_FLAGS: [&str; 1] = ["tags"];
 const BOOL_FLAGS: [&str; 1] = ["quick"];
 const INT_FLAGS: [&str; 6] = ["round", "limit", "n", "lines", "id", "version"];
+/// Flags whose value is JSON, handed over as the object it parses to.
+const JSON_FLAGS: [&str; 1] = ["act"];
 
 fn usage(group: &str) -> Usage {
     match GROUPS.iter().find(|(g, _)| *g == group) {
@@ -61,6 +64,10 @@ pub(crate) fn parse(args: &[String]) -> Result<Invocation, Usage> {
                 obj.entry(flag).or_insert_with(|| json!({})).as_object_mut().unwrap().insert(k.into(), json!(v));
             } else if CSV_FLAGS.contains(&flag) {
                 obj.insert(flag.into(), json!(val.split(',').map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>()));
+            } else if JSON_FLAGS.contains(&flag) {
+                let v: Value = serde_json::from_str(val).ok().filter(Value::is_object)
+                    .ok_or_else(|| Usage(format!("--{flag} takes JSON, like '{{\"kind\":\"recheck\"}}'.")))?;
+                obj.insert(flag.into(), v);
             } else if INT_FLAGS.contains(&flag) {
                 obj.insert(flag.into(), json!(val.parse::<u64>().map_err(|_| Usage(format!("--{flag} must be a whole number.")))?));
             } else {
@@ -79,11 +86,75 @@ pub(crate) fn parse(args: &[String]) -> Result<Invocation, Usage> {
             i += 1;
         }
     }
+    // `run begin --kind K [--path P] [--text T]`: the tool takes these as one source
+    if name == "chronicle.run.begin" {
+        let kind = obj.remove("kind").ok_or_else(|| Usage("--kind is required: notes, plan or prompt.".into()))?;
+        let mut source = serde_json::Map::new();
+        source.insert("kind".into(), kind);
+        for k in ["path", "text"] { if let Some(v) = obj.remove(k) { source.insert(k.into(), v); } }
+        obj.insert("source".into(), Value::Object(source));
+    }
     Ok(Invocation { name, args: Value::Object(obj), dir, json })
 }
 
-/// The list table: id, status, round, tags, path; other capabilities print the summary.
+/// `fmtElapsed` on the card: 45s, 4m 05s, 1h 02m.
+fn elapsed(ms: u64) -> String {
+    let s = ms / 1000;
+    if s < 60 { return format!("{s}s") }
+    let m = s / 60;
+    if m < 60 { return format!("{m}m {:02}s", s % 60) }
+    format!("{}h {:02}m", m / 60, m % 60)
+}
+
+/// `run list`: one row per run, newest first, then the summary.
+fn render_run_list(out: &Outcome) -> String {
+    let row = |c: [&str; 6]| format!("{:>5}  {:<11}  {:>5}  {:<6}  {:<7}  {}\n", c[0], c[1], c[2], c[3], c[4], c[5]);
+    let mut s = row(["round", "state", "lanes", "cost", "elapsed", "needs you"]);
+    for r in out.data["runs"].as_array().cloned().unwrap_or_default() {
+        let (round, lanes, ny) = (r["round"].as_u64().unwrap_or(0).to_string(), r["lanes"].as_u64().unwrap_or(0).to_string(), r["needs_you"].as_u64().unwrap_or(0).to_string());
+        let cost = format!("${:.2}", r["cost_usd"].as_f64().unwrap_or(0.0));
+        let el = elapsed(r["elapsed_ms"].as_u64().unwrap_or(0));
+        s.push_str(&row([&round, r["state"].as_str().unwrap_or(""), &lanes, &cost, &el, &ny]));
+    }
+    s.push_str(&format!("{}\n", out.summary));
+    s
+}
+
+/// `run state`: the summary, each lane with its try, checks, leaks and last line, then
+/// what needs the user with the `--act` each row takes.
+fn render_run_state(out: &Outcome) -> String {
+    let mut s = format!("{}\n", out.summary);
+    for l in out.data["lanes"].as_array().cloned().unwrap_or_default() {
+        let id = l["id"].as_str().unwrap_or("").to_uppercase();
+        let title = l["title"].as_str().map(|t| format!(" · {t}")).unwrap_or_default();
+        let tries = l["attempt"].as_u64().filter(|n| *n > 0).map(|n| format!(" · try {n}")).unwrap_or_default();
+        s.push_str(&format!("lane {id}{title} · {}{tries}\n", l["state"].as_str().unwrap_or("")));
+        if let Some(g) = l["gates"].as_array().and_then(|g| g.last()) {
+            let checks: Vec<String> = g["checks"].as_array().cloned().unwrap_or_default().iter()
+                .map(|c| format!("{} → {}", c["name"].as_str().unwrap_or(""), if c["pass"] == true { "pass" } else { "fail" })).collect();
+            if !checks.is_empty() { s.push_str(&format!("  {}\n", checks.join(" · "))); }
+        }
+        let leak: Vec<&str> = l["leak"].as_array().map(|a| a.iter().filter_map(|p| p.as_str()).collect()).unwrap_or_default();
+        if !leak.is_empty() { s.push_str(&format!("  also touched: {}\n", leak.join(", "))); }
+        if let Some(last) = l["last_line"].as_str() { s.push_str(&format!("  last: {last}\n")); }
+    }
+    let rows = out.data["needs_you"].as_array().cloned().unwrap_or_default();
+    if !rows.is_empty() {
+        s.push_str("needs you:\n");
+        for x in rows {
+            let lane = x["lane"].as_str().map(|l| format!(" · lane {}", l.to_uppercase())).unwrap_or_default();
+            let item = x["item"].as_str().map(|i| format!(" · {i}")).unwrap_or_default();
+            s.push_str(&format!("  {} · {}{lane}{item}: {}\n", x["index"], x["kind"].as_str().unwrap_or(""), x["reason"].as_str().unwrap_or("")));
+            for act in x["acts"].as_array().cloned().unwrap_or_default() { s.push_str(&format!("    --act '{act}'\n")); }
+        }
+    }
+    s
+}
+
+/// The list tables (notes, runs) and the run view; other capabilities print the summary.
 pub(crate) fn render_table(name: &str, out: &Outcome) -> String {
+    if name == "chronicle.run.list" { return render_run_list(out) }
+    if name == "chronicle.run.state" { return render_run_state(out) }
     if name != "chronicle.notes.list" { return format!("{}\n", out.summary) }
     let mut s = String::new();
     let cell = |v: &Value| v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|n| n.to_string())).unwrap_or_else(|| "·".into());
@@ -226,7 +297,7 @@ mod tests {
         }
         let h = help_text();
         for line in ["chronicle --open <dir>", "chronicle --derive <dir>", "chronicle --state <dir>", "chronicle --mcp <dir>",
-                     "chronicle <notes|state|round|project|terminal|designs> <verb> [--flag value] [--json] [dir]", "chronicle --version"] {
+                     "chronicle <notes|state|round|run|project|terminal|designs> <verb> [--flag value] [--json] [dir]", "chronicle --version"] {
             assert!(h.contains(line), "help text is missing {line:?}:\n{h}");
         }
         assert!(!h.contains('\u{2014}'), "no em dash in the help text");
@@ -336,6 +407,65 @@ mod tests {
         assert_eq!(t, "T-001  done         1  ui   Tasks/T-001 A.md\n·      ·            ·  ·    Ideas/B.md\n2 notes.\n");
         let out = Outcome { summary: "A done.".into(), data: json!({"x": 1}) };
         assert_eq!(render_table("chronicle.other", &out), "A done.\n");
+    }
+
+    #[test]
+    fn the_run_verbs_parse_to_the_same_args_the_tools_take() {
+        let i = parse(&a("run state --n 10 --json")).unwrap();
+        assert_eq!((i.name.as_str(), &i.args, i.json), ("chronicle.run.state", &json!({"n": 10}), true));
+        assert_eq!(parse(&a("run list")).unwrap().args, json!({}));
+        for v in ["stop", "resume"] {
+            let i = parse(&a(&format!("run {v} --n 3"))).unwrap();
+            assert_eq!((i.name, i.args), (format!("chronicle.run.{v}"), json!({"n": 3})));
+        }
+        // begin folds --kind/--path/--text into the one source the tool takes
+        assert_eq!(parse(&a("run begin --kind notes /tmp/p")).unwrap().args, json!({"source": {"kind": "notes"}}));
+        assert_eq!(parse(&a("run begin --kind plan --path fixes/phase_4_fixes_plan.md")).unwrap().args,
+                   json!({"source": {"kind": "plan", "path": "fixes/phase_4_fixes_plan.md"}}));
+        let i = parse(&["run".into(), "begin".into(), "--kind".into(), "prompt".into(), "--text".into(), "tidy the copy".into()]).unwrap();
+        assert_eq!(i.args, json!({"source": {"kind": "prompt", "text": "tidy the copy"}}));
+        assert_eq!(parse(&a("run begin")).unwrap_err().0, "--kind is required: notes, plan or prompt.");
+        // --act is JSON, handed over as the object NeedsAct reads
+        let i = parse(&["run".into(), "needs_you".into(), "--n".into(), "2".into(), "--act".into(), r#"{"kind":"skip","item":"T-3"}"#.into()]).unwrap();
+        assert_eq!(i.args, json!({"n": 2, "act": {"kind": "skip", "item": "T-3"}}));
+        assert_eq!(parse(&a("run needs_you --n 2 --act skip")).unwrap_err().0, "--act takes JSON, like '{\"kind\":\"recheck\"}'.");
+        let i = parse(&["run".into(), "lane_nudge".into(), "--n".into(), "2".into(), "--lane".into(), "a".into(), "--text".into(), "look at b.ts".into()]).unwrap();
+        assert_eq!(i.args, json!({"n": 2, "lane": "a", "text": "look at b.ts"}));
+        assert_eq!(parse(&a("run lane_discard --n 2 --lane b")).unwrap().args, json!({"n": 2, "lane": "b"}));
+        assert_eq!(parse(&a("run")).unwrap_err().0,
+                   "Usage: chronicle run <begin|list|state|stop|resume|needs_you|lane_nudge|lane_discard> [--flag value] [--json] [dir].");
+    }
+
+    #[test]
+    fn a_run_list_and_a_run_state_read_like_the_card() {
+        let out = Outcome { summary: "2 runs · round 2 needs you · round 1 done.".into(), data: json!({"runs": [
+            {"n": 2, "round": 2, "state": "needs you", "lanes": 2, "cost_usd": 0.25, "elapsed_ms": 245_000, "needs_you": 2},
+            {"n": 1, "round": 1, "state": "done", "lanes": 1, "cost_usd": 0.5, "elapsed_ms": 45_000, "needs_you": 0}]}) };
+        let want = [
+            "round  state        lanes  cost    elapsed  needs you",
+            "    2  needs you        2  $0.25   4m 05s   2",
+            "    1  done             1  $0.50   45s      0",
+            "2 runs · round 2 needs you · round 1 done.",
+        ];
+        assert_eq!(render_table("chronicle.run.list", &out), want.iter().map(|l| format!("{l}\n")).collect::<String>());
+
+        let out = Outcome { summary: "Round 2 · needs you · 2 lanes · $0.25.".into(), data: json!({
+            "lanes": [
+                {"id": "a", "title": "Crash fix", "state": "being checked", "attempt": 2, "leak": ["src/c.ts"], "last_line": "Fixed it.",
+                 "gates": [{"fix": 0, "checks": [{"name": "test", "pass": true}, {"name": "lint", "pass": false}]}]},
+                {"id": "b", "title": "Copy", "state": "needs you", "attempt": 3, "leak": [], "last_line": null, "gates": []}],
+            "needs_you": [{"index": 0, "kind": "parked", "lane": "b", "item": "T-3", "reason": "it names a file that isn't there",
+                           "acts": [{"kind": "skip", "item": "T-3"}]}]}) };
+        assert_eq!(render_table("chronicle.run.state", &out),
+            "Round 2 · needs you · 2 lanes · $0.25.\n\
+             lane A · Crash fix · being checked · try 2\n\
+             \x20 test → pass · lint → fail\n\
+             \x20 also touched: src/c.ts\n\
+             \x20 last: Fixed it.\n\
+             lane B · Copy · needs you · try 3\n\
+             needs you:\n\
+             \x20 0 · parked · lane B · T-3: it names a file that isn't there\n\
+             \x20   --act '{\"kind\":\"skip\",\"item\":\"T-3\"}'\n");
     }
 
     #[test]
