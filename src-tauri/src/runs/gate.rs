@@ -194,10 +194,12 @@ pub fn save_paths(repo: &Path, paths: &[String], message: &str) -> Result<Saved,
     let tracked: HashSet<String> = nul_paths(&git_raw(repo, &ls).unwrap_or_default()).into_iter().collect();
     let live: Vec<&str> = paths.iter().map(|s| s.as_str()).filter(|p| repo.join(p).exists() || tracked.contains(*p)).collect();
     if live.is_empty() { return Ok(Saved::Nothing); }
+    let mut added = false;
     let saved = (|| {
         let mut add = vec!["add", "--"];
         add.extend(live.iter().copied());
         with_index_retry(|| git(repo, &add))?;
+        added = true;
         let mut diff = vec!["diff", "--cached", "--quiet", "HEAD", "--"];
         diff.extend(live.iter().copied());
         if git_ok(repo, &diff) { return Ok(Saved::AlreadySaved(git(repo, &["rev-parse", "HEAD"])?)); }
@@ -206,8 +208,9 @@ pub fn save_paths(repo: &Path, paths: &[String], message: &str) -> Result<Saved,
         with_index_retry(|| git(repo, &commit))?;
         Ok(Saved::Commit(git(repo, &["rev-parse", "HEAD"])?))
     })();
-    if saved.is_err() {
-        // a save that didn't happen leaves nothing of the lane's staged
+    if saved.is_err() && added {
+        // a save that didn't happen leaves nothing of the lane's staged (and when the add never
+        // ran, the index is the user's as it was: nothing is unstaged)
         let mut reset = vec!["reset", "-q", "--"];
         reset.extend(live.iter().copied());
         let _ = with_index_retry(|| git(repo, &reset));
@@ -437,6 +440,26 @@ mod tests {
             Leak { path: "src/c/y.ts".into(), owner: Some("c".into()), by: None },
             Leak { path: "README.md".into(), owner: None, by: None },
         ], "b's own tool write while b was working is b's; .chronicle/ is the app's");
+    }
+
+    #[test]
+    fn a_save_whose_add_never_ran_leaves_the_users_staged_change_alone() {
+        let r = repo("add-never-ran");
+        std::fs::write(r.join("lane.txt"), "base").unwrap();
+        git(&r, &["add", "lane.txt"]).unwrap();
+        git(&r, &["commit", "-qm", "lane base"]).unwrap();
+        // the user staged their own change to a file the lane owns, then the lane edited it further
+        std::fs::write(r.join("lane.txt"), "the user's staged version").unwrap();
+        git(&r, &["add", "lane.txt"]).unwrap();
+        std::fs::write(r.join("lane.txt"), "the lane's version").unwrap();
+        // a path through a link makes `git add` refuse before it stages anything
+        let ext = r.with_file_name(format!("{}-ext", r.file_name().unwrap().to_string_lossy()));
+        std::fs::create_dir_all(&ext).unwrap();
+        std::fs::write(ext.join("x.txt"), "outside").unwrap();
+        std::os::unix::fs::symlink(&ext, r.join("lnk")).unwrap();
+        let e = save_paths(&r, &["lane.txt".into(), "lnk/x.txt".into()], "lane a").unwrap_err();
+        assert!(e.contains("beyond a symbolic link"), "{e}");
+        assert_eq!(git(&r, &["show", ":lane.txt"]).unwrap(), "the user's staged version", "nothing was unstaged");
     }
 
     #[test]

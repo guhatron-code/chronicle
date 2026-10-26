@@ -62,8 +62,9 @@ pub fn planner_server(dir: &Path, exe: &Path) -> Value { server(dir, exe, &["--p
 pub fn lane_server(dir: &Path, exe: &Path, n: u64, lane: &str) -> Value { server(dir, exe, &["--run", &n.to_string(), "--lane", lane]) }
 
 /// How long a lane's block or ask may take: inside the bridge's six-minute
-/// cut-off for them (bridge.rs), whatever the providers and the agent do.
-pub const ANSWER_WITHIN: Duration = Duration::from_secs(330);
+/// cut-off for them (bridge.rs), whatever the providers and the agent do, and
+/// inside the scheduler's stall bound (R29).
+pub const ANSWER_WITHIN: Duration = Duration::from_secs(240);
 const NOT_DECIDED: &str = "Chronicle hasn't decided on that item yet. Carry on with your other items, then call chronicle_run_block again for it.";
 
 /// `f`'s result if it comes within `limit`; it carries on in the background either way.
@@ -196,6 +197,7 @@ mod tests {
         assert_eq!(within(Duration::from_secs(5), || 7), Some(7));
         assert_eq!(within(Duration::from_millis(50), || { std::thread::sleep(Duration::from_millis(500)); 7 }), None);
         assert!(ANSWER_WITHIN < Duration::from_secs(6 * 60));
+        assert!(ANSWER_WITHIN.as_millis() < super::super::scheduler::STALL_MS as u128, "an answer is cut off before the lane could stall");
     }
 
     #[test]

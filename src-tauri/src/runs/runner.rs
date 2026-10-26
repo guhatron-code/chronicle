@@ -101,6 +101,19 @@ pub struct RunCtl {
     cost_base: Mutex<HashMap<String, f64>>,
     nudges: Mutex<HashMap<String, Vec<String>>>,
     recent: Mutex<HashMap<String, Vec<String>>>,
+    /// per lane: how many of its asks Chronicle is still answering (a judged command, a block, an ask)
+    deciding: Mutex<HashMap<String, usize>>,
+}
+
+/// While held, the lane is waiting on Chronicle, not silent: the scheduler doesn't stall it.
+pub struct Deciding { ctl: Weak<RunCtl>, lane: String }
+impl Drop for Deciding {
+    fn drop(&mut self) {
+        let Some(ctl) = self.ctl.upgrade() else { return };
+        if let Some(n) = lk(&ctl.deciding).get_mut(&self.lane) { *n = n.saturating_sub(1); }
+        // the answer's arrival is the lane's wire: its silence is measured from here
+        lk(&ctl.last_wire).insert(self.lane.clone(), ctl.now());
+    }
 }
 
 impl RunCtl {
@@ -112,11 +125,19 @@ impl RunCtl {
             gate_lock: Mutex::new(()), main_tree: AtomicBool::new(false), stopping: AtomicBool::new(false), skew_ms: AtomicU64::new(0),
             last_wire: Default::default(), tool_writes: Default::default(), snapshots: Default::default(), active: Default::default(),
             pending: Default::default(), cost_base: Default::default(), nudges: Default::default(), recent: Default::default(),
+            deciding: Default::default(),
         });
         (ctl, rx)
     }
 
     fn now(&self) -> u64 { now_ms() + self.skew_ms.load(Ordering::SeqCst) }
+
+    /// Chronicle is answering one of `lane`'s asks until the guard drops.
+    pub fn deciding(self: &Arc<Self>, lane: &str) -> Deciding {
+        *lk(&self.deciding).entry(lane.to_string()).or_default() += 1;
+        lk(&self.last_wire).insert(lane.to_string(), self.now());
+        Deciding { ctl: Arc::downgrade(self), lane: lane.to_string() }
+    }
     #[cfg(test)]
     pub(crate) fn advance_clock(&self, ms: u64) { self.skew_ms.fetch_add(ms, Ordering::SeqCst); }
 
@@ -146,7 +167,10 @@ impl RunCtl {
         if self.snapshot().state.terminal() { return false; }
         self.unpark_dependents();
         let rec = self.snapshot();
-        let wire = lk(&self.last_wire).clone();
+        let mut wire = lk(&self.last_wire).clone();
+        // a lane Chronicle is still answering is waiting on Chronicle, not silent
+        let now = self.now();
+        for (lane, n) in lk(&self.deciding).iter() { if *n > 0 { wire.insert(lane.clone(), now); } }
         let t = Tick { now_ms: self.now(), last_wire: &wire, max_lanes: self.max_lanes, main_tree: self.main_tree.load(Ordering::SeqCst) };
         for a in scheduler::next_actions(&rec, &t) { self.perform(a); }
         true
@@ -347,6 +371,8 @@ impl RunCtl {
         let g = Gate { commit: commit.clone(), checks: checked.results, review, notice: checked.notice, fix: lane.fixes };
         let passed = g.passed();
         let fixes = lane.fixes;
+        // a nudge that came while the lane was checked gets its turn before the lane closes
+        let nudged = passed && lk(&self.nudges).get(id).is_some_and(|v| !v.is_empty());
         // Stop may have come while the checks ran: the save and its gate are still recorded, the lane isn't moved
         let stopped = self.stopping.load(Ordering::SeqCst);
         self.update(|r| {
@@ -364,7 +390,8 @@ impl RunCtl {
                 l.gates.push(g.clone());
             }
             if stopped { return; }
-            if passed { let _ = r.set_lane_state(id, LaneState::Closed); }
+            if nudged { let _ = r.set_lane_state(id, LaneState::Fixing); }
+            else if passed { let _ = r.set_lane_state(id, LaneState::Closed); }
             else if fixes >= MAX_FIX_PASSES {
                 // the checks are law; when they all passed, it was the review that failed
                 let what = if g.checks.iter().all(|c| c.exit == Some(0)) { "review" } else { "checks" };
@@ -378,8 +405,13 @@ impl RunCtl {
             }
         });
         if stopped { return; }
-        if passed { self.host.stop(self, id, self.k_of(id)); }
-        else if fixes < MAX_FIX_PASSES && !self.stopping.load(Ordering::SeqCst) {
+        if nudged {
+            let texts = lk(&self.nudges).remove(id).unwrap_or_default();
+            self.send_turn(id, PromptKind::Fix, &prompts::nudge_prompt(&texts));
+        }
+        // closed, or parked for the user: either way the lane's adapter has nothing left to do
+        else if passed || fixes >= MAX_FIX_PASSES { self.host.stop(self, id, self.k_of(id)); }
+        else if !self.stopping.load(Ordering::SeqCst) {
             self.send_turn(id, PromptKind::Fix, &prompts::fix_prompt(fixes + 1, &g));
         }
     }
@@ -476,9 +508,9 @@ impl RunCtl {
         if rec.state.terminal() || !can_move(rec.state, RunState::Stopped) { return; }
         self.stopping.store(true, Ordering::SeqCst);
         for l in &rec.lanes {
-            if l.state.busy() || l.state.between_tries() {
+            if l.state.busy() || l.state.between_tries() || l.state == LaneState::Parked {
                 let k = self.k_of(&l.id);
-                self.host.cancel(self, &l.id, k);
+                if l.state.busy() { self.host.cancel(self, &l.id, k); }
                 self.host.stop(self, &l.id, k);
             }
         }
@@ -496,6 +528,7 @@ impl RunCtl {
 
     /// `chronicle_run_block` (spec §3, §6 decision 2).
     pub fn block(self: &Arc<Self>, lane: &str, item: &str, reason: &str) -> Result<String, String> {
+        let _waiting_on_chronicle = self.deciding(lane);
         let rec = self.snapshot();
         let map = rec.lane_map.as_ref().ok_or("This round has no lanes yet.")?;
         let spec = map.lanes.iter().find(|l| l.id == lane).ok_or_else(|| format!("There's no lane {lane} in this round."))?;
@@ -521,6 +554,7 @@ impl RunCtl {
 
     /// `chronicle_run_ask`: the judge answers, never the user.
     pub fn ask(self: &Arc<Self>, lane: &str, question: &str) -> String {
+        let _waiting_on_chronicle = self.deciding(lane);
         let spec = self.spec(lane).unwrap_or_default();
         let ctx = format!("Lane {}: {} — owns {}", lane.to_uppercase(), spec.title, spec.owns.join(", "));
         let (answer, logs) = self.judge.ask(lane, question, &ctx);
@@ -660,6 +694,7 @@ impl LanePolicy for RunPolicy {
                 refuse(command, PUBLISH_REFUSAL.into())
             }
             Verdict::Judge { command } => {
+                let _waiting_on_chronicle = ctl.deciding(&self.lane);
                 let rec = ctl.snapshot();
                 let map = rec.lane_map.clone().unwrap_or_default();
                 let spec = map.lanes.iter().find(|l| l.id == self.lane).cloned().unwrap_or_default();
@@ -1227,6 +1262,66 @@ mod tests {
         assert_eq!(gate::files_in(&r, &commit), vec!["a/rewrite.txt"], "its own commit holds its work");
         assert!(c.leak.is_empty() && done.lane("a").unwrap().leak.is_empty(), "no leak on either lane: {:?} / {:?}", c.leak, done.lane("a").unwrap().leak);
         assert_eq!(gate::git(&r, &["status", "--porcelain"]).unwrap(), "", "nothing is left unsaved");
+    }
+
+    #[test]
+    fn a_lane_parked_after_its_fixes_has_its_session_ended_and_stop_ends_it_again() {
+        let r = repo("parkstop", 29);
+        let host = FakeHost::new(Box::new(|lane, _| vec![(format!("{lane}/work.txt"), "x".into(), true)]));
+        let mut k = kit(&r, two_lanes(29, &[], &["never"]), vec![check("never", "exit 1")], host.clone());
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        let held = wait_until(&k.ctl, 60, |x| x.state == RunState::NeedsYou);
+        assert_eq!(held.lane("b").unwrap().state, LaneState::Parked);
+        let stops = |h: &FakeHost| h.stopped.lock().unwrap().iter().filter(|l| *l == "b").count();
+        assert_eq!(stops(&host), 1, "the parked lane's adapter is ended when it parks");
+        k.ctl.tx.send(Ev::Stop).unwrap();
+        wait_until(&k.ctl, 20, |x| x.state.terminal());
+        assert_eq!(stops(&host), 2, "Stop ends every lane that may still hold a session, a parked one included");
+    }
+
+    #[test]
+    fn a_lane_waiting_on_chronicles_own_answer_is_not_stalled() {
+        let r = repo("deciding", 30);
+        let host = FakeHost::hanging(Box::new(|_, _| vec![]));
+        let mut k = kit(&r, two_lanes(30, &[], &[]), vec![], host.clone());
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        wait_until(&k.ctl, 20, |x| x.lanes.iter().all(|l| l.state == LaneState::Streaming));
+        // a's ask is with the judge (a policy answer, a block or an ask in flight)
+        let pending = k.ctl.deciding("a");
+        k.ctl.advance_clock(scheduler::STALL_MS + 60_000);
+        k.ctl.tx.send(Ev::Kick).unwrap();
+        let stalled = wait_until(&k.ctl, 20, |x| x.lane("b").map(|l| l.state) == Some(LaneState::Stalled));
+        assert_eq!(stalled.lane("a").unwrap().state, LaneState::Streaming, "Chronicle is the one thinking: a isn't stalled");
+        drop(pending);
+        // the answer's arrival counts as the lane's wire: its silence starts again from there
+        k.ctl.tx.send(Ev::Kick).unwrap();
+        std::thread::sleep(Duration::from_millis(700));
+        assert_eq!(k.ctl.snapshot().lane("a").unwrap().state, LaneState::Streaming);
+        k.ctl.tx.send(Ev::Stop).unwrap();
+        wait_until(&k.ctl, 20, |x| x.state.terminal());
+    }
+
+    #[test]
+    fn a_nudge_sent_while_the_lane_is_checked_reaches_it_before_it_closes() {
+        let r = repo("nudgegate", 31);
+        let prompts: Arc<Mutex<Vec<String>>> = Default::default();
+        let seen = prompts.clone();
+        let host = FakeHost::new(Box::new(move |lane, text| {
+            if lane == "a" { lk(&seen).push(text.to_string()); }
+            vec![(format!("{lane}/work.txt"), text.len().to_string(), true)]
+        }));
+        let mut k = kit(&r, two_lanes(31, &["slow"], &[]), vec![check("slow", "sleep 1")], host);
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        wait_until(&k.ctl, 30, |x| x.lane("a").map(|l| l.state) == Some(LaneState::Gating));
+        k.ctl.nudge("a", "also rename the helper").unwrap();
+        let done = wait_until(&k.ctl, 60, |x| x.state.terminal());
+        assert_eq!(done.state, RunState::Done, "{done:#?}");
+        let got = lk(&prompts).clone();
+        assert!(got.iter().any(|p| p.contains("also rename the helper")), "the nudge was delivered: {got:#?}");
+        let a = done.lane("a").unwrap();
+        assert_eq!(a.state, LaneState::Closed);
+        assert_eq!(a.fixes, 0, "a nudge isn't a fix pass");
+        assert!(a.gates.len() >= 2 && a.gates.last().unwrap().passed(), "the nudged turn was checked too");
     }
 
     #[test]
