@@ -39,6 +39,14 @@ describe("a run's records replay into the card, board by board", () => {
     expect(updates).toHaveLength(5);
     expect(updates.map((u) => u.record.state)).toEqual(["running", "running", "running", "gating", "done"]);
   });
+  it("keeps cost equal to the planner plus the lanes, as Rust's total_cost does", () => {
+    for (const { record: r } of updates) {
+      const usd = r.planner_cost_usd + r.lanes.reduce((a, l) => a + l.cost_usd, 0);
+      expect(r.cost.usd).toBeCloseTo(usd, 2);
+      expect(r.cost.in).toBe(r.lanes.reduce((a, l) => a + l.tokens.in, 0));
+      expect(r.cost.out).toBe(r.lanes.reduce((a, l) => a + l.tokens.out, 0));
+    }
+  });
   it("R1 · working", () => {
     const r = at(0);
     expect(M.runFooter(r)).toBe("Nothing needs you. Chronicle saves each lane as it passes.");
@@ -50,7 +58,7 @@ describe("a run's records replay into the card, board by board", () => {
   it("R3.2 · the fix passes", () => {
     const r = at(2);
     expect(M.runFooter(r)).toBe("Lane C passed on its fix. Two lanes still working.");
-    expect(M.fmtCost(r.cost.usd)).toBe("$2.02");
+    expect(M.fmtCost(r.cost.usd)).toBe("$2.24");
   });
   it("R3.3 · the final check", () => {
     const r = at(3);
@@ -69,16 +77,20 @@ describe("a lane's transcript replays into the lane view (board R2)", () => {
   const items = groupEntries(s.entries);
   it("opens with Chronicle's instruction and the lane's own words", () => {
     expect(items[0]).toMatchObject({ kind: "user", text: "You are lane C of round 10: Scroll anchoring." });
-    expect(items[1]).toMatchObject({ kind: "assistant" });
+    expect(items[1]).toMatchObject({ kind: "assistant", text: expect.stringContaining("Replacing the follow-scroll effect with a sentinel") });
   });
   it("folds the subagent's three calls under its card", () => {
     const sub = items.find((e) => e.kind === "subagent");
     expect(sub && sub.kind === "subagent" ? sub.children.map((c) => c.toolCallId) : []).toEqual(["c4", "c5", "c6"]);
   });
+  it("keeps the subagent card's result text", () => {
+    const sub = items.find((e) => e.kind === "subagent");
+    expect(JSON.stringify(sub && sub.kind === "subagent" ? sub.tool : null)).toContain("60.0 fps over 12 s");
+  });
   it("keeps Chronicle's two answers as guard rows — one judged, one refused", () => {
     const guards = s.entries.filter((e) => e.kind === "guard");
     expect(guards).toHaveLength(2);
-    expect(guards[0]).toMatchObject({ allowed: true, decision: { confidence: 0.88 } });
+    expect(guards[0]).toMatchObject({ allowed: true, decision: { confidence: 0.88, probabilities: { allow: 0.88, ask: 0.09, deny: 0.03 } } });
     expect(guards[1]).toMatchObject({ allowed: false, reason: "Chronicle commits for you" });
   });
   it("shows the rest as tool cards, in order", () => {
