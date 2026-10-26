@@ -74,10 +74,13 @@ impl Lane {
 }
 
 /// The project dir a session key belongs to. Suffix-aware, so a `#` in a real
-/// folder name is never mistaken for a lane.
+/// folder name is never mistaken for a lane: `#w/` is cut only when what
+/// follows it is a whole worker lane (`<run>-<k>`).
 pub fn dir_of(key: &str) -> &str {
     if let Some(d) = key.strip_suffix("#design").or_else(|| key.strip_suffix("#review")) { return d; }
-    if let Some(i) = key.rfind("#w/") { return &key[..i]; }
+    if let Some(i) = key.rfind("#w/") {
+        if Lane::parse(Some(&key[i + 1..])).is_ok() { return &key[..i]; }
+    }
     key
 }
 
@@ -767,6 +770,14 @@ impl std::fmt::Debug for PolicyHandle { fn fmt(&self, f: &mut std::fmt::Formatte
 #[derive(Clone)]
 pub struct ScreenHandle(pub Arc<dyn AskScreen>);
 impl std::fmt::Debug for ScreenHandle { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { f.write_str("ScreenHandle") } }
+
+/// What a policy decided, once the ask it answered was already cancelled (a
+/// turn end or Stop won the race): the adapter heard "cancelled", so the guard
+/// must not claim the call was allowed.
+const CANCELLED_FIRST: &str = "Cancelled before the decision landed.";
+fn cancelled_first(a: PolicyAnswer) -> PolicyAnswer {
+    PolicyAnswer { allow: false, reason: CANCELLED_FIRST.into(), ..a }
+}
 
 /// The once-only option for an answer. Never an "always": those write durable
 /// rules outside the run. No once-only option → `None`, and the ask is cancelled.
@@ -1650,8 +1661,11 @@ impl AcpSession {
                     let rid = id.to_string();
                     std::thread::spawn(move || {
                         let a = policy.answer(&params);
-                        // already resolved by a cancel? the guard still says what was decided
-                        let _ = me.respond_permission(&rid, policy_option(&params, a.allow));
+                        // already resolved by a cancel? then the guard says so, not what was decided
+                        let a = match me.respond_permission(&rid, policy_option(&params, a.allow)) {
+                            Ok(()) => a,
+                            Err(_) => cancelled_first(a),
+                        };
                         me.emit_guard(&params, &a);
                     });
                     return;
@@ -1822,6 +1836,9 @@ impl AcpSession {
         }
         if let Some(PolicyHandle(p)) = &self.extras.policy {
             if let Err(reason) = p.may_write(&full) {
+                // every refusal shows on the thread, naming the path
+                let a = PolicyAnswer { allow: false, path: full.to_string_lossy().to_string(), reason: reason.clone(), decision: None };
+                self.emit_guard(&Value::Null, &a);
                 return self.respond_err(id, -32602, &reason);
             }
         }
@@ -3767,6 +3784,9 @@ for line in sys.stdin:
         assert_eq!(dir_of("/a#b/p#w/10-2"), "/a#b/p", "a # in the project path survives");
         assert_eq!(dir_of("/p#design"), "/p");
         assert_eq!(dir_of("/p#review"), "/p");
+        assert_eq!(dir_of("/a#w/b"), "/a#w/b", "a folder named `#w/b` is not a lane");
+        assert_eq!(dir_of("/a#w/b/p#w/3-1"), "/a#w/b/p");
+        assert_eq!(dir_of("/a#w/1-2x"), "/a#w/1-2x");
         assert_eq!(dir_of("/p"), "/p");
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -3817,8 +3837,24 @@ for line in sys.stdin:
         wait_for(&h.rx, 20, |v| state_is(v, "ready"));
         let s = h.state.get(&h.key).unwrap();
         s.prompt(vec![json!({ "type": "text", "text": "do the round" })], "do the round".into()).unwrap();
-        wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/turn_end"));
+        let mut refused = None;
+        loop {
+            let v = h.rx.recv_timeout(Duration::from_secs(20)).expect("events from the worker lane");
+            if method_is(&v, "_chronicle/guard") && v["message"]["params"]["path"].as_str().is_some_and(|p| p.ends_with("agent-made.txt")) {
+                refused = Some(v["message"]["params"].clone());
+            }
+            if method_is(&v, "_chronicle/turn_end") { break; }
+        }
         assert!(!h.dir.join("agent-made.txt").exists(), "fs/write_text_file obeys the lane's fence");
+        let g = refused.expect("a refused direct write leaves a guard entry");
+        assert_eq!(g["allowed"], false);
+        assert_eq!(g["path"], h.dir.join("agent-made.txt").to_string_lossy().as_ref());
+        assert_eq!(g["reason"], "this lane owns no files");
+        let log = std::fs::read_to_string(h.dir.join(".mock-requests.jsonl")).unwrap_or_default();
+        let answer = log.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|v| v["id"] == 100 && v.get("method").is_none()).expect("the agent got an answer to its write");
+        assert_eq!(answer["error"]["code"], -32602);
+        assert_eq!(answer["error"]["message"], "this lane owns no files");
         s.stop(true);
         let _ = std::fs::remove_dir_all(&h.dir);
     }
@@ -3846,6 +3882,39 @@ for line in sys.stdin:
         }
         assert!(saw_guard);
         assert!(h.dir.join("agent-made.txt").exists(), "a screen is not a fence: the chat lane's writes are untouched");
+        s.stop(true);
+        let _ = std::fs::remove_dir_all(&h.dir);
+    }
+
+    #[test]
+    fn a_policy_answer_that_loses_to_a_cancel_is_never_shown_as_allowed() {
+        // answer() reports it was entered, then blocks until the test lets it go
+        struct Gated { entered: Mutex<mpsc::Sender<()>>, gate: Mutex<mpsc::Receiver<()>> }
+        impl LanePolicy for Gated {
+            fn answer(&self, _params: &Value) -> PolicyAnswer {
+                let _ = self.entered.lock().unwrap().send(());
+                let _ = self.gate.lock().unwrap().recv_timeout(Duration::from_secs(20));
+                PolicyAnswer { allow: true, path: "frames/a.html".into(), reason: "the policy's own reason".into(), decision: None }
+            }
+            fn may_write(&self, _abs: &Path) -> Result<(), String> { Ok(()) }
+        }
+        let (etx, erx) = mpsc::channel();
+        let (gtx, grx) = mpsc::channel();
+        let policy = Gated { entered: Mutex::new(etx), gate: Mutex::new(grx) };
+        let extras = LaneExtras { policy: Some(PolicyHandle(Arc::new(policy))), ..Default::default() };
+        let Some(h) = start_mock_as("worker-race", crate::agents::claude(), Lane::Worker { run: 2, k: 0 }, extras) else { return };
+        wait_for(&h.rx, 20, |v| state_is(v, "ready"));
+        let s = h.state.get(&h.key).unwrap();
+        s.prompt(vec![json!({ "type": "text", "text": "DESIGN-FENCE" })], "DESIGN-FENCE".into()).unwrap();
+        for _ in 0..3 { erx.recv_timeout(Duration::from_secs(20)).expect("all three asks reach the policy"); }
+        s.cancel().unwrap();
+        for _ in 0..3 { gtx.send(()).unwrap(); }
+        let mut guards = vec![];
+        while guards.len() < 3 { guards.push(wait_for(&h.rx, 20, |v| method_is(v, "_chronicle/guard"))["message"]["params"].clone()); }
+        for g in &guards {
+            assert_eq!(g["allowed"], false, "the adapter heard cancelled: {g}");
+            assert_eq!(g["reason"], CANCELLED_FIRST);
+        }
         s.stop(true);
         let _ = std::fs::remove_dir_all(&h.dir);
     }
