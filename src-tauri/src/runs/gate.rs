@@ -226,12 +226,27 @@ pub fn split_changes(changed: &[String], lane: &str, map: &LaneMap, active: &[St
     (owned, leaks)
 }
 
-pub fn diff_for(repo: &Path, commit: &str) -> String {
-    let d = git_raw(repo, &["show", "--format=", "--patch", "--no-color", commit]).unwrap_or_default();
+fn capped(d: String) -> String {
     if d.len() <= DIFF_CAP { return d; }
     let mut end = DIFF_CAP;
     while !d.is_char_boundary(end) { end -= 1; }
     format!("{}\n[the diff is longer; the rest was cut]", &d[..end])
+}
+
+pub fn diff_for(repo: &Path, commit: &str) -> String {
+    capped(git_raw(repo, &["show", "--format=", "--patch", "--no-color", commit]).unwrap_or_default())
+}
+
+/// The diff from `base` to `commit`, over the paths `keep` lets through — a
+/// lane's whole saved work since the run began, without the other lanes'
+/// saves in between. `None` when `base` isn't a commit this repo has.
+pub fn diff_between(repo: &Path, base: &str, commit: &str, keep: impl Fn(&str) -> bool) -> Option<String> {
+    git(repo, &["rev-parse", "--verify", "--quiet", &format!("{base}^{{commit}}")]).ok().filter(|s| !s.is_empty())?;
+    let paths: Vec<String> = changed_between(repo, base, commit).into_iter().filter(|p| !p.starts_with(".chronicle/") && keep(p)).collect();
+    if paths.is_empty() { return Some(String::new()); }
+    let mut args = vec!["diff", "--patch", "--no-color", "--no-renames", base, commit, "--"];
+    args.extend(paths.iter().map(|p| p.as_str()));
+    Some(capped(git_raw(repo, &args).unwrap_or_default()))
 }
 
 pub fn files_in(repo: &Path, commit: &str) -> Vec<String> {

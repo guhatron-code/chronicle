@@ -215,6 +215,8 @@ pub struct RunRecord {
     #[serde(default)] pub skipped: Vec<String>,
     /// the check names the final check is running right now (the card lists them)
     #[serde(default)] pub head_pending: Vec<String>,
+    /// the repo's HEAD when the run began: each lane's review reads its whole diff from here
+    #[serde(default, skip_serializing_if = "Option::is_none")] pub base_commit: Option<String>,
 }
 
 pub fn can_move(from: RunState, to: RunState) -> bool {
@@ -255,7 +257,7 @@ impl RunRecord {
             plan_path: plan_path.into(), prompt_path: prompt_path.into(), source: source.into(),
             lane_map: None, lanes: vec![], head_check: None, decisions: vec![], needs_you: vec![], cost: Cost::default(),
             planner_tries: 0, planner_error: None, planner_cost_usd: 0.0, notices: vec![], target_lanes: None,
-            interrupted_from: None, skipped: vec![], head_pending: vec![] }
+            interrupted_from: None, skipped: vec![], head_pending: vec![], base_commit: None }
     }
     pub fn round_n(&self) -> u64 { self.round.unwrap_or(self.n) }
     pub fn set_state(&mut self, to: RunState) -> Result<(), String> {

@@ -3,7 +3,7 @@
 //! server and Chronicle's policy. Its acp-updates go to the pane as usual and
 //! to the controller as `Ev`s. Plus the chat lane's screen: during a run, a
 //! push, tag, publish or release from the chat session is refused and shown.
-use super::fence::{classify, Shell, PUBLISH_REFUSAL};
+use super::fence::{classify, tool_name, write_target, Shell, PUBLISH_REFUSAL, RUN_SERVER, WRITE_TOOLS};
 use super::record::{list, save, NeedsYou, RunState};
 use super::runner::{Ev, LaneHost, RunCtl};
 use super::{tools, Runs};
@@ -143,17 +143,26 @@ pub(crate) fn launch_worker(agents: &acp::AcpState, emit: acp::Emit, key: String
 }
 
 /// The chat lane during a run (spec §4): publish verbs are refused there too,
-/// and the refusal is a needs-you row on the live run.
+/// and the refusal is a needs-you row on the live run. Hands off (spec §3, §5):
+/// the run server's own tools, and the planner's writes of its round's two
+/// fixes/ files while the round is planned, are answered here, not by the user.
 pub struct RunsScreen {
     pub dir: PathBuf,
     /// adds the row to the live run; false when no run is live
     pub record: Arc<dyn Fn(&Path, NeedsYou) -> bool + Send + Sync>,
+    /// the live run's state and round, if a run is live on the project
+    pub live: Arc<dyn Fn(&Path) -> Option<(RunState, u64)> + Send + Sync>,
+}
+
+/// The live run: not finished, and not an interrupted one nobody drives.
+fn live_run(dir: &Path) -> Option<(RunState, u64)> {
+    list(dir).into_iter().rev().find(|r| !r.state.terminal() && r.state != RunState::Interrupted).map(|r| (r.state, r.round_n()))
 }
 
 impl RunsScreen {
     pub fn for_app(app: &tauri::AppHandle, dir: &Path) -> RunsScreen {
         let app = app.clone();
-        RunsScreen { dir: dir.to_path_buf(), record: Arc::new(move |dir: &Path, row: NeedsYou| {
+        RunsScreen { dir: dir.to_path_buf(), live: Arc::new(live_run), record: Arc::new(move |dir: &Path, row: NeedsYou| {
             // an interrupted run is nobody's round in progress: the chat lane is itself again
             let Some(mut rec) = list(dir).into_iter().rev().find(|r| !r.state.terminal() && r.state != RunState::Interrupted) else { return false };
             let runs = app.state::<Runs>();
@@ -166,8 +175,26 @@ impl RunsScreen {
     }
 }
 
+impl RunsScreen {
+    /// Chronicle's own answer to the chat lane's ask while a run is live, if it has one.
+    fn hands_off(&self, params: &Value) -> Option<PolicyAnswer> {
+        let name = tool_name(params)?;
+        let (state, round) = (self.live)(&self.dir)?;
+        let allow = |path: String| PolicyAnswer { allow: true, path, reason: String::new(), decision: None };
+        if name.starts_with(&format!("mcp__{RUN_SERVER}__")) { return Some(allow(name.to_string())); }
+        if state != RunState::Planning || !WRITE_TOOLS.contains(&name) { return None; }
+        let target = write_target(params.get("toolCall")?);
+        if target.is_empty() { return None; }
+        let at = acp::canonical_deep(Path::new(target))?;
+        ["plan", "prompt"].iter()
+            .any(|k| acp::canonical_deep(&self.dir.join(format!("fixes/phase_{round}_fixes_{k}.md"))).as_ref() == Some(&at))
+            .then(|| allow(target.to_string()))
+    }
+}
+
 impl AskScreen for RunsScreen {
     fn screen(&self, params: &Value) -> Option<PolicyAnswer> {
+        if let Some(a) = self.hands_off(params) { return Some(a); }
         let cmd = params.pointer("/toolCall/rawInput/command").and_then(|v| v.as_str())?;
         if classify(cmd) != Shell::Publish { return None; }
         let row = NeedsYou { kind: "refused".into(), lane: None, item: None, reason: cmd.to_string(), reading: None };
@@ -205,7 +232,7 @@ mod tests {
         let screen = RunsScreen { dir: PathBuf::from("/p"), record: Arc::new(move |_d: &Path, row: NeedsYou| {
             if !l2.load(std::sync::atomic::Ordering::SeqCst) { return false; }
             sink.lock().unwrap().push(row); true
-        }) };
+        }), live: Arc::new(|_d: &Path| None) };
         let ask = |c: &str| json!({ "toolCall": { "toolCallId": "t", "name": "Bash", "rawInput": { "command": c } } });
         let a = screen.screen(&ask("git push origin main")).expect("refused during a round");
         assert!(!a.allow);
@@ -214,6 +241,52 @@ mod tests {
         assert!(screen.screen(&ask("npm test")).is_none(), "only publish verbs are screened; the user answers the rest");
         live.store(false, std::sync::atomic::Ordering::SeqCst);
         assert!(screen.screen(&ask("git push")).is_none(), "outside a round the chat lane behaves as today");
+    }
+
+    fn screen_with(dir: &Path, live: Option<(RunState, u64)>) -> RunsScreen {
+        RunsScreen { dir: dir.to_path_buf(), record: Arc::new(|_d: &Path, _row: NeedsYou| true), live: Arc::new(move |_d: &Path| live) }
+    }
+    fn write_ask(name: &str, path: &Path) -> Value {
+        json!({ "toolCall": { "toolCallId": "w", "name": name, "kind": "edit", "rawInput": { "file_path": path.to_string_lossy() } },
+            "options": [ { "optionId": "yes", "kind": "allow_once" }, { "optionId": "no", "kind": "reject_once" } ] })
+    }
+
+    #[test]
+    fn the_planners_own_fixes_files_are_allowed_while_its_round_is_planned() {
+        let d = std::env::temp_dir().join(format!("chronicle-screen-plan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let d = d.canonicalize().unwrap();
+        let s = screen_with(&d, Some((RunState::Planning, 7)));
+        for f in ["fixes/phase_7_fixes_plan.md", "fixes/phase_7_fixes_prompt.md"] {
+            let a = s.screen(&write_ask("Write", &d.join(f))).unwrap_or_else(|| panic!("{f} is the planner's own file"));
+            assert!(a.allow, "{f}");
+            assert!(s.screen(&write_ask("Edit", &d.join(f))).map(|a| a.allow).unwrap_or(false), "an edit of {f} too");
+        }
+        assert!(s.screen(&write_ask("Write", &d.join("fixes/phase_8_fixes_plan.md"))).is_none(), "another round's plan goes to the user");
+        assert!(s.screen(&write_ask("Write", &d.join("src/main.rs"))).is_none(), "any other write goes to the user");
+        assert!(s.screen(&write_ask("Write", &d.join("fixes/../src/phase_7_fixes_plan.md"))).is_none());
+        assert!(s.screen(&write_ask("Write", Path::new("/elsewhere/fixes/phase_7_fixes_plan.md"))).is_none(), "another project's file goes to the user");
+        // once the lanes run, the planner's turn is over: its writes are the user's to answer again
+        assert!(screen_with(&d, Some((RunState::Running, 7))).screen(&write_ask("Write", &d.join("fixes/phase_7_fixes_plan.md"))).is_none());
+        assert!(screen_with(&d, None).screen(&write_ask("Write", &d.join("fixes/phase_7_fixes_plan.md"))).is_none(), "no run, no screen");
+    }
+
+    #[test]
+    fn the_run_servers_own_tools_are_allowed_while_a_run_is_live() {
+        let ask = json!({ "toolCall": { "toolCallId": "m", "name": "mcp__chronicle-run__chronicle_run_declare", "rawInput": {} },
+            "options": [ { "optionId": "yes", "kind": "allow_once" }, { "optionId": "no", "kind": "reject_once" } ] });
+        for st in [RunState::Planning, RunState::Running, RunState::NeedsYou] {
+            let a = screen_with(Path::new("/p"), Some((st, 3))).screen(&ask).expect("the run server is Chronicle's own");
+            assert!(a.allow, "{st:?}");
+        }
+        assert!(screen_with(Path::new("/p"), None).screen(&ask).is_none(), "outside a run the user answers");
+        let mut via_meta = json!({ "toolCall": { "toolCallId": "m2", "_meta": { "claudeCode": { "toolName": "mcp__chronicle-run__chronicle_run_state" } } },
+            "options": [ { "optionId": "ok", "kind": "allow_once" } ] });
+        crate::agents::normalize::normalize_permission(&mut via_meta, crate::agents::claude());
+        assert!(screen_with(Path::new("/p"), Some((RunState::Planning, 3))).screen(&via_meta).map(|a| a.allow).unwrap_or(false));
+        let full = json!({ "toolCall": { "toolCallId": "m3", "name": "mcp__chronicle__chronicle_notes_create" }, "options": [] });
+        assert!(screen_with(Path::new("/p"), Some((RunState::Planning, 3))).screen(&full).is_none(), "the full chronicle server still asks");
     }
 
     #[test]

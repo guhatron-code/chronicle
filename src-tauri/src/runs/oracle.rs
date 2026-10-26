@@ -126,6 +126,8 @@ pub(crate) mod fake {
         pub completes: Mutex<VecDeque<Result<Value, String>>>,
         pub decide_calls: AtomicUsize,
         pub complete_calls: AtomicUsize,
+        /// every prompt `complete_json` was asked, in order
+        pub prompts: Mutex<Vec<String>>,
         pub model: String,
     }
     impl FakeOracle {
@@ -139,8 +141,9 @@ pub(crate) mod fake {
             self.decide_calls.fetch_add(1, Ordering::SeqCst);
             self.decides.lock().unwrap().pop_front().unwrap_or_else(|| Err("unreachable".into()))
         }
-        fn complete_json(&self, _s: &str, _p: &str, _schema: &Value) -> Result<(Value, String), String> {
+        fn complete_json(&self, _s: &str, p: &str, _schema: &Value) -> Result<(Value, String), String> {
             self.complete_calls.fetch_add(1, Ordering::SeqCst);
+            self.prompts.lock().unwrap().push(p.to_string());
             self.completes.lock().unwrap().pop_front().unwrap_or_else(|| Err("unreachable".into())).map(|v| (v, self.model.clone()))
         }
     }

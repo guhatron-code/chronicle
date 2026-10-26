@@ -112,6 +112,8 @@ pub fn begin_in(p: &Project, source: &Source, judge: Option<&Judge>) -> Result<V
         _ => ((items.len() as u32).clamp(1, max), vec![]),
     };
     rec.target_lanes = Some(lanes);
+    // the lanes' reviews read each lane's whole diff from here (spec §3)
+    rec.base_commit = super::gate::git(&p.repo, &["rev-parse", "HEAD"]).ok().filter(|h| !h.is_empty());
     rec.decisions.extend(logs);
     if let Some(j) = judge { rec.notices.extend(j.take_notice()); }
     save(dir, &mut rec)?;
@@ -119,14 +121,11 @@ pub fn begin_in(p: &Project, source: &Source, judge: Option<&Judge>) -> Result<V
     Ok(json!({ "n": n, "total": total, "prompt": prompt }))
 }
 
-fn fail_round(dir: &Path, n: u64, kind: RunKind) {
+fn fail_round(dir: &Path, rec: &RunRecord) {
+    let n = rec.round_n();
     // a plan was the user's before the run: its round goes back to ready and its notes stay as they are
-    if kind == RunKind::Plan { return runner::set_round_state(dir, n, "ready"); }
-    if let Ok(rounds) = crate::notes::rounds::load(dir) {
-        if let Some(r) = rounds.iter().find(|r| r.n == n) {
-            for rel in &r.note_paths { let _ = crate::notes::rounds::set_status(dir, rel, Some("queued"), None); }
-        }
-    }
+    if rec.kind == RunKind::Plan { return runner::set_round_state(dir, n, "ready"); }
+    runner::release_notes(dir, rec);
     runner::set_round_state(dir, n, round_state_for(RunState::Failed));
 }
 
@@ -168,7 +167,7 @@ pub fn settle_in(p: &Project, n: u64, planner_cost: f64) -> Result<Settle, Strin
         rec.planner_error = rec.planner_error.clone().or_else(|| planner_last_text(&p.dir));
         let why = rec.planner_error.clone().unwrap_or_else(|| "The planner never declared a lane map.".into());
         save(&p.dir, &mut rec)?;
-        fail_round(&p.dir, rec.round_n(), rec.kind);
+        fail_round(&p.dir, &rec);
         return Ok(Settle::Failed(format!("No lane map Chronicle could accept after three tries. {why}")));
     }
     save(&p.dir, &mut rec)?;
@@ -386,6 +385,7 @@ pub async fn run_stop(roots: State<'_, OpenRoots>, runs: State<'_, Runs>, agents
             let mut r = rec;
             r.set_state(RunState::Stopped)?;
             save(&p.dir, &mut r)?;
+            runner::release_notes(&p.dir, &r);
             runner::set_round_state(&p.dir, r.round_n(), round_state_for(r.state));
         }
         _ => {}
@@ -559,6 +559,15 @@ mod tests {
         for _ in 0..2 { assert!(matches!(settle_in(&q, 1, 0.0).unwrap(), Settle::Retry(_))); }
         assert!(matches!(settle_in(&q, 1, 0.0).unwrap(), Settle::Failed(ref s) if s.contains("the declare tool")));
         assert_eq!(load(&q.dir, 1).unwrap().unwrap().planner_error.as_deref(), Some("I couldn't find the declare tool."));
+    }
+
+    #[test]
+    fn a_run_remembers_the_head_it_began_from() {
+        let p = project("base");
+        for a in [&["init", "-q"][..], &["config", "user.email", "t@t"], &["config", "user.name", "t"], &["config", "commit.gpgsign", "false"], &["add", "package.json"], &["commit", "-qm", "init"]] { gate::git(&p.repo, a).unwrap(); }
+        begin_in(&p, &Source::Prompt { text: "do it".into() }, None).unwrap();
+        let rec = load(&p.dir, 1).unwrap().unwrap();
+        assert_eq!(rec.base_commit, Some(gate::git(&p.repo, &["rev-parse", "HEAD"]).unwrap()));
     }
 
     #[test]

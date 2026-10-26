@@ -316,7 +316,11 @@ impl RunCtl {
         let writes = lk(&self.tool_writes).clone();
         let (owned, leaks) = gate::split_changes(&changed, id, &map, &active, &writes);
         // 2 · save the lane's own files, by explicit path
-        let titles: Vec<String> = spec.items.iter().map(|i| map.items.iter().find(|x| &x.id == i).map(|x| format!("{i}: {}", x.title)).unwrap_or_else(|| i.clone())).collect();
+        // the review is asked only about the items still the lane's: never one parked for the user or skipped
+        let set_aside: HashSet<&str> = rec.needs_you.iter().filter(|x| x.kind == "parked" && x.lane.as_deref() == Some(id))
+            .filter_map(|x| x.item.as_deref()).chain(rec.skipped.iter().map(|s| s.as_str())).collect();
+        let titles: Vec<String> = spec.items.iter().filter(|i| !set_aside.contains(i.as_str()))
+            .map(|i| map.items.iter().find(|x| &x.id == i).map(|x| format!("{i}: {}", x.title)).unwrap_or_else(|| i.clone())).collect();
         let message = format!("{}\n\nRound {} · lane {}: {}\n\nChronicle-Run: {}/{}", spec.title, rec.round_n(), id.to_uppercase(), spec.items.join(", "), rec.n, id);
         let head = || gate::git(&self.repo, &["rev-parse", "HEAD"]).unwrap_or_default();
         let (commit, save_failure) = match gate::save_paths(&self.repo, &owned, &message) {
@@ -337,7 +341,7 @@ impl RunCtl {
         if checked.main_tree { self.main_tree.store(true, Ordering::SeqCst); }
         if let Some(e) = save_failure { checked.results.insert(0, CheckResult { name: "save".into(), exit: Some(1), ms: 0, timed_out: false, tail: e }); }
         let review = checked.results.iter().all(|c| c.exit == Some(0))
-            .then(|| review::review(&self.reviewer, &titles, &gate::diff_for(&self.repo, &commit), &checked.results));
+            .then(|| review::review(&self.reviewer, &titles, &self.lane_diff(&rec, &lane, &spec, &commit), &checked.results));
         let notice = self.reviewer.take_notice();
         let g = Gate { commit: commit.clone(), checks: checked.results, review, notice: checked.notice, fix: lane.fixes };
         let passed = g.passed();
@@ -361,10 +365,12 @@ impl RunCtl {
             if stopped { return; }
             if passed { let _ = r.set_lane_state(id, LaneState::Closed); }
             else if fixes >= MAX_FIX_PASSES {
+                // the checks are law; when they all passed, it was the review that failed
+                let what = if g.checks.iter().all(|c| c.exit == Some(0)) { "review" } else { "checks" };
                 let _ = r.set_lane_state(id, LaneState::Parked);
-                if let Some(l) = r.lane_mut(id) { l.parked = Some("Its checks still failed after two fixes.".into()); }
+                if let Some(l) = r.lane_mut(id) { l.parked = Some(format!("Its {what} still failed after two fixes.")); }
                 r.needs_you.push(NeedsYou { kind: "exhausted".into(), lane: Some(id.into()), item: None,
-                    reason: format!("Lane {}’s checks still failed after two fixes.", id.to_uppercase()), reading: None });
+                    reason: format!("Lane {}’s {what} still failed after two fixes.", id.to_uppercase()), reading: None });
             } else {
                 if let Some(l) = r.lane_mut(id) { l.fixes += 1; }
                 let _ = r.set_lane_state(id, LaneState::Fixing);
@@ -375,6 +381,17 @@ impl RunCtl {
         else if fixes < MAX_FIX_PASSES && !self.stopping.load(Ordering::SeqCst) {
             self.send_turn(id, PromptKind::Fix, &prompts::fix_prompt(fixes + 1, &g));
         }
+    }
+
+    /// What the review reads (spec §3): the lane's whole saved work, from the
+    /// run's base to its latest save, over the files it owns — a fix pass's
+    /// save alone would hide the work the first save already made.
+    fn lane_diff(&self, rec: &RunRecord, lane: &LaneRecord, spec: &LaneSpec, commit: &str) -> String {
+        let owns = lane_map::compile(&spec.owns);
+        // a record from before the base was kept: the parent of the lane's first save
+        let base = rec.base_commit.clone().or_else(|| lane.gates.first().map(|g| format!("{}^", g.commit))).unwrap_or_else(|| format!("{commit}^"));
+        gate::diff_between(&self.repo, &base, commit, |p| owns.iter().any(|g| g.matches(p)))
+            .unwrap_or_else(|| gate::diff_for(&self.repo, commit))
     }
 
     fn head(self: &Arc<Self>) {
@@ -470,7 +487,10 @@ impl RunCtl {
                 if l.state.busy() || l.state.between_tries() { l.state = LaneState::Cancelled; l.ended = Some(iso_now()); }
             }
         });
-        if after.state == RunState::Stopped { set_round_state(&self.dir, rec.round_n(), "failed"); }
+        if after.state == RunState::Stopped {
+            release_notes(&self.dir, &after);
+            set_round_state(&self.dir, rec.round_n(), "failed");
+        }
     }
 
     /// `chronicle_run_block` (spec §3, §6 decision 2).
@@ -583,6 +603,25 @@ pub fn flip_notes(dir: &Path, round: u64, map: &LaneMap, rec: &RunRecord) {
     for item in &map.items {
         if parked.contains(item.id.as_str()) || rec.skipped.contains(&item.id) { continue; }
         if let Some(note) = &item.note { let _ = crate::notes::rounds::set_status(dir, note, Some("done"), Some(round)); }
+    }
+}
+
+/// A round that ended without closing (Stop, a failed run): each of its notes
+/// whose item a closed lane finished is done; every other one goes back to the
+/// queue, its round link removed. A plan's round keeps its notes as they are.
+pub fn release_notes(dir: &Path, rec: &RunRecord) {
+    if rec.kind == RunKind::Plan { return; }
+    let round = rec.round_n();
+    let Ok(rounds) = crate::notes::rounds::load(dir) else { return };
+    let Some(r) = rounds.iter().find(|r| r.n == round) else { return };
+    let parked: HashSet<&str> = rec.needs_you.iter().filter(|x| x.kind == "parked").filter_map(|x| x.item.as_deref()).collect();
+    let done: HashSet<&str> = rec.lane_map.iter().flat_map(|m| m.lanes.iter().filter(|s| rec.lane(&s.id).map_or(false, |l| l.state == LaneState::Closed))
+        .flat_map(move |s| s.items.iter().filter_map(move |i| m.items.iter().find(|x| &x.id == i))))
+        .filter(|i| !parked.contains(i.id.as_str()) && !rec.skipped.contains(&i.id))
+        .filter_map(|i| i.note.as_deref()).collect();
+    for rel in &r.note_paths {
+        let _ = if done.contains(rel.as_str()) { crate::notes::rounds::set_status(dir, rel, Some("done"), Some(round)) }
+            else { crate::notes::rounds::set_status(dir, rel, Some("queued"), None) };
     }
 }
 
@@ -721,7 +760,7 @@ pub(crate) mod testkit {
         r
     }
 
-    pub(crate) struct Kit { pub ctl: Arc<RunCtl>, pub rx: Option<Receiver<Ev>>, pub decide: Arc<FakeOracle>, pub published: Arc<Mutex<Vec<RunRecord>>> }
+    pub(crate) struct Kit { pub ctl: Arc<RunCtl>, pub rx: Option<Receiver<Ev>>, pub decide: Arc<FakeOracle>, pub review: Arc<FakeOracle>, pub published: Arc<Mutex<Vec<RunRecord>>> }
 
     pub(crate) fn kit(dir: &Path, rec: RunRecord, checks: Vec<Check>, host: Arc<dyn LaneHost>) -> Kit {
         let decide = FakeOracle::named("jev-1.13.0");
@@ -730,7 +769,7 @@ pub(crate) mod testkit {
         let published: Arc<Mutex<Vec<RunRecord>>> = Default::default();
         let sink = published.clone();
         // the review side is shared, as `oracle::for_project` shares it: the judge's second opinions and the reviewer
-        let reviewer = Arc::new(Fallback::new(review.clone(), review, REVIEW_FALLBACK));
+        let reviewer = Arc::new(Fallback::new(review.clone(), review.clone(), REVIEW_FALLBACK));
         let (ctl, rx) = RunCtl::new(CtlParts {
             dir: dir.to_path_buf(), repo: dir.to_path_buf(),
             scratch: std::env::temp_dir().join(format!("chronicle-runner-scratch-{}-{}", dir.file_name().unwrap().to_string_lossy(), std::process::id())),
@@ -739,7 +778,7 @@ pub(crate) mod testkit {
             reviewer,
             host, publish: Arc::new(move |_d: &Path, r: &RunRecord| lk(&sink).push(r.clone())),
         });
-        Kit { ctl, rx: Some(rx), decide, published }
+        Kit { ctl, rx: Some(rx), decide, review, published }
     }
 
     pub(crate) fn wait_until(ctl: &RunCtl, secs: u64, pred: impl Fn(&RunRecord) -> bool) -> RunRecord {
@@ -824,7 +863,110 @@ mod tests {
         assert_eq!(b.state, LaneState::Parked);
         assert_eq!(b.gates.len(), 3, "the save and two fix passes");
         assert_eq!(done.needs_you[0].kind, "exhausted");
+        assert_eq!(done.needs_you[0].reason, "Lane B’s checks still failed after two fixes.");
         assert_eq!(done.lane("a").unwrap().state, LaneState::Closed);
+        k.ctl.tx.send(Ev::Stop).unwrap();
+    }
+
+    #[test]
+    fn a_review_that_never_passes_says_the_review_failed_not_the_checks() {
+        let r = repo("reviewpark", 23);
+        let host = FakeHost::new(Box::new(|lane, _| vec![(format!("{lane}/work.txt"), "x".into(), true)]));
+        let mut k = kit(&r, two_lanes(23, &[], &[]), vec![], host);
+        k.review.completes.lock().unwrap().clear();
+        for _ in 0..16 { k.review.complete_with(json!({ "pass": false, "findings": [{ "file": "a/work.txt", "line": 1, "what": "not done" }] })); }
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        let done = wait_until(&k.ctl, 60, |x| x.state == RunState::NeedsYou);
+        let rows: Vec<&str> = done.needs_you.iter().filter(|x| x.kind == "exhausted").map(|x| x.reason.as_str()).collect();
+        assert!(rows.contains(&"Lane A’s review still failed after two fixes."), "{rows:?}");
+        assert!(!rows.iter().any(|x| x.contains("checks")), "the checks passed: {rows:?}");
+        assert_eq!(done.lane("a").unwrap().parked.as_deref(), Some("Its review still failed after two fixes."));
+        k.ctl.tx.send(Ev::Stop).unwrap();
+    }
+
+    #[test]
+    fn a_fix_pass_is_reviewed_on_the_lanes_whole_diff_since_the_run_began() {
+        let r = repo("cumulative", 24);
+        let mut rec = two_lanes(24, &[], &["fixed"]);
+        rec.base_commit = Some(gate::git(&r, &["rev-parse", "HEAD"]).unwrap());
+        let host = FakeHost::new(Box::new(|lane, text| {
+            if lane == "b" && text.contains("fix 1 of 2") { vec![("b/fixed.txt".into(), "FIXLINE".into(), true)] }
+            else { vec![(format!("{lane}/work.txt"), format!("FIRSTWORK-{lane}"), true)] }
+        }));
+        let mut k = kit(&r, rec, vec![check("fixed", "test -f b/fixed.txt")], host);
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        let done = wait_until(&k.ctl, 60, |x| x.state.terminal());
+        assert_eq!(done.state, RunState::Done, "{done:#?}");
+        let b = done.lane("b").unwrap();
+        assert_eq!(b.gates.len(), 2);
+        assert_eq!(gate::files_in(&r, &b.gates[1].commit), vec!["b/fixed.txt"], "the second save holds only the fix");
+        let prompts = k.review.prompts.lock().unwrap().clone();
+        let fix_review = prompts.iter().find(|p| p.contains("FIXLINE")).expect("the fix pass was reviewed");
+        assert!(fix_review.contains("FIRSTWORK-b"), "the first save's work is in the reviewed diff: {fix_review}");
+        assert!(!fix_review.contains("FIRSTWORK-a"), "another lane's save is not this lane's diff: {fix_review}");
+    }
+
+    #[test]
+    fn stopping_a_notes_run_puts_its_unfinished_notes_back_in_the_queue() {
+        let r = repo("stopnotes", 27);
+        std::fs::create_dir_all(r.join(".chronicle/notes/Tasks")).unwrap();
+        for f in ["A", "B"] { std::fs::write(r.join(format!(".chronicle/notes/Tasks/{f}.md")), format!("---\nstatus: in_progress\nround: 27\n---\n\n{f}\n")).unwrap(); }
+        crate::notes::rounds::save(&r, &[crate::notes::rounds::Round { n: 27, state: "running".into(), kind: None, task_ids: vec![],
+            note_paths: vec!["Tasks/A.md".into(), "Tasks/B.md".into()], created_at: 0,
+            plan_path: "fixes/phase_27_fixes_plan.md".into(), prompt_path: "fixes/phase_27_fixes_prompt.md".into() }]).unwrap();
+        let mut rec = two_lanes(27, &[], &[]);
+        rec.kind = RunKind::Notes;
+        if let Some(m) = rec.lane_map.as_mut() { m.items[0].note = Some("Tasks/A.md".into()); m.items[1].note = Some("Tasks/B.md".into()); }
+        let host = FakeHost::hanging(Box::new(|_, _| vec![]));
+        let mut k = kit(&r, rec, vec![], host);
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        wait_until(&k.ctl, 20, |x| x.lanes.iter().all(|l| l.state == LaneState::Streaming));
+        // lane a passed its gate before the Stop; b was still working
+        k.ctl.update(|x| { let l = x.lane_mut("a").unwrap(); l.state = LaneState::Closed; });
+        k.ctl.tx.send(Ev::Stop).unwrap();
+        wait_until(&k.ctl, 20, |x| x.state.terminal());
+        let front = |f: &str| std::fs::read_to_string(r.join(format!(".chronicle/notes/Tasks/{f}.md"))).unwrap();
+        let b = front("B");
+        assert!(b.contains("status: queued") && !b.contains("round:"), "the unfinished note is back in the queue: {b}");
+        let a = front("A");
+        assert!(a.contains("status: done") && a.contains("round: 27"), "the finished item's note is done: {a}");
+        assert_eq!(crate::notes::rounds::load(&r).unwrap()[0].state, "failed");
+        assert_eq!(crate::notes::rounds::queued_notes(&r), vec!["Tasks/B.md"]);
+    }
+
+    #[test]
+    fn resume_keeps_the_runs_base() {
+        let mut rec = two_lanes(25, &[], &[]);
+        rec.base_commit = Some("abc123".into());
+        rec.state = RunState::Interrupted;
+        rec.interrupted_from = Some(RunState::Running);
+        let (back, _) = scheduler::resume(&rec);
+        assert_eq!(back.base_commit.as_deref(), Some("abc123"));
+        let json = serde_json::to_string(&back).unwrap();
+        let again: RunRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(again.base_commit.as_deref(), Some("abc123"), "the record carries it");
+    }
+
+    #[test]
+    fn the_review_is_not_asked_about_a_parked_or_skipped_item() {
+        let r = repo("reviewparked", 26);
+        let mut rec = two_lanes(26, &[], &[]);
+        if let Some(m) = rec.lane_map.as_mut() {
+            m.items.push(Item { id: "I-3".into(), title: "the impossible work".into(), note: None, rewrite: None });
+            m.items.push(Item { id: "I-4".into(), title: "the skipped work".into(), note: None, rewrite: None });
+            m.lanes[0].items = vec!["I-1".into(), "I-3".into(), "I-4".into()];
+        }
+        rec.skipped = vec!["I-4".into()];
+        let host = FakeHost::new(Box::new(|lane, _| vec![(format!("{lane}/work.txt"), lane.to_string(), true)]));
+        let mut k = kit(&r, rec, vec![], host);
+        k.decide.decide_with(decision(vec![noul("impossible_as_written", 0.9)], "jev-1.13.0", false));
+        assert!(k.ctl.block("a", "I-3", "the file it names doesn't exist").unwrap().starts_with("Accepted"));
+        let asked_before = k.review.prompts.lock().unwrap().len();
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        wait_until(&k.ctl, 60, |x| x.state == RunState::NeedsYou);
+        let prompts = k.review.prompts.lock().unwrap()[asked_before..].to_vec();
+        let a = prompts.iter().find(|p| p.contains("I-1: the a work")).expect("lane a was reviewed");
+        assert!(!a.contains("I-3") && !a.contains("I-4"), "{a}");
         k.ctl.tx.send(Ev::Stop).unwrap();
     }
 
