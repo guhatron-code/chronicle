@@ -76,7 +76,8 @@ pub fn overlap(a: &Glob, b: &Glob) -> bool {
 
 /// Rewrite the fixed part of a pattern to where it really is: symlinks
 /// followed, relative to the project's canonical root. Refuses a pattern
-/// whose fixed part resolves outside the project.
+/// whose fixed part resolves outside the project. (Symlinks under a wildcard
+/// pattern are not followed here: `validate` refuses such a pattern outright.)
 pub fn normalise(repo: &Path, g: &Glob) -> Result<Glob, String> {
     let prefix = g.static_prefix().to_string();
     let rest = g.text[prefix.len()..].to_string();
@@ -143,6 +144,35 @@ fn find_cycle(lanes: &[LaneSpec]) -> Option<Vec<String>> {
     None
 }
 
+/// The first symlink beneath a wildcard glob's fixed folder (depth <= 8; `.git`,
+/// `node_modules`, `target` skipped), as (repo-relative link, canonical target).
+fn first_link_under(repo: &Path, prefix: &str) -> Option<(String, String)> {
+    let croot = repo.canonicalize().ok()?;
+    let start = repo.join(prefix.trim_end_matches('/'));
+    fn walk(dir: &Path, depth: usize, repo: &Path, croot: &Path) -> Option<(String, String)> {
+        let mut kids: Vec<_> = std::fs::read_dir(dir).ok()?.filter_map(|e| e.ok()).collect();
+        kids.sort_by_key(|e| e.file_name());
+        for e in kids {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let p = e.path();
+            let ft = e.file_type().ok()?;
+            if ft.is_symlink() {
+                let rel = p.strip_prefix(repo).unwrap_or(&p).to_string_lossy().into_owned();
+                let target = match p.canonicalize() {
+                    Ok(c) => c.strip_prefix(croot).map(|r| r.to_string_lossy().into_owned()).unwrap_or_else(|_| c.to_string_lossy().into_owned()),
+                    Err(_) => std::fs::read_link(&p).map(|l| l.to_string_lossy().into_owned()).unwrap_or_default(),
+                };
+                return Some((rel, target));
+            }
+            if ft.is_dir() && depth < 8 && !matches!(name.as_str(), ".git" | "node_modules" | "target") {
+                if let Some(r) = walk(&p, depth + 1, repo, croot) { return Some(r); }
+            }
+        }
+        None
+    }
+    if start.is_dir() { walk(&start, 1, repo, &croot) } else { None }
+}
+
 pub fn validate(map: &LaneMap, repo: &Path, checks: &[Check], round_notes: &[String]) -> Result<LaneMap, Vec<String>> {
     let mut errs: Vec<String> = vec![];
     let mut out = map.clone();
@@ -157,8 +187,8 @@ pub fn validate(map: &LaneMap, repo: &Path, checks: &[Check], round_notes: &[Str
         if l.owns.is_empty() { errs.push(format!("Lane {} owns no files.", l.id)); }
         match l.isolation.as_deref() {
             None => {}
-            Some("worktree") => errs.push(format!("lane {} asks for its own worktree; that comes in a later release", l.id)),
-            Some(other) => errs.push(format!("lane {}: unknown isolation \"{other}\"", l.id)),
+            Some("worktree") => errs.push(format!("Lane {} asks for its own worktree; that comes in a later release.", l.id)),
+            Some(other) => errs.push(format!("Lane {}: unknown isolation \"{other}\".", l.id)),
         }
     }
     let declared: Vec<&str> = map.items.iter().map(|i: &Item| i.id.as_str()).collect();
@@ -188,7 +218,15 @@ pub fn validate(map: &LaneMap, repo: &Path, checks: &[Check], round_notes: &[Str
             });
             match g {
                 Ok(g) if reaches_forbidden(&g) => errs.push(format!("Lane {} owns {}, which reaches .chronicle/, fixes/ or chronicle.json; lanes never write those.", l.id, g.text)),
-                Ok(g) => gs.push(g),
+                Ok(g) => {
+                    if g.has_wildcard() {
+                        if let Some((link, target)) = first_link_under(repo, g.static_prefix()) {
+                            errs.push(format!("Lane {}'s {} crosses a link {link} → {target}; own the real path instead.", l.id, g.text));
+                            continue;
+                        }
+                    }
+                    gs.push(g)
+                }
                 Err(e) => errs.push(format!("Lane {}: {e}.", l.id)),
             }
         }
@@ -379,9 +417,23 @@ mod tests {
         let mut l = lane("a", &["T-1"], &["src/lib/**"], &[], &[]);
         l.isolation = Some("worktree".into());
         let e = errs(validate(&map(&["T-1"], vec![l.clone()]), &r, &checks(), &[]));
-        assert!(e.contains("lane a asks for its own worktree; that comes in a later release"), "{e}");
+        assert!(e.contains("Lane a asks for its own worktree; that comes in a later release"), "{e}");
         l.isolation = Some("vm".into());
         let e = errs(validate(&map(&["T-1"], vec![l]), &r, &checks(), &[]));
-        assert!(e.contains("lane a: unknown isolation \"vm\""), "{e}");
+        assert!(e.contains("Lane a: unknown isolation \"vm\"."), "{e}");
+    }
+
+    #[test]
+    fn a_wildcard_glob_over_a_symlink_is_refused() {
+        let r = repo("wild");
+        std::fs::create_dir_all(r.join("lib/shared")).unwrap();
+        std::fs::write(r.join("lib/shared/x.ts"), "").unwrap();
+        std::os::unix::fs::symlink("../lib/shared", r.join("src/shared")).unwrap();
+        let m = map(&["T-1", "T-2"], vec![lane("a", &["T-1"], &["src/**/x.ts"], &[], &[]), lane("b", &["T-2"], &["lib/**"], &[], &[])]);
+        let e = errs(validate(&m, &r, &checks(), &[]));
+        assert!(e.contains("Lane a's src/**/x.ts crosses a link src/shared → lib/shared; own the real path instead."), "{e}");
+        assert!(!e.contains("Lane b"), "{e}");
+        let ok = map(&["T-2"], vec![lane("b", &["T-2"], &["lib/**"], &[], &[])]);
+        assert!(validate(&ok, &r, &checks(), &[]).is_ok());
     }
 }
