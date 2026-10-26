@@ -1654,6 +1654,25 @@ export async function startRunInPane(dir: string, source: RunSource): Promise<nu
   return n;
 }
 
+/**
+ * After a relaunch the thread has no `run` entries (they live in memory): a run
+ * of this project still in progress gets its card back at the thread's end, so
+ * its Resume / Stop and needs-you rows are in the pane. No prompt is sent, a
+ * finished run lands nothing, and a run already in the thread is never doubled.
+ */
+export async function landLiveRunCards(dir: string): Promise<void> {
+  const list = await refreshRuns(dir);
+  const s = agentSessionFor(dir);
+  let landed = false;
+  for (const r of [...list].sort((a, b) => a.n - b.n)) {
+    if (r.state === "done" || r.state === "failed" || r.state === "stopped") continue;
+    if (runCardFor(dir, r.n)) continue;
+    s.entries.push({ kind: "run", rev: 0, n: r.n, total: r.lane_map?.items.length ?? 0, ended: false, queued: false, part: "card" });
+    landed = true;
+  }
+  if (landed) notify();
+}
+
 /** Resume an interrupted run. One caught while planning sends its planner prompt again. */
 export async function resumeRunInPane(dir: string, n: number): Promise<void> {
   const r = await runResume(dir, n);

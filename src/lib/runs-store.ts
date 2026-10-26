@@ -50,7 +50,8 @@ export const runFor = (dir: string, n: number): RunRecord | null => byDir.get(di
 export function liveRun(dir: string): RunRecord | null {
   return [...(byDir.get(dir)?.values() ?? [])].filter((r) => !runOver(r)).sort((a, b) => b.n - a.n)[0] ?? null;
 }
-export function refreshRuns(dir: string): Promise<void> {
+/** The project's records from Rust, kept; resolves to what was listed (empty when listing failed). */
+export function refreshRuns(dir: string): Promise<RunRecord[]> {
   ensure();
-  return runsList(dir).then((list) => { for (const r of list) ingest(dir, r); bump(); }).catch(() => {});
+  return runsList(dir).then((list) => { for (const r of list) ingest(dir, r); bump(); return list; }).catch(() => []);
 }

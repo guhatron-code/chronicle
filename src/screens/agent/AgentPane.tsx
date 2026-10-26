@@ -21,6 +21,7 @@ import {
   agentVersion,
   flushAgentNotifications,
   laneKey,
+  landLiveRunCards,
   loadLaneHistory,
   startRunInPane,
   type AgentEntry,
@@ -37,7 +38,7 @@ import { indexFor, subscribeNotesIndex } from "@/lib/notes-store";
 import { sendDesignMessage } from "@/lib/design-store";
 import { agentEditKeep, agentEditUndo, agentRestoreCheckpoint } from "@/lib/ipc";
 import { CheckGlyph, LanesGlyph } from "@/components/chrome/icons";
-import { refreshRuns, runFor, runsVersion, subscribeRuns } from "@/lib/runs-store";
+import { runFor, runsVersion, subscribeRuns } from "@/lib/runs-store";
 import { runLaneNudge } from "@/lib/runs-ipc";
 import { gateLabel, guardLine, laneBusy, laneDivider } from "@/lib/runs-model";
 import { every } from "@/lib/scheduler";
@@ -571,7 +572,8 @@ export function AgentPane({
 }) {
   const version = useSyncExternalStore(subscribeAgent, agentVersion, agentVersion);
   const runsGen = useSyncExternalStore(subscribeRuns, runsVersion, runsVersion);
-  useEffect(() => { if (variant === "chat") void refreshRuns(dir); }, [dir, variant]);
+  // a run still in progress after a relaunch gets its card back in the thread
+  useEffect(() => { if (variant === "chat") void landLiveRunCards(dir); }, [dir, variant]);
   const [openLane, setOpenLane] = useState<{ n: number; id: string } | null>(null);
   const [runAsRound, setRunAsRound] = useState(false);
   const onOpenLane = useCallback((n: number, id: string) => setOpenLane({ n, id }), []);

@@ -24,7 +24,7 @@ vi.mock("./runs-ipc", () => ({
   runPlanCancel: vi.fn(async () => {}),
   runResume: vi.fn(async () => ({ state: "planning", prompt: "PLAN AGAIN" })),
 }));
-vi.mock("./runs-store", () => ({ refreshRuns: vi.fn(async () => {}) }));
+vi.mock("./runs-store", () => ({ refreshRuns: vi.fn(async () => []) }));
 vi.mock("./notes-store", () => ({
   indexFor: () => ({ notes: [], rounds: [], generation: 0, vault: "", borrowed: false }),
   refreshNotes: vi.fn(async () => {}), roundGenerating: vi.fn(() => false), roundNotesFor: vi.fn(() => []), setRoundGenerating: vi.fn(),
@@ -167,6 +167,27 @@ describe("runs in the agent store", () => {
     expect(runCards()).toHaveLength(1);
     expect(runCard()).toMatchObject({ n: 10, total: 7, ended: false, queued: false });
     expect(runCard()?.outcome).toBeUndefined();
+  });
+
+  it("after a relaunch, a run still in progress lands its card at the thread's end, once", async () => {
+    const store = await import("./runs-store");
+    const rec = (n: number, state: string) => ({ n, state, round: n, lane_map: { items: [{ id: "T-1" }, { id: "T-2" }], lanes: [] } });
+    agent.agentSessionFor(DIR).entries.push({ kind: "user", text: "earlier" } as unknown as AgentEntry);
+    vi.mocked(store.refreshRuns).mockResolvedValue([rec(9, "done"), rec(12, "interrupted")] as never);
+    await agent.landLiveRunCards(DIR);
+    agent.flushAgentNotifications();
+    const es = agent.agentSessionFor(DIR).entries;
+    expect(es.at(-1)).toMatchObject({ kind: "run", n: 12, total: 2, part: "card", ended: false, queued: false });
+    expect(runCards()).toHaveLength(1);
+    expect(runCards()[0]).toMatchObject({ n: 12 });
+    expect(ipc.agentPrompt).not.toHaveBeenCalled();
+    await agent.landLiveRunCards(DIR);
+    expect(runCards()).toHaveLength(1);
+    vi.mocked(store.refreshRuns).mockResolvedValue([rec(9, "done"), rec(10, "stopped"), rec(11, "failed")] as never);
+    agent.agentSessionFor(DIR).entries = [];
+    await agent.landLiveRunCards(DIR);
+    expect(runCards()).toHaveLength(0);
+    vi.mocked(store.refreshRuns).mockResolvedValue([]);
   });
 
   it("a run that can't begin touches nothing", async () => {
