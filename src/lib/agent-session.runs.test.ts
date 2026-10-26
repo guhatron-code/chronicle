@@ -47,6 +47,8 @@ describe("runs in the agent store", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.assign(agent.agentSessionFor(DIR), { phase: "ready", turnActive: false, entries: [], queue: [], cost: 1.0 });
+    // deliver anything a previous test left pending, so no backstop timer carries over
+    agent.flushAgentNotifications();
   });
 
   it("a lane's updates land in its own session, keyed under its run", () => {
@@ -64,45 +66,50 @@ describe("runs in the agent store", () => {
     const key = agent.laneKey(DIR, "w/10-1");
     onUpdate!({ dir: DIR, lane: "w/10-1", message: { method: "_chronicle/guard", params: { allowed: true, path: "npx vitest run src/lib", reason: "it reads only",
       decision: { choice: "allow", confidence: 0.93, model: "jev-1.13.0", band: "act" } } } });
+    agent.flushAgentNotifications();
     expect(agent.agentSessionFor(key).entries.at(-1)).toMatchObject({ kind: "guard", allowed: true, decision: { confidence: 0.93, model: "jev-1.13.0" } });
   });
 
   it("a run lands its card and sends the planner prompt", async () => {
     expect(await agent.startRunInPane(DIR, { kind: "notes" })).toBe(10);
-    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(ipc.agentPrompt).toHaveBeenCalled(); }, { timeout: 5000, interval: 5 });
     expect(runCard()).toMatchObject({ kind: "run", n: 10, total: 7, queued: false, costBase: 1.0 });
     expect(vi.mocked(ipc.agentPrompt).mock.calls[0][2]).toBe("PLAN IT");
   });
 
   it("the planning turn's end starts the run with what the turn cost", async () => {
     await agent.startRunInPane(DIR, { kind: "notes" });
-    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(ipc.agentPrompt).toHaveBeenCalled(); }, { timeout: 5000, interval: 5 });
     onUpdate!({ dir: DIR, lane: "chat", message: usage(1.26) });
+    agent.flushAgentNotifications();
     onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
-    await vi.waitFor(() => expect(runsIpc.runPlanSettle).toHaveBeenCalledWith(DIR, 10, expect.closeTo(0.26, 5)));
-    await vi.waitFor(() => expect(runCard()).toMatchObject({ ended: true, outcome: "running" }));
+    agent.flushAgentNotifications();
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(runsIpc.runPlanSettle).toHaveBeenCalledWith(DIR, 10, expect.closeTo(0.26, 5)); }, { timeout: 5000, interval: 5 });
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(runCard()).toMatchObject({ ended: true, outcome: "running" }); }, { timeout: 5000, interval: 5 });
   });
 
   it("a turn that declared no map sends the reasons and waits again", async () => {
     vi.mocked(runsIpc.runPlanSettle).mockResolvedValueOnce({ state: "retry", prompt: "FIX THE MAP" });
     await agent.startRunInPane(DIR, { kind: "notes" });
-    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(ipc.agentPrompt).toHaveBeenCalledTimes(1); }, { timeout: 5000, interval: 5 });
     onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
-    await vi.waitFor(() => expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("FIX THE MAP"));
+    agent.flushAgentNotifications();
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("FIX THE MAP"); }, { timeout: 5000, interval: 5 });
     expect(runCard()).toMatchObject({ ended: false, queued: false });
   });
 
   it("a stopped planning turn cancels the run", async () => {
     await agent.startRunInPane(DIR, { kind: "notes" });
-    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(ipc.agentPrompt).toHaveBeenCalled(); }, { timeout: 5000, interval: 5 });
     onUpdate!({ dir: DIR, lane: "chat", message: { method: "_chronicle/turn_end", params: { stopReason: "cancelled" } } });
-    await vi.waitFor(() => expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10));
-    await vi.waitFor(() => expect(runCard()).toMatchObject({ ended: true, outcome: "cancelled" }));
+    agent.flushAgentNotifications();
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10); }, { timeout: 5000, interval: 5 });
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(runCard()).toMatchObject({ ended: true, outcome: "cancelled" }); }, { timeout: 5000, interval: 5 });
   });
 
   it("resuming a run caught while planning sends its planner prompt again", async () => {
     await agent.resumeRunInPane(DIR, 10);
-    await vi.waitFor(() => expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("PLAN AGAIN"));
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("PLAN AGAIN"); }, { timeout: 5000, interval: 5 });
     expect(runCard()).toMatchObject({ n: 10 });
   });
 
@@ -117,10 +124,11 @@ describe("runs in the agent store", () => {
   it("a retry whose reasons can't be sent fails the run and tells Rust", async () => {
     vi.mocked(runsIpc.runPlanSettle).mockResolvedValueOnce({ state: "retry", prompt: "FIX THE MAP" });
     await agent.startRunInPane(DIR, { kind: "notes" });
-    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(ipc.agentPrompt).toHaveBeenCalledTimes(1); }, { timeout: 5000, interval: 5 });
     vi.mocked(ipc.agentPrompt).mockRejectedValueOnce(new Error("gone"));
     onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
-    await vi.waitFor(() => expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10));
+    agent.flushAgentNotifications();
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10); }, { timeout: 5000, interval: 5 });
     expect(runCard()).toMatchObject({ ended: true, outcome: "failed" });
     expect(notes.setRoundGenerating).toHaveBeenLastCalledWith(DIR, false);
   });
@@ -128,16 +136,17 @@ describe("runs in the agent store", () => {
   it("a settle that throws cancels the run's planning and fails the card", async () => {
     vi.mocked(runsIpc.runPlanSettle).mockRejectedValueOnce(new Error("disk"));
     await agent.startRunInPane(DIR, { kind: "notes" });
-    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(ipc.agentPrompt).toHaveBeenCalled(); }, { timeout: 5000, interval: 5 });
     onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
-    await vi.waitFor(() => expect(runCard()).toMatchObject({ ended: true, outcome: "failed" }));
+    agent.flushAgentNotifications();
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(runCard()).toMatchObject({ ended: true, outcome: "failed" }); }, { timeout: 5000, interval: 5 });
     expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10);
   });
 
   it("resuming a run whose card is in the thread reopens that card", async () => {
     agent.agentSessionFor(DIR).entries.push({ kind: "run", rev: 0, n: 10, total: 7, ended: true, outcome: "failed" });
     await agent.resumeRunInPane(DIR, 10);
-    await vi.waitFor(() => expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("PLAN AGAIN"));
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("PLAN AGAIN"); }, { timeout: 5000, interval: 5 });
     expect(runCards()).toHaveLength(1);
     expect(runCard()).toMatchObject({ n: 10, total: 7, ended: false, queued: false });
     expect(runCard()?.outcome).toBeUndefined();
@@ -157,7 +166,8 @@ describe("runs in the agent store", () => {
     expect(runCard()).toMatchObject({ queued: true });
     vi.mocked(ipc.agentPrompt).mockRejectedValueOnce(new Error("the agent is still working"));
     onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
-    await vi.waitFor(() => expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10));
+    agent.flushAgentNotifications();
+    await vi.waitFor(() => { agent.flushAgentNotifications(); expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10); }, { timeout: 5000, interval: 5 });
     expect(runCard()).toMatchObject({ ended: true, outcome: "failed" });
     expect(notes.setRoundGenerating).toHaveBeenLastCalledWith(DIR, false);
     expect(runsIpc.runPlanCancel).toHaveBeenCalledTimes(1);
