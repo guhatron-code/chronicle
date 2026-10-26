@@ -500,4 +500,13 @@ mod tests {
         assert!(!is_live(&d, 4));
         assert!(!is_live(&d, 5));
     }
+
+    #[test]
+    fn the_frontend_fixture_is_a_record_rust_reads() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../src/lib/__fixtures__/run-record.json")).unwrap();
+        let r: RunRecord = serde_json::from_str(&text).expect("the TypeScript fixture and the Rust record are one shape");
+        assert_eq!((r.n, r.state, r.lanes.len()), (10, RunState::Running, 4));
+        assert_eq!(r.lane("c").unwrap().state, LaneState::Gating);
+        assert!((r.total_cost().usd - 1.84).abs() < 1e-9, "the fixture's cost is what Rust would compute");
+    }
 }
