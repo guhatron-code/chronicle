@@ -254,6 +254,12 @@ pub fn discard_paths(repo: &Path, paths: &[String]) -> Result<usize, String> {
     Ok(tracked.len())
 }
 
+/// HEAD already is round `round`'s closing save (its `Chronicle-Phase` trailer).
+pub fn head_has_trailer(repo: &Path, round: u64) -> bool {
+    let want = format!("Chronicle-Phase: FX-{round} done");
+    git(repo, &["log", "-1", "--format=%B"]).map(|m| m.lines().any(|l| l.trim() == want)).unwrap_or(false)
+}
+
 /// The round's closing trailer as an empty commit made with plumbing, so the
 /// index — and anything the user has staged — is never part of it.
 pub fn close_commit(repo: &Path, round: u64) -> Result<String, String> {

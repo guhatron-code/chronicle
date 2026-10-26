@@ -243,7 +243,7 @@ pub fn lane_can_move(from: LaneState, to: LaneState) -> bool {
         | (Preparing | BuildingPrompt | Launching | Initialising | Streaming | Finishing | Gating | Fixing, Failed | TimedOut | Stalled)
         | (Preparing | BuildingPrompt | Launching | Initialising | Streaming | Fixing, Waiting)
         | (Failed | TimedOut | Stalled, Preparing | Parked)
-        | (Parked, Waiting)
+        | (Parked, Waiting) | (Waiting, Parked)
         | (Cancelled, Waiting)
         | (Closed, Fixing))
 }

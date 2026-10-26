@@ -23,6 +23,11 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
+/// How the controller reaches a lane's session. The contract: `start`, `prompt`
+/// and `stop` (and `cancel`) return at once, without waiting for the session to
+/// initialise or the turn to end — the event loop and the gate (holding the
+/// gate lock) call them. Everything that happens afterwards comes back as `Ev`s
+/// on `ctl.tx`.
 pub trait LaneHost: Send + Sync {
     /// Start lane `lane`'s session. Its lifecycle comes back as `Ev`s on
     /// `ctl.tx`; `Ready` always arrives through the channel, never by a call.
@@ -182,10 +187,7 @@ impl RunCtl {
             Action::Stall(id) => self.fail_lane(&id, LaneState::Stalled),
             Action::Park { lane, reason } => {
                 self.update(|r| {
-                    if r.set_lane_state(&lane, LaneState::Parked).is_err() {
-                        // a waiting lane whose dependency will never close: parked before it ever started
-                        match r.lane_mut(&lane) { Some(l) if l.state == LaneState::Waiting => l.state = LaneState::Parked, _ => return }
-                    }
+                    if r.set_lane_state(&lane, LaneState::Parked).is_err() { return; }
                     if let Some(l) = r.lane_mut(&lane) { l.parked = Some(reason.clone()); }
                     r.needs_you.push(NeedsYou { kind: "exhausted".into(), lane: Some(lane.clone()), item: None, reason, reading: None });
                 });
@@ -340,7 +342,8 @@ impl RunCtl {
         let g = Gate { commit: commit.clone(), checks: checked.results, review, notice: checked.notice, fix: lane.fixes };
         let passed = g.passed();
         let fixes = lane.fixes;
-        if self.stopping.load(Ordering::SeqCst) { return; }
+        // Stop may have come while the checks ran: the save and its gate are still recorded, the lane isn't moved
+        let stopped = self.stopping.load(Ordering::SeqCst);
         self.update(|r| {
             if let Some(n) = notice { r.notices.push(n); }
             for leak in &leaks {
@@ -355,6 +358,7 @@ impl RunCtl {
                 for leak in &leaks { if !l.leak.contains(leak) { l.leak.push(leak.clone()); } }
                 l.gates.push(g.clone());
             }
+            if stopped { return; }
             if passed { let _ = r.set_lane_state(id, LaneState::Closed); }
             else if fixes >= MAX_FIX_PASSES {
                 let _ = r.set_lane_state(id, LaneState::Parked);
@@ -366,8 +370,11 @@ impl RunCtl {
                 let _ = r.set_lane_state(id, LaneState::Fixing);
             }
         });
+        if stopped { return; }
         if passed { self.host.stop(self, id, self.k_of(id)); }
-        else if fixes < MAX_FIX_PASSES { self.send_turn(id, PromptKind::Fix, &prompts::fix_prompt(fixes + 1, &g)); }
+        else if fixes < MAX_FIX_PASSES && !self.stopping.load(Ordering::SeqCst) {
+            self.send_turn(id, PromptKind::Fix, &prompts::fix_prompt(fixes + 1, &g));
+        }
     }
 
     fn head(self: &Arc<Self>) {
@@ -403,6 +410,7 @@ impl RunCtl {
         let notice = self.judge.take_notice();
         self.update(|r| { r.decisions.extend(logs); r.notices.extend(notice); });
         let Some(lane) = pick else { return needs(&failing) };
+        let fixes_before = rec.lane(&lane).map(|l| l.fixes).unwrap_or(0);
         self.update(|r| {
             if let Some(h) = r.head_check.as_mut() { h.reopened = Some(lane.clone()); }
             if let Some(l) = r.lane_mut(&lane) { l.fixes = MAX_FIX_PASSES; } // exactly one pass
@@ -412,14 +420,23 @@ impl RunCtl {
         lk(&self.pending).insert(lane.clone(), (PromptKind::Fix, prompts::head_fix_prompt(&failing)));
         lk(&self.last_wire).insert(lane.clone(), self.now());
         let policy: Arc<dyn LanePolicy> = Arc::new(RunPolicy::new(self, &lane));
-        if self.host.start(self, &lane, self.k_of(&lane), policy).is_err() { needs(&failing); }
+        if self.host.start(self, &lane, self.k_of(&lane), policy).is_err() {
+            lk(&self.pending).remove(&lane);
+            // the lane's own save stands: back to closed, by the attempt machine's own steps (fixing → finishing → gating → closed)
+            self.update(|r| {
+                for to in [LaneState::Finishing, LaneState::Gating, LaneState::Closed] { let _ = r.set_lane_state(&lane, to); }
+                if let Some(l) = r.lane_mut(&lane) { l.fixes = fixes_before; }
+            });
+            needs(&failing);
+        }
     }
 
     fn close(self: &Arc<Self>) {
         let rec = self.snapshot();
         let round = rec.round_n();
         if let Some(map) = &rec.lane_map { flip_notes(&self.dir, round, map, &rec); }
-        let closing = gate::close_commit(&self.repo, round);
+        // a resume from `closing` may find the trailer already at HEAD: never a second one
+        let closing = if gate::head_has_trailer(&self.repo, round) { Ok(String::new()) } else { gate::close_commit(&self.repo, round) };
         for l in &rec.lanes { self.host.stop(self, &l.id, self.k_of(&l.id)); }
         set_round_state(&self.dir, round, "done");
         self.update(|r| {
@@ -428,12 +445,18 @@ impl RunCtl {
         });
     }
 
+    /// The controller's owner let go of it: every working lane's session ends.
+    fn release(self: &Arc<Self>) {
+        for l in self.snapshot().lanes.iter().filter(|l| l.state.busy()) { self.host.stop(self, &l.id, self.k_of(&l.id)); }
+    }
+
     /// Stop (spec §3): every lane's turn cancelled and its session ended.
     /// Nothing is reverted; Discard is per lane, on the user's click.
     pub fn stop_all(self: &Arc<Self>) {
-        self.stopping.store(true, Ordering::SeqCst);
         let rec = self.snapshot();
-        if rec.state.terminal() { return; }
+        // a closing run finishes its close; a finished one stays as it is
+        if rec.state.terminal() || !can_move(rec.state, RunState::Stopped) { return; }
+        self.stopping.store(true, Ordering::SeqCst);
         for l in &rec.lanes {
             if l.state.busy() || l.state.between_tries() {
                 let k = self.k_of(&l.id);
@@ -441,13 +464,13 @@ impl RunCtl {
                 self.host.stop(self, &l.id, k);
             }
         }
-        self.update(|r| {
+        let after = self.update(|r| {
+            if r.set_state(RunState::Stopped).is_err() { return; }
             for l in r.lanes.iter_mut() {
                 if l.state.busy() || l.state.between_tries() { l.state = LaneState::Cancelled; l.ended = Some(iso_now()); }
             }
-            let _ = r.set_state(RunState::Stopped);
         });
-        set_round_state(&self.dir, rec.round_n(), "failed");
+        if after.state == RunState::Stopped { set_round_state(&self.dir, rec.round_n(), "failed"); }
     }
 
     /// `chronicle_run_block` (spec §3, §6 decision 2).
@@ -538,9 +561,9 @@ pub fn spawn(ctl: Arc<RunCtl>, rx: Receiver<Ev>, first: Vec<Action>) -> std::thr
                 if ev == Ev::Stop { ctl.stop_all(); return; }
                 ctl.handle(ev);
             }
+            // dropped by its owner (the registry, a test): sessions end, the record stays as it is, for resume
+            if Arc::strong_count(&ctl) == 1 { ctl.release(); return; }
             if !ctl.tick() { return; }
-            // dropped by its owner (the registry, a test): the record stays as it is, for resume
-            if Arc::strong_count(&ctl) == 1 { return; }
         }
     })
 }
@@ -632,13 +655,20 @@ pub(crate) mod testkit {
         policies: Mutex<HashMap<String, Arc<dyn LanePolicy>>>,
         pub started: Mutex<Vec<String>>,
         pub stopped: Mutex<Vec<String>>,
+        /// this many `start` calls fail before they succeed again
+        pub fail_starts: std::sync::atomic::AtomicUsize,
     }
     impl FakeHost {
-        pub fn new(work: Work) -> Arc<Self> { Arc::new(FakeHost { work, end_turns: true, policies: Default::default(), started: Default::default(), stopped: Default::default() }) }
-        pub fn hanging(work: Work) -> Arc<Self> { Arc::new(FakeHost { work, end_turns: false, policies: Default::default(), started: Default::default(), stopped: Default::default() }) }
+        fn with(work: Work, end_turns: bool) -> Arc<Self> {
+            Arc::new(FakeHost { work, end_turns, policies: Default::default(), started: Default::default(), stopped: Default::default(), fail_starts: Default::default() })
+        }
+        pub fn new(work: Work) -> Arc<Self> { Self::with(work, true) }
+        pub fn hanging(work: Work) -> Arc<Self> { Self::with(work, false) }
     }
     impl LaneHost for FakeHost {
         fn start(&self, ctl: &Arc<RunCtl>, lane: &str, _k: u16, policy: Arc<dyn LanePolicy>) -> Result<(), String> {
+            let failing = self.fail_starts.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1)).is_ok();
+            if failing { return Err("the agent couldn't start".into()); }
             lk(&self.started).push(lane.into());
             lk(&self.policies).insert(lane.into(), policy);
             let _ = ctl.tx.send(Ev::Ready { lane: lane.into(), session: format!("s-{lane}") });
@@ -902,8 +932,12 @@ mod tests {
         std::thread::sleep(Duration::from_millis(700));
         assert!(k.ctl.snapshot().lanes.iter().all(|l| l.state == LaneState::Streaming), "one minute without a word isn't a stall");
         // a wire message from b keeps it alive; a stays silent past five minutes
+        // b's wire message lands first (no loop tick can fall into the gap), then the clock moves on
+        let seen = lk(&k.ctl.last_wire).get("b").copied();
         k.ctl.advance_clock(scheduler::STALL_MS - 30_000);
         k.ctl.tx.send(Ev::Wire { lane: "b".into() }).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while lk(&k.ctl.last_wire).get("b").copied() == seen { assert!(std::time::Instant::now() < deadline, "b's wire was never handled"); std::thread::sleep(Duration::from_millis(10)); }
         k.ctl.advance_clock(60_000);
         k.ctl.tx.send(Ev::Kick).unwrap();
         let stalled = wait_until(&k.ctl, 20, |x| x.lane("a").map(|l| l.state) == Some(LaneState::Stalled));
@@ -947,5 +981,90 @@ mod tests {
         assert!(done.lanes.iter().all(|l| l.state == LaneState::Closed));
         assert!(done.needs_you.is_empty(), "b's row went with its park");
         assert_eq!(done.lane("b").unwrap().parked, None);
+    }
+
+    /// Lanes a and b already closed with their own saves.
+    fn closed_lanes(r: &Path, n: u64) -> RunRecord {
+        let mut rec = two_lanes(n, &[], &[]);
+        for id in ["a", "b"] {
+            std::fs::create_dir_all(r.join(id)).unwrap();
+            std::fs::write(r.join(id).join("work.txt"), id).unwrap();
+            let gate::Saved::Commit(c) = gate::save_paths(r, &[format!("{id}/work.txt")], &format!("Lane {id} work")).unwrap() else { panic!() };
+            let l = rec.lane_mut(id).unwrap();
+            l.state = LaneState::Closed;
+            l.commit = Some(c.clone());
+            l.gates.push(Gate { commit: c, ..Default::default() });
+        }
+        rec
+    }
+
+    #[test]
+    fn resuming_a_run_caught_closing_saves_nothing_twice() {
+        let r = repo("closing", 19);
+        let mut rec = closed_lanes(&r, 19);
+        gate::close_commit(&r, 19).unwrap(); // the close commit landed; the record never heard
+        rec.state = RunState::Interrupted;
+        rec.interrupted_from = Some(RunState::Closing);
+        let (back, first) = scheduler::resume(&rec);
+        assert_eq!(first, vec![Action::Close]);
+        let mut k = kit(&r, back, vec![], FakeHost::new(Box::new(|_, _| vec![])));
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), first);
+        let done = wait_until(&k.ctl, 30, |x| x.state.terminal());
+        assert_eq!(done.state, RunState::Done);
+        let log = gate::git(&r, &["log", "--format=%s"]).unwrap();
+        assert_eq!(log.lines().filter(|s| *s == "Close FX-19").count(), 1, "exactly one close commit: {log}");
+        assert!(done.notices.is_empty(), "{:?}", done.notices);
+        assert_eq!(crate::notes::rounds::load(&r).unwrap()[0].state, "done");
+    }
+
+    #[test]
+    fn a_triage_lane_that_cannot_start_goes_back_to_closed_and_the_round_waits_for_you() {
+        let r = repo("triage", 20);
+        let mut rec = closed_lanes(&r, 20);
+        rec.state = RunState::Interrupted;
+        rec.interrupted_from = Some(RunState::Gating);
+        let (back, first) = scheduler::resume(&rec);
+        let host = FakeHost::new(Box::new(|_, _| vec![]));
+        host.fail_starts.store(1, Ordering::SeqCst);
+        let mut k = kit(&r, back, vec![check("whole", "exit 1")], host.clone());
+        k.decide.decide_with(decision(vec![choice("lane", "a", &[("a", 0.9), ("b", 0.05), ("none", 0.05)], 0.9)], "jev-1.13.0", false));
+        spawn(k.ctl.clone(), k.rx.take().unwrap(), first);
+        let held = wait_until(&k.ctl, 30, |x| x.state == RunState::NeedsYou);
+        let a = held.lane("a").unwrap();
+        assert_eq!(a.state, LaneState::Closed, "not left fixing forever");
+        assert_eq!(a.fixes, 0);
+        assert_eq!(held.head_check.as_ref().unwrap().reopened.as_deref(), Some("a"));
+        assert!(held.needs_you.iter().any(|x| x.kind == "head"), "{:#?}", held.needs_you);
+        assert!(host.started.lock().unwrap().is_empty());
+        k.ctl.tx.send(Ev::Stop).unwrap();
+        wait_until(&k.ctl, 20, |x| x.state.terminal());
+    }
+
+    #[test]
+    fn dropping_the_controller_ends_the_lane_sessions() {
+        let r = repo("drop", 21);
+        let host = FakeHost::hanging(Box::new(|_, _| vec![]));
+        let mut k = kit(&r, two_lanes(21, &[], &[]), vec![], host.clone());
+        let h = spawn(k.ctl.clone(), k.rx.take().unwrap(), vec![]);
+        wait_until(&k.ctl, 20, |x| x.lanes.iter().all(|l| l.state == LaneState::Streaming));
+        drop(k);
+        h.join().unwrap();
+        let mut stopped = host.stopped.lock().unwrap().clone();
+        stopped.sort();
+        assert_eq!(stopped, vec!["a", "b"], "both working sessions were ended");
+        let rec = crate::runs::record::load(&r, 21).unwrap().unwrap();
+        assert!(rec.lanes.iter().all(|l| l.state == LaneState::Streaming), "the record stays as it was, for resume");
+    }
+
+    #[test]
+    fn stop_during_closing_leaves_a_done_round_done() {
+        let r = repo("stopclose", 22);
+        let mut rec = closed_lanes(&r, 22);
+        rec.state = RunState::Closing;
+        let k = kit(&r, rec, vec![], FakeHost::new(Box::new(|_, _| vec![])));
+        k.ctl.stop_all();
+        assert_eq!(k.ctl.snapshot().state, RunState::Closing, "a closing run can't be stopped");
+        assert_eq!(crate::notes::rounds::load(&r).unwrap()[0].state, "ready", "the round isn't marked failed");
+        assert!(k.ctl.snapshot().lanes.iter().all(|l| l.state == LaneState::Closed));
     }
 }
