@@ -119,7 +119,9 @@ pub fn begin_in(p: &Project, source: &Source, judge: Option<&Judge>) -> Result<V
     Ok(json!({ "n": n, "total": total, "prompt": prompt }))
 }
 
-fn fail_round(dir: &Path, n: u64) {
+fn fail_round(dir: &Path, n: u64, kind: RunKind) {
+    // a plan was the user's before the run: its round goes back to ready and its notes stay as they are
+    if kind == RunKind::Plan { return runner::set_round_state(dir, n, "ready"); }
     if let Ok(rounds) = crate::notes::rounds::load(dir) {
         if let Some(r) = rounds.iter().find(|r| r.n == n) {
             for rel in &r.note_paths { let _ = crate::notes::rounds::set_status(dir, rel, Some("queued"), None); }
@@ -166,7 +168,7 @@ pub fn settle_in(p: &Project, n: u64, planner_cost: f64) -> Result<Settle, Strin
         rec.planner_error = rec.planner_error.clone().or_else(|| planner_last_text(&p.dir));
         let why = rec.planner_error.clone().unwrap_or_else(|| "The planner never declared a lane map.".into());
         save(&p.dir, &mut rec)?;
-        fail_round(&p.dir, rec.round_n());
+        fail_round(&p.dir, rec.round_n(), rec.kind);
         return Ok(Settle::Failed(format!("No lane map Chronicle could accept after three tries. {why}")));
     }
     save(&p.dir, &mut rec)?;
@@ -190,13 +192,14 @@ pub fn cancel_planning_in(p: &Project, n: u64) -> Result<(), String> {
 }
 
 /// After a restart: a run nobody drives is interrupted, remembering where.
-pub fn recover_in(dir: &Path, live: &dyn Fn(u64) -> bool) -> Vec<RunRecord> {
+/// Each record it marks is handed to `marked` (the app publishes it).
+pub fn recover_in(dir: &Path, live: &dyn Fn(u64) -> bool, marked: &dyn Fn(&RunRecord)) -> Vec<RunRecord> {
     let mut out = list(dir);
     for r in out.iter_mut() {
         if !r.state.terminal() && r.state != RunState::Interrupted && !live(r.n) {
             r.interrupted_from = Some(r.state);
             r.state = RunState::Interrupted;
-            let _ = save(dir, r);
+            if save(dir, r).is_ok() { marked(r); }
         }
     }
     out
@@ -212,17 +215,18 @@ pub fn apply_needs_you(dir: &Path, rec: &mut RunRecord, act: &NeedsAct) -> Resul
     let parked_at = |rec: &RunRecord, item: &str| rec.needs_you.iter().position(|x| x.kind == "parked" && x.item.as_deref() == Some(item)).ok_or_else(|| format!("{item} isn't waiting on you."));
     match act {
         NeedsAct::Skip { item } => {
+            // everything that can fail comes first: a failed Skip keeps its row and changes nothing
             let i = parked_at(rec, item)?;
-            rec.needs_you.remove(i);
-            rec.skipped.push(item.clone());
             let note = rec.lane_map.as_ref().and_then(|m| m.items.iter().find(|x| &x.id == item)).and_then(|x| x.note.clone());
-            if let Some(note) = note {
-                crate::notes::rounds::set_status(dir, &note, Some("queued"), None)?;
+            if let Some(note) = &note {
+                crate::notes::rounds::set_status(dir, note, Some("queued"), None)?;
                 if let Ok(mut rounds) = crate::notes::rounds::load(dir) {
-                    if let Some(r) = rounds.iter_mut().find(|r| r.n == rec.round_n()) { r.note_paths.retain(|p| p != &note); }
+                    if let Some(r) = rounds.iter_mut().find(|r| r.n == rec.round_n()) { r.note_paths.retain(|p| p != note); }
                     let _ = crate::notes::rounds::save(dir, &rounds);
                 }
             }
+            rec.needs_you.remove(i);
+            rec.skipped.push(item.clone());
         }
         NeedsAct::Rewrite { item, text } => {
             let text = text.trim();
@@ -243,8 +247,9 @@ pub fn apply_needs_you(dir: &Path, rec: &mut RunRecord, act: &NeedsAct) -> Resul
         NeedsAct::Retry { lane } => {
             // the controller's next tick un-parks the lanes that waited on this one (`unpark_dependents`)
             let i = rec.needs_you.iter().position(|x| x.kind == "exhausted" && x.lane.as_deref() == Some(lane)).ok_or_else(|| format!("Lane {} isn't waiting on you.", lane.to_uppercase()))?;
+            if rec.lane(lane).is_none() { return Err(format!("There's no lane {lane}.")); }
             rec.needs_you.remove(i);
-            let l = rec.lane_mut(lane).ok_or_else(|| format!("There's no lane {lane}."))?;
+            let Some(l) = rec.lane_mut(lane) else { return Ok(()) };
             l.state = LaneState::Waiting;
             l.attempt = 0;
             l.fixes = 0;
@@ -264,6 +269,41 @@ pub fn apply_needs_you(dir: &Path, rec: &mut RunRecord, act: &NeedsAct) -> Resul
     }
     if rec.state == RunState::NeedsYou && scheduler::blocking(rec) == 0 { rec.set_state(RunState::Running)?; }
     Ok(())
+}
+
+/// A needs-you action on a run no controller holds: a refused publish can be
+/// dismissed from the record itself (a planning run's chat lane makes those);
+/// everything else waits for the run to be driven again.
+pub fn needs_you_on_record(dir: &Path, n: u64, act: &NeedsAct) -> Result<RunRecord, String> {
+    let mut rec = load(dir, n)?.ok_or_else(|| format!("There's no round {n}."))?;
+    if !matches!(act, NeedsAct::Dismiss { .. }) {
+        return Err(match rec.state {
+            RunState::Interrupted => "Resume the run first.".to_string(),
+            RunState::Planning => format!("Round {n} is still being planned."),
+            s if s.terminal() => format!("Round {n} has finished."),
+            _ => format!("Round {n} isn't being driven right now."),
+        });
+    }
+    apply_needs_you(dir, &mut rec, act)?;
+    save(dir, &mut rec)?;
+    Ok(rec)
+}
+
+/// The cancel Stop sends a planning run's turn (spec §3: Stop is session/cancel):
+/// the planner is the chat lane's session. False when no session is there.
+pub fn cancel_planner_turn(agents: &crate::acp::AcpState, dir: &Path) -> bool {
+    agents.get(&planner_key(dir)).map(|s| s.cancel().is_ok()).unwrap_or(false)
+}
+/// The chat lane's session key for a canonical project dir (main.rs's `session_key`).
+fn planner_key(dir: &Path) -> String { crate::acp::Lane::Chat.key(&dir.to_string_lossy()) }
+
+/// Begin under the project's in-flight hold: a second begin (or a resume)
+/// while this one sizes and saves is refused with a sentence.
+pub fn begin_with(runs: &Runs, p: &Project, source: &Source, judge: Option<&Judge>) -> Result<Value, String> {
+    let _hold = runs.hold(&p.dir)?;
+    let out = begin_in(p, source, judge)?;
+    if let Some(n) = out["n"].as_u64() { runs.planning(&p.dir, n); }
+    Ok(out)
 }
 
 /// A controller for a running record, registered and started. The judge and
@@ -287,16 +327,16 @@ fn live_ctl(runs: &Runs, p: &Project, n: u64) -> Result<Arc<RunCtl>, String> {
 }
 
 #[tauri::command]
-pub async fn run_begin(roots: State<'_, OpenRoots>, runs: State<'_, Runs>, dir: String, source: Source) -> Result<Value, String> {
+pub async fn run_begin(app: tauri::AppHandle, roots: State<'_, OpenRoots>, runs: State<'_, Runs>, dir: String, source: Source) -> Result<Value, String> {
     let p = crate::project_for(&roots, &dir)?;
     // the sizing decision may wait on a provider or the agent: off the async runtime
-    let q = p.clone();
+    let (q, h) = (p.clone(), app.clone());
     let out = tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
         let (decisions, review) = oracle::for_project(&q.dir);
-        begin_in(&q, &source, Some(&Judge::new(decisions, review)))
+        begin_with(&h.state::<Runs>(), &q, &source, Some(&Judge::new(decisions, review)))
     }).await.map_err(|e| e.to_string())??;
     if let Some(n) = out["n"].as_u64() {
-        runs.planning(&p.dir, n);
         if let Some(rec) = load(&p.dir, n).ok().flatten() { runs.publish(&p.dir, &rec); }
     }
     Ok(out)
@@ -326,16 +366,21 @@ pub async fn run_plan_cancel(roots: State<'_, OpenRoots>, runs: State<'_, Runs>,
 pub async fn runs_list(roots: State<'_, OpenRoots>, runs: State<'_, Runs>, dir: String) -> Result<Vec<RunRecord>, String> {
     let p = crate::project_for(&roots, &dir)?;
     let live = |n: u64| is_live(&runs, &p.dir, n);
-    Ok(recover_in(&p.dir, &live).into_iter().map(|r| runs.get(&p.dir, r.n).map(|c| c.snapshot()).unwrap_or(r)).collect())
+    let marked = |r: &RunRecord| runs.publish(&p.dir, r);
+    Ok(recover_in(&p.dir, &live, &marked).into_iter().map(|r| runs.get(&p.dir, r.n).map(|c| c.snapshot()).unwrap_or(r)).collect())
 }
 
 #[tauri::command]
-pub async fn run_stop(roots: State<'_, OpenRoots>, runs: State<'_, Runs>, dir: String, n: u64) -> Result<(), String> {
+pub async fn run_stop(roots: State<'_, OpenRoots>, runs: State<'_, Runs>, agents: State<'_, crate::acp::AcpState>, dir: String, n: u64) -> Result<(), String> {
     let p = crate::project_for(&roots, &dir)?;
     if let Ok(ctl) = live_ctl(&runs, &p, n) { return ctl.tx.send(runner::Ev::Stop).map_err(|e| e.to_string()); }
     let rec = load(&p.dir, n)?.ok_or_else(|| format!("There's no round {n}."))?;
     match rec.state {
-        RunState::Planning => cancel_planning_in(&p, n)?,
+        RunState::Planning => {
+            // the planner's turn ends first, so it writes nothing after its files are swept
+            cancel_planner_turn(&agents, &p.dir);
+            cancel_planning_in(&p, n)?
+        }
         RunState::Interrupted if rec.interrupted_from == Some(RunState::Planning) => cancel_planning_in(&p, n)?,
         RunState::Interrupted => {
             let mut r = rec;
@@ -352,6 +397,8 @@ pub async fn run_stop(roots: State<'_, OpenRoots>, runs: State<'_, Runs>, dir: S
 #[tauri::command]
 pub async fn run_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>, runs: State<'_, Runs>, dir: String, n: u64) -> Result<Value, String> {
     let p = crate::project_for(&roots, &dir)?;
+    // one resume (or begin) at a time: the check below and the controller's insert happen under it
+    let _hold = runs.hold(&p.dir)?;
     let rec = load(&p.dir, n)?.ok_or_else(|| format!("There's no round {n}."))?;
     if rec.state != RunState::Interrupted { return Err(format!("Round {n} wasn't interrupted.")); }
     let (mut back, first) = scheduler::resume(&rec);
@@ -368,7 +415,11 @@ pub async fn run_resume(app: tauri::AppHandle, roots: State<'_, OpenRoots>, runs
 #[tauri::command]
 pub async fn run_needs_you(roots: State<'_, OpenRoots>, runs: State<'_, Runs>, dir: String, n: u64, act: NeedsAct) -> Result<(), String> {
     let p = crate::project_for(&roots, &dir)?;
-    let ctl = live_ctl(&runs, &p, n)?;
+    let Some(ctl) = runs.get(&p.dir, n).filter(|c| !c.snapshot().state.terminal()) else {
+        let rec = needs_you_on_record(&p.dir, n, &act)?;
+        runs.publish(&p.dir, &rec);
+        return Ok(());
+    };
     let mut result = Ok(());
     ctl.update(|r| { result = apply_needs_you(&p.dir, r, &act); });
     // the next tick acts on it — a retried lane starts and the lanes that waited on it un-park
@@ -527,10 +578,12 @@ mod tests {
         let mut r = RunRecord::new(7, RunKind::Prompt, Some(7), "p", "q", "x");
         r.state = RunState::Gating;
         save(&p.dir, &mut r).unwrap();
-        let out = recover_in(&p.dir, &|_| false);
+        let marked = std::cell::RefCell::new(vec![]);
+        let out = recover_in(&p.dir, &|_| false, &|r| marked.borrow_mut().push(r.n));
         assert_eq!(out[0].state, RunState::Interrupted);
         assert_eq!(out[0].interrupted_from, Some(RunState::Gating));
-        assert_eq!(recover_in(&p.dir, &|_| true)[0].state, RunState::Interrupted, "an interrupted run stays so until Resume");
+        assert_eq!(recover_in(&p.dir, &|_| true, &|r| marked.borrow_mut().push(r.n))[0].state, RunState::Interrupted, "an interrupted run stays so until Resume");
+        assert_eq!(*marked.borrow(), vec![7], "the record it marked is published, once");
     }
 
     #[test]
@@ -538,11 +591,10 @@ mod tests {
         let p = project("planning-live");
         note(&p, "Tasks/A.md", "x");
         let runs = Runs::new();
-        begin_in(&p, &Source::Notes, None).unwrap();
-        runs.planning(&p.dir, 1);
-        assert_eq!(recover_in(&p.dir, &|n| is_live(&runs, &p.dir, n))[0].state, RunState::Planning, "the chat lane is writing it");
+        begin_with(&runs, &p, &Source::Notes, None).unwrap();
+        assert_eq!(recover_in(&p.dir, &|n| is_live(&runs, &p.dir, n), &|_| {})[0].state, RunState::Planning, "the chat lane is writing it");
         let after_restart = Runs::new();
-        assert_eq!(recover_in(&p.dir, &|n| is_live(&after_restart, &p.dir, n))[0].state, RunState::Interrupted);
+        assert_eq!(recover_in(&p.dir, &|n| is_live(&after_restart, &p.dir, n), &|_| {})[0].state, RunState::Interrupted);
     }
 
     #[test]
@@ -611,6 +663,76 @@ mod tests {
         assert_eq!(done.state, RunState::Done, "{done:#?}");
         assert!(done.lanes.iter().all(|l| l.state == LaneState::Closed));
         assert!(done.needs_you.is_empty(), "b's row went with its park");
+    }
+
+    #[test]
+    fn a_failed_plan_run_hands_its_round_back_with_its_notes_untouched() {
+        let p = project("plan-fail");
+        note(&p, "Tasks/A.md", "x");
+        crate::notes::rounds::set_status(&p.dir, "Tasks/A.md", Some("done"), Some(4)).unwrap();
+        crate::notes::rounds::save(&p.dir, &[crate::notes::rounds::Round { n: 4, state: "done".into(), kind: None, task_ids: vec![],
+            note_paths: vec!["Tasks/A.md".into()], created_at: 0, plan_path: "fixes/phase_4_fixes_plan.md".into(), prompt_path: "fixes/phase_4_fixes_prompt.md".into() }]).unwrap();
+        std::fs::write(p.dir.join("fixes/phase_4_fixes_plan.md"), "Round kind: bug fixes\n\n- I-1 do a\n").unwrap();
+        begin_in(&p, &Source::Plan { path: "fixes/phase_4_fixes_plan.md".into() }, None).unwrap();
+        for _ in 0..2 { assert!(matches!(settle_in(&p, 4, 0.0).unwrap(), Settle::Retry(_))); }
+        assert!(matches!(settle_in(&p, 4, 0.0).unwrap(), Settle::Failed(_)));
+        let round = crate::notes::rounds::load(&p.dir).unwrap().into_iter().find(|r| r.n == 4).unwrap();
+        assert_eq!((round.state.as_str(), round.note_paths.len()), ("ready", 1));
+        let text = std::fs::read_to_string(p.dir.join(".chronicle/notes/Tasks/A.md")).unwrap();
+        assert!(text.contains("status: done"), "a done note of the plan's round stays done: {text}");
+    }
+
+    #[test]
+    fn stop_on_a_planning_run_cancels_the_chat_lanes_turn() {
+        let p = project("stop-planner");
+        assert_eq!(planner_key(&p.dir), p.dir.to_string_lossy(), "the chat lane keeps the historic key: the canonical project path");
+        assert!(!cancel_planner_turn(&crate::acp::AcpState::new(), &p.dir), "no chat session: nothing to cancel, and no error");
+    }
+
+    #[test]
+    fn a_failed_needs_you_action_keeps_its_row_and_changes_nothing() {
+        let p = project("needs-fail");
+        let mut r = RunRecord::new(2, RunKind::Notes, Some(2), "p", "q", "");
+        r.lane_map = Some(one_lane(Some("Tasks/missing.md")));
+        r.lanes = vec![LaneRecord::new("a")];
+        r.state = RunState::NeedsYou;
+        r.needs_you.push(NeedsYou { kind: "parked".into(), lane: Some("a".into()), item: Some("T-1".into()), reason: "no".into(), reading: None });
+        r.needs_you.push(NeedsYou { kind: "exhausted".into(), lane: Some("z".into()), item: None, reason: "gone".into(), reading: None });
+        let before = serde_json::to_value(&r).unwrap();
+        assert!(apply_needs_you(&p.dir, &mut r, &NeedsAct::Skip { item: "T-1".into() }).is_err(), "the note can't be put back");
+        assert!(apply_needs_you(&p.dir, &mut r, &NeedsAct::Retry { lane: "z".into() }).unwrap_err().contains("no lane z"));
+        assert_eq!(serde_json::to_value(&r).unwrap(), before);
+    }
+
+    #[test]
+    fn a_refused_row_on_a_run_nobody_drives_can_be_dismissed_and_nothing_else() {
+        let p = project("needs-planning");
+        let mut r = RunRecord::new(3, RunKind::Prompt, Some(3), "p", "q", "x");
+        r.needs_you.push(NeedsYou { kind: "refused".into(), lane: None, item: None, reason: "git push".into(), reading: None });
+        r.needs_you.push(NeedsYou { kind: "parked".into(), lane: Some("a".into()), item: Some("T-1".into()), reason: "no".into(), reading: None });
+        save(&p.dir, &mut r).unwrap();
+        assert_eq!(needs_you_on_record(&p.dir, 3, &NeedsAct::Skip { item: "T-1".into() }).unwrap_err(), "Round 3 is still being planned.");
+        let out = needs_you_on_record(&p.dir, 3, &NeedsAct::Dismiss { index: 0 }).unwrap();
+        assert_eq!(out.needs_you.len(), 1);
+        assert_eq!(load(&p.dir, 3).unwrap().unwrap().needs_you.len(), 1, "saved");
+        let mut i = load(&p.dir, 3).unwrap().unwrap();
+        i.state = RunState::Interrupted;
+        save(&p.dir, &mut i).unwrap();
+        assert_eq!(needs_you_on_record(&p.dir, 3, &NeedsAct::Recheck).unwrap_err(), "Resume the run first.");
+    }
+
+    #[test]
+    fn a_second_begin_while_the_first_is_under_way_is_refused() {
+        let p = project("begin-twice");
+        note(&p, "Tasks/A.md", "x");
+        let runs = Runs::new();
+        let first = runs.hold(&p.dir).unwrap();
+        let e = begin_with(&runs, &p, &Source::Notes, None).unwrap_err();
+        assert_eq!(e, "Chronicle is already starting a round in this project. Wait a moment, then try again.");
+        assert!(crate::notes::rounds::load(&p.dir).unwrap().is_empty(), "the refused begin froze nothing");
+        drop(first);
+        assert!(begin_with(&runs, &p, &Source::Notes, None).is_ok(), "the hold goes with the first begin");
+        assert!(runs.hold(&p.dir).is_ok(), "and with the second");
     }
 
     #[test]

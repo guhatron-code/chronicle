@@ -41,10 +41,13 @@ pub fn lane_event(lane: &str, v: &Value) -> Ev {
 /// to the pane only.
 fn forward(tx: Sender<Ev>, lane: String, current: Arc<AtomicBool>) -> impl Fn(&Value) + Send + Sync {
     let tx = Mutex::new(tx);
-    move |v: &Value| {
-        if !current.load(Ordering::SeqCst) { return; }
-        if let Ok(t) = tx.lock() { let _ = t.send(lane_event(&lane, v)); }
-    }
+    move |v: &Value| { if let Ok(t) = tx.lock() { tell(&current, &t, lane_event(&lane, v)); } }
+}
+
+/// Every word from one session start to the controller — its wire, and the
+/// host's own `Died` / failed-turn reports for it — goes through its flag.
+fn tell(current: &AtomicBool, tx: &Sender<Ev>, ev: Ev) {
+    if current.load(Ordering::SeqCst) { let _ = tx.send(ev); }
 }
 
 /// The app's lane host. `start`, `prompt` and `stop` return at once (the
@@ -60,6 +63,9 @@ impl AcpHost {
     pub fn new(app: tauri::AppHandle) -> Self { AcpHost { app, current: Mutex::new(HashMap::new()) } }
     fn key(ctl: &RunCtl, k: u16) -> String { acp::Lane::Worker { run: ctl.n, k }.key(&ctl.dir.to_string_lossy()) }
     fn session(&self, ctl: &RunCtl, k: u16) -> Option<Arc<acp::AcpSession>> { self.app.state::<acp::AcpState>().get(&Self::key(ctl, k)) }
+    fn flag(&self, key: &str) -> Option<Arc<AtomicBool>> {
+        self.current.lock().unwrap_or_else(|e| e.into_inner()).get(key).cloned()
+    }
     /// The key's current session stops speaking to the controller; a new start's flag, if any, replaces it.
     fn retire(&self, key: &str, next: Option<Arc<AtomicBool>>) {
         let mut g = self.current.lock().unwrap_or_else(|e| e.into_inner());
@@ -99,18 +105,19 @@ impl LaneHost for AcpHost {
                 Ok(false) => "the lane's previous session was still running".to_string(),
                 Err(e) => e,
             };
-            let _ = tx.send(Ev::Died { lane: id, reason });
+            tell(&flag, &tx, Ev::Died { lane: id, reason });
         });
         Ok(())
     }
     fn prompt(&self, ctl: &Arc<RunCtl>, lane: &str, k: u16, text: &str) -> Result<(), String> {
         let s = self.session(ctl, k).ok_or("the lane's session isn't running")?;
+        let flag = self.flag(&Self::key(ctl, k)).ok_or("the lane's session was stopped")?;
         let (tx, id, text) = (ctl.tx.clone(), lane.to_string(), text.to_string());
         std::thread::spawn(move || {
             // the thread shows the first line ("You are lane C of round 10: …"), the agent gets it all
             let display = text.lines().next().unwrap_or("").to_string();
             if s.prompt(vec![json!({ "type": "text", "text": text })], display).is_err() {
-                let _ = tx.send(Ev::TurnEnd { lane: id, stop: None, error: true });
+                tell(&flag, &tx, Ev::TurnEnd { lane: id, stop: None, error: true });
             }
         });
         Ok(())
@@ -212,6 +219,8 @@ mod tests {
     #[test]
     fn a_stopped_session_no_longer_speaks_to_the_controller() {
         let (tx, rx) = std::sync::mpsc::channel();
+        let (to_ctl_tx, to_ctl_rx) = std::sync::mpsc::channel::<Ev>();
+        let tx_of = |t: &Sender<Ev>| t.clone();
         let current = Arc::new(AtomicBool::new(true));
         let to_ctl = forward(tx, "a".into(), current.clone());
         to_ctl(&wire("_chronicle/turn_end", json!({ "stopReason": "end_turn" })));
@@ -219,5 +228,12 @@ mod tests {
         current.store(false, Ordering::SeqCst);
         to_ctl(&wire("_chronicle/session_state", json!({ "state": "ended" })));
         assert!(rx.try_recv().is_err(), "the ended line of a session the controller stopped is not a death of the lane's next try");
+        // the host's own reports about that session (a failed launch, a failed prompt) are held back the same way
+        tell(&current, &tx_of(&to_ctl_tx), Ev::Died { lane: "a".into(), reason: "x".into() });
+        tell(&current, &tx_of(&to_ctl_tx), Ev::TurnEnd { lane: "a".into(), stop: None, error: true });
+        assert!(to_ctl_rx.try_recv().is_err());
+        current.store(true, Ordering::SeqCst);
+        tell(&current, &tx_of(&to_ctl_tx), Ev::Died { lane: "a".into(), reason: "x".into() });
+        assert!(matches!(to_ctl_rx.try_recv(), Ok(Ev::Died { .. })), "a live session's death still reaches the controller");
     }
 }

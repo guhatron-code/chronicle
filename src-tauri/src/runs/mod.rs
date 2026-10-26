@@ -28,10 +28,18 @@ pub struct Runs {
     /// runs whose planner prompt went to the chat lane in this app session —
     /// a planning run from before a restart is nobody's, so it reads as interrupted
     planning: Mutex<HashSet<(PathBuf, u64)>>,
+    /// projects with a begin or a resume under way (`hold`)
+    busy: Arc<Mutex<HashSet<PathBuf>>>,
+}
+
+/// A project's begin-or-resume hold; released when dropped.
+pub struct Hold { busy: Arc<Mutex<HashSet<PathBuf>>>, dir: PathBuf }
+impl Drop for Hold {
+    fn drop(&mut self) { if let Ok(mut g) = self.busy.lock() { g.remove(&self.dir); } }
 }
 
 impl Runs {
-    pub fn new() -> Self { Runs { ctls: Mutex::new(HashMap::new()), emit: Mutex::new(None), planning: Mutex::new(HashSet::new()) } }
+    pub fn new() -> Self { Runs { ctls: Mutex::new(HashMap::new()), emit: Mutex::new(None), planning: Mutex::new(HashSet::new()), busy: Default::default() } }
     pub fn set_emit(&self, f: runner::Publish) { if let Ok(mut g) = self.emit.lock() { *g = Some(f); } }
     pub fn publish(&self, dir: &Path, rec: &record::RunRecord) {
         if let Some(f) = self.emit.lock().ok().and_then(|g| g.clone()) { f(dir, rec); }
@@ -52,6 +60,12 @@ impl Runs {
     }
     pub fn is_planning(&self, dir: &Path, n: u64) -> bool {
         self.planning.lock().map(|g| g.contains(&(dir.to_path_buf(), n))).unwrap_or(false)
+    }
+    /// One begin or resume per project at a time: the second is refused, never queued.
+    pub fn hold(&self, dir: &Path) -> Result<Hold, String> {
+        let mut g = self.busy.lock().map_err(|e| e.to_string())?;
+        if !g.insert(dir.to_path_buf()) { return Err("Chronicle is already starting a round in this project. Wait a moment, then try again.".into()); }
+        Ok(Hold { busy: self.busy.clone(), dir: dir.to_path_buf() })
     }
     pub fn get(&self, dir: &Path, n: u64) -> Option<Arc<runner::RunCtl>> {
         self.ctls.lock().ok()?.get(&(dir.to_path_buf(), n)).cloned()
