@@ -562,10 +562,13 @@ export const decodePtyChunk = (b64: string): Uint8Array =>
 /* ---------- the agent pane (ACP — src-tauri/src/acp.rs) ---------- */
 
 /** The chat lane is keyed by the project dir alone; the design lane suffixes
- *  it with `#design` — the same project, a second session beside it. */
-export type Lane = "chat" | "design";
+ *  it with `#design`; a run's lane k of run n with `#w/<n>-<k>`. */
+export type Lane = "chat" | "design" | `w/${number}-${number}`;
 export function splitLaneKey(key: string): { dir: string; lane: Lane } {
-  return key.endsWith("#design") ? { dir: key.slice(0, -"#design".length), lane: "design" } : { dir: key, lane: "chat" };
+  if (key.endsWith("#design")) return { dir: key.slice(0, -"#design".length), lane: "design" };
+  const i = key.lastIndexOf("#w/");
+  if (i >= 0) return { dir: key.slice(0, i), lane: key.slice(i + 1) as Lane };
+  return { dir: key, lane: "chat" };
 }
 const laneArgs = (key: string) => splitLaneKey(key);
 

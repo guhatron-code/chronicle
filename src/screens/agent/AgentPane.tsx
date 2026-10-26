@@ -389,6 +389,8 @@ function Entry({
   // "guard" is the design lane's own entry kind (a tool call the acp seam
   // judged against the designs folder) — only the refusals show
   if (entry.kind === "guard") return <GuardRow entry={entry} />;
+  // the run card's face lands with the Runs pane; until then it has no row
+  if (entry.kind === "run") return null;
   return (
     <div className="px-3.5 py-1">
       <ToolCard tool={entry} dir={dir} readOnly={readOnly} />

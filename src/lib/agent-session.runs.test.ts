@@ -1,0 +1,106 @@
+/*
+ * Runs in the agent store: a lane's wire lands in its own session keyed under
+ * its run; a run's card enters the chat thread and its planner prompt is sent;
+ * the planning turn's end starts the run, or sends the reasons and waits again.
+ */
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentEntry } from "./agent-session";
+
+type Update = { dir: string; lane?: string; message: { method: string; params?: Record<string, unknown> } };
+let onUpdate: ((u: Update) => void) | null = null;
+
+vi.mock("./ipc", () => ({
+  agentsAvailable: vi.fn(async () => ({ claude: null, codex: null, default: "" })),
+  onAcpUpdate: vi.fn(async (cb: (u: Update) => void) => { onUpdate = cb; return () => {}; }),
+  agentPrompt: vi.fn(async () => {}), roundRunMessage: vi.fn(async () => ""), agentSessionStart: vi.fn(async () => {}),
+  roundPlanBegin: vi.fn(), roundPlanCancel: vi.fn(async () => {}), roundPlanSettle: vi.fn(),
+  agentCancel: vi.fn(), agentEdits: vi.fn(async () => ({ files: [] })), agentHistoryRead: vi.fn(async () => ({ lines: [] })),
+  agentSetConfigOption: vi.fn(), agentRespondPermission: vi.fn(), agentSessionResume: vi.fn(),
+  agentSessionState: vi.fn(), agentSessionStop: vi.fn(), agentSessionsList: vi.fn(), agentSetMode: vi.fn(), designOutsideFiles: vi.fn(async () => []),
+}));
+vi.mock("./runs-ipc", () => ({
+  runBegin: vi.fn(async () => ({ n: 10, total: 7, prompt: "PLAN IT" })),
+  runPlanSettle: vi.fn(async () => ({ state: "running" })),
+  runPlanCancel: vi.fn(async () => {}),
+  runResume: vi.fn(async () => ({ state: "planning", prompt: "PLAN AGAIN" })),
+}));
+vi.mock("./runs-store", () => ({ refreshRuns: vi.fn(async () => {}) }));
+vi.mock("./notes-store", () => ({
+  indexFor: () => ({ notes: [], rounds: [], generation: 0, vault: "", borrowed: false }),
+  refreshNotes: vi.fn(async () => {}), roundGenerating: vi.fn(() => false), roundNotesFor: vi.fn(() => []), setRoundGenerating: vi.fn(),
+}));
+vi.mock("./journal", () => ({ announce: vi.fn() }));
+vi.mock("@/overlays/toasts", () => ({ toastAction: vi.fn(), toastError: vi.fn() }));
+
+const ipc = await import("./ipc");
+const runsIpc = await import("./runs-ipc");
+const agent = await import("./agent-session");
+const DIR = "/home/u/proj";
+const chunk = (text: string) => ({ method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } } });
+const usage = (amount: number) => ({ method: "session/update", params: { update: { sessionUpdate: "usage_update", used: 1, size: 10, cost: { amount } } } });
+const turnEnd = () => ({ method: "_chronicle/turn_end", params: { stopReason: "end_turn" } });
+const runCard = () => agent.agentSessionFor(DIR).entries.find((e) => e.kind === "run") as Extract<AgentEntry, { kind: "run" }> | undefined;
+
+describe("runs in the agent store", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.assign(agent.agentSessionFor(DIR), { phase: "ready", turnActive: false, entries: [], queue: [], cost: 1.0 });
+  });
+
+  it("a lane's updates land in its own session, keyed under its run", () => {
+    onUpdate!({ dir: DIR, lane: "w/10-2", message: chunk("lane says hi") });
+    agent.flushAgentNotifications();
+    const key = agent.laneKey(DIR, "w/10-2");
+    expect(key).toBe(`${DIR}#w/10-2`);
+    expect(agent.splitLaneKey(key)).toEqual({ dir: DIR, lane: "w/10-2" });
+    expect(agent.splitLaneKey(`/a#b/p#w/1-0`)).toEqual({ dir: "/a#b/p", lane: "w/1-0" });
+    expect(agent.agentSessionFor(key).entries[0]).toMatchObject({ kind: "assistant", text: "lane says hi" });
+    expect(agent.agentSessionFor(DIR).entries).toHaveLength(0);
+  });
+
+  it("a decision rides on its guard row", () => {
+    const key = agent.laneKey(DIR, "w/10-1");
+    onUpdate!({ dir: DIR, lane: "w/10-1", message: { method: "_chronicle/guard", params: { allowed: true, path: "npx vitest run src/lib", reason: "it reads only",
+      decision: { choice: "allow", confidence: 0.93, model: "jev-1.13.0", band: "act" } } } });
+    expect(agent.agentSessionFor(key).entries.at(-1)).toMatchObject({ kind: "guard", allowed: true, decision: { confidence: 0.93, model: "jev-1.13.0" } });
+  });
+
+  it("a run lands its card and sends the planner prompt", async () => {
+    expect(await agent.startRunInPane(DIR, { kind: "notes" })).toBe(10);
+    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    expect(runCard()).toMatchObject({ kind: "run", n: 10, total: 7, queued: false, costBase: 1.0 });
+    expect(vi.mocked(ipc.agentPrompt).mock.calls[0][2]).toBe("PLAN IT");
+  });
+
+  it("the planning turn's end starts the run with what the turn cost", async () => {
+    await agent.startRunInPane(DIR, { kind: "notes" });
+    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    onUpdate!({ dir: DIR, lane: "chat", message: usage(1.26) });
+    onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
+    await vi.waitFor(() => expect(runsIpc.runPlanSettle).toHaveBeenCalledWith(DIR, 10, expect.closeTo(0.26, 5)));
+    await vi.waitFor(() => expect(runCard()).toMatchObject({ ended: true, outcome: "running" }));
+  });
+
+  it("a turn that declared no map sends the reasons and waits again", async () => {
+    vi.mocked(runsIpc.runPlanSettle).mockResolvedValueOnce({ state: "retry", prompt: "FIX THE MAP" });
+    await agent.startRunInPane(DIR, { kind: "notes" });
+    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalledTimes(1));
+    onUpdate!({ dir: DIR, lane: "chat", message: turnEnd() });
+    await vi.waitFor(() => expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("FIX THE MAP"));
+    expect(runCard()).toMatchObject({ ended: false, queued: false });
+  });
+
+  it("a stopped planning turn cancels the run", async () => {
+    await agent.startRunInPane(DIR, { kind: "notes" });
+    await vi.waitFor(() => expect(ipc.agentPrompt).toHaveBeenCalled());
+    onUpdate!({ dir: DIR, lane: "chat", message: { method: "_chronicle/turn_end", params: { stopReason: "cancelled" } } });
+    await vi.waitFor(() => expect(runsIpc.runPlanCancel).toHaveBeenCalledWith(DIR, 10));
+    await vi.waitFor(() => expect(runCard()).toMatchObject({ ended: true, outcome: "cancelled" }));
+  });
+
+  it("resuming a run caught while planning sends its planner prompt again", async () => {
+    await agent.resumeRunInPane(DIR, 10);
+    await vi.waitFor(() => expect(vi.mocked(ipc.agentPrompt).mock.calls.at(-1)?.[2]).toBe("PLAN AGAIN"));
+    expect(runCard()).toMatchObject({ n: 10 });
+  });
+});

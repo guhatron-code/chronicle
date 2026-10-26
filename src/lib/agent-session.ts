@@ -39,17 +39,23 @@ import { announce } from "./journal";
 import { touch } from "./thread-rows";
 import { recordRateLimit } from "./limits-store";
 import { toastAction, toastError } from "@/overlays/toasts";
+import { runBegin, runPlanCancel, runPlanSettle, runResume, type RunSource } from "./runs-ipc";
+import { refreshRuns } from "./runs-store";
 
 export { type Lane } from "./ipc";
 /** The chat lane's key IS the project dir; the design lane's is
- *  `laneKey(dir, "design")` — the same project, a second session beside it. */
-export const laneKey = (dir: string, lane: Lane): string => (lane === "chat" ? dir : `${dir}#design`);
+ *  `laneKey(dir, "design")` — the same project, a second session beside it —
+ *  and a run's worker lane is `laneKey(dir, "w/<n>-<k>")`. */
+export const laneKey = (dir: string, lane: Lane): string => (lane === "chat" ? dir : `${dir}#${lane}`);
 /** The inverse of `laneKey` — kept as our own pure logic (not imported from
  *  ./ipc) so the reducer never depends on a live binding into a module every
  *  suite in this file mocks wholesale. Suffix stays byte-identical to ipc.ts's
  *  own `splitLaneKey`, which is what the public export below re-exports. */
 function splitKey(key: string): { dir: string; lane: Lane } {
-  return key.endsWith("#design") ? { dir: key.slice(0, -"#design".length), lane: "design" } : { dir: key, lane: "chat" };
+  if (key.endsWith("#design")) return { dir: key.slice(0, -"#design".length), lane: "design" };
+  const i = key.lastIndexOf("#w/");
+  if (i >= 0) return { dir: key.slice(0, i), lane: key.slice(i + 1) as Lane };
+  return { dir: key, lane: "chat" };
 }
 export { splitKey as splitLaneKey };
 
@@ -126,7 +132,14 @@ export type AgentEntry = { rev: number } & (
     }
   | { kind: "turn-error"; message: string }
   /** the acp seam refused a tool call outside the design's own folder (Design pane) */
-  | { kind: "guard"; allowed: boolean; path: string; reason: string }
+  | {
+      kind: "guard";
+      allowed: boolean;
+      path: string;
+      reason: string;
+      /** the judge's call on an ask a run's lane raised (Runs) — absent on a plain fence refusal */
+      decision?: { choice: string; confidence: number; model: string; band: string; probabilities?: Record<string, number> };
+    }
   | {
       kind: "round";
       n: number;
@@ -152,6 +165,18 @@ export type AgentEntry = { rev: number } & (
        *  `round_plan_settle` read back, never from what the agent said */
       ended?: boolean;
       outcome?: "ready" | "failed" | "cancelled";
+    }
+  | {
+      kind: "run";
+      n: number;
+      total: number;
+      /** waiting for the pane, as on a round card: its prompt hasn't gone out yet */
+      queued?: boolean;
+      /** the planning turn ended and was settled (or abandoned) */
+      ended?: boolean;
+      outcome?: "running" | "failed" | "cancelled";
+      /** the session's cost when the planner's prompt went out — the plan row shows the difference */
+      costBase?: number;
     }
   | {
       kind: "plan";
@@ -435,6 +460,24 @@ const projectRelative = (dir: string, p: string) =>
 type Raw = Record<string, unknown>;
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
+/** The judge's decision a run's guard row carries, read off the wire defensively. */
+function guardDecision(v: unknown): Extract<AgentEntry, { kind: "guard" }>["decision"] {
+  if (!v || typeof v !== "object") return undefined;
+  const d = v as Raw;
+  const out: NonNullable<Extract<AgentEntry, { kind: "guard" }>["decision"]> = {
+    choice: str(d.choice),
+    confidence: Number(d.confidence) || 0,
+    model: str(d.model),
+    band: str(d.band),
+  };
+  if (d.probabilities && typeof d.probabilities === "object") {
+    const p: Record<string, number> = {};
+    for (const [k, x] of Object.entries(d.probabilities as Raw)) if (typeof x === "number") p[k] = x;
+    out.probabilities = p;
+  }
+  return out;
+}
+
 /** Pull the mono detail out of a ToolCall/ToolCallUpdate: a location path for
  *  file-ish calls, the command for runs, the title otherwise. */
 function toolDetail(dir: string, kind: string, tc: Raw): string {
@@ -652,11 +695,12 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
     if (live && lane === "chat") {
       for (let i = s.entries.length - 1; i >= 0; i--) {
         const e = s.entries[i];
-        if (e.kind === "round-plan" && !e.ended && !e.queued) {
+        if ((e.kind === "round-plan" || e.kind === "run") && !e.ended && !e.queued) {
           e.ended = true;
           touch(e);
           settledPlan = true;
-          void settleRoundPlan(dir, e, stopReason);
+          if (e.kind === "run") void settleRunPlan(dir, e, stopReason);
+          else void settleRoundPlan(dir, e, stopReason);
           break;
         }
       }
@@ -707,7 +751,7 @@ function reduceInto(s: AgentSessionState, dir: string, msg: AcpUpdate["message"]
   }
 
   if (method === "_chronicle/guard") {
-    s.entries.push({ kind: "guard", rev: 0, allowed: !!params.allowed, path: str(params.path), reason: str(params.reason) });
+    s.entries.push({ kind: "guard", rev: 0, allowed: !!params.allowed, path: str(params.path), reason: str(params.reason), decision: guardDecision(params.decision) });
     notify();
     return;
   }
@@ -1235,25 +1279,66 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
     void refreshNotes(dir);
   };
 
+  await landCardInPane(dir, {
+    kind: "round-plan",
+    prompt,
+    push: (queued) => {
+      agentSessionFor(dir).entries.push({ kind: "round-plan", rev: 0, n, total, queued });
+      notify();
+    },
+    // the card's Stop can land while the session is still starting — a plan
+    // nobody is waiting for any more must not be sent the moment it is, and
+    // its card must not sit open waiting for a turn that will never come
+    stillWanted: () => !over && roundGenerating(dir),
+    // Stop has already cancelled the record; only the card is left to close
+    abandon: () => { over = true; endCard(); },
+    giveUp,
+    isOver: () => over,
+  });
+}
+
+type CardKind = "round" | "round-plan" | "run";
+
+/** How a card's prompt reaches the pane — shared by the round plan, the round
+ *  run and the run's planning turn, so the three can never land differently. */
+interface CardLanding {
+  kind: CardKind;
+  prompt: string;
+  /** put the card in the thread; called at most once */
+  push: (queued: boolean) => void;
+  stillWanted: () => boolean;
+  abandon: () => void;
+  /** it could not be sent: close the card and undo whatever its caller began */
+  giveUp: () => void;
+  /** has the caller already given up? */
+  isOver: () => boolean;
+}
+
+/**
+ * The card enters the thread and its prompt goes out — now, if the pane is
+ * free, or when it is.
+ *
+ * Everything that is not free waits for the session, and only a session that
+ * is NOT there gets started. A pane that is `ready` with a live turn is the
+ * case that made this rule: restarting it blanked the thread and, the backend
+ * being single-flight, never emitted `session_state` at all — the pane sat on
+ * "installing" forever. Queuing behind the turn is the intended behaviour, so
+ * the card lands straight away, marked `queued` (it says "waiting for the
+ * pane", and no turn ending is its own) and the subscriber sends the moment
+ * the turn drops.
+ */
+async function landCardInPane(dir: string, c: CardLanding): Promise<void> {
+  const s = agentSessionFor(dir);
   if (s.phase === "ready" && !s.turnActive) {
-    s.entries.push({ kind: "round-plan", rev: 0, n, total });
-    notify();
+    c.push(false);
     try {
-      await sendAgentMessage(dir, prompt);
+      await sendAgentMessage(dir, c.prompt);
     } catch (e) {
-      giveUp();
+      c.giveUp();
       throw e;
     }
     return;
   }
-  // Everything else waits for the session, and only a session that is NOT
-  // there gets started. A pane that is `ready` with a live turn is the case
-  // that made this rule: restarting it blanked the thread and, the backend
-  // being single-flight, never emitted `session_state` at all — the pane sat
-  // on "installing" forever. Queuing behind the turn is the intended
-  // behaviour, so the card lands straight away, marked `queued` (it says
-  // "waiting for the pane", and no turn ending is its own) and the subscriber
-  // sends the moment the turn drops.
   const needsStart = s.phase !== "ready" && s.phase !== "installing" && s.phase !== "starting";
   /* Once. A session that turns out to be ready while `startAgentSession` is
      still in flight sends from the subscriber before the line below runs, and
@@ -1263,31 +1348,21 @@ export async function startRoundPlanInPane(dir: string): Promise<void> {
   const land = (queued: boolean) => {
     if (landed) return;
     landed = true;
-    agentSessionFor(dir).entries.push({ kind: "round-plan", rev: 0, n, total, queued });
-    notify();
+    c.push(queued);
   };
-  const un = sendWhenPaneIsFree(dir, "round-plan", prompt, {
-    land,
-    // the card's Stop can land while the session is still starting — a plan
-    // nobody is waiting for any more must not be sent the moment it is, and
-    // its card must not sit open waiting for a turn that will never come
-    stillWanted: () => !over && roundGenerating(dir),
-    // Stop has already cancelled the record; only the card is left to close
-    abandon: () => { over = true; endCard(); },
-    fail: giveUp,
-  });
+  const un = sendWhenPaneIsFree(dir, c.kind, c.prompt, { land, stillWanted: c.stillWanted, abandon: c.abandon, fail: c.giveUp });
   if (!needsStart) { land(true); return; }
   // startAgentSession resets the thread, so the card goes in AFTER it
   try {
     await startAgentSession(dir);
   } catch (e) {
     un();
-    giveUp();
+    c.giveUp();
     throw e;
   }
   // the subscriber may already have given up while the session was starting —
-  // landing a card for an abandoned plan would strand it open
-  if (over) return;
+  // landing a card for an abandoned one would strand it open
+  if (c.isOver()) return;
   land(true);
 }
 
@@ -1329,7 +1404,7 @@ interface PaneHandoff {
 
 function sendWhenPaneIsFree(
   dir: string,
-  kind: "round" | "round-plan",
+  kind: CardKind,
   text: string,
   on: PaneHandoff,
 ): () => void {
@@ -1464,12 +1539,14 @@ function flushQueue(dir: string, s: AgentSessionState): void {
 /** The card's message is going out now, so it is no longer waiting for the
  *  pane: the turn about to start IS its own, and the turn-end reducer must be
  *  able to see it again. */
-function unqueueCard(dir: string, kind: "round" | "round-plan"): void {
+function unqueueCard(dir: string, kind: CardKind): void {
   const entries = agentSessionFor(dir).entries;
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i];
     if (e.kind === kind && !e.ended && e.queued) {
       e.queued = false;
+      // the run's plan row shows what the planning turn cost from here
+      if (e.kind === "run") e.costBase = agentSessionFor(dir).cost ?? 0;
       touch(e);
       notify();
       return;
@@ -1518,30 +1595,13 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
     throw e;
   }
 
-  if (s.phase === "ready" && !s.turnActive) {
-    s.entries.push({ kind: "round", rev: 0, n, total });
-    notify();
-    try {
-      await sendAgentMessage(dir, message);
-    } catch (e) {
-      giveUp();
-      throw e;
-    }
-    return;
-  }
-  // as in startRoundPlanInPane: only a session that is not there is started —
-  // a `ready` pane mid-turn queues behind the turn instead of being restarted
-  const needsStart = s.phase !== "ready" && s.phase !== "installing" && s.phase !== "starting";
-  // once, and whoever gets there first — see startRoundPlanInPane
-  let landed = false;
-  const land = (queued: boolean) => {
-    if (landed) return;
-    landed = true;
-    agentSessionFor(dir).entries.push({ kind: "round", rev: 0, n, total, queued });
-    notify();
-  };
-  const un = sendWhenPaneIsFree(dir, "round", message, {
-    land,
+  await landCardInPane(dir, {
+    kind: "round",
+    prompt: message,
+    push: (queued) => {
+      agentSessionFor(dir).entries.push({ kind: "round", rev: 0, n, total, queued });
+      notify();
+    },
     // "Not running anymore" on the round card just takes the mark down, and a
     // run still waiting for the pane is exactly the case where the user can
     // hit it before anything was sent. The mark IS this route's record of the
@@ -1554,21 +1614,119 @@ export async function startRoundInPane(dir: string, n: number, total: number): P
       return m?.n === n && m.route === "pane";
     },
     abandon: giveUp,
-    fail: giveUp,
+    giveUp,
+    isOver: () => over,
   });
-  if (!needsStart) { land(true); return; }
-  // startAgentSession resets the thread, so the card goes in AFTER it
-  try {
-    await startAgentSession(dir);
-  } catch (e) {
-    un();
-    giveUp();
-    throw e;
+}
+
+type RunEntry = Extract<AgentEntry, { kind: "run" }>;
+
+function runCardFor(dir: string, n: number): RunEntry | undefined {
+  const es = agentSessionFor(dir).entries;
+  for (let i = es.length - 1; i >= 0; i--) {
+    const e = es[i];
+    if (e.kind === "run" && e.n === n) return e;
   }
-  // the subscriber may have given up while the session was starting — landing
-  // a card for a run that will never be sent would strand it open
-  if (over) return;
-  land(true);
+  return undefined;
+}
+
+/**
+ * A run (Runs §7): Chronicle opens the round, the planner writes the plan and
+ * declares the lanes as a turn in this pane, and when that turn ends the run
+ * starts — Rust drives the lanes from there — or is asked again, or fails.
+ */
+export async function startRunInPane(dir: string, source: RunSource): Promise<number> {
+  const { n, total, prompt } = await runBegin(dir, source);
+  if (source.kind === "notes") setRoundGenerating(dir, true);
+  void refreshNotes(dir);
+  void refreshRuns(dir);
+  await landRunPrompt(dir, n, total, prompt);
+  return n;
+}
+
+/** Resume an interrupted run. One caught while planning sends its planner prompt again. */
+export async function resumeRunInPane(dir: string, n: number): Promise<void> {
+  const r = await runResume(dir, n);
+  void refreshRuns(dir);
+  if (r.state === "planning" && r.prompt) await landRunPrompt(dir, n, 0, r.prompt);
+}
+
+/** A lane's transcript after a restart (its live wire is gone; its records are not). */
+export async function loadLaneHistory(key: string, sessionId: string): Promise<void> {
+  const r = (await agentHistoryRead(key, sessionId).catch(() => null)) as { lines?: unknown[] } | null;
+  const lines = Array.isArray(r?.lines) ? r.lines : [];
+  if (lines.length === 0) return;
+  agentSessionFor(key).entries = reduceLines(key, lines).entries;
+  notify();
+}
+
+/** The run card enters the thread and the planner's prompt goes out — now, or
+ *  when the pane is free, by the same rules a round card follows. */
+async function landRunPrompt(dir: string, n: number, total: number, prompt: string): Promise<void> {
+  agentSessionFor(dir).viewing = null;
+  let over = false;
+  const giveUp = () => {
+    if (over) return;
+    over = true;
+    const e = runCardFor(dir, n);
+    if (e && !e.ended) { e.ended = true; e.outcome = "cancelled"; touch(e); notify(); }
+    void runPlanCancel(dir, n).catch(() => {});
+    setRoundGenerating(dir, false);
+    void refreshNotes(dir);
+    void refreshRuns(dir);
+  };
+  await landCardInPane(dir, {
+    kind: "run",
+    prompt,
+    push: (queued) => {
+      const s = agentSessionFor(dir);
+      s.entries.push({ kind: "run", rev: 0, n, total, queued, costBase: s.cost ?? 0 });
+      notify();
+    },
+    stillWanted: () => !over,
+    abandon: () => { over = true; },
+    giveUp,
+    isOver: () => over,
+  });
+}
+
+/** The planning turn ended. Rust reads what was declared and says what happens next. */
+async function settleRunPlan(dir: string, entry: RunEntry, stopReason: string | null): Promise<void> {
+  const s = agentSessionFor(dir);
+  const cost = s.cost != null && entry.costBase != null ? Math.max(0, s.cost - entry.costBase) : 0;
+  try {
+    if (stopReason === "cancelled") {
+      await runPlanCancel(dir, entry.n);
+      entry.outcome = "cancelled";
+    } else {
+      const r = await runPlanSettle(dir, entry.n, cost);
+      if (r.state === "retry" && r.prompt) {
+        // asked again: the card waits for the pane like any queued card, and
+        // the next turn's end settles it afresh
+        entry.ended = false;
+        entry.queued = true;
+        touch(entry);
+        sendWhenPaneIsFree(dir, "run", r.prompt, {
+          land: () => {},
+          stillWanted: () => !entry.ended,
+          abandon: () => {},
+          fail: () => { entry.ended = true; entry.outcome = "failed"; touch(entry); notify(); },
+        });
+        notify();
+        return;
+      }
+      entry.outcome = r.state === "running" ? "running" : "failed";
+      if (r.state === "failed") toastError("The round didn’t start", (r.reason ?? "The plan couldn’t be split into lanes").slice(0, 110));
+    }
+  } catch (e) {
+    entry.outcome = "failed";
+    toastError("Couldn’t start the round", String(e).slice(0, 110));
+  }
+  touch(entry);
+  setRoundGenerating(dir, false);
+  notify();
+  void refreshNotes(dir);
+  void refreshRuns(dir);
 }
 
 export function agentLive(dir: string): boolean {
